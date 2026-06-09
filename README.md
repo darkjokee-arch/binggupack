@@ -84,11 +84,13 @@ OpenBinggu(개인용 트랙)는 개인이 자기 로컬에서 작업 맥락을 *
 ## Install / 설치
 
 ```bash
-git clone <REPO_URL>            # repo 공개 후 (현재 HOLD)
-cd openbinggu
+git clone https://github.com/darkjokee-arch/binggupack.git
+cd binggupack
 python -m venv .venv && . .venv/bin/activate   # 선택
 # 표준 라이브러리 위주이므로 별도 의존성 최소
 ```
+
+> ℹ️ 현재 repo는 **private** 입니다. **Public 전환 후 누구나 clone** 할 수 있습니다(전환 전에는 owner 권한 계정만 접근).
 
 ## Run selftest / 자체 검증 실행
 
@@ -180,4 +182,4 @@ This project is licensed under the **MIT License** — see the [LICENSE](LICENSE
 
 - 개인용(트랙1): 로컬 사용 + 공개 준비(RC) — fail-closed dry-run 완료.
 - 팀 유료(트랙2): DEFER. 불특정 다수 marketplace: BLOCK.
-- 실제 GitHub push: owner 승인 전 HOLD.
+- 실제 GitHub push: **private repo push 완료**(v0.1.0-rc1). **Public 전환은 owner GO 대기.**
