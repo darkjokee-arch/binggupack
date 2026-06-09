@@ -3,9 +3,9 @@ marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dr
 # BingguPack
 
 > **Evidence-backed context packs for multi-agent AI workflows.**
-> Track1 public RC (`v0.1.0-rc1`) · internal codename: OpenBinggu
-> 상태: **GitHub Public 공개 완료(`v0.1.0-rc1`).** "100% 완성판" 아님(아래 §범위).
-> 코드 라이선스 = **MIT**(확정). enum(release_mode/entitlement) 확정 0 · production write 0.
+> Track1 public RC · internal codename: OpenBinggu
+> 버전: **v0.1.0-rc1**(공개 완료) = read/dry-run + pack validation + MCP 5도구 → **v0.2.0-rc1** = +**local persistence**(candidate-only, opt-in, write 기본 OFF).
+> "100% 완성판" 아님(아래 §범위). 코드 라이선스 = **MIT**. enum(release_mode/entitlement) HOLD · production write 0.
 
 ---
 
@@ -35,9 +35,9 @@ OpenBinggu(개인용 트랙)는 개인이 자기 로컬에서 작업 맥락을 *
 - pack **검증**(validate)·소비 smoke(consumer)·공개 fail-closed 게이트(publish_guard) — 전부 read/dry-run
 - **MCP 기본판**: read/dry-run **5도구**(pack_build·pack_validate·consumer_smoke·publish_guard_dryrun·selftest) 노출, `inputSchema`·`tools/call content` MCP 표준 준수, write/upload/apply/push/confirmed 도구 **미노출**
 - doctor **11/11** selftest, 공개 후보 트리 secret/PII scan(`--tree`)
+- **(v0.2.0-rc1) local persistence**: 자기 로컬(`OPENBINGGU_HOME`)에 candidate graph 저장. **write 기본 OFF**·명시 opt-in 시에만·**CLI 전용(MCP write 도구 미노출)**·candidate-only(`promotion_allowed=0`). backup/rollback·C-2 1클릭·duplicate/freshness 검사·multi-user 격리. selftest 11/11 + read-only 재독 E2E 10/10.
 
 **이 RC가 아직 제공하지 않는 것 (다음 단계)**:
-- 일반 사용자용 **local persistence** 플로우(저장 위치 정책·backup/rollback 자동화) — 현재는 staging 1-pack apply 실증만
 - **multi-agent handoff** 사용자 가이드·prompt template
 - 실 **reviewer 인증·confirmed apply**(현재 preview까지, `confirmed_created=0`)
 - **OpenCrab Pack v1 finalize**(Neo4j import/check/export 이벤트 플로우)
@@ -59,7 +59,7 @@ OpenBinggu(개인용 트랙)는 개인이 자기 로컬에서 작업 맥락을 *
 |---|---|
 | 입력 / 핵심문장 / edge·evidence / pack 생성·검증 | ✅ read/dry-run 제공 |
 | MCP read/dry-run 5도구(기본 도구 노출/호출 검증 완료) | ✅ 제공 |
-| local persistence(로컬 후보 저장) | ⏳ 다음 단계(staging 1-pack 실증만 완료) |
+| local persistence(로컬 후보 저장) | ✅ **v0.2.0-rc1** — candidate-only·opt-in·write 기본 OFF(selftest 11/11 + 재독 E2E 10/10) |
 | multi-agent handoff | ⏳ 가이드 예정 |
 | review / confirmed | ⏳ preview까지(confirmed는 사람 승인 기반) |
 | OpenCrab Pack v1 finalize | ⏳ Neo4j 이벤트 플로우 미완 |
