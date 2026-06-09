@@ -1,0 +1,13 @@
+{
+  "pack_id": "pack_review_crosspack_001",
+  "pack_type": "candidate",
+  "scope": "cross-pack fuzzy merge 는 review-only 테스트 (STOP 조건 전부 회피)",
+  "depends_on": ["pack_sess_20260603_001"],
+  "evidence_policy": {"source": "박제", "min_evidence": 2},
+  "merge_policy": {"mode": "review", "target": "review", "cross_pack": "fuzzy"},
+  "promotion_allowed_default": false,
+  "status": "review_required",
+  "cross_pack_tags": ["bid-engine", "claude-hooks"],
+  "risk_level": "medium",
+  "created_from": "synthetic"
+}

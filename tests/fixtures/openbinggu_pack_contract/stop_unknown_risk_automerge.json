@@ -1,0 +1,13 @@
+{
+  "pack_id": "pack_bad_unknownrisk_001",
+  "pack_type": "evidence",
+  "scope": "risk_level=unknown + merge mode=auto 자동merge 금지 테스트",
+  "depends_on": [],
+  "evidence_policy": {"source": "paste-cache", "min_evidence": 1},
+  "merge_policy": {"mode": "auto", "target": "staging", "cross_pack": "isolated"},
+  "promotion_allowed_default": false,
+  "status": "staged",
+  "cross_pack_tags": [],
+  "risk_level": "unknown",
+  "created_from": "synthetic"
+}

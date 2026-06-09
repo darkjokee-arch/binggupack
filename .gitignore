@@ -1,0 +1,27 @@
+# secrets / credentials
+.env
+*.env
+*_secret*
+*_token*
+credentials*
+private_key*
+*.pem
+*.key
+
+# 실 데이터 / 운영 저장소
+*.sqlite
+*.db
+localcrab_index.sqlite
+*_graph.yaml
+localbinggu_production_graph.yaml
+reingest_pack_draft/
+reports/
+reviews/
+captures/
+packs/private/
+
+# 빌드/임시
+tmp/
+__pycache__/
+*.bak_*
+*.zip

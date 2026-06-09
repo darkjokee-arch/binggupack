@@ -1,0 +1,13 @@
+{
+  "pack_id": "pack_sess_20260603_001",
+  "pack_type": "session",
+  "scope": "bid-engine tier2 운영 세션 박제",
+  "depends_on": [],
+  "evidence_policy": {"source": "traj", "min_evidence": 1},
+  "merge_policy": {"mode": "manual", "target": "staging", "cross_pack": "isolated"},
+  "promotion_allowed_default": false,
+  "status": "draft",
+  "cross_pack_tags": [],
+  "risk_level": "low",
+  "created_from": "handoff_20260603_tier2_resume"
+}

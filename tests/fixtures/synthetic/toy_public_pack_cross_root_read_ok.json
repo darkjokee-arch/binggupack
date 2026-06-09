@@ -1,0 +1,82 @@
+{
+  "_meta": {
+    "candidate_only": true,
+    "synthetic_only": true,
+    "executed": false,
+    "purpose": "트랙1 개인용 RC — 다른 사용자(다른 user_root)가 공개(public) toy pack을 받아 읽을 수 있는지(portability) 검증용 synthetic fixture. owner_a가 만든 public skeleton/toy pack을 reader_b가 cross-root로 read 허용되는지 확인.",
+    "raw_pii_included": false,
+    "private_data_included": false,
+    "note": "실 데이터/실명/실 경로 0. 모든 식별자는 synthetic. source pointer는 상대경로/synthetic만(clean). 기존 scope_envelope_dryrun.py 의 vis_public_anyone_ok 케이스(make_pack(visibility='public') + grant_other)와 동형. 실제 자동 검증은 해당 selftest GATE=GO 가 대표.",
+    "design_ref": "OPENBINGGU_PERSONAL_TRACK_BASELINE_AND_GITHUB_PUBLISH.md §2-1 / OPENBINGGU_SCOPE_ENVELOPE_DRYRUN_RESULT.md vis_public_anyone_ok"
+  },
+  "case_name": "toy_public_pack_cross_root_read_ok",
+  "kind": "positive",
+  "pack": {
+    "manifest": {
+      "format_version": "opencrab-pack-v1",
+      "pack_id": "user_synthetic_a/pack_toy01",
+      "owner": "user_synthetic_a",
+      "user_root": "user_synthetic_a",
+      "user_namespace": "user_synthetic_a",
+      "visibility": "public",
+      "pack_type": "candidate",
+      "redaction_status": "clean",
+      "raw_allowed": false,
+      "counts": { "nodes": 2, "edges": 1, "evidence": 2 }
+    },
+    "candidate": true,
+    "promotion_allowed": false,
+    "items": [
+      {
+        "item_id": "node:user_synthetic_a:toy:a1b2c3",
+        "type": "claim_summary",
+        "mask_result": "clean",
+        "content": "Toy 프로젝트: 빌드 스크립트는 make build 로 실행한다 (합성 예시, 민감정보 없음)."
+      },
+      {
+        "item_id": "node:user_synthetic_a:toy:d4e5f6",
+        "type": "claim_summary",
+        "mask_result": "clean",
+        "content": "Toy 프로젝트: 테스트는 make test 로 실행한다 (합성 예시)."
+      },
+      {
+        "item_id": "src_ptr_relative_1",
+        "type": "source_pointer",
+        "mask_result": "clean",
+        "content": "examples/toy_project/Makefile",
+        "reason": "상대경로 — 비공개 절대경로/사내 URL 아님 (clean)"
+      }
+    ],
+    "consumer_view": {
+      "evidence_basis": {
+        "node_ids": ["node:user_synthetic_a:toy:a1b2c3", "node:user_synthetic_a:toy:d4e5f6"],
+        "edge_ids": ["edge:user_synthetic_a:toy:e0a1b2"],
+        "evidence_ids": ["EVC-11111111", "EVC-22222222"]
+      },
+      "counts": { "nodes": 2, "edges": 1, "evidence": 2 }
+    }
+  },
+  "grant": {
+    "reader": "user_synthetic_b",
+    "user_root": "user_synthetic_b",
+    "reader_permission": "public_reader",
+    "allowed_visibility": ["public"],
+    "session_valid": true,
+    "team_member": false
+  },
+  "expected": {
+    "read_allowed": true,
+    "verdict": "ALLOW",
+    "cross_root_public_read": true,
+    "private_leak": false,
+    "source_pointer_worst": "clean",
+    "publish_allowed": true,
+    "raw_value_recorded": false,
+    "note": "다른 user_root(user_synthetic_b)가 owner(user_synthetic_a)의 public pack 을 read 허용. private/team 이었다면 deny. evidence_basis ID 집합만 노출, raw 원문 미요구."
+  },
+  "pass_fail_rule": {
+    "fixture_pass_when": "다른 user_root 가 visibility=public + allowed_visibility 에 public 포함 시 read_allowed == true AND private_leak == false AND source_pointer_worst == 'clean'",
+    "fixture_fail_when": "private/team pack 을 cross-root 로 읽거나, source pointer 가 dirty/unknown 인데 publish_allowed == true 이거나, raw 값이 출력/기록됨",
+    "homolog_selftest": "scripts/openbinggu_scope_envelope_dryrun.py --selftest → vis_public_anyone_ok (PASS) / vis_private_otherroot_deny (STOP) 가 본 fixture 의 정/부 동형"
+  }
+}

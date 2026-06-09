@@ -1,0 +1,55 @@
+{
+  "_meta": {
+    "synthetic_only": true,
+    "purpose": "toy_project 입력으로 candidate pack 빌드 시 기대 요약(예시). 실제 실행 산출이 아니라 학습용 기대값.",
+    "raw_included": false,
+    "note": "원본 텍스트/비밀값/실경로 미포함. source pointer 미포함 디폴트 예시."
+  },
+  "pack": {
+    "format_version": "opencrab-pack-v1",
+    "pack_id": "user_synthetic_demo/pack_toy",
+    "owner": "user_synthetic_demo",
+    "user_root": "user_synthetic_demo",
+    "user_namespace": "user_synthetic_demo",
+    "visibility": "public",
+    "pack_type": "candidate",
+    "candidate": true,
+    "promotion_allowed": false,
+    "redaction_status": "clean",
+    "raw_allowed": false,
+    "source_pointer_included": false,
+    "source_pointer_policy": "공개 pack 디폴트 = 미포함(alias/hash/salt 도 기본 미포함). 필요 시 user 명시 승인 후 별도 정책.",
+    "counts": { "nodes": 3, "edges": 2, "evidence": 3 }
+  },
+  "expected_summary": {
+    "nodes": 3,
+    "edges": 2,
+    "evidence": 3,
+    "all_candidate": true,
+    "promotion_allowed": false,
+    "redaction_residual": 0,
+    "source_pointer_scan": { "clean": 0, "dirty": 0, "unknown": 0, "note": "공개 pack 에 source pointer 미포함이므로 판정 대상 0" },
+    "publish_guard": "ALLOW (source pointer 미포함 + secret/PII 0 + owner 수동 승인 전 push 금지)"
+  },
+  "expected_checks": {
+    "doctor_selftest": "9/9 PASS GATE=GO",
+    "doctor_tree_examples_toy_project": "verdict=CLEAN (hits 0)",
+    "watcher_pack_builder_m0_selftest": "GATE=GO",
+    "pack_validate_selftest": "GATE=GO",
+    "pack_consumer_smoke_selftest": "GATE=GO"
+  },
+  "block_conditions": {
+    "note": "아래가 있으면 공개/업로드 BLOCK (요약만 표시, raw 미출력)",
+    "examples": [
+      "source pointer 가 unknown(판단불가) 또는 비공개 절대경로 형태",
+      "비밀키/접근 토큰/자격증명 류 포함",
+      "개인정보(연락처/식별번호 등) 포함",
+      "사용자 홈 절대경로/사내 주소/내부 IP 같은 비공개 경로"
+    ]
+  },
+  "opencrab_upload": {
+    "model": "각 사용자가 가입해 자기 pack 을 자기 의지로 업로드(우리가 쌓는 중앙 store 아님)",
+    "gate": "GitHub 공개와 동일 fail-closed gate + user 수동 승인",
+    "status": "docs 기준 흐름만 정의 / 실제 업로드 API·연결 미구현"
+  }
+}

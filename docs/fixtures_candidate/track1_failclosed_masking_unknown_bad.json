@@ -1,0 +1,55 @@
+{
+  "_meta": {
+    "candidate_only": true,
+    "synthetic_only": true,
+    "executed": false,
+    "purpose": "트랙1 GitHub 공개 fail-closed 게이트1 검증 — 마스킹 결과 unknown(판단불가) 항목이 섞이면 공개가 fail-open(ALLOW)이 아니라 fail-closed(BLOCK)로 귀결되는지 확인",
+    "raw_pii_included": false,
+    "note": "진짜 PII/secret 미포함. unknown 유발은 합성 토큰 MASK_UNDECIDED_TOKEN 으로만 표현. 실행/selftest 는 별도 GO.",
+    "design_ref": "OPENBINGGU_TRACK1_FAILCLOSED_PUBLISH_GUARD_DESIGN.md §2 게이트1 / §4 / §6"
+  },
+  "case_name": "track1_failclosed_masking_unknown_bad",
+  "kind": "negative",
+  "pack": {
+    "pack_id": "user_synthetic/pack_failclosed_demo",
+    "owner": "user_synthetic",
+    "user_root": "user_synthetic",
+    "visibility": "private",
+    "candidate": true,
+    "promotion_allowed": false,
+    "publish_target": "github_public_candidate",
+    "items": [
+      {
+        "item_id": "node_ok_1",
+        "type": "claim_summary",
+        "mask_result": "clean",
+        "content": "합성 클레임 요약 1 (민감정보 없음)"
+      },
+      {
+        "item_id": "src_ptr_unknown_1",
+        "type": "source_pointer",
+        "mask_result": "unknown",
+        "content": "MASK_UNDECIDED_TOKEN",
+        "reason": "마스킹/스캔 엔진이 처리하지 못한 형태 — 판단불가"
+      }
+    ]
+  },
+  "grant": {
+    "reader": "user_synthetic",
+    "reader_permission": "owner",
+    "session_valid": true
+  },
+  "expected": {
+    "publish_allowed": false,
+    "verdict": "BLOCK",
+    "reason_codes_include": ["MASK_UNKNOWN"],
+    "fail_closed_triggered": true,
+    "must_not_be": "ALLOW (fail-open 으로 새면 안전판 결함 = fixture FAIL)",
+    "intended_failed_check": "mask_clean_required",
+    "raw_value_recorded": false
+  },
+  "pass_fail_rule": {
+    "fixture_pass_when": "actual.publish_allowed == false AND verdict == 'BLOCK' AND 'MASK_UNKNOWN' in reason_codes",
+    "fixture_fail_when": "actual.publish_allowed == true (fail-open) OR raw 값이 출력/기록됨"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "pack_id": "pack_fixture_001",
+  "pack_type": "synthetic_fixture",
+  "scope": "validator selftest 용 합성 pack",
+  "depends_on": [],
+  "evidence_policy": {"source": "synthetic", "min_evidence": 0},
+  "merge_policy": {"mode": "manual", "target": "staging", "cross_pack": "isolated"},
+  "promotion_allowed_default": false,
+  "status": "validated",
+  "cross_pack_tags": [],
+  "risk_level": "low",
+  "created_from": "openbinggu_pack_contract selftest"
+}

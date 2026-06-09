@@ -1,0 +1,10 @@
+{
+  "_comment": "OpenBinggu local MCP server 등록 예시(후보). 실제 등록/공개는 owner 결정 후. read/dry-run 도구만 노출.",
+  "mcpServers": {
+    "openbinggu": {
+      "command": "python",
+      "args": ["scripts/openbinggu_mcp_server.py", "--serve", "."],
+      "env": { "OPENBINGGU_MODE": "local_readonly" }
+    }
+  }
+}

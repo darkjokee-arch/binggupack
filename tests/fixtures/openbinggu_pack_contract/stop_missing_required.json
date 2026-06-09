@@ -1,0 +1,5 @@
+{
+  "pack_id": "pack_bad_missing_001",
+  "pack_type": "session",
+  "scope": "required field 누락 테스트 — depends_on/evidence_policy/merge_policy/promotion_allowed_default/status/cross_pack_tags/risk_level/created_from 부재"
+}

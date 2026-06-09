@@ -1,0 +1,13 @@
+{
+  "pack_id": "pack_bad_promotion_001",
+  "pack_type": "candidate",
+  "scope": "promotion_allowed_default=true 위반 테스트",
+  "depends_on": [],
+  "evidence_policy": {"source": "박제", "min_evidence": 2},
+  "merge_policy": {"mode": "review", "target": "candidate", "cross_pack": "isolated"},
+  "promotion_allowed_default": true,
+  "status": "draft",
+  "cross_pack_tags": [],
+  "risk_level": "medium",
+  "created_from": "synthetic"
+}

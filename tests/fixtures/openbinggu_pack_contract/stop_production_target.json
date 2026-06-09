@@ -1,0 +1,13 @@
+{
+  "pack_id": "pack_bad_prodtarget_001",
+  "pack_type": "session",
+  "scope": "session pack 이 production target 직접 참조 금지 테스트",
+  "depends_on": [],
+  "evidence_policy": {"source": "traj", "min_evidence": 1},
+  "merge_policy": {"mode": "manual", "target": "production", "cross_pack": "isolated"},
+  "promotion_allowed_default": false,
+  "status": "draft",
+  "cross_pack_tags": [],
+  "risk_level": "low",
+  "created_from": "synthetic"
+}

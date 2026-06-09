@@ -1,0 +1,13 @@
+{
+  "pack_id": "pack_bad_highrisk_001",
+  "pack_type": "audit",
+  "scope": "risk_level=high + merge mode=auto 자동merge 금지 테스트",
+  "depends_on": [],
+  "evidence_policy": {"source": "박제", "min_evidence": 3},
+  "merge_policy": {"mode": "auto", "target": "candidate", "cross_pack": "isolated"},
+  "promotion_allowed_default": false,
+  "status": "review_required",
+  "cross_pack_tags": [],
+  "risk_level": "high",
+  "created_from": "synthetic"
+}
