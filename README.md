@@ -138,6 +138,15 @@ python scripts/openbinggu_pack_consumer_smoke.py --selftest
 - private/team pack은 다른 user_root에서 읽으면 **거부(deny-by-default)** 됩니다.
 - pack은 candidate이며, 받은 쪽에서 자동으로 자기 그래프에 병합되지 않습니다(검토 후 수동).
 
+## Multi-agent handoff / 여러 AI에 pack 넘기기
+
+하나의 pack을 **Claude·Codex·ChatGPT·Gemini**가 같은 맥락으로 이어받게 하는 방법은 [Multi-agent handoff guide](OPENBINGGU_PHASE3_MULTI_AGENT_HANDOFF_GUIDE.md)를 참고하세요. 4개 모델용 **prompt template**과 consumer 규칙을 포함합니다. 핵심:
+
+- **evidence_refs 기반 답변**: pack의 evidence_refs로 뒷받침되는 사실만 답하고, 없으면 "pack에 근거 없음"이라고 답합니다(**추측 금지**).
+- **evidence 없는 edge는 candidate**: 새 node→node 관계는 evidence 직접성이 없으면 confirmed가 아닌 candidate 제안으로만 표시합니다.
+- **충돌 보존 / 자동 병합·승격 금지**: contradicts edge는 양쪽을 다 제시하고, 받은 pack을 자기 그래프에 자동 반영하지 않습니다(검토 후 수동, confirmed는 별도).
+- 출처는 node_id/evidence_id만 표기(raw 경로·secret 미출력).
+
 ## Validate your real data / 실데이터 검증 (공개·업로드 전, 사용자 로컬에서만)
 
 > ⚠️ selftest가 `GATE: GO`여도 그건 "검사기가 맞다"는 뜻이지 "당신의 실제 데이터가 안전하다"는 뜻이 아닙니다. 공개/업로드 전, **자기 로컬 데이터(공개 후보 트리)** 로 한 번 더 검증하세요. 이 검증은 **사용자 자기 머신에서만** 수행하며, 작성자/운영자가 당신의 데이터를 대신 스캔하지 않습니다.
