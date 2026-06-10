@@ -2,7 +2,7 @@
 
 > OpenBinggu is the legacy/internal codename for BingguPack.
 
-> **Track1 public RC** — v0.1.0-rc1: read/dry-run + pack validation + MCP 5도구 / v0.2.0-rc1: +local persistence(candidate-only, opt-in, write 기본 OFF) / v0.3.0-rc1: +manual one-shot capture(read-only) / v0.3.1-rc1: +batch pack staging loader / v0.4.0-rc1: +promotion preview(read-only) / v0.5.0-rc1: +reviewer/confirmed preview(read-only) / **v0.6.0-rc1(최신)**: +finalize dry-run generator. "100% 완성판"이 아니며, 모든 사용자 환경 동작을 보장하지 않습니다. 전체 로드맵·범위는 `README.md`, 따라하기는 `docs/BINGGUPACK_TUTORIAL.md` 참조.
+> **Track1 public RC** — v0.1.0-rc1: read/dry-run + pack validation + MCP 5도구 / v0.2.0-rc1: +local persistence(candidate-only, opt-in, write 기본 OFF) / v0.3.0-rc1: +manual one-shot capture(read-only) / v0.3.1-rc1: +batch pack staging loader / v0.4.0-rc1: +promotion preview(read-only) / v0.5.0-rc1: +reviewer/confirmed preview(read-only) / v0.6.0-rc1: +finalize dry-run generator / **v0.6.1-rc1(최신)**: 문서·온보딩 fix + hosted MCP skeleton 로컬 PoC. "100% 완성판"이 아니며, 모든 사용자 환경 동작을 보장하지 않습니다. 전체 로드맵·범위는 `README.md`, 따라하기는 `docs/BINGGUPACK_TUTORIAL.md` 참조.
 
 ## Requirements / 요구사항
 - Python 3.10+ (표준 라이브러리 위주)
@@ -32,7 +32,7 @@ python scripts/openbinggu_doctor.py --selftest          # 12/12 PASS GATE=GO 기
 python scripts/openbinggu_doctor.py --tree examples/toy_project   # CLEAN 기대
 ```
 
-## Reviewer/confirmed preview selftest / 리뷰·확정 preview 검증 (v0.5.0-rc1 예정, preview only)
+## Reviewer/confirmed preview selftest / 리뷰·확정 preview 검증 (v0.5.0-rc1, preview only)
 ```bash
 python scripts/openbinggu_phase4_reviewer_confirmed_selftest.py   # 9/9 PASS GATE=GO 기대
 python scripts/openbinggu_reviewer_auth_session_selftest.py       # 20/20 PASS GATE=GO 기대
