@@ -22,8 +22,8 @@ cd binggupack
 python scripts/openbinggu_doctor.py --selftest
 ```
 
-✅ 기대: 마지막에 `summary: 11/11 PASS` + `GATE: GO` + 종료코드 `0`.
-하나라도 다르면 사용을 멈추고 이슈를 확인하세요.
+✅ 기대: 마지막에 `summary: 12/12 PASS` + `GATE: GO` + 종료코드 `0`.
+(버전에 따라 검사 개수는 늘어날 수 있습니다 — `GATE: GO` + 종료코드 `0`이면 정상입니다. `GATE: GO`가 아니거나 종료코드가 0이 아닐 때만 사용을 멈추고 이슈를 확인하세요.)
 
 ## 3. toy 예제로 pack 흐름 보기
 

@@ -43,7 +43,7 @@ BingguPack(개인용 트랙)은 개인이 자기 로컬에서 작업 맥락을 *
 - **MCP 기본판**: read/dry-run **5도구**(pack_build·pack_validate·consumer_smoke·publish_guard_dryrun·selftest) 노출, `inputSchema`·`tools/call content` MCP 표준 준수, write/upload/apply/push/confirmed 도구 **미노출**
 - doctor **12/12** selftest, 공개 후보 트리 secret/PII scan(`--tree`)
 - **(v0.2.0-rc1) local persistence**: 자기 로컬(`OPENBINGGU_HOME`)에 candidate graph 저장. **write 기본 OFF**·명시 opt-in 시에만·**CLI 전용(MCP write 도구 미노출)**·candidate-only(`promotion_allowed=0`). backup/rollback·C-2 1클릭·duplicate/freshness 검사·multi-user 격리. selftest 11/11 + read-only 재독 E2E 10/10.
-- **(v0.3.0-rc1) manual one-shot capture (read-only)**: 사용자가 명시 지정한 경로만 capture(allowlist only·denylist 우선·fail-closed). raw 저장 0·source pointer 공개 미포함·rate limit·kill switch. **write opt-in 없으면 staging write 0**, **hook/daemon NOT_STARTED**(설치/실행 0). selftest 10/10. (reviewer/confirmed preview selftest는 의존성 검토 중·이번 RC 미포함.)
+- **(v0.3.0-rc1) manual one-shot capture (read-only)**: 사용자가 명시 지정한 경로만 capture(allowlist only·denylist 우선·fail-closed). raw 저장 0·source pointer 공개 미포함·rate limit·kill switch. **write opt-in 없으면 staging write 0**, **hook/daemon NOT_STARTED**(설치/실행 0). selftest 10/10. (reviewer/confirmed preview는 v0.3.0 당시 미포함 — **v0.5.0-rc1에서 preview로 추가됨**, 아래 로드맵 표 참조.)
 
 **이 RC가 아직 제공하지 않는 것 (다음 단계)**:
 - **multi-agent handoff** 사용자 가이드·prompt template
@@ -74,7 +74,7 @@ BingguPack(개인용 트랙)은 개인이 자기 로컬에서 작업 맥락을 *
 | multi-agent handoff | ✅ Phase 3 guide provided — [가이드](docs/OPENBINGGU_PHASE3_MULTI_AGENT_HANDOFF_GUIDE.md) |
 | review / confirmed | ✅ **v0.5.0-rc1** — reviewer/confirmed **preview**(dry-run·sandbox·synthetic) 9모듈, confirmed_created=0·applied=0·promoted=0·upload=0 불변을 doctor가 강제. confirmed 생성·적용은 계속 별도 단계 |
 | OpenCrab Pack v1 finalize dry-run | ✅ **v0.6.0-rc1** — local generator(레이아웃 11종 로컬 조립), **Neo4j run 0 · upload/apply 0**. 실제 finalize/upload는 계속 HOLD |
-| Hosted app / @BingguPack chat app | 📋 **planned** — 채팅 앱에서 `@BingguPack`처럼 pack context 호출. ChatGPT Apps/HTTPS MCP first, Claude/Gemini adapters later |
+| Hosted app / @BingguPack chat app | 📋 **planned** — 채팅 앱에서 `@BingguPack`처럼 pack context 호출. ChatGPT Apps/HTTPS MCP first, Claude/Gemini adapters later. **local read-only HTTP MCP skeleton PoC는 ✅ 완료**(127.0.0.1 전용·synthetic only — `docs/BINGGUPACK_HOSTED_MCP_SKELETON_RESULT.md`; hosted 배포·connector 등록은 계속 planned/HOLD) |
 | Conversation → candidate capture (round-trip) | 📋 **planned** — 대화에서 사용자 승인 기반 candidate capture(preview 먼저, 자동 저장 없음) — [App path 설계 §8](docs/BINGGUPACK_APP_PATH_DESIGN.md) |
 | OpenCrab Pack v1 finalize | ⏳ Neo4j 이벤트 플로우 미완 |
 
@@ -158,7 +158,7 @@ python scripts/openbinggu_mcp_path_gate_adapter.py --selftest
 
 ```bash
 # 1) toy/synthetic pack 예시 위치
-#    docs/fixtures_candidate/toy_public_pack_cross_root_read_ok.json
+#    tests/fixtures/synthetic/toy_public_pack_cross_root_read_ok.json
 #    (다른 user_root 가 public pack 을 읽을 수 있는 synthetic 예시)
 
 # 2) consumer smoke 로 읽기 흐름 확인
