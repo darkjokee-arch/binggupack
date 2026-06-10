@@ -15,9 +15,9 @@ marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dr
 
 ---
 
-## What is OpenBinggu (Personal Track)
+## What is BingguPack (Personal Track)
 
-OpenBinggu(개인용 트랙)는 개인이 자기 로컬에서 작업 맥락을 **candidate pack**(검토 전 후보 묶음)으로 만들고, 그 pack을 **검증(dry-run)** 한 뒤, 원하면 **공개 가능한 형태로만** 다른 사람과 나눌 수 있게 하는 도구입니다.
+BingguPack(개인용 트랙)은 개인이 자기 로컬에서 작업 맥락을 **candidate pack**(검토 전 후보 묶음)으로 만들고, 그 pack을 **검증(dry-run)** 한 뒤, 원하면 **공개 가능한 형태로만** 다른 사람과 나눌 수 있게 하는 도구입니다.
 
 - **개인용/로컬 우선**: pack은 기본적으로 `owner + AI` 내부에서만 동작합니다.
 - **candidate-first / review-only**: 수집·생성물은 전부 candidate이며 자동 승격(promotion)되지 않습니다.
@@ -29,7 +29,7 @@ OpenBinggu(개인용 트랙)는 개인이 자기 로컬에서 작업 맥락을 *
 
 ## 이 공개본(RC)의 범위 / Scope of this public RC
 
-이 저장소는 **OpenBinggu Track1 공개 1차판(public RC)** 입니다. **"OpenBinggu 100% 완성판"이 아닙니다.** 모든 사용자 환경에서의 동작을 보장하지 않습니다(자기 로컬 검증 필수, 아래 참조).
+이 저장소는 **BingguPack Track1 공개 1차판(public RC)** 입니다. **"BingguPack 100% 완성판"이 아닙니다.** 모든 사용자 환경에서의 동작을 보장하지 않습니다(자기 로컬 검증 필수, 아래 참조).
 
 **이 RC가 제공하는 것 (read / dry-run / 검증 중심)**:
 - pack **검증**(validate)·소비 smoke(consumer)·공개 fail-closed 게이트(publish_guard) — 전부 read/dry-run
@@ -46,9 +46,9 @@ OpenBinggu(개인용 트랙)는 개인이 자기 로컬에서 작업 맥락을 *
 
 > write·upload·apply·confirmed·push는 이 RC에 노출되지 않으며, 각각 별도 승인·구현이 필요합니다.
 
-## OpenBinggu 100% 전체 로드맵 / Full roadmap
+## BingguPack 100% 전체 로드맵 / Full roadmap
 
-목표로 하는 "100% OpenBinggu"는 아래 전체 흐름입니다. 이 공개 RC는 그 중 **입력 ~ pack 검증 ~ MCP 기본**까지를 read/dry-run으로 닫은 1차판입니다.
+목표로 하는 "100% BingguPack"은 아래 전체 흐름입니다. 이 공개 RC는 그 중 **입력 ~ pack 검증 ~ MCP 기본**까지를 read/dry-run으로 닫은 1차판입니다.
 
 ```
 입력 → 핵심문장 노드 → 동사형 edge + evidence_refs → pack 생성/검증
@@ -78,7 +78,7 @@ OpenBinggu(개인용 트랙)는 개인이 자기 로컬에서 작업 맥락을 *
 
 ## Neo4j (when needed) / Neo4j는 언제 필요한가
 
-- 개인영속/일상 작업은 **LocalCrab/OpenBinggu local store + JSONL/SQLite backend**로 동작합니다.
+- 개인영속/일상 작업은 **LocalCrab/BingguPack local store + JSONL/SQLite backend**로 동작합니다.
 - **평소 Neo4j 서버는 불필요**합니다(서버 0, neo4j-cypher MCP 미등록).
 - Neo4j는 **OpenCrab Pack v1 finalize/upload 시점에만 required**입니다 (`validate → Neo4j import/check → Neo4j graph export → package`).
 - canonical graph = **JSONL**(`graph/nodes.jsonl`·`graph/edges.jsonl`). Neo4j는 그 시점의 검증/재현용이며 JSONL을 대체하지 않습니다.
@@ -198,7 +198,7 @@ OPENBINGGU_HOME=<repo 밖 경로> python scripts/openbinggu_batch_pack_loader.py
 ## License / 라이선스
 
 This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file.
-이 프로젝트는 **MIT License**를 따릅니다(루트 `LICENSE` 파일 참조). Copyright (c) 2026 OpenBinggu contributors.
+이 프로젝트는 **MIT License**를 따릅니다(루트 `LICENSE` 파일 참조). Copyright (c) 2026 BingguPack contributors.
 
 > 참고: `release_mode`·`entitlement` enum은 별개로 계속 HOLD입니다(코드 라이선스(MIT)와 무관, 배포/과금 모드 미확정).
 

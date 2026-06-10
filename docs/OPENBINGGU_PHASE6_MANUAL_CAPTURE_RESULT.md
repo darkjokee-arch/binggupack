@@ -1,3 +1,5 @@
+> OpenBinggu is the legacy/internal codename for BingguPack.
+
 # BingguPack Phase 6 — Manual One-Shot Capture 결과 (2026-06-09)
 
 > 설계: `OPENBINGGU_PHASE6_AUTO_CAPTURE_PLAN.md`. 구현: `scripts/openbinggu_phase6_manual_capture_selftest.py`.

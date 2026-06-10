@@ -1,7 +1,7 @@
-# toy_project — OpenBinggu 최소 예제 (synthetic)
+# toy_project — BingguPack 최소 예제 (synthetic)
 
 > 이 디렉터리는 **합성(synthetic) 예제**입니다. 실제 개인 데이터·실경로·비밀값·원본 source pointer는 들어있지 않습니다.
-> OpenBinggu를 처음 받은 사용자가 "받기 → 검사 → pack 만들기 → 검증 → 읽기 → (공개 판정)" 흐름을 바로 따라 할 수 있게 만든 toy 입니다.
+> BingguPack을 처음 받은 사용자가 "받기 → 검사 → pack 만들기 → 검증 → 읽기 → (공개 판정)" 흐름을 바로 따라 할 수 있게 만든 toy 입니다.
 
 ---
 

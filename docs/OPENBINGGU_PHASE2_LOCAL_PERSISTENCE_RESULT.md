@@ -1,3 +1,5 @@
+> OpenBinggu is the legacy/internal codename for BingguPack.
+
 # BingguPack Phase 2 — Local Persistence 결과 + v0.2.0-rc1 계획 (2026-06-09)
 
 > 설계: `OPENBINGGU_PHASE2_LOCAL_PERSISTENCE_DESIGN.md`. 결과: Phase 2-A(저장 흐름 selftest) + Phase 2-B(staging 재독 E2E).

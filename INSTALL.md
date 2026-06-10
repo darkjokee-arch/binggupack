@@ -1,4 +1,6 @@
-# INSTALL — OpenBinggu (Personal Track)
+# INSTALL — BingguPack (Personal Track)
+
+> OpenBinggu is the legacy/internal codename for BingguPack.
 
 > **Track1 public RC** — v0.1.0-rc1: read/dry-run + pack validation + MCP 5도구 / v0.2.0-rc1: +local persistence(candidate-only, opt-in, write 기본 OFF) / v0.3.0-rc1: +manual one-shot capture(read-only). "100% 완성판"이 아니며, 모든 사용자 환경 동작을 보장하지 않습니다. 전체 로드맵·범위는 `README.md` 참조.
 

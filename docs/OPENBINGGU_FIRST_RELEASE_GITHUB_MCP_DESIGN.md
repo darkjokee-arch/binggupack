@@ -1,3 +1,5 @@
+> OpenBinggu is the legacy/internal codename for BingguPack.
+
 marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dry-run)
 
 # OpenBinggu 1차 배포 — GitHub + MCP 방식 설계 (DESIGN, A 초안)

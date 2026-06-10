@@ -1,3 +1,5 @@
+> OpenBinggu is the legacy/internal codename for BingguPack.
+
 # OpenBinggu 상위 설계 목표 — Multi-User × Multi-Agent Shared Pack System
 
 - 작성일: 2026-06-07

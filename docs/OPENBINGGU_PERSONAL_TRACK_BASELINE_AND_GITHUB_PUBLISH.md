@@ -1,3 +1,5 @@
+> OpenBinggu is the legacy/internal codename for BingguPack.
+
 # OpenBinggu 작업 B — 개인용(트랙1) 기준 정렬 + GitHub 공개 대비 (DESIGN / 후보 ONLY)
 
 > **상태라인(표준):** `marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dry-run)`

@@ -1,3 +1,5 @@
+> OpenBinggu is the legacy/internal codename for BingguPack.
+
 # OpenBinggu Public Release Policy — Public Skeleton / Private Data Separation
 
 > OpenBinggu는 향후 GitHub에 **framework/skeleton**으로 공개될 수 있다.

@@ -1,3 +1,5 @@
+> OpenBinggu is the legacy/internal codename for BingguPack.
+
 marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dry-run)
 
 # OpenBinggu 트랙1 — sanitizer 정책: 차단만 유지 + 수동 해제(whitelist 예외) (POLICY)

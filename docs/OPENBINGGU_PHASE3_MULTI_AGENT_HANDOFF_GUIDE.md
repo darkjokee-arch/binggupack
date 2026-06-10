@@ -1,3 +1,5 @@
+> OpenBinggu is the legacy/internal codename for BingguPack.
+
 # BingguPack Phase 3 — Multi-Agent Handoff Guide (DESIGN/문서 ONLY)
 
 > 목적: 사용자가 만든 pack(또는 로컬 candidate memory)을 **Claude·Codex·ChatGPT·Gemini가 같은 맥락으로 이어받게** 하는 방법.

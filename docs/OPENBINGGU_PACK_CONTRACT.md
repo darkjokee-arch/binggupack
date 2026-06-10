@@ -1,3 +1,5 @@
+> OpenBinggu is the legacy/internal codename for BingguPack.
+
 # OPENBINGGU PACK CONTRACT (v0.10)
 
 > 상태: **GO** (selftest 8/8 일치) · production write **0** · **BLOCKED_BY_V09 유지**
