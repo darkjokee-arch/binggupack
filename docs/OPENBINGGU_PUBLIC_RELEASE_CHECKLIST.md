@@ -9,7 +9,7 @@
 
 ## 0. fail-closed 공개 게이트 (2026-06-08 반영)
 
-> 트랙1 GitHub 공개의 선결 안전판. 상세 [TRACK1_FAILCLOSED_PUBLISH_GUARD_DESIGN](OPENBINGGU_TRACK1_FAILCLOSED_PUBLISH_GUARD_DESIGN.md).
+> 트랙1 GitHub 공개의 선결 안전판. 상세 `OPENBINGGU_TRACK1_FAILCLOSED_PUBLISH_GUARD_DESIGN.md`(internal design doc — not included in public repo).
 
 - [ ] **source pointer dirty/unknown → publish BLOCK** — pack builder(`watcher_pack_builder_m0`)가 source pointer를 `clean | dirty | unknown` 판정. dirty(Windows 절대경로/`file://`·UNC·비공개 unix path·localhost·내부IP·내부도메인) 또는 unknown(빈값·토큰)이 1건이라도 있으면 공개 BLOCK(raw 경로 미출력·라벨·count만).
 - [x] **`scripts/openbinggu_scope_envelope_dryrun.py --selftest` GATE=GO / EXIT=0** (게이트1 마스킹 clean-only·게이트2 수동승인·회귀방지 R1~R3·source pointer 판정).

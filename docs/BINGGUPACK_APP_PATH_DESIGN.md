@@ -69,16 +69,18 @@
 | 출력 | `{context_markdown}` — **Phase 3 handoff guide의 prompt template과 동일 형식** (pack 요약 + 노드/엣지 발췌 + consumer 규칙 4줄: evidence_refs 기반·추측 금지·candidate 표시·자동 병합 금지) |
 설계 불변: 이 출력 == mobile fallback에서 사람이 복붙하는 Markdown — 단일 포맷 정의를 양쪽이 공유(이중 유지보수 금지).
 
-## 7. 플랫폼별 확인 필요 목록 (실측 전 가정 금지)
+## 7. 플랫폼별 확인 필요 목록 — ✅ 실측 완료 (2026-06-10, 상세: `BINGGUPACK_APP_P1P6_FINDINGS.md`)
 
-| # | 항목 | 플랫폼 |
-|---|---|---|
-| P1 | Apps 등록 요건(검수·도메인 인증·rate limit 정책) | ChatGPT Apps |
-| P2 | HTTPS MCP(streamable) 세션/SSE 요구사항·timeout | ChatGPT/공통 |
-| P3 | remote MCP connector 등록 방식·OAuth scope 제약 | Claude |
-| P4 | adapter 형태(Gems/Extensions 중 무엇이 tool 호출 지원하는지) | Gemini |
-| P5 | tool 응답 크기 상한(handoff_context Markdown이 잘리는 한계) | 전 플랫폼 |
-| P6 | 무료 hosted 런타임 후보(서버리스 cold start가 MCP 세션과 호환되는지) | 인프라 |
+| # | 항목 | 플랫폼 | 실측 결과 요약 |
+|---|---|---|---|
+| P1 | Apps 등록 요건 | ChatGPT Apps | MCP 기반. Developer Mode로 본인 계정 즉시 연결(심사 0) / 디렉토리 공개는 개인 신원확인+심사. 서버는 공개 도메인 필수 |
+| P2 | HTTPS MCP(streamable) 세션/timeout | ChatGPT/공통 | 단일 endpoint POST/GET. **SSE 선택사항·stateless 합법** → JSON-only 최소 구현으로 스펙 적합 |
+| P3 | remote connector·OAuth | Claude | 전 플랜 지원 + **no-auth 공식 허용** + 모바일 사용 가능(웹에서 추가 후) — 3사 중 최저 장벽 |
+| P4 | adapter 형태 | Gemini | 소비자 앱은 custom MCP 미개방(조건부) — **Gemini CLI가 동일 서버 그대로 재사용**(adapter 불필요) |
+| P5 | tool 응답 크기 상한 | 전 플랫폼 | Claude ~25K 토큰 캡 / ChatGPT tool 정의 5K 토큰 + truncation 보고 → **응답 1만 토큰 이하 + pagination** 설계 기준 |
+| P6 | 무료 hosted 런타임 | 인프라 | **Cloudflare Workers 1순위**(영구 무료·cold start 0·공식 MCP 템플릿, 단 JS/TS 포팅 필요) / Python 유지 시 Render 차선(sleep 감수) |
+
+**§7 결론**: 서버 1개(stateless·JSON-only·read-only)로 ChatGPT+Claude+Gemini CLI 3곳 커버, 3 경로 모두 OAuth 없이 시작 가능. 권장 검증 순서 = Claude no-auth(모바일 포함) → ChatGPT Developer Mode → Gemini CLI → 이후 OAuth+디렉토리 심사. 구현은 전부 별도 GO.
 
 ## 8. 역방향 round-trip roadmap — 대화 → candidate capture (planned, v1 범위 밖)
 

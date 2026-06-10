@@ -5,7 +5,7 @@ marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dr
 # OpenBinggu 1차 배포 — 실데이터 검증 절차 (S4)
 
 > **상태: 절차 문서(2026-06-08). docs only · 실 업로드/push 0 · 실 트리 secret/PII scan 구현(`scripts/openbinggu_public_tree_scan.py` + `doctor --tree <ROOT>`, read-only·raw 미출력).**
-> 4CLI 선결 gate S4(합성 fixture 통과 ≠ 실 로컬데이터 안전) 흡수. 상세 [FIRST_RELEASE_4CLI_SYNTHESIS](OPENBINGGU_FIRST_RELEASE_4CLI_SYNTHESIS.md) §3-A.
+> 4CLI 선결 gate S4(합성 fixture 통과 ≠ 실 로컬데이터 안전) 흡수. 상세 `OPENBINGGU_FIRST_RELEASE_4CLI_SYNTHESIS.md`(internal design doc — not included in public repo) §3-A.
 > 상위: [CLEAN_REPO_BOOTSTRAP](OPENBINGGU_CLEAN_REPO_BOOTSTRAP.md) · [RELEASE_PREFLIGHT_CHECKLIST](OPENBINGGU_RELEASE_PREFLIGHT_CHECKLIST.md) · [SANITIZER_POLICY_BLOCK_ONLY](OPENBINGGU_SANITIZER_POLICY_BLOCK_ONLY.md).
 
 ---

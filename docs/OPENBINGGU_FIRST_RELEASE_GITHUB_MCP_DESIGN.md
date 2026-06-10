@@ -84,7 +84,7 @@ OpenBinggu 개인용 RC를 **GitHub 공개 + local MCP 서버** 형태로 1차 �
 
 ## 4-2. 4CLI 토론 결과 반영 (2026-06-08, both_reject → 공개 GO 선결 gate)
 
-> 본 A 초안은 4CLI 토론에서 **방향 GO / "지금 공개 GO" HOLD-REFINE**(judge=both_reject) 판정됨. 상세 [FIRST_RELEASE_4CLI_SYNTHESIS](OPENBINGGU_FIRST_RELEASE_4CLI_SYNTHESIS.md).
+> 본 A 초안은 4CLI 토론에서 **방향 GO / "지금 공개 GO" HOLD-REFINE**(judge=both_reject) 판정됨. 상세 `OPENBINGGU_FIRST_RELEASE_4CLI_SYNTHESIS.md`(internal design doc — not included in public repo).
 > 공개 push 전 선결 gate(전부 별도 GO, 현재 HOLD):
 > - **보안(C)**: S1 git 히스토리 영속성(새 clean repo 시작·history purge 절차) · S2 공개 pack 디폴트 source pointer 미포함 · S3 MCP path TOCTOU 포함 격리 · S4 합성 fixture 통과≠실데이터 안전 · S5 신규코드(stub/doctor) 공격면 최소화.
 > - **격리/효용(D)**: X1 bid-engine/인증서 등 타프로젝트 경로 deny(로컬 격리) · X2 OpenCrab 없이도 효용 보이는 toy end-to-end 시나리오(OpenCrab 통합은 2차 유지).

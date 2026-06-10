@@ -94,14 +94,14 @@ OpenBinggu는 **각 사용자가 자기 작업/문서/코드/대화에서 eviden
 
 | 컴포넌트 | 이 목표에서의 역할 | 상태 |
 |---|---|---|
-| **Watcher M0~M3 운영모드** ([WATCHER_READONLY_OPERATING_MODE](OPENBINGGU_WATCHER_READONLY_OPERATING_MODE_DESIGN.md)) | 축 A 입력단 — 사용자 작업 → capture→evidence→node. 사용자별 격리된 evidence 생산자 | M0 구현 GO 완료 / M1~M3 HOLD |
-| **MVP2.1 edge** ([MVP21_EDGE_SAFETY_FILTER](OPENBINGGU_MVP21_EDGE_SAFETY_FILTER_DESIGN.md)) | graph의 edge 절반 — node/edge graph 완성. R2 안전필터 | 설계 R2 / 구현 HOLD |
+| **Watcher M0~M3 운영모드** (`OPENBINGGU_WATCHER_READONLY_OPERATING_MODE_DESIGN.md`(internal design doc — not included in public repo)) | 축 A 입력단 — 사용자 작업 → capture→evidence→node. 사용자별 격리된 evidence 생산자 | M0 구현 GO 완료 / M1~M3 HOLD |
+| **MVP2.1 edge** (`OPENBINGGU_MVP21_EDGE_SAFETY_FILTER_DESIGN.md`(internal design doc — not included in public repo)) | graph의 edge 절반 — node/edge graph 완성. R2 안전필터 | 설계 R2 / 구현 HOLD |
 | **pack contract + validator** ([PACK_CONTRACT](OPENBINGGU_PACK_CONTRACT.md)) | 모델 중립 pack(축 B) 의 최소 계약 게이트. private/team/public 공통 형식 보증 | 운영 중 |
 | **M0→pack 빌더** (`watcher_pack_builder_m0.py`) | capture~pack 직렬화 dry-run — 축 A 산출을 축 B 포맷으로 | dry-run GO 완료 |
-| **Common Bus** ([COMMON_BUS](OPENBINGGU_COMMON_BUS.md)) | 축 B 실체 — 여러 모델이 같은 Core 통해 graph 기여/조회. 엔진 공개·데이터 private | 정의됨 |
+| **Common Bus** (`OPENBINGGU_COMMON_BUS.md`(internal design doc — not included in public repo)) | 축 B 실체 — 여러 모델이 같은 Core 통해 graph 기여/조회. 엔진 공개·데이터 private | 정의됨 |
 | **Public Release Policy/Checklist** ([POLICY](OPENBINGGU_PUBLIC_RELEASE_POLICY.md)·[CHECKLIST](OPENBINGGU_PUBLIC_RELEASE_CHECKLIST.md)) | public 범위 게이트 — raw 데이터 공유 금지 강제 | 정의됨 |
 | **v0.11~v0.17 chain** (staging→review queue→decision→apply plan→e2e) | GraphMerge review~apply 백본 — 파이프라인 5단계 review 부분 | 설계/부분구현 |
-| **EVALUATION_PROTOCOL** ([EVAL](OPENBINGGU_EVALUATION_PROTOCOL.md)) | pack/시스템 가치를 데이터 축적 후 고정 기준으로 측정 | 12질문 조건부 A_KEEP |
+| **EVALUATION_PROTOCOL** (`OPENBINGGU_EVALUATION_PROTOCOL.md`(internal design doc — not included in public repo)) | pack/시스템 가치를 데이터 축적 후 고정 기준으로 측정 | 12질문 조건부 A_KEEP |
 
 ---
 

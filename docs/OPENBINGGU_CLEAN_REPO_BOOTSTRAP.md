@@ -5,7 +5,7 @@ marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dr
 # OpenBinggu 1차 배포 — clean repo 부트스트랩 절차 (S1)
 
 > **상태: 절차 문서(2026-06-08). docs only · 실 repo 생성/push 0 · production write 0.**
-> 4CLI 선결 gate S1(git 히스토리 영속성) 흡수. 상세 [FIRST_RELEASE_4CLI_SYNTHESIS](OPENBINGGU_FIRST_RELEASE_4CLI_SYNTHESIS.md) §3-A.
+> 4CLI 선결 gate S1(git 히스토리 영속성) 흡수. 상세 `OPENBINGGU_FIRST_RELEASE_4CLI_SYNTHESIS.md`(internal design doc — not included in public repo) §3-A.
 > 상위: [RELEASE_REPO_LAYOUT](OPENBINGGU_RELEASE_REPO_LAYOUT.md) · [RELEASE_PREFLIGHT_CHECKLIST](OPENBINGGU_RELEASE_PREFLIGHT_CHECKLIST.md).
 
 ---

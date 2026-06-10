@@ -6,7 +6,7 @@
 
 - 작성일: 2026-06-08
 - 상태: **제품 방향 정의 only.** 결정·구현·production write 0. OpenCrab/store/DB/bid-engine write 0. apply/ingest/merge/push/v09/ARMED 0. enum 확정 0. 실자료 외부전송 0.
-- 상위: [BUSINESS_SCOPE_DECISION_BRIEF](OPENBINGGU_BUSINESS_SCOPE_DECISION_BRIEF.md)(4선택지 brief) · [P0_BUNDLE_STATUS_UNDECIDED_HOLD](OPENBINGGU_P0_BUNDLE_STATUS_UNDECIDED_HOLD.md) · [PACK_APPROVAL_THREE_PATH_DESIGN](OPENBINGGU_PACK_APPROVAL_THREE_PATH_DESIGN.md).
+- 상위: `OPENBINGGU_BUSINESS_SCOPE_DECISION_BRIEF.md`(internal design doc — not included in public repo)(4선택지 brief) · `OPENBINGGU_P0_BUNDLE_STATUS_UNDECIDED_HOLD.md`(internal design doc — not included in public repo) · `OPENBINGGU_PACK_APPROVAL_THREE_PATH_DESIGN.md`(internal design doc — not included in public repo).
 - 표현 규칙: "production 보장"·"보안 완성" 금지. 검증 표현은 "현재 fixture/temp 기준 추가 노출 미검출"만.
 
 ---
@@ -59,7 +59,7 @@
 | **트랙 2 billing/구독** | **DEFER** | 구독/결제 메커니즘 설계 필요. entitlement enum은 HOLD |
 | **불특정 다수 marketplace** | **BLOCK** | 현재 목표 아님. public paid circulation·판매자/구매자/정산 구조 제외 |
 | **release_mode/license/entitlement enum 확정** | **HOLD** | 데스크탑 publishing UI 앱 소스 부재(작업 A 실측). 확정 금지 |
-| **우리 시스템/운영자의 OpenCrab store 자동 write/apply/ingest** | **HOLD** | [PRODUCTION_HOLD_BOUNDARY](OPENBINGGU_PRODUCTION_HOLD_BOUNDARY.md) 조건 1~7 미충족. ※ OpenCrab은 가입자가 자기 pack을 자기 의지로 올리는 곳 — **사용자 주도 자발 업로드는 별개**(동일 fail-closed gate 적용 시 1차 배포 흐름 포함 가능, [FIRST_RELEASE_GITHUB_MCP_DESIGN](OPENBINGGU_FIRST_RELEASE_GITHUB_MCP_DESIGN.md) §2-4) |
+| **우리 시스템/운영자의 OpenCrab store 자동 write/apply/ingest** | **HOLD** | `OPENBINGGU_PRODUCTION_HOLD_BOUNDARY.md`(internal design doc — not included in public repo) 조건 1~7 미충족. ※ OpenCrab은 가입자가 자기 pack을 자기 의지로 올리는 곳 — **사용자 주도 자발 업로드는 별개**(동일 fail-closed gate 적용 시 1차 배포 흐름 포함 가능, [FIRST_RELEASE_GITHUB_MCP_DESIGN](OPENBINGGU_FIRST_RELEASE_GITHUB_MCP_DESIGN.md) §2-4) |
 
 ---
 
