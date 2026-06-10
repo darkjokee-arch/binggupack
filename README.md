@@ -153,6 +153,17 @@ OPENBINGGU_HOME=<repo 밖 경로> python scripts/openbinggu_batch_pack_loader.py
 - write는 **기본 OFF**(`--enable-write` 없으면 거부), apply 직전 PII/secret 잔존 재스캔(kind만 출력) 후 검출 시 거부됩니다.
 - manifest가 `pack_type=candidate` + `promotion_allowed_default=false`가 아니면 load 자체를 거부합니다(fail-closed).
 
+### Preview a promotion / 승격 전 preview (v0.4.0-rc1, read-only)
+
+batch pack을 로컬 운영형 그래프로 승격하기 **전에**, 어떤 변환(D1~D4)·id 충돌·FTS 색인 추가·backup/rollback 준비가 필요한지 **미리 보여주는 plan 도구**입니다. target DB는 항상 read-only로만 열며 **어떤 write도 하지 않습니다**(승격 실행기는 이 RC에 미포함). `OPENBINGGU_OPERATING_DB` 미지정 시 synthetic temp DB로 시연합니다.
+
+```bash
+python scripts/openbinggu_promotion_preview.py --selftest                    # 12/12 PASS GATE=GO 기대
+python scripts/openbinggu_promotion_preview.py --pack-dir <pack 디렉터리> --domain D10
+```
+
+> 변환 규칙·target schema contract·contentless FTS 검증법은 [Promotion Preview 설계](docs/OPENBINGGU_PROMOTION_PREVIEW_DESIGN.md) 참조.
+
 ## Multi-agent handoff / 여러 AI에 pack 넘기기
 
 하나의 pack을 **Claude·Codex·ChatGPT·Gemini**가 같은 맥락으로 이어받게 하는 방법은 [Multi-agent handoff guide](OPENBINGGU_PHASE3_MULTI_AGENT_HANDOFF_GUIDE.md)를 참고하세요. 4개 모델용 **prompt template**과 consumer 규칙을 포함합니다. 핵심:
