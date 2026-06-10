@@ -1,0 +1,6 @@
+name = "binggupack-workers-port-local"
+main = "src/index.ts"
+compatibility_date = "2025-05-01"
+
+# GO-WORKERS-PORT-LOCAL — wrangler dev 로컬 한정 PoC.
+# 배포(deploy)·routes·custom domain·KV·secrets 전부 미설정 (HOLD).

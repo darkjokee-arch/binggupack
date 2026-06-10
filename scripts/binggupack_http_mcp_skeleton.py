@@ -98,12 +98,14 @@ def make_toy_packs(root):
             })
             evidx.append({"evidence_id": eid, "source_path": rel_src})  # 상대경로만(clean)
             evchunk.append({"item_id": eid, "text": sentence})
+        nid2eid = {nid_: eid_ for nid_, _sent, eid_, _src in node_rows}
         edges = [{
             "id": "edge:%s:%s" % (pack_name, eid_),
             "source": "node:%s:%s" % (pack_name, s),
             "target": "node:%s:%s" % (pack_name, t),
             "properties": {"relation": rel, "candidate": True, "origin": "synthetic"},
-            "evidence_refs": [nodes[0]["evidence_refs"][0]], "promotion_allowed": False,
+            # 의존 대상(target) 노드의 근거 — 전 엣지에 첫 근거 일괄 박던 결함 fix (2026-06-10)
+            "evidence_refs": [nid2eid[t]], "promotion_allowed": False,
         } for eid_, s, rel, t in edge_rows]
         (d / "manifest.json").write_text(json.dumps({
             "format_version": "opencrab-pack-v1", "pack_id": pid,

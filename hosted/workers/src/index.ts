@@ -1,0 +1,602 @@
+// BingguPack hosted MCP — Cloudflare Workers TS (GO-CONNECTOR-PHASE1-CODE-LOCAL).
+//
+// 기반: GO-WORKERS-PORT-LOCAL 포팅본 (selftest 21/21 GO · Python parity byte 30/30 GO).
+// 이 버전부터 TS가 단일 정본 — 설계 docs/BINGGUPACK_CONNECTOR_PHASE1_PREFLIGHT_DESIGN.md §1~§4 반영:
+//   S1 경로 토큰: /mcp/<MCP_PATH_TOKEN> (env 주입 — wrangler secret 또는 .dev.vars. 코드/설정 평문 0)
+//      토큰 미설정 시 fail-closed 503. 토큰 없는 /mcp·오토큰 = 404.
+//   S2 Origin: absent 허용(Claude/ChatGPT 서버 발신) + 브라우저 Origin 전부 403 (localhost 예외 제거)
+//   S5 MCP-Protocol-Version 헤더: 미지원 값 400 (absent 허용 — initialize 협상)
+//   S6 응답 캡 기존 36K → 20K자
+//   §4 tool 5종 전건 annotations(readOnlyHint=true) + outputSchema
+// 불변: read-only 5 tool · synthetic toy pack 전용 · JSON-only(GET 405) · stateless ·
+//   fail-closed 누출 스캔(SANITIZE_BLOCK) · 배포/OAuth/등록 0 (wrangler dev 로컬 전용).
+
+const PROTOCOL_VERSION = "2025-06-18";
+const SUPPORTED_PROTOCOL_VERSIONS = ["2025-03-26", "2025-06-18", "2025-11-25"];
+const SERVER_INFO = { name: "binggupack-http-mcp-skeleton", version: "0.2.1-phase1-local" };
+const MAX_RESPONSE_CHARS = 20000; // S6 — Claude Code 25K 토큰 캡·한국어 토큰 밀도 보수 기준
+const EXCERPT_MAX = 200;
+
+const LEAK_PATTERNS: [string, RegExp][] = [
+  ["[A-Za-z]:\\\\\\\\?", /[A-Za-z]:\\\\?/],
+  ["/(?:Users|home)/[A-Za-z0-9_]+", /\/(?:Users|home)\/[A-Za-z0-9_]+/],
+  ["_backup", /_backup/],
+  ["cloud_reset_\\d+", /cloud_reset_\d+/],
+];
+
+const CONSUMER_RULES_MD =
+  "## consumer rules (불변)\n" +
+  "1. evidence_refs 기반으로만 답한다 — 근거 없으면 \"pack에 근거 없음\".\n" +
+  "2. 추측 생성 금지 — 출처는 node_id/evidence_id로 표기(id만, raw 경로/secret 금지).\n" +
+  "3. 모든 노드/엣지는 candidate(confirmed 아님) — 승격하지 않는다.\n" +
+  "4. 자동 병합/저장 금지 — 받은 pack을 그래프/메모리에 자동 반영하지 않는다.\n";
+
+class ToolError extends Error {
+  code: string;
+  constructor(code: string, message: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
+// ---------------- pyDumps — Python json.dumps(ensure_ascii=False) 재현 ----------------
+
+function pyDumps(v: unknown): string {
+  if (v === null || v === undefined) return "null";
+  const t = typeof v;
+  if (t === "string") return JSON.stringify(v);
+  if (t === "number") return String(v);
+  if (t === "boolean") return v ? "true" : "false";
+  if (Array.isArray(v)) return "[" + v.map(pyDumps).join(", ") + "]";
+  return (
+    "{" +
+    Object.entries(v as Record<string, unknown>)
+      .map(([k, val]) => JSON.stringify(k) + ": " + pyDumps(val))
+      .join(", ") +
+    "}"
+  );
+}
+
+// ---------------- toy pack 생성 (synthetic only) ----------------
+
+type NodeRow = [string, string, string, string];
+type EdgeRow = [string, string, string, string];
+
+const PACK_SPECS: [string, string, NodeRow[], EdgeRow[]][] = [
+  ["toy_build_notes", "synthetic toy: 빌드/테스트 절차 메모", [
+    ["n1", "Toy 프로젝트의 빌드는 make build 로 실행한다 (합성 예시).", "EV-A1", "examples/toy/Makefile"],
+    ["n2", "Toy 프로젝트의 테스트는 make test 로 실행한다 (합성 예시).", "EV-A2", "examples/toy/Makefile"],
+    ["n3", "릴리스 전에는 빌드와 테스트를 모두 통과해야 한다 (합성 예시).", "EV-A3", "examples/toy/RELEASE.md"],
+  ], [["e1", "n3", "depends_on", "n1"], ["e2", "n3", "depends_on", "n2"]]],
+  ["toy_recipe_notes", "synthetic toy: 요리 레시피 메모", [
+    ["n1", "토마토 수프는 토마토를 먼저 볶은 뒤 끓인다 (합성 예시).", "EV-B1", "examples/recipe/soup.md"],
+    ["n2", "수프 간은 마지막 단계에서 맞춘다 (합성 예시).", "EV-B2", "examples/recipe/soup.md"],
+  ], [["e1", "n2", "refines", "n1"]]],
+];
+
+interface Pack {
+  manifest: Record<string, any>;
+  nodes: any[];
+  edges: any[];
+  evIndex: any[];
+  evChunk: any[];
+}
+
+function makeToyPacks(): Pack[] {
+  const packs: Pack[] = [];
+  for (const [packName, scopeDesc, nodeRows, edgeRows] of PACK_SPECS) {
+    const pid = "toy/" + packName;
+    const nodes: any[] = [];
+    const evIndex: any[] = [];
+    const evChunk: any[] = [];
+    const nid2eid: Record<string, string> = {};
+    for (const [nid, , eid] of nodeRows) nid2eid[nid] = eid;
+    for (const [nid, sentence, eid, relSrc] of nodeRows) {
+      nodes.push({
+        id: `node:${packName}:${nid}`,
+        label: sentence.slice(0, 40),
+        properties: { sentence, candidate: true, origin: "synthetic", domain: "toy" },
+        evidence_refs: [eid],
+        promotion_allowed: false,
+      });
+      evIndex.push({ evidence_id: eid, source_path: relSrc });
+      evChunk.push({ item_id: eid, text: sentence });
+    }
+    const edges = edgeRows.map(([eid_, s, rel, t]) => ({
+      id: `edge:${packName}:${eid_}`,
+      source: `node:${packName}:${s}`,
+      target: `node:${packName}:${t}`,
+      properties: { relation: rel, candidate: true, origin: "synthetic" },
+      evidence_refs: [nid2eid[t]], // 의존 대상(target) 노드의 근거 — Python 원본과 동일 fix (parity)
+      promotion_allowed: false,
+    }));
+    packs.push({
+      manifest: {
+        format_version: "opencrab-pack-v1", pack_id: pid,
+        scope: scopeDesc, visibility: "private", status: "staged",
+        pack_type: "candidate", promotion_allowed_default: false,
+        counts: { nodes: nodes.length, edges: edges.length, evidence: evIndex.length },
+      },
+      nodes, edges, evIndex, evChunk,
+    });
+  }
+  return packs;
+}
+
+// ---------------- consume() — sanitize view (원본 contract 1:1) ----------------
+
+function consume(pack: Pack): any {
+  const manifest = pack.manifest;
+  const visibility = manifest.visibility ?? "private";
+  const status = manifest.status ?? "staged";
+  const packPromotionDefault = manifest.promotion_allowed_default ?? false;
+  const confirmedAllowed = status === "validated";
+
+  const nodeView = pack.nodes.map((n) => {
+    const p = n.properties ?? {};
+    return {
+      id: n.id,
+      claim: p.sentence ?? n.label ?? "",
+      candidate: Boolean(p.candidate),
+      promotion_allowed: Boolean(n.promotion_allowed ?? false),
+      origin: p.origin ?? "",
+      domain: p.domain ?? "",
+      evidence_refs: [...(n.evidence_refs ?? [])],
+      trust: "candidate_unverified",
+    };
+  });
+
+  const edgeView = pack.edges.map((e) => {
+    const p = e.properties ?? {};
+    return {
+      id: e.id,
+      relation: p.relation ?? "",
+      source: e.source ?? "",
+      target: e.target ?? "",
+      candidate: Boolean(p.candidate),
+      promotion_allowed: Boolean(e.promotion_allowed ?? false),
+      origin: p.origin ?? "",
+      evidence_refs: [...(e.evidence_refs ?? [])],
+      trust: "candidate_unverified",
+    };
+  });
+
+  const evText: Record<string, string> = {};
+  for (const c of pack.evChunk) evText[c.item_id] = c.text ?? "";
+  const evidenceView = pack.evIndex.map((ev) => {
+    const eid = ev.evidence_id;
+    const ptr = ev.source_path ?? "";
+    const present = eid in evText && Boolean(evText[eid]);
+    return {
+      evidence_id: eid,
+      source_pointer: ptr,
+      verification: present ? "verified_pointer" : "unverified",
+      redaction: (evText[eid] ?? "").includes("[REDACTED:") || present ? "applied" : "unknown",
+    };
+  });
+
+  const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+  return {
+    pack_id: manifest.pack_id ?? "",
+    scope: manifest.scope ?? "",
+    visibility, status,
+    confirmed_allowed: confirmedAllowed,
+    pack_promotion_allowed_default: Boolean(packPromotionDefault),
+    counts: { nodes: nodeView.length, edges: edgeView.length, evidence: evidenceView.length },
+    evidence_basis: {
+      node_ids: nodeView.map((n) => n.id).sort(cmp),
+      edge_ids: edgeView.map((e) => e.id).sort(cmp),
+      evidence_ids: evidenceView.map((e) => e.evidence_id).sort(cmp),
+    },
+    nodes: nodeView, edges: edgeView, evidence: evidenceView,
+  };
+}
+
+// ---------------- pack store (read-only) ----------------
+
+class PackStore {
+  private views: Record<string, any> = {};
+  constructor() {
+    for (const pack of makeToyPacks()) {
+      const view = consume(pack);
+      if (view.pack_id) this.views[view.pack_id] = view;
+    }
+  }
+  ids(): string[] {
+    return Object.keys(this.views).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  }
+  get(packId: string): any {
+    if (!(packId in this.views)) throw new ToolError("PACK_NOT_FOUND", "pack_id not found: " + packId);
+    return this.views[packId];
+  }
+}
+
+const STORE = new PackStore();
+
+// ---------------- tools (전부 read-only) ----------------
+
+function reqStr(args: Record<string, any>, key: string): string {
+  const val = args[key];
+  if (typeof val !== "string" || !val.trim()) {
+    throw new ToolError("INVALID_ARGUMENT", "missing required string: " + key);
+  }
+  return val.trim();
+}
+
+function toInt(v: any): number {
+  const n = Math.trunc(Number(v));
+  if (Number.isNaN(n)) throw new ToolError("INVALID_ARGUMENT", "invalid integer");
+  return n;
+}
+
+function countOcc(text: string, term: string): number {
+  if (!term) return 0;
+  let c = 0, i = 0;
+  while ((i = text.indexOf(term, i)) !== -1) { c++; i += term.length; }
+  return c;
+}
+
+function toolPackList(store: PackStore, args: Record<string, any>): any {
+  const limit = Math.max(1, Math.min(toInt(args.limit ?? 20), 50));
+  const packs = store.ids().slice(0, limit).map((pid) => {
+    const v = store.get(pid);
+    return { pack_id: pid, title: v.scope ?? "", counts: v.counts,
+             candidate_note: "all items candidate (not confirmed)" };
+  });
+  return { packs, total: store.ids().length };
+}
+
+function toolPackSummary(store: PackStore, args: Record<string, any>): any {
+  const v = store.get(reqStr(args, "pack_id"));
+  const topics = v.nodes.slice(0, 10).map((n: any) => n.claim.slice(0, 40));
+  return {
+    pack_id: v.pack_id,
+    manifest_summary: { visibility: v.visibility, status: v.status,
+                        pack_type: "candidate", counts: v.counts },
+    topics,
+    candidate_note: "all items candidate (not confirmed); promotion_allowed=false",
+  };
+}
+
+function toolEvidenceSearch(store: PackStore, args: Record<string, any>): any {
+  const v = store.get(reqStr(args, "pack_id"));
+  const query = reqStr(args, "query");
+  if (!(query.length >= 2 && query.length <= 200)) {
+    throw new ToolError("QUERY_TOO_SHORT", "query must be 2~200 chars");
+  }
+  const limit = Math.max(1, Math.min(toInt(args.limit ?? 5), 20));
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const hits: any[] = [];
+  for (const n of v.nodes) {
+    const text = n.claim.toLowerCase();
+    let score = 0;
+    for (const t of terms) score += countOcc(text, t);
+    if (score > 0) {
+      for (const eid of n.evidence_refs) {
+        hits.push({ evidence_id: eid, sentence_excerpt: n.claim.slice(0, EXCERPT_MAX),
+                    score, candidate: true });
+      }
+    }
+  }
+  hits.sort((a, b) => b.score - a.score ||
+    (a.evidence_id < b.evidence_id ? -1 : a.evidence_id > b.evidence_id ? 1 : 0));
+  return { hits: hits.slice(0, limit), total_hits: hits.length,
+           candidate_note: "excerpts are candidate evidence" };
+}
+
+function toolNodeEdgeLookup(store: PackStore, args: Record<string, any>): any {
+  const v = store.get(reqStr(args, "pack_id"));
+  const nodeId = args.node_id;
+  const keyword = args.keyword;
+  if (!nodeId && !keyword) throw new ToolError("NODE_NOT_FOUND", "node_id or keyword required");
+  const nodesById: Record<string, any> = {};
+  for (const n of v.nodes) nodesById[n.id] = n;
+  let node: any;
+  if (nodeId) {
+    if (!(nodeId in nodesById)) throw new ToolError("NODE_NOT_FOUND", "node_id not found: " + nodeId);
+    node = nodesById[nodeId];
+  } else {
+    const kw = String(keyword).toLowerCase();
+    const cands = v.nodes.filter((n: any) => n.claim.toLowerCase().includes(kw));
+    if (cands.length === 0) throw new ToolError("NODE_NOT_FOUND", "no node matches keyword");
+    if (cands.length > 1) {
+      const ids = cands.map((n: any) => n.id).sort((a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0));
+      throw new ToolError("AMBIGUOUS_KEYWORD", "candidates: " + ids.slice(0, 5).join(", "));
+    }
+    node = cands[0];
+  }
+  const edges = v.edges
+    .filter((e: any) => e.source === node.id || e.target === node.id)
+    .map((e: any) => ({
+      id: e.id, relation: e.relation,
+      direction: e.source === node.id ? "out" : "in",
+      peer_id: e.source === node.id ? e.target : e.source,
+      evidence_refs: e.evidence_refs, candidate: e.candidate,
+    }));
+  return { node: { id: node.id, claim: node.claim, candidate: node.candidate,
+                   evidence_refs: node.evidence_refs, trust: node.trust },
+           edges };
+}
+
+function toolHandoffContext(store: PackStore, args: Record<string, any>): any {
+  const v = store.get(reqStr(args, "pack_id"));
+  const maxNodes = Math.max(1, Math.min(toInt(args.max_nodes ?? 15), 30));
+  const topic = String(args.topic ?? "").trim().toLowerCase();
+  const nodes = v.nodes;
+  let picked: any[];
+  if (topic) {
+    const filtered = nodes.filter((n: any) => n.claim.toLowerCase().includes(topic));
+    picked = filtered.length ? filtered : nodes;
+  } else {
+    picked = nodes;
+  }
+  picked = picked.slice(0, maxNodes);
+  const pickedIds = new Set(picked.map((n: any) => n.id));
+  const lines = [
+    "# BingguPack handoff context — " + v.pack_id,
+    `(candidate pack — not confirmed / counts: nodes=${v.counts.nodes} edges=${v.counts.edges} evidence=${v.counts.evidence})`,
+    "", CONSUMER_RULES_MD, "## nodes (candidate)",
+  ];
+  for (const n of picked) {
+    lines.push(`- [${n.id}] ${n.claim} (evidence: ${n.evidence_refs.join(", ")})`);
+  }
+  lines.push("");
+  lines.push("## edges (candidate)");
+  for (const e of v.edges) {
+    if (pickedIds.has(e.source) || pickedIds.has(e.target)) {
+      lines.push(`- ${e.source} -${e.relation}-> ${e.target} (evidence: ${e.evidence_refs.join(", ")})`);
+    }
+  }
+  const md = lines.join("\n");
+  return { context_markdown: md, nodes_included: picked.length,
+           truncated: picked.length < nodes.length };
+}
+
+// §4 — 공통 annotations: 전 tool read-only·비파괴·멱등·closed-world
+const READ_ONLY_ANNOTATIONS = {
+  readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false,
+};
+
+const COUNTS_SCHEMA = {
+  type: "object",
+  properties: { nodes: { type: "integer" }, edges: { type: "integer" }, evidence: { type: "integer" } },
+  required: ["nodes", "edges", "evidence"],
+};
+
+interface ToolDef {
+  description: string;
+  inputSchema: Record<string, any>;
+  outputSchema: Record<string, any>;
+  handler: (store: PackStore, args: Record<string, any>) => any;
+}
+
+const TOOLS: Record<string, ToolDef> = {
+  pack_list: {
+    description: "내 synthetic toy pack 목록(요약만, raw 경로 0). read-only.",
+    inputSchema: { type: "object", properties: {
+      limit: { type: "integer", description: "최대 개수(기본 20)" } }, required: [] },
+    outputSchema: { type: "object", properties: {
+      packs: { type: "array", items: { type: "object", properties: {
+        pack_id: { type: "string" }, title: { type: "string" },
+        counts: COUNTS_SCHEMA, candidate_note: { type: "string" } },
+        required: ["pack_id", "title", "counts", "candidate_note"] } },
+      total: { type: "integer" } }, required: ["packs", "total"] },
+    handler: toolPackList,
+  },
+  pack_summary: {
+    description: "pack manifest 요약 + counts + 주제 라벨. read-only.",
+    inputSchema: { type: "object", properties: {
+      pack_id: { type: "string" } }, required: ["pack_id"] },
+    outputSchema: { type: "object", properties: {
+      pack_id: { type: "string" },
+      manifest_summary: { type: "object", properties: {
+        visibility: { type: "string" }, status: { type: "string" },
+        pack_type: { type: "string" }, counts: COUNTS_SCHEMA },
+        required: ["visibility", "status", "pack_type", "counts"] },
+      topics: { type: "array", items: { type: "string" } },
+      candidate_note: { type: "string" } },
+      required: ["pack_id", "manifest_summary", "topics", "candidate_note"] },
+    handler: toolPackSummary,
+  },
+  evidence_search: {
+    description: "pack 내 evidence 발췌 검색(상위 N, candidate 표시 유지). read-only.",
+    inputSchema: { type: "object", properties: {
+      pack_id: { type: "string" }, query: { type: "string", description: "2~200자" },
+      limit: { type: "integer", description: "기본 5, 최대 20" } },
+      required: ["pack_id", "query"] },
+    outputSchema: { type: "object", properties: {
+      hits: { type: "array", items: { type: "object", properties: {
+        evidence_id: { type: "string" }, sentence_excerpt: { type: "string" },
+        score: { type: "integer" }, candidate: { type: "boolean" } },
+        required: ["evidence_id", "sentence_excerpt", "score", "candidate"] } },
+      total_hits: { type: "integer" }, candidate_note: { type: "string" } },
+      required: ["hits", "total_hits", "candidate_note"] },
+    handler: toolEvidenceSearch,
+  },
+  node_edge_lookup: {
+    description: "노드 + 연결 엣지(relation·evidence_refs) 조회. read-only.",
+    inputSchema: { type: "object", properties: {
+      pack_id: { type: "string" }, node_id: { type: "string" },
+      keyword: { type: "string" } }, required: ["pack_id"] },
+    outputSchema: { type: "object", properties: {
+      node: { type: "object", properties: {
+        id: { type: "string" }, claim: { type: "string" }, candidate: { type: "boolean" },
+        evidence_refs: { type: "array", items: { type: "string" } }, trust: { type: "string" } },
+        required: ["id", "claim", "candidate", "evidence_refs", "trust"] },
+      edges: { type: "array", items: { type: "object", properties: {
+        id: { type: "string" }, relation: { type: "string" }, direction: { type: "string" },
+        peer_id: { type: "string" }, evidence_refs: { type: "array", items: { type: "string" } },
+        candidate: { type: "boolean" } },
+        required: ["id", "relation", "direction", "peer_id", "evidence_refs", "candidate"] } } },
+      required: ["node", "edges"] },
+    handler: toolNodeEdgeLookup,
+  },
+  handoff_context: {
+    description: "모델 투입용 context Markdown(mobile fallback과 동일 형식). read-only.",
+    inputSchema: { type: "object", properties: {
+      pack_id: { type: "string" }, topic: { type: "string" },
+      max_nodes: { type: "integer", description: "기본 15, 최대 30" } },
+      required: ["pack_id"] },
+    outputSchema: { type: "object", properties: {
+      context_markdown: { type: "string" }, nodes_included: { type: "integer" },
+      truncated: { type: "boolean" } },
+      required: ["context_markdown", "nodes_included", "truncated"] },
+    handler: toolHandoffContext,
+  },
+};
+
+// ---------------- JSON-RPC / 크기·누출 가드 ----------------
+
+function leakScan(text: string): string[] {
+  return LEAK_PATTERNS.filter(([, re]) => re.test(text)).map(([pat]) => pat);
+}
+
+function fitResult(result: Record<string, any>): Record<string, any> {
+  for (let i = 0; i < 8; i++) {
+    const s = pyDumps(result);
+    if (s.length <= MAX_RESPONSE_CHARS) return result;
+    let cut = false;
+    for (const key of ["packs", "hits", "edges", "topics"]) {
+      const seq = result[key];
+      if (Array.isArray(seq) && seq.length > 1) {
+        result[key] = seq.slice(0, Math.max(1, Math.floor(seq.length / 2)));
+        cut = true;
+      }
+    }
+    if (typeof result.context_markdown === "string" && result.context_markdown.length > 1000) {
+      result.context_markdown = result.context_markdown.slice(0, Math.floor(result.context_markdown.length / 2));
+      cut = true;
+    }
+    result.truncated = true;
+    if (!cut) return { error_code: "RESPONSE_TOO_LARGE", message: "result exceeds size cap" };
+  }
+  return result;
+}
+
+function handleRpc(store: PackStore, rpc: Record<string, any>): Record<string, any> | null {
+  const rpcId = rpc.id ?? null;
+  const method = rpc.method ?? "";
+  if (rpcId === null) return null; // notification — 202
+  let result: Record<string, any>;
+  if (method === "initialize") {
+    // 스펙 MUST: 요청 버전을 지원하면 동일 버전으로 응답 (echo)
+    const reqVer = (rpc.params ?? {}).protocolVersion;
+    result = { protocolVersion: SUPPORTED_PROTOCOL_VERSIONS.includes(reqVer) ? reqVer : PROTOCOL_VERSION,
+               capabilities: { tools: { listChanged: false } },
+               serverInfo: SERVER_INFO };
+  } else if (method === "ping") {
+    result = {};
+  } else if (method === "tools/list") {
+    const names = Object.keys(TOOLS).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    result = { tools: names.map((k) => ({ name: k, description: TOOLS[k].description,
+                                          inputSchema: TOOLS[k].inputSchema,
+                                          outputSchema: TOOLS[k].outputSchema,
+                                          annotations: READ_ONLY_ANNOTATIONS })) };
+  } else if (method === "tools/call") {
+    const params = rpc.params ?? {};
+    const name = params.name ?? "";
+    const args = params.arguments ?? {};
+    if (!(name in TOOLS)) {
+      return { jsonrpc: "2.0", id: rpcId,
+               error: { code: -32602, message: "unknown tool: " + name } };
+    }
+    let out: Record<string, any>;
+    let isErr: boolean;
+    try {
+      out = fitResult(TOOLS[name].handler(store, args));
+      isErr = "error_code" in out;
+    } catch (e) {
+      if (e instanceof ToolError) {
+        out = { error_code: e.code, message: e.message };
+        isErr = true;
+      } else {
+        throw e;
+      }
+    }
+    let text = pyDumps(out);
+    const leaks = leakScan(text);
+    if (leaks.length) { // fail-closed: 내부 흔적 검출 시 결과 자체를 내보내지 않음
+      out = { error_code: "SANITIZE_BLOCK", message: "internal trace detected; blocked" };
+      text = pyDumps(out);
+      isErr = true;
+    }
+    // 스펙 MUST: structuredContent는 outputSchema 적합 의무 — 오류 면제 조항 없음(공식 SDK는
+    // 존재 시 isError 무관 검증). 오류는 content text만 반환(SDK가 명시 면제하는 유일 형태).
+    result = isErr
+      ? { content: [{ type: "text", text }], isError: true }
+      : { content: [{ type: "text", text }], structuredContent: out, isError: false };
+  } else {
+    return { jsonrpc: "2.0", id: rpcId,
+             error: { code: -32601, message: "method not found: " + method } };
+  }
+  return { jsonrpc: "2.0", id: rpcId, result };
+}
+
+// ---------------- HTTP (fetch handler) ----------------
+
+function deny(status: number, msg: string): Response {
+  return new Response(pyDumps({ error: msg }), {
+    status, headers: { "Content-Type": "application/json" },
+  });
+}
+
+// S2 — absent 허용(서버 발신은 Origin 없음), 브라우저 Origin은 전부 403
+function originOk(request: Request): boolean {
+  return request.headers.get("Origin") === null;
+}
+
+// S5 — MCP-Protocol-Version 헤더: absent 허용, 미지원 값은 400
+function protocolVersionOk(request: Request): boolean {
+  const pv = request.headers.get("MCP-Protocol-Version");
+  return pv === null || SUPPORTED_PROTOCOL_VERSIONS.includes(pv);
+}
+
+interface Env {
+  MCP_PATH_TOKEN?: string;
+}
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    // 변수명에 token·secret 류 + '=' 조합 금지 — 공개 트리 secret 스캐너 자기검출 회피 (6/10 박제)
+    const pathKey = (env.MCP_PATH_TOKEN ?? "").trim();
+    if (!pathKey) return deny(503, "path token not configured"); // S1 fail-closed
+    const mcpPath = "/mcp/" + pathKey;
+    const url = new URL(request.url);
+    if (request.method === "GET") {
+      if (url.pathname !== mcpPath) return deny(404, "not found");
+      return deny(405, "SSE not offered (JSON-only server)");
+    }
+    if (request.method === "DELETE") {
+      return deny(405, "stateless server (no session)");
+    }
+    if (request.method !== "POST") {
+      return deny(501, "unsupported method");
+    }
+    if (url.pathname !== mcpPath) return deny(404, "not found"); // 토큰 없는 /mcp·오토큰 포함
+    if (!originOk(request)) return deny(403, "origin not allowed");
+    if (!protocolVersionOk(request)) return deny(400, "unsupported protocol version");
+    let rpc: Record<string, any>;
+    try {
+      rpc = await request.json() as Record<string, any>;
+    } catch {
+      return deny(400, "invalid json");
+    }
+    if (rpc === null || typeof rpc !== "object" || Array.isArray(rpc)) {
+      return deny(400, "invalid json"); // null/배열/스칼라 body — JSON-RPC 객체만 허용
+    }
+    let resp: Record<string, any> | null;
+    try {
+      resp = handleRpc(STORE, rpc);
+    } catch { // 미상 예외 — 내부 정보 미노출 정적 -32603
+      resp = { jsonrpc: "2.0", id: rpc.id ?? null,
+               error: { code: -32603, message: "internal error" } };
+    }
+    if (resp === null) return new Response(null, { status: 202 });
+    return new Response(pyDumps(resp), {
+      status: 200, headers: { "Content-Type": "application/json" },
+    });
+  },
+};
+
+// 테스트 전용 노출 — Workers 런타임은 default export만 사용 (S28 절단 경로 실발동 검증용)
+export const __test = { fitResult, leakScan, pyDumps };

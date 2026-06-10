@@ -8,7 +8,7 @@
 > **BingguPack is a public tool that each user can clone and run locally with their own data.**
 > 각 사용자가 GitHub에서 받아 **자기 로컬 데이터**로 pack을 검증·저장·preview하는 공개형 개인용 도구입니다 (특정인 전용 아님).
 > Track1 public RC · internal codename: OpenBinggu
-> 버전: **v0.1.0-rc1** = read/dry-run + pack validation + MCP 5도구 → **v0.2.0-rc1** = +**local persistence**(candidate-only, opt-in, write 기본 OFF) → **v0.3.0-rc1** = +**manual one-shot capture**(read-only) → **v0.3.1-rc1** = +**batch pack staging loader** → **v0.4.0-rc1** = +**promotion preview**(read-only) → **v0.5.0-rc1** = +**reviewer/confirmed preview** → **v0.6.0-rc1** = +**finalize dry-run generator** → **v0.6.1-rc1**(최신) = 문서/온보딩 fix + hosted MCP skeleton 로컬 PoC.
+> 버전: **v0.1.0-rc1** = read/dry-run + pack validation + MCP 5도구 → **v0.2.0-rc1** = +**local persistence**(candidate-only, opt-in, write 기본 OFF) → **v0.3.0-rc1** = +**manual one-shot capture**(read-only) → **v0.3.1-rc1** = +**batch pack staging loader** → **v0.4.0-rc1** = +**promotion preview**(read-only) → **v0.5.0-rc1** = +**reviewer/confirmed preview** → **v0.6.0-rc1** = +**finalize dry-run generator** → **v0.6.1-rc1**(최신) = 문서/온보딩 fix + hosted MCP skeleton 로컬 PoC → **v0.7.0**(후보, 미태그) = hosted connector 실구현(Claude custom connector 실동작 검증 — `docs/BINGGUPACK_HOSTED_CONNECTOR_PHASE1_RESULT.md`).
 > 🚀 처음이라면: [10분 튜토리얼](docs/BINGGUPACK_TUTORIAL.md)
 > "100% 완성판" 아님(아래 §범위). 코드 라이선스 = **MIT**. enum(release_mode/entitlement) HOLD · production write 0.
 
@@ -74,7 +74,7 @@ BingguPack(개인용 트랙)은 개인이 자기 로컬에서 작업 맥락을 *
 | multi-agent handoff | ✅ Phase 3 guide provided — [가이드](docs/OPENBINGGU_PHASE3_MULTI_AGENT_HANDOFF_GUIDE.md) |
 | review / confirmed | ✅ **v0.5.0-rc1** — reviewer/confirmed **preview**(dry-run·sandbox·synthetic) 9모듈, confirmed_created=0·applied=0·promoted=0·upload=0 불변을 doctor가 강제. confirmed 생성·적용은 계속 별도 단계 |
 | OpenCrab Pack v1 finalize dry-run | ✅ **v0.6.0-rc1** — local generator(레이아웃 11종 로컬 조립), **Neo4j run 0 · upload/apply 0**. 실제 finalize/upload는 계속 HOLD |
-| Hosted app / @BingguPack chat app | 📋 **planned** — 채팅 앱에서 `@BingguPack`처럼 pack context 호출. ChatGPT Apps/HTTPS MCP first, Claude/Gemini adapters later. **local read-only HTTP MCP skeleton PoC는 ✅ 완료**(127.0.0.1 전용·synthetic only — `docs/BINGGUPACK_HOSTED_MCP_SKELETON_RESULT.md`). **TS(Cloudflare Workers) 포팅본도 로컬 검증 통과**(path token·readOnlyHint·outputSchema·response cap, 로컬 한정 — 공개 repo 외부 보관). **connector 정본 = TS Workers 포팅본 / 이 repo의 Python skeleton = PoC archive(frozen)**. hosted 배포·connector 등록은 계속 planned/HOLD |
+| Hosted app / @BingguPack chat app | 🟢 **Claude 경로 동작 확인(개인용)** — 2026-06-10 Cloudflare Workers 실배포 + **Claude custom connector에서 read-only 5 tool 실동작 검증 완료**(no-auth+비공개 토큰 경로·synthetic toy pack 한정 — `docs/BINGGUPACK_HOSTED_CONNECTOR_PHASE1_RESULT.md`). local Python skeleton PoC는 `docs/BINGGUPACK_HOSTED_MCP_SKELETON_RESULT.md`. **connector 정본 = TS Workers 포팅본(공개 repo 외부 보관) / 이 repo의 Python skeleton = PoC archive(frozen)**. ChatGPT/Gemini 등록·OAuth·실 pack 탑재는 계속 planned/HOLD |
 | Conversation → candidate capture (round-trip) | 📋 **planned** — 대화에서 사용자 승인 기반 candidate capture(preview 먼저, 자동 저장 없음) — [App path 설계 §8](docs/BINGGUPACK_APP_PATH_DESIGN.md) |
 | OpenCrab Pack v1 finalize | ⏳ Neo4j 이벤트 플로우 미완 |
 

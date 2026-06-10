@@ -2,7 +2,7 @@
 
 > OpenBinggu is the legacy/internal codename for BingguPack.
 
-> **Track1 public RC** — v0.1.0-rc1: read/dry-run + pack validation + MCP 5도구 / v0.2.0-rc1: +local persistence(candidate-only, opt-in, write 기본 OFF) / v0.3.0-rc1: +manual one-shot capture(read-only) / v0.3.1-rc1: +batch pack staging loader / v0.4.0-rc1: +promotion preview(read-only) / v0.5.0-rc1: +reviewer/confirmed preview(read-only) / v0.6.0-rc1: +finalize dry-run generator / **v0.6.1-rc1(최신)**: 문서·온보딩 fix + hosted MCP skeleton 로컬 PoC. "100% 완성판"이 아니며, 모든 사용자 환경 동작을 보장하지 않습니다. 전체 로드맵·범위는 `README.md`, 따라하기는 `docs/BINGGUPACK_TUTORIAL.md` 참조.
+> **Track1 public RC** — v0.1.0-rc1: read/dry-run + pack validation + MCP 5도구 / v0.2.0-rc1: +local persistence(candidate-only, opt-in, write 기본 OFF) / v0.3.0-rc1: +manual one-shot capture(read-only) / v0.3.1-rc1: +batch pack staging loader / v0.4.0-rc1: +promotion preview(read-only) / v0.5.0-rc1: +reviewer/confirmed preview(read-only) / v0.6.0-rc1: +finalize dry-run generator / **v0.6.1-rc1(최신)**: 문서·온보딩 fix + hosted MCP skeleton 로컬 PoC / v0.7.0(후보, 미태그): hosted connector 실구현 — Claude custom connector 실동작 검증 완료(`docs/BINGGUPACK_HOSTED_CONNECTOR_PHASE1_RESULT.md`). "100% 완성판"이 아니며, 모든 사용자 환경 동작을 보장하지 않습니다. 전체 로드맵·범위는 `README.md`, 따라하기는 `docs/BINGGUPACK_TUTORIAL.md` 참조.
 
 ## Requirements / 요구사항
 - Python 3.10+ (표준 라이브러리 위주)
@@ -52,9 +52,9 @@ python scripts/openbinggu_promotion_preview.py --selftest        # 12/12 PASS GA
 ```bash
 python scripts/openbinggu_phase6_manual_capture_selftest.py   # 10/10 PASS GATE=GO 기대
 ```
-> **synthetic / temp / read-only** 기준. 사용자가 명시 지정한 경로만 capture(allowlist only, denylist 우선), raw 저장 0·source pointer 공개 미포함. **write opt-in 없으면 staging write 0**, **hook/daemon은 NOT_STARTED**(설치/실행 0). reviewer/confirmed preview selftest(Phase 4)는 의존성 검토 중으로 이번 RC에 미포함.
+> **synthetic / temp / read-only** 기준. 사용자가 명시 지정한 경로만 capture(allowlist only, denylist 우선), raw 저장 0·source pointer 공개 미포함. **write opt-in 없으면 staging write 0**, **hook/daemon은 NOT_STARTED**(설치/실행 0). (reviewer/confirmed preview selftest는 v0.3.0 당시 미포함 — **v0.5.0-rc1에서 preview로 추가됨**, 위 §Reviewer/confirmed 참조.)
 
-## Finalize dry-run selftest / finalize 조립 검증 (v0.6 후보, 로컬 생성만)
+## Finalize dry-run selftest / finalize 조립 검증 (v0.6.0-rc1, 로컬 생성만)
 ```bash
 python scripts/openbinggu_finalize_dryrun.py --selftest   # 10/10 PASS GATE=GO 기대
 ```
