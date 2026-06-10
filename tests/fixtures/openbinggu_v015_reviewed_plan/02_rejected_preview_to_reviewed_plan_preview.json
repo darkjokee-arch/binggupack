@@ -1,0 +1,9 @@
+{
+  "source_id": "v015_02",
+  "expected": {"counts": {"rejected_preview": 1}},
+  "items": [
+    {"review_id": "rev_r", "source_pack_id": "pack_r", "source_decision_bucket": "REJECTED_PREVIEW",
+     "candidate_refs": {"nodes": ["n_r"], "edges": []}, "evidence_refs": ["ev_r"], "reason_codes": ["cross_pack_fuzzy"],
+     "human_summary": "reject preview → reviewed_plan.rejected_preview"}
+  ]
+}

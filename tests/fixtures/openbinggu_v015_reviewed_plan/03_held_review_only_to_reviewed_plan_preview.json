@@ -1,0 +1,9 @@
+{
+  "source_id": "v015_03",
+  "expected": {"counts": {"held_preview": 1}},
+  "items": [
+    {"review_id": "rev_h", "source_pack_id": "pack_h", "source_decision_bucket": "HELD_REVIEW_ONLY",
+     "candidate_refs": {"nodes": ["n_h"], "edges": []}, "evidence_refs": ["ev_h"], "reason_codes": ["cross_pack_fuzzy"],
+     "human_summary": "held → reviewed_plan.held_preview"}
+  ]
+}

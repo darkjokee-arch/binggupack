@@ -41,6 +41,7 @@ _CHECKS = [
     ("public_tree_scan", "openbinggu_public_tree_scan.py"),  # 실 트리 secret/PII scanner(synthetic 검증)
     ("c2_guard_selftest", "openbinggu_c2_guard_selftest.py"),  # C-2 단일통제 가드 synthetic selftest(21/21, write 0)
     ("staging_write_selftest", "openbinggu_staging_write_selftest.py"),  # Step3 staging write synthetic(11/11, temp DB, 운영 write 0)
+    ("phase4_reviewer_confirmed", "openbinggu_phase4_reviewer_confirmed_selftest.py"),  # v0.5 preview 불변 강제(confirmed_created=0/applied=0/promoted=0/upload=0)
 ]
 
 _GATE_RE = re.compile(r"GATE:\s*([A-Za-z\-]+)")

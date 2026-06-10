@@ -1,0 +1,10 @@
+{
+  "source_reviewed_plan_preview_id": "v016_14",
+  "blocked_by_v09": true,
+  "expected": {"statuses": ["BLOCKED_BY_V09", "BLOCKED_BY_V09", "BLOCKED_BY_V09"]},
+  "items": [
+    {"review_id": "rev_x1", "source_pack_id": "pack_x1", "source_reviewed_plan_bucket": "approved_preview", "candidate_refs": {"nodes": ["n1"], "edges": []}, "evidence_refs": ["e1"], "reason_codes": ["risk_high"], "approval": {"token_status": "APPROVAL_TOKEN_RECOGNIZED_PREVIEW_ONLY"}},
+    {"review_id": "rev_x2", "source_pack_id": "pack_x2", "source_reviewed_plan_bucket": "approved_preview", "candidate_refs": {"nodes": ["n2"], "edges": []}, "evidence_refs": ["e2"], "reason_codes": ["risk_high"], "approval": {"token_status": "APPROVAL_TOKEN_RECOGNIZED_PREVIEW_ONLY"}},
+    {"review_id": "rev_x3", "source_pack_id": "pack_x3", "source_reviewed_plan_bucket": "approved_preview", "candidate_refs": {"nodes": ["n3"], "edges": []}, "evidence_refs": ["e3"], "reason_codes": ["risk_high"], "approval": {"token_status": "APPROVAL_TOKEN_RECOGNIZED_PREVIEW_ONLY"}}
+  ]
+}

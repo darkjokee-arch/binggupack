@@ -1,0 +1,10 @@
+{
+  "source_id": "v015_13",
+  "approval_token": "실제 reviewed apply GO",
+  "expected": {"counts": {"approved_preview": 1}, "approval_gate_status": "APPROVAL_TOKEN_RECOGNIZED_PREVIEW_ONLY"},
+  "items": [
+    {"review_id": "rev_pa", "source_pack_id": "pack_pa", "source_decision_bucket": "APPROVED_PREVIEW",
+     "candidate_refs": {"nodes": ["n_pa"], "edges": []}, "evidence_refs": ["ev_pa"], "reason_codes": ["risk_high"],
+     "human_summary": "approve+token 있어도 promotion_allowed=true 금지"}
+  ]
+}

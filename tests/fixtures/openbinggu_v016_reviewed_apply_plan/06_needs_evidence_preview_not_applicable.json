@@ -1,0 +1,9 @@
+{
+  "source_reviewed_plan_preview_id": "v016_06",
+  "expected": {"statuses": ["NOT_APPLICABLE_NEEDS_EVIDENCE"]},
+  "items": [
+    {"review_id": "rev_n", "source_pack_id": "pack_n", "source_reviewed_plan_bucket": "needs_evidence_preview",
+     "candidate_refs": {"nodes": ["n_n"], "edges": []}, "evidence_refs": ["ev_n"], "reason_codes": ["risk_unknown"],
+     "approval": {"token_status": "APPROVAL_REQUIRED_PREVIEW"}}
+  ]
+}

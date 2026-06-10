@@ -1,0 +1,9 @@
+{
+  "source_reviewed_plan_preview_id": "v016_04",
+  "expected": {"statuses": ["NOT_APPLICABLE_REJECTED"]},
+  "items": [
+    {"review_id": "rev_r", "source_pack_id": "pack_r", "source_reviewed_plan_bucket": "rejected_preview",
+     "candidate_refs": {"nodes": ["n_r"], "edges": []}, "evidence_refs": ["ev_r"], "reason_codes": ["cross_pack_fuzzy"],
+     "approval": {"token_status": "APPROVAL_REQUIRED_PREVIEW"}}
+  ]
+}

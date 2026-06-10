@@ -1,0 +1,10 @@
+{
+  "source_reviewed_plan_preview_id": "v016_16",
+  "blocked_by_v09": true,
+  "expected": {"statuses": ["BLOCKED_BY_V09"]},
+  "items": [
+    {"review_id": "rev_wc", "source_pack_id": "pack_wc", "source_reviewed_plan_bucket": "approved_preview",
+     "candidate_refs": {"nodes": ["n_wc"], "edges": []}, "evidence_refs": ["ev_wc"], "reason_codes": ["risk_high"],
+     "approval": {"token_status": "APPROVAL_TOKEN_RECOGNIZED_PREVIEW_ONLY"}}
+  ]
+}

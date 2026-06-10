@@ -1,0 +1,9 @@
+{
+  "source_id": "v015_04",
+  "expected": {"counts": {"needs_evidence_preview": 1}},
+  "items": [
+    {"review_id": "rev_n", "source_pack_id": "pack_n", "source_decision_bucket": "NEEDS_MORE_EVIDENCE",
+     "candidate_refs": {"nodes": ["n_n"], "edges": []}, "evidence_refs": ["ev_n"], "reason_codes": ["risk_unknown"],
+     "human_summary": "needs more evidence → reviewed_plan.needs_evidence_preview"}
+  ]
+}

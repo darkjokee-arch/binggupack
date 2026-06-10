@@ -1,0 +1,9 @@
+{
+  "source_reviewed_plan_preview_id": "v016_07",
+  "expected": {"statuses": ["NOT_APPLICABLE_BLOCKED"]},
+  "items": [
+    {"review_id": "rev_bi", "source_pack_id": "pack_bi", "source_reviewed_plan_bucket": "blocked_or_invalid",
+     "candidate_refs": {"nodes": ["n_bi"], "edges": []}, "evidence_refs": ["ev_bi"], "reason_codes": ["invalid_decision"],
+     "approval": {"token_status": "APPROVAL_REQUIRED_PREVIEW"}}
+  ]
+}

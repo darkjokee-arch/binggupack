@@ -1,0 +1,9 @@
+{
+  "source_id": "v015_11",
+  "expected": {"counts": {"rejected_preview": 1}, "candidate_preserved": true, "reason_preserved": true},
+  "items": [
+    {"review_id": "rev_cand", "source_pack_id": "pack_cand", "source_decision_bucket": "REJECTED_PREVIEW",
+     "candidate_refs": {"nodes": ["n_c1", "n_c2", "n_c3"], "edges": ["e_c1", "e_c2"]}, "evidence_refs": ["ev_c1"],
+     "reason_codes": ["cross_pack_fuzzy", "manual_check"], "human_summary": "candidate_refs/reason_codes 보존"}
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "source_id": "v015_01",
+  "expected": {"counts": {"approved_preview": 1}, "approval_gate_status": "APPROVAL_REQUIRED_PREVIEW"},
+  "items": [
+    {"review_id": "rev_a", "source_pack_id": "pack_a", "source_decision_bucket": "APPROVED_PREVIEW",
+     "candidate_refs": {"nodes": ["n_a"], "edges": []}, "evidence_refs": ["ev_a"], "reason_codes": ["risk_high"],
+     "human_summary": "approve preview → reviewed_plan.approved_preview"}
+  ]
+}

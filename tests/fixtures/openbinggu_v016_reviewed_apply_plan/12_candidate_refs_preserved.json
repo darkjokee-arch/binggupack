@@ -1,0 +1,10 @@
+{
+  "source_reviewed_plan_preview_id": "v016_12",
+  "blocked_by_v09": true,
+  "expected": {"statuses": ["BLOCKED_BY_V09"], "candidate_preserved": true},
+  "items": [
+    {"review_id": "rev_cand", "source_pack_id": "pack_cand", "source_reviewed_plan_bucket": "approved_preview",
+     "candidate_refs": {"nodes": ["n_c1", "n_c2", "n_c3"], "edges": ["e_c1", "e_c2"]}, "evidence_refs": ["ev_c1"],
+     "reason_codes": ["risk_high"], "approval": {"token_status": "APPROVAL_TOKEN_RECOGNIZED_PREVIEW_ONLY"}}
+  ]
+}

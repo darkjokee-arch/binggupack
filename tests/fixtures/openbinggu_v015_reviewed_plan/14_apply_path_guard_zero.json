@@ -1,0 +1,13 @@
+{
+  "source_id": "v015_14",
+  "approval_token": "실제 reviewed apply GO",
+  "expected": {"counts": {"approved_preview": 1, "rejected_preview": 1}},
+  "items": [
+    {"review_id": "rev_g1", "source_pack_id": "pack_g1", "source_decision_bucket": "APPROVED_PREVIEW",
+     "candidate_refs": {"nodes": ["n_g1"], "edges": []}, "evidence_refs": ["ev_g1"], "reason_codes": ["risk_high"],
+     "human_summary": "approve+token 있어도 apply/transaction 미호출"},
+    {"review_id": "rev_g2", "source_pack_id": "pack_g2", "source_decision_bucket": "REJECTED_PREVIEW",
+     "candidate_refs": {"nodes": ["n_g2"], "edges": []}, "evidence_refs": ["ev_g2"], "reason_codes": ["cross_pack_fuzzy"],
+     "human_summary": "reject도 graph write 미호출"}
+  ]
+}

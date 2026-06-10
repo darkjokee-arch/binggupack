@@ -1,0 +1,9 @@
+{
+  "source_id": "v015_05",
+  "expected": {"counts": {"blocked_or_invalid": 1, "approved_preview": 0}},
+  "items": [
+    {"review_id": "rev_s", "source_pack_id": "pack_s", "source_decision_bucket": "STOP",
+     "candidate_refs": {"nodes": ["n_s"], "edges": []}, "evidence_refs": ["ev_s"], "reason_codes": ["invalid_decision"],
+     "human_summary": "STOP → blocked_or_invalid"}
+  ]
+}

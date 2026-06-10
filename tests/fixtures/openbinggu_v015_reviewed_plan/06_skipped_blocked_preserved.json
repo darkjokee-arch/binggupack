@@ -1,0 +1,9 @@
+{
+  "source_id": "v015_06",
+  "expected": {"counts": {"skipped_blocked": 1, "approved_preview": 0}},
+  "items": [
+    {"review_id": "rev_sb", "source_pack_id": "pack_secret", "source_decision_bucket": "SKIPPED_BLOCKED",
+     "candidate_refs": {"nodes": ["n_sb"], "edges": []}, "evidence_refs": ["ev_sb"], "reason_codes": ["secret_like_content"],
+     "human_summary": "blocked → skipped_blocked, apply 없음"}
+  ]
+}

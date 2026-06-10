@@ -1,0 +1,9 @@
+{
+  "source_reviewed_plan_preview_id": "v016_08",
+  "expected": {"statuses": ["NOT_APPLICABLE_SKIPPED_BLOCKED"]},
+  "items": [
+    {"review_id": "rev_sb", "source_pack_id": "pack_sb", "source_reviewed_plan_bucket": "skipped_blocked",
+     "candidate_refs": {"nodes": ["n_sb"], "edges": []}, "evidence_refs": ["ev_sb"], "reason_codes": ["secret_like_content"],
+     "approval": {"token_status": "APPROVAL_REQUIRED_PREVIEW"}}
+  ]
+}

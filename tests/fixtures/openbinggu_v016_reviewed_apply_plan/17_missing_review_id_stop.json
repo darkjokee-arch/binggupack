@@ -1,0 +1,10 @@
+{
+  "source_reviewed_plan_preview_id": "v016_17",
+  "blocked_by_v09": true,
+  "expected": {"statuses": ["STOP_MISSING_REVIEW_ID"]},
+  "items": [
+    {"source_pack_id": "pack_norid", "source_reviewed_plan_bucket": "approved_preview",
+     "candidate_refs": {"nodes": ["n_norid"], "edges": []}, "evidence_refs": ["ev_norid"], "reason_codes": ["risk_high"],
+     "approval": {"token_status": "APPROVAL_TOKEN_RECOGNIZED_PREVIEW_ONLY"}}
+  ]
+}

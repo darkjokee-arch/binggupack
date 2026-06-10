@@ -1,0 +1,13 @@
+{
+  "source_id": "v015_12_mixed",
+  "expected": {"counts": {"approved_preview": 1, "rejected_preview": 1, "held_preview": 1, "needs_evidence_preview": 1, "blocked_or_invalid": 1, "skipped_blocked": 1, "skipped_excluded": 1}, "source_pack_preserved": true},
+  "items": [
+    {"review_id": "m_app", "source_pack_id": "p_app", "source_decision_bucket": "APPROVED_PREVIEW", "candidate_refs": {"nodes": ["n1"], "edges": []}, "evidence_refs": ["e1"], "reason_codes": ["risk_high"], "human_summary": "a"},
+    {"review_id": "m_rej", "source_pack_id": "p_rej", "source_decision_bucket": "REJECTED_PREVIEW", "candidate_refs": {"nodes": ["n2"], "edges": []}, "evidence_refs": ["e2"], "reason_codes": ["cross_pack_fuzzy"], "human_summary": "r"},
+    {"review_id": "m_held", "source_pack_id": "p_held", "source_decision_bucket": "HELD_REVIEW_ONLY", "candidate_refs": {"nodes": ["n3"], "edges": []}, "evidence_refs": ["e3"], "reason_codes": ["cross_pack_fuzzy"], "human_summary": "h"},
+    {"review_id": "m_more", "source_pack_id": "p_more", "source_decision_bucket": "NEEDS_MORE_EVIDENCE", "candidate_refs": {"nodes": ["n4"], "edges": []}, "evidence_refs": ["e4"], "reason_codes": ["risk_unknown"], "human_summary": "m"},
+    {"review_id": "m_stop", "source_pack_id": "p_stop", "source_decision_bucket": "STOP", "candidate_refs": {"nodes": ["n5"], "edges": []}, "evidence_refs": ["e5"], "reason_codes": ["invalid_decision"], "human_summary": "s"},
+    {"review_id": "m_block", "source_pack_id": "p_block", "source_decision_bucket": "SKIPPED_BLOCKED", "candidate_refs": {"nodes": ["n6"], "edges": []}, "evidence_refs": ["e6"], "reason_codes": ["secret_like_content"], "human_summary": "b"},
+    {"review_id": "m_excl", "source_pack_id": "p_excl", "source_decision_bucket": "SKIPPED_EXCLUDED", "candidate_refs": {"nodes": [], "edges": []}, "evidence_refs": [], "reason_codes": ["valid_low_risk"], "human_summary": "x"}
+  ]
+}

@@ -28,9 +28,16 @@ python -m venv .venv
 
 ## Verify / 동작 확인 (권장 진입점)
 ```bash
-python scripts/openbinggu_doctor.py --selftest          # 11/11 PASS GATE=GO 기대
+python scripts/openbinggu_doctor.py --selftest          # 12/12 PASS GATE=GO 기대
 python scripts/openbinggu_doctor.py --tree examples/toy_project   # CLEAN 기대
 ```
+
+## Reviewer/confirmed preview selftest / 리뷰·확정 preview 검증 (v0.5.0-rc1 예정, preview only)
+```bash
+python scripts/openbinggu_phase4_reviewer_confirmed_selftest.py   # 9/9 PASS GATE=GO 기대
+python scripts/openbinggu_reviewer_auth_session_selftest.py       # 20/20 PASS GATE=GO 기대
+```
+> **PREVIEW ONLY** — confirmed_created=0 / applied=0 / promoted=0 / upload=0 을 selftest가 강제합니다. confirmed 생성·적용은 이 RC에 포함되지 않습니다.
 
 ## Local persistence selftest / 로컬 저장 검증 (v0.2.0-rc1, opt-in 기능 검증)
 ```bash

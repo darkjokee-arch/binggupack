@@ -24,7 +24,7 @@ examples/toy_project/
 
 ```bash
 # 0) 한 번에 공개 전 자가검사
-python scripts/openbinggu_doctor.py --selftest          # 11/11 GATE=GO 기대
+python scripts/openbinggu_doctor.py --selftest          # 12/12 GATE=GO 기대
 
 # 1) 이 toy 트리를 공개 후보로 스캔(secret/PII/경로) — CLEAN 이어야 함
 python scripts/openbinggu_doctor.py --tree examples/toy_project

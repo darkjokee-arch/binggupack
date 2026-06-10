@@ -1,0 +1,15 @@
+{
+  "source_reviewed_plan_preview_id": "v016_10_mixed",
+  "blocked_by_v09": true,
+  "expected": {"statuses": ["BLOCKED_BY_V09", "NOT_APPROVED", "NOT_APPLICABLE_REJECTED", "NOT_APPLICABLE_HELD", "NOT_APPLICABLE_NEEDS_EVIDENCE", "NOT_APPLICABLE_BLOCKED", "NOT_APPLICABLE_SKIPPED_BLOCKED", "NOT_APPLICABLE_SKIPPED_EXCLUDED"], "source_pack_preserved": true},
+  "items": [
+    {"review_id": "m1", "source_pack_id": "p1", "source_reviewed_plan_bucket": "approved_preview", "candidate_refs": {"nodes": ["n1"], "edges": []}, "evidence_refs": ["e1"], "reason_codes": ["risk_high"], "approval": {"token_status": "APPROVAL_TOKEN_RECOGNIZED_PREVIEW_ONLY"}},
+    {"review_id": "m2", "source_pack_id": "p2", "source_reviewed_plan_bucket": "approved_preview", "candidate_refs": {"nodes": ["n2"], "edges": []}, "evidence_refs": ["e2"], "reason_codes": ["risk_high"], "approval": {"token_status": "APPROVAL_REQUIRED_PREVIEW"}},
+    {"review_id": "m3", "source_pack_id": "p3", "source_reviewed_plan_bucket": "rejected_preview", "candidate_refs": {"nodes": ["n3"], "edges": []}, "evidence_refs": ["e3"], "reason_codes": ["cross_pack_fuzzy"], "approval": {"token_status": "APPROVAL_REQUIRED_PREVIEW"}},
+    {"review_id": "m4", "source_pack_id": "p4", "source_reviewed_plan_bucket": "held_preview", "candidate_refs": {"nodes": ["n4"], "edges": []}, "evidence_refs": ["e4"], "reason_codes": ["cross_pack_fuzzy"], "approval": {"token_status": "APPROVAL_REQUIRED_PREVIEW"}},
+    {"review_id": "m5", "source_pack_id": "p5", "source_reviewed_plan_bucket": "needs_evidence_preview", "candidate_refs": {"nodes": ["n5"], "edges": []}, "evidence_refs": ["e5"], "reason_codes": ["risk_unknown"], "approval": {"token_status": "APPROVAL_REQUIRED_PREVIEW"}},
+    {"review_id": "m6", "source_pack_id": "p6", "source_reviewed_plan_bucket": "blocked_or_invalid", "candidate_refs": {"nodes": ["n6"], "edges": []}, "evidence_refs": ["e6"], "reason_codes": ["invalid_decision"], "approval": {"token_status": "APPROVAL_REQUIRED_PREVIEW"}},
+    {"review_id": "m7", "source_pack_id": "p7", "source_reviewed_plan_bucket": "skipped_blocked", "candidate_refs": {"nodes": ["n7"], "edges": []}, "evidence_refs": ["e7"], "reason_codes": ["secret_like_content"], "approval": {"token_status": "APPROVAL_REQUIRED_PREVIEW"}},
+    {"review_id": "m8", "source_pack_id": "p8", "source_reviewed_plan_bucket": "skipped_excluded", "candidate_refs": {"nodes": [], "edges": []}, "evidence_refs": [], "reason_codes": ["valid_low_risk"], "approval": {"token_status": "APPROVAL_REQUIRED_PREVIEW"}}
+  ]
+}

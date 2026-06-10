@@ -1,0 +1,9 @@
+{
+  "source_id": "v015_16",
+  "expected": {"counts": {"approved_preview": 1}, "blocked_by_v09_required": true},
+  "items": [
+    {"review_id": "rev_v09", "source_pack_id": "pack_v09", "source_decision_bucket": "APPROVED_PREVIEW",
+     "candidate_refs": {"nodes": ["n_v09"], "edges": []}, "evidence_refs": ["ev_v09"], "reason_codes": ["risk_high"],
+     "human_summary": "human_approval_gate.blocked_by_v09_required=true 확인"}
+  ]
+}

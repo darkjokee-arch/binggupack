@@ -1,0 +1,10 @@
+{
+  "source_id": "v015_15",
+  "approval_token": "실제 reviewed apply GO",
+  "expected": {"counts": {"approved_preview": 1}},
+  "items": [
+    {"review_id": "rev_pw", "source_pack_id": "pack_pw", "source_decision_bucket": "APPROVED_PREVIEW",
+     "candidate_refs": {"nodes": ["n_pw"], "edges": []}, "evidence_refs": ["ev_pw"], "reason_codes": ["risk_high"],
+     "human_summary": "approve+token 있어도 production write/operating store write 미호출"}
+  ]
+}

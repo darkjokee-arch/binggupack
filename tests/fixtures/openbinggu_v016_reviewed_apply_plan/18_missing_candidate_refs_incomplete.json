@@ -1,0 +1,10 @@
+{
+  "source_reviewed_plan_preview_id": "v016_18",
+  "blocked_by_v09": true,
+  "expected": {"statuses": ["INCOMPLETE_MISSING_CANDIDATE_REFS"]},
+  "items": [
+    {"review_id": "rev_nocand", "source_pack_id": "pack_nocand", "source_reviewed_plan_bucket": "approved_preview",
+     "evidence_refs": ["ev_nocand"], "reason_codes": ["risk_high"],
+     "approval": {"token_status": "APPROVAL_TOKEN_RECOGNIZED_PREVIEW_ONLY"}}
+  ]
+}

@@ -41,7 +41,7 @@ BingguPack(개인용 트랙)은 개인이 자기 로컬에서 작업 맥락을 *
 **이 RC가 제공하는 것 (read / dry-run / 검증 중심)**:
 - pack **검증**(validate)·소비 smoke(consumer)·공개 fail-closed 게이트(publish_guard) — 전부 read/dry-run
 - **MCP 기본판**: read/dry-run **5도구**(pack_build·pack_validate·consumer_smoke·publish_guard_dryrun·selftest) 노출, `inputSchema`·`tools/call content` MCP 표준 준수, write/upload/apply/push/confirmed 도구 **미노출**
-- doctor **11/11** selftest, 공개 후보 트리 secret/PII scan(`--tree`)
+- doctor **12/12** selftest, 공개 후보 트리 secret/PII scan(`--tree`)
 - **(v0.2.0-rc1) local persistence**: 자기 로컬(`OPENBINGGU_HOME`)에 candidate graph 저장. **write 기본 OFF**·명시 opt-in 시에만·**CLI 전용(MCP write 도구 미노출)**·candidate-only(`promotion_allowed=0`). backup/rollback·C-2 1클릭·duplicate/freshness 검사·multi-user 격리. selftest 11/11 + read-only 재독 E2E 10/10.
 - **(v0.3.0-rc1) manual one-shot capture (read-only)**: 사용자가 명시 지정한 경로만 capture(allowlist only·denylist 우선·fail-closed). raw 저장 0·source pointer 공개 미포함·rate limit·kill switch. **write opt-in 없으면 staging write 0**, **hook/daemon NOT_STARTED**(설치/실행 0). selftest 10/10. (reviewer/confirmed preview selftest는 의존성 검토 중·이번 RC 미포함.)
 
@@ -72,10 +72,11 @@ BingguPack(개인용 트랙)은 개인이 자기 로컬에서 작업 맥락을 *
 | batch pack staging loader | ✅ **v0.3.1-rc1** — pack 디렉터리→staging apply→read-back→rollback(selftest 10/10) |
 | promotion preview(read-only) | ✅ **v0.4.0-rc1** — D1~D4 변환·충돌·FTS/backup/rollback plan만, write 0(selftest 12/12) |
 | multi-agent handoff | ✅ Phase 3 guide provided — [가이드](docs/OPENBINGGU_PHASE3_MULTI_AGENT_HANDOFF_GUIDE.md) |
-| review / confirmed | ⏳ preview까지(confirmed는 사람 승인 기반) |
+| review / confirmed | 🔜 **v0.5.0-rc1 예정** — reviewer/confirmed **preview**(dry-run·sandbox·synthetic) 9모듈, confirmed_created=0·applied=0·promoted=0·upload=0 불변을 doctor가 강제. confirmed 생성·적용은 계속 별도 단계 |
 | OpenCrab Pack v1 finalize | ⏳ Neo4j 이벤트 플로우 미완 |
 
 > Neo4j는 위 표의 마지막 단계(finalize/upload)에서만 필요합니다. 평소 일상 작업에는 불필요합니다(아래 §Neo4j 참조).
+> Internal module structure may change between RC releases. / 내부 모듈 구조는 RC 릴리스 사이에 변경될 수 있습니다.
 
 ---
 
@@ -126,8 +127,9 @@ doctor는 아래 검사를 한 번에 호출하고 **요약(PASS/FAIL·reason_co
 4. pack_consumer_smoke    5. path_safety_gate          6. mcp_path_gate_adapter
 7. public_tree_scan       8. c2_guard_selftest(C-2 단일통제 21/21)
 9. staging_write_selftest(temp DB, 운영 write 0)
+10. phase4_reviewer_confirmed(preview 불변 강제: confirmed_created=0·applied=0·promoted=0·upload=0)
 + secret/PII scan(dry-run stub) + real_tree_scan(--tree 지정 시) + operating store 불변 확인
-→ 총 **11/11 PASS · GATE=GO** 기대
+→ 총 **12/12 PASS · GATE=GO** 기대
 
 개별 실행도 가능합니다:
 

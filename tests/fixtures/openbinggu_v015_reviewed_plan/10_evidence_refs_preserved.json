@@ -1,0 +1,9 @@
+{
+  "source_id": "v015_10",
+  "expected": {"counts": {"approved_preview": 1}, "evidence_preserved": true},
+  "items": [
+    {"review_id": "rev_ev", "source_pack_id": "pack_ev", "source_decision_bucket": "APPROVED_PREVIEW",
+     "candidate_refs": {"nodes": ["n_ev"], "edges": []}, "evidence_refs": ["ev_001", "ev_002", "ev_003", "ev_004"],
+     "reason_codes": ["risk_high"], "human_summary": "evidence_refs 보존"}
+  ]
+}

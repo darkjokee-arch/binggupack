@@ -1,0 +1,11 @@
+{
+  "source_reviewed_plan_preview_id": "v016_20",
+  "blocked_by_v09": true,
+  "_note": "public release safety — item 들에 절대경로/private path 노출이 없어야 한다. clean 한 pack_id/refs 만 사용.",
+  "expected": {"statuses": ["BLOCKED_BY_V09"], "no_private_paths": true},
+  "items": [
+    {"review_id": "rev_clean", "source_pack_id": "pack_clean_session_001", "source_reviewed_plan_bucket": "approved_preview",
+     "candidate_refs": {"nodes": ["node_clean_1"], "edges": ["edge_clean_1"]}, "evidence_refs": ["evidence_clean_1"],
+     "reason_codes": ["risk_high"], "approval": {"token_status": "APPROVAL_TOKEN_RECOGNIZED_PREVIEW_ONLY"}}
+  ]
+}

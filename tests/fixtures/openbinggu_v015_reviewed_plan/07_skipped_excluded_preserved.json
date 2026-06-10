@@ -1,0 +1,9 @@
+{
+  "source_id": "v015_07",
+  "expected": {"counts": {"skipped_excluded": 1, "approved_preview": 0}},
+  "items": [
+    {"review_id": "rev_se", "source_pack_id": "pack_safe", "source_decision_bucket": "SKIPPED_EXCLUDED",
+     "candidate_refs": {"nodes": [], "edges": []}, "evidence_refs": [], "reason_codes": ["valid_low_risk"],
+     "human_summary": "excluded → skipped_excluded, apply 없음"}
+  ]
+}
