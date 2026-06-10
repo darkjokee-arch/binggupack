@@ -8,7 +8,7 @@
 > **BingguPack is a public tool that each user can clone and run locally with their own data.**
 > 각 사용자가 GitHub에서 받아 **자기 로컬 데이터**로 pack을 검증·저장·preview하는 공개형 개인용 도구입니다 (특정인 전용 아님).
 > Track1 public RC · internal codename: OpenBinggu
-> 버전: **v0.1.0-rc1** = read/dry-run + pack validation + MCP 5도구 → **v0.2.0-rc1** = +**local persistence**(candidate-only, opt-in, write 기본 OFF) → **v0.3.0-rc1** = +**manual one-shot capture**(read-only) → **v0.3.1-rc1** = +**batch pack staging loader** → **v0.4.0-rc1**(최신) = +**promotion preview**(read-only).
+> 버전: **v0.1.0-rc1** = read/dry-run + pack validation + MCP 5도구 → **v0.2.0-rc1** = +**local persistence**(candidate-only, opt-in, write 기본 OFF) → **v0.3.0-rc1** = +**manual one-shot capture**(read-only) → **v0.3.1-rc1** = +**batch pack staging loader** → **v0.4.0-rc1** = +**promotion preview**(read-only) → **v0.5.0-rc1** = +**reviewer/confirmed preview** → **v0.6.0-rc1**(최신) = +**finalize dry-run generator**.
 > 🚀 처음이라면: [10분 튜토리얼](docs/BINGGUPACK_TUTORIAL.md)
 > "100% 완성판" 아님(아래 §범위). 코드 라이선스 = **MIT**. enum(release_mode/entitlement) HOLD · production write 0.
 
@@ -72,7 +72,8 @@ BingguPack(개인용 트랙)은 개인이 자기 로컬에서 작업 맥락을 *
 | batch pack staging loader | ✅ **v0.3.1-rc1** — pack 디렉터리→staging apply→read-back→rollback(selftest 10/10) |
 | promotion preview(read-only) | ✅ **v0.4.0-rc1** — D1~D4 변환·충돌·FTS/backup/rollback plan만, write 0(selftest 12/12) |
 | multi-agent handoff | ✅ Phase 3 guide provided — [가이드](docs/OPENBINGGU_PHASE3_MULTI_AGENT_HANDOFF_GUIDE.md) |
-| review / confirmed | 🔜 **v0.5.0-rc1 예정** — reviewer/confirmed **preview**(dry-run·sandbox·synthetic) 9모듈, confirmed_created=0·applied=0·promoted=0·upload=0 불변을 doctor가 강제. confirmed 생성·적용은 계속 별도 단계 |
+| review / confirmed | ✅ **v0.5.0-rc1** — reviewer/confirmed **preview**(dry-run·sandbox·synthetic) 9모듈, confirmed_created=0·applied=0·promoted=0·upload=0 불변을 doctor가 강제. confirmed 생성·적용은 계속 별도 단계 |
+| OpenCrab Pack v1 finalize dry-run | ✅ **v0.6.0-rc1** — local generator(레이아웃 11종 로컬 조립), **Neo4j run 0 · upload/apply 0**. 실제 finalize/upload는 계속 HOLD |
 | Hosted app / @BingguPack chat app | 📋 **planned** — 채팅 앱에서 `@BingguPack`처럼 pack context 호출. ChatGPT Apps/HTTPS MCP first, Claude/Gemini adapters later |
 | Conversation → candidate capture (round-trip) | 📋 **planned** — 대화에서 사용자 승인 기반 candidate capture(preview 먼저, 자동 저장 없음) — [App path 설계 §8](docs/BINGGUPACK_APP_PATH_DESIGN.md) |
 | OpenCrab Pack v1 finalize | ⏳ Neo4j 이벤트 플로우 미완 |
@@ -119,7 +120,7 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1   # 선택
 ```
 
-> ℹ️ 이 repo는 **Public**(최신 tag `v0.4.0-rc1`)이라 누구나 clone 할 수 있습니다.
+> ℹ️ 이 repo는 **Public**(최신 tag `v0.6.0-rc1`)이라 누구나 clone 할 수 있습니다.
 
 ## Run selftest / 자체 검증 실행
 
@@ -251,4 +252,4 @@ This project is licensed under the **MIT License** — see the [LICENSE](LICENSE
 
 - 개인용(트랙1): 로컬 사용 + 공개 준비(RC) — fail-closed dry-run 완료.
 - 팀 유료(트랙2): DEFER. 불특정 다수 marketplace: BLOCK.
-- 실제 GitHub: **Public 공개(최신 `v0.4.0-rc1`, prerelease).**
+- 실제 GitHub: **Public 공개(최신 `v0.6.0-rc1`, prerelease).**
