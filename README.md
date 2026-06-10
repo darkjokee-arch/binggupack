@@ -140,6 +140,19 @@ python scripts/openbinggu_pack_consumer_smoke.py --selftest
 - private/team pack은 다른 user_root에서 읽으면 **거부(deny-by-default)** 됩니다.
 - pack은 candidate이며, 받은 쪽에서 자동으로 자기 그래프에 병합되지 않습니다(검토 후 수동).
 
+### Load a batch pack into local staging / batch pack을 로컬 staging에 적재해 보기
+
+batch pack 디렉터리(manifest.json + jsonl)를 local persistence staging에 **apply → read-back → rollback(원복)** 까지 한 번에 검증:
+
+```bash
+python scripts/openbinggu_batch_pack_loader.py --selftest          # synthetic/temp 전 과정 검증 (10/10 기대)
+# 자기 pack 적재(명시 opt-in 필수, 기본은 rollback 원복 / --keep 시 유지):
+OPENBINGGU_HOME=<repo 밖 경로> python scripts/openbinggu_batch_pack_loader.py --pack-dir <pack 디렉터리> --enable-write
+```
+
+- write는 **기본 OFF**(`--enable-write` 없으면 거부), apply 직전 PII/secret 잔존 재스캔(kind만 출력) 후 검출 시 거부됩니다.
+- manifest가 `pack_type=candidate` + `promotion_allowed_default=false`가 아니면 load 자체를 거부합니다(fail-closed).
+
 ## Multi-agent handoff / 여러 AI에 pack 넘기기
 
 하나의 pack을 **Claude·Codex·ChatGPT·Gemini**가 같은 맥락으로 이어받게 하는 방법은 [Multi-agent handoff guide](OPENBINGGU_PHASE3_MULTI_AGENT_HANDOFF_GUIDE.md)를 참고하세요. 4개 모델용 **prompt template**과 consumer 규칙을 포함합니다. 핵심:
