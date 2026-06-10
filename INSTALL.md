@@ -54,6 +54,12 @@ python scripts/openbinggu_phase6_manual_capture_selftest.py   # 10/10 PASS GATE=
 ```
 > **synthetic / temp / read-only** 기준. 사용자가 명시 지정한 경로만 capture(allowlist only, denylist 우선), raw 저장 0·source pointer 공개 미포함. **write opt-in 없으면 staging write 0**, **hook/daemon은 NOT_STARTED**(설치/실행 0). reviewer/confirmed preview selftest(Phase 4)는 의존성 검토 중으로 이번 RC에 미포함.
 
+## Finalize dry-run selftest / finalize 조립 검증 (v0.6 후보, 로컬 생성만)
+```bash
+python scripts/openbinggu_finalize_dryrun.py --selftest   # 10/10 PASS GATE=GO 기대
+```
+> pack v1 레이아웃을 **로컬에 조립만** 합니다 — upload/apply 0, **Neo4j 실행 0**(import.cypher는 파일 생성만, export_status=NOT_RUN). license는 `{scope:"personal", name:"MIT"}`, release_mode/entitlement는 비필드.
+
 ## MCP / MCP 연결 (선택)
 `mcp.example.json` 참고. read/dry-run 도구만 노출됩니다(write/apply/push 미노출).
 
