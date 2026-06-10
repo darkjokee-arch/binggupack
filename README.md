@@ -4,7 +4,7 @@ marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dr
 
 > **Evidence-backed context packs for multi-agent AI workflows.**
 > Track1 public RC · internal codename: OpenBinggu
-> 버전: **v0.1.0-rc1**(공개 완료) = read/dry-run + pack validation + MCP 5도구 → **v0.2.0-rc1** = +**local persistence**(candidate-only, opt-in, write 기본 OFF).
+> 버전: **v0.1.0-rc1**(공개 완료) = read/dry-run + pack validation + MCP 5도구 → **v0.2.0-rc1** = +**local persistence**(candidate-only, opt-in, write 기본 OFF) → **v0.3.0-rc1** = +**manual one-shot capture**(read-only).
 > "100% 완성판" 아님(아래 §범위). 코드 라이선스 = **MIT**. enum(release_mode/entitlement) HOLD · production write 0.
 
 ---
@@ -36,7 +36,7 @@ OpenBinggu(개인용 트랙)는 개인이 자기 로컬에서 작업 맥락을 *
 - **MCP 기본판**: read/dry-run **5도구**(pack_build·pack_validate·consumer_smoke·publish_guard_dryrun·selftest) 노출, `inputSchema`·`tools/call content` MCP 표준 준수, write/upload/apply/push/confirmed 도구 **미노출**
 - doctor **11/11** selftest, 공개 후보 트리 secret/PII scan(`--tree`)
 - **(v0.2.0-rc1) local persistence**: 자기 로컬(`OPENBINGGU_HOME`)에 candidate graph 저장. **write 기본 OFF**·명시 opt-in 시에만·**CLI 전용(MCP write 도구 미노출)**·candidate-only(`promotion_allowed=0`). backup/rollback·C-2 1클릭·duplicate/freshness 검사·multi-user 격리. selftest 11/11 + read-only 재독 E2E 10/10.
-- **(v0.3.0-rc1 후보) manual one-shot capture (read-only)**: 사용자가 명시 지정한 경로만 capture(allowlist only·denylist 우선·fail-closed). raw 저장 0·source pointer 공개 미포함·rate limit·kill switch. **write opt-in 없으면 staging write 0**, **hook/daemon NOT_STARTED**(설치/실행 0). selftest 10/10. (reviewer/confirmed preview selftest는 의존성 검토 중·이번 RC 미포함.)
+- **(v0.3.0-rc1) manual one-shot capture (read-only)**: 사용자가 명시 지정한 경로만 capture(allowlist only·denylist 우선·fail-closed). raw 저장 0·source pointer 공개 미포함·rate limit·kill switch. **write opt-in 없으면 staging write 0**, **hook/daemon NOT_STARTED**(설치/실행 0). selftest 10/10. (reviewer/confirmed preview selftest는 의존성 검토 중·이번 RC 미포함.)
 
 **이 RC가 아직 제공하지 않는 것 (다음 단계)**:
 - **multi-agent handoff** 사용자 가이드·prompt template
@@ -61,6 +61,7 @@ OpenBinggu(개인용 트랙)는 개인이 자기 로컬에서 작업 맥락을 *
 | 입력 / 핵심문장 / edge·evidence / pack 생성·검증 | ✅ read/dry-run 제공 |
 | MCP read/dry-run 5도구(기본 도구 노출/호출 검증 완료) | ✅ 제공 |
 | local persistence(로컬 후보 저장) | ✅ **v0.2.0-rc1** — candidate-only·opt-in·write 기본 OFF(selftest 11/11 + 재독 E2E 10/10) |
+| manual one-shot capture(read-only) | ✅ **v0.3.0-rc1** — allowlist·denylist·rate limit·kill switch·fail-closed(selftest 10/10) |
 | multi-agent handoff | ⏳ 가이드 예정 |
 | review / confirmed | ⏳ preview까지(confirmed는 사람 승인 기반) |
 | OpenCrab Pack v1 finalize | ⏳ Neo4j 이벤트 플로우 미완 |
@@ -91,7 +92,7 @@ python -m venv .venv && . .venv/bin/activate   # 선택
 # 표준 라이브러리 위주이므로 별도 의존성 최소
 ```
 
-> ℹ️ 이 repo는 **Public**(`v0.1.0-rc1`)이라 누구나 clone 할 수 있습니다.
+> ℹ️ 이 repo는 **Public**(최신 tag `v0.3.0-rc1`)이라 누구나 clone 할 수 있습니다.
 
 ## Run selftest / 자체 검증 실행
 
@@ -192,4 +193,4 @@ This project is licensed under the **MIT License** — see the [LICENSE](LICENSE
 
 - 개인용(트랙1): 로컬 사용 + 공개 준비(RC) — fail-closed dry-run 완료.
 - 팀 유료(트랙2): DEFER. 불특정 다수 marketplace: BLOCK.
-- 실제 GitHub: **Public 공개 완료(`v0.1.0-rc1`).**
+- 실제 GitHub: **Public 공개(최신 `v0.3.0-rc1`, prerelease).**
