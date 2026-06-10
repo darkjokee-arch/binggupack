@@ -24,6 +24,7 @@
 - **공개성**: GitHub 공개 **가능성을 열어둠**(개인이 자기 pack을 오픈소스로 공개하는 선택). 무료 또는 오픈소스 가능.
 - **핵심 기준**: `private/local`.
 - **위치**: 가장 먼저 완성하는 기본 버전. 트랙 2의 토대.
+- **hosted app/connector option (planned)**: 개인용 사용 형태의 확장으로, hosted MCP/App을 통해 채팅 앱에서 `@BingguPack`처럼 자기 pack context를 호출. ChatGPT Apps/HTTPS MCP 우선, Claude/Gemini는 플랫폼별 adapter. **개인 자기 pack 한정** — team paid는 계속 DEFER, marketplace는 계속 BLOCK, enum(release_mode/entitlement)은 계속 HOLD.
 
 ### 트랙 2 — 팀 유료 버전 (개인용 위 확장)
 - **사용 형태**: 회사/팀 단위로 여러 사람이 같이 사용.

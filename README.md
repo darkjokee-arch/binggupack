@@ -73,10 +73,16 @@ BingguPack(개인용 트랙)은 개인이 자기 로컬에서 작업 맥락을 *
 | promotion preview(read-only) | ✅ **v0.4.0-rc1** — D1~D4 변환·충돌·FTS/backup/rollback plan만, write 0(selftest 12/12) |
 | multi-agent handoff | ✅ Phase 3 guide provided — [가이드](docs/OPENBINGGU_PHASE3_MULTI_AGENT_HANDOFF_GUIDE.md) |
 | review / confirmed | 🔜 **v0.5.0-rc1 예정** — reviewer/confirmed **preview**(dry-run·sandbox·synthetic) 9모듈, confirmed_created=0·applied=0·promoted=0·upload=0 불변을 doctor가 강제. confirmed 생성·적용은 계속 별도 단계 |
+| Hosted app / @BingguPack chat app | 📋 **planned** — 채팅 앱에서 `@BingguPack`처럼 pack context 호출. ChatGPT Apps/HTTPS MCP first, Claude/Gemini adapters later |
 | OpenCrab Pack v1 finalize | ⏳ Neo4j 이벤트 플로우 미완 |
 
 > Neo4j는 위 표의 마지막 단계(finalize/upload)에서만 필요합니다. 평소 일상 작업에는 불필요합니다(아래 §Neo4j 참조).
 > Internal module structure may change between RC releases. / 내부 모듈 구조는 RC 릴리스 사이에 변경될 수 있습니다.
+
+**사용 경로 3가지 / Three usage paths**:
+1. **CLI/local path (현재 RC)** — 이 저장소의 도구로 자기 로컬에서 pack 검증·적재·preview.
+2. **Mobile handoff path** — 모바일/웹 채팅에서는 pack 요약·prompt template을 붙여넣는 handoff fallback ([Phase 3 가이드](docs/OPENBINGGU_PHASE3_MULTI_AGENT_HANDOFF_GUIDE.md)).
+3. **App path (planned)** — hosted MCP/App으로 채팅 앱에서 `@BingguPack` 호출. 플랫폼별 지원 차이 있음(ChatGPT Apps/HTTPS MCP 우선, Claude/Gemini는 adapter 필요).
 
 ---
 

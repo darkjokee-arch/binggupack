@@ -26,6 +26,7 @@ OpenBinggu는 **각 사용자가 자기 작업/문서/코드/대화에서 eviden
 5. **세션/모델 교차 맥락 유지** — 모델이 바뀌어도, 세션이 끊겨도 pack이 context를 운반 → 맥락 단절 0.
 6. **pack 배포 범위** — private / team / public.
 7. **공유 금지 경계** — secret / PII / raw 운영데이터는 어떤 범위로도 공유 금지.
+8. **최종 UX — 앱에서 `@BingguPack` 호출** — 모바일 등 일반 채팅 앱에서 `@BingguPack`처럼 pack context를 불러 쓰는 것이 최종 사용 형태. hosted MCP/App 단계(planned)이며 플랫폼별 지원 차이 있음(ChatGPT Apps/HTTPS MCP 우선, Claude/Gemini는 플랫폼별 adapter 필요). 그전까지는 prompt/summary handoff가 모바일 fallback.
 
 ---
 
