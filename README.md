@@ -4,7 +4,8 @@ marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dr
 
 > **Evidence-backed context packs for multi-agent AI workflows.**
 > Track1 public RC · internal codename: OpenBinggu
-> 버전: **v0.1.0-rc1**(공개 완료) = read/dry-run + pack validation + MCP 5도구 → **v0.2.0-rc1** = +**local persistence**(candidate-only, opt-in, write 기본 OFF) → **v0.3.0-rc1** = +**manual one-shot capture**(read-only).
+> 버전: **v0.1.0-rc1** = read/dry-run + pack validation + MCP 5도구 → **v0.2.0-rc1** = +**local persistence**(candidate-only, opt-in, write 기본 OFF) → **v0.3.0-rc1** = +**manual one-shot capture**(read-only) → **v0.3.1-rc1** = +**batch pack staging loader** → **v0.4.0-rc1**(최신) = +**promotion preview**(read-only).
+> 🚀 처음이라면: [10분 튜토리얼](docs/BINGGUPACK_TUTORIAL.md)
 > "100% 완성판" 아님(아래 §범위). 코드 라이선스 = **MIT**. enum(release_mode/entitlement) HOLD · production write 0.
 
 ---
@@ -62,6 +63,8 @@ BingguPack(개인용 트랙)은 개인이 자기 로컬에서 작업 맥락을 *
 | MCP read/dry-run 5도구(기본 도구 노출/호출 검증 완료) | ✅ 제공 |
 | local persistence(로컬 후보 저장) | ✅ **v0.2.0-rc1** — candidate-only·opt-in·write 기본 OFF(selftest 11/11 + 재독 E2E 10/10) |
 | manual one-shot capture(read-only) | ✅ **v0.3.0-rc1** — allowlist·denylist·rate limit·kill switch·fail-closed(selftest 10/10) |
+| batch pack staging loader | ✅ **v0.3.1-rc1** — pack 디렉터리→staging apply→read-back→rollback(selftest 10/10) |
+| promotion preview(read-only) | ✅ **v0.4.0-rc1** — D1~D4 변환·충돌·FTS/backup/rollback plan만, write 0(selftest 12/12) |
 | multi-agent handoff | ⏳ 가이드 예정 |
 | review / confirmed | ⏳ preview까지(confirmed는 사람 승인 기반) |
 | OpenCrab Pack v1 finalize | ⏳ Neo4j 이벤트 플로우 미완 |
@@ -92,7 +95,7 @@ python -m venv .venv && . .venv/bin/activate   # 선택
 # 표준 라이브러리 위주이므로 별도 의존성 최소
 ```
 
-> ℹ️ 이 repo는 **Public**(최신 tag `v0.3.0-rc1`)이라 누구나 clone 할 수 있습니다.
+> ℹ️ 이 repo는 **Public**(최신 tag `v0.4.0-rc1`)이라 누구나 clone 할 수 있습니다.
 
 ## Run selftest / 자체 검증 실행
 
@@ -166,7 +169,7 @@ python scripts/openbinggu_promotion_preview.py --pack-dir <pack 디렉터리> --
 
 ## Multi-agent handoff / 여러 AI에 pack 넘기기
 
-하나의 pack을 **Claude·Codex·ChatGPT·Gemini**가 같은 맥락으로 이어받게 하는 방법은 [Multi-agent handoff guide](OPENBINGGU_PHASE3_MULTI_AGENT_HANDOFF_GUIDE.md)를 참고하세요. 4개 모델용 **prompt template**과 consumer 규칙을 포함합니다. 핵심:
+하나의 pack을 **Claude·Codex·ChatGPT·Gemini**가 같은 맥락으로 이어받게 하는 방법은 [Multi-agent handoff guide](docs/OPENBINGGU_PHASE3_MULTI_AGENT_HANDOFF_GUIDE.md)를 참고하세요. 4개 모델용 **prompt template**과 consumer 규칙을 포함합니다. 핵심:
 
 - **evidence_refs 기반 답변**: pack의 evidence_refs로 뒷받침되는 사실만 답하고, 없으면 "pack에 근거 없음"이라고 답합니다(**추측 금지**).
 - **evidence 없는 edge는 candidate**: 새 node→node 관계는 evidence 직접성이 없으면 confirmed가 아닌 candidate 제안으로만 표시합니다.
@@ -185,18 +188,18 @@ python scripts/openbinggu_promotion_preview.py --pack-dir <pack 디렉터리> --
 5. 검출 **1건 이상이면 verdict=BLOCK / GATE=NO-GO**(공개·업로드 차단)
 6. 모두 0(CLEAN)일 때만, 요약을 보고 **본인이 수동 승인** → 그 후에만 push/upload
 
-> 상세: [REAL_DATA_VALIDATION_PROCEDURE](OPENBINGGU_REAL_DATA_VALIDATION_PROCEDURE.md). GitHub 공개와 OpenCrab 업로드는 동일 BLOCK 기준·동일 수동 승인 게이트. scan은 read-only이며 raw 경로/내용/secret을 출력하지 않습니다(file_id·reason_code·count만).
+> 상세: [REAL_DATA_VALIDATION_PROCEDURE](docs/OPENBINGGU_REAL_DATA_VALIDATION_PROCEDURE.md). GitHub 공개와 OpenCrab 업로드는 동일 BLOCK 기준·동일 수동 승인 게이트. scan은 read-only이며 raw 경로/내용/secret을 출력하지 않습니다(file_id·reason_code·count만).
 
 ## Publish your own pack / 내 pack 공개 (요약)
 
-공개 전 [Public Release Checklist](OPENBINGGU_PUBLIC_RELEASE_CHECKLIST.md)를 전수 통과해야 합니다. 핵심:
+공개 전 [Public Release Checklist](docs/OPENBINGGU_PUBLIC_RELEASE_CHECKLIST.md)를 전수 통과해야 합니다. 핵심:
 
 1. 작성자 실데이터(그래프/DB/리뷰/캡처/evidence 원문) 미포함.
 2. `.env`/token/key/credential 0, secret/PII scan PASS(검출 시 존재·길이만 보고, raw 미출력).
 3. **source pointer가 dirty/unknown이면 공개 BLOCK**(비공개 절대경로·사내 URL·localhost·내부 IP 등).
 4. 공개 직전 **owner 1회 수동 승인** 후에만 push.
 
-> 자동 sanitizer/치환으로 통과시키지 않습니다(정책: 차단만 유지 — [SANITIZER_POLICY_BLOCK_ONLY](OPENBINGGU_SANITIZER_POLICY_BLOCK_ONLY.md)).
+> 자동 sanitizer/치환으로 통과시키지 않습니다(정책: 차단만 유지 — [SANITIZER_POLICY_BLOCK_ONLY](docs/OPENBINGGU_SANITIZER_POLICY_BLOCK_ONLY.md)).
 
 ## Do NOT / 금지·주의사항
 
@@ -217,4 +220,4 @@ This project is licensed under the **MIT License** — see the [LICENSE](LICENSE
 
 - 개인용(트랙1): 로컬 사용 + 공개 준비(RC) — fail-closed dry-run 완료.
 - 팀 유료(트랙2): DEFER. 불특정 다수 marketplace: BLOCK.
-- 실제 GitHub: **Public 공개(최신 `v0.3.0-rc1`, prerelease).**
+- 실제 GitHub: **Public 공개(최신 `v0.4.0-rc1`, prerelease).**
