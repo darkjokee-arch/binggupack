@@ -26,6 +26,12 @@ python scripts/openbinggu_phase2_staging_reread_e2e.py           # 10/10 PASS GA
 ```
 > 위 selftest는 **temp OPENBINGGU_HOME** 기준입니다(실제 사용자 홈에 write 0). 실제 저장 기능은 **write 기본 OFF**·명시 opt-in·CLI 전용이며, MCP write 도구는 노출되지 않습니다. candidate-only(`promotion_allowed=0`), confirmed/promote/OpenCrab/Neo4j는 HOLD.
 
+## Manual capture selftest (v0.3.0-rc1 후보, read-only)
+```bash
+python scripts/openbinggu_phase6_manual_capture_selftest.py   # 10/10 PASS GATE=GO 기대
+```
+> **synthetic / temp / read-only** 기준. 사용자가 명시 지정한 경로만 capture(allowlist only, denylist 우선), raw 저장 0·source pointer 공개 미포함. **write opt-in 없으면 staging write 0**, **hook/daemon은 NOT_STARTED**(설치/실행 0). reviewer/confirmed preview selftest(Phase 4)는 의존성 검토 중으로 이번 RC에 미포함.
+
 ## MCP (선택)
 `mcp.example.json` 참고. read/dry-run 도구만 노출됩니다(write/apply/push 미노출).
 

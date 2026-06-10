@@ -36,6 +36,7 @@ OpenBinggu(개인용 트랙)는 개인이 자기 로컬에서 작업 맥락을 *
 - **MCP 기본판**: read/dry-run **5도구**(pack_build·pack_validate·consumer_smoke·publish_guard_dryrun·selftest) 노출, `inputSchema`·`tools/call content` MCP 표준 준수, write/upload/apply/push/confirmed 도구 **미노출**
 - doctor **11/11** selftest, 공개 후보 트리 secret/PII scan(`--tree`)
 - **(v0.2.0-rc1) local persistence**: 자기 로컬(`OPENBINGGU_HOME`)에 candidate graph 저장. **write 기본 OFF**·명시 opt-in 시에만·**CLI 전용(MCP write 도구 미노출)**·candidate-only(`promotion_allowed=0`). backup/rollback·C-2 1클릭·duplicate/freshness 검사·multi-user 격리. selftest 11/11 + read-only 재독 E2E 10/10.
+- **(v0.3.0-rc1 후보) manual one-shot capture (read-only)**: 사용자가 명시 지정한 경로만 capture(allowlist only·denylist 우선·fail-closed). raw 저장 0·source pointer 공개 미포함·rate limit·kill switch. **write opt-in 없으면 staging write 0**, **hook/daemon NOT_STARTED**(설치/실행 0). selftest 10/10. (reviewer/confirmed preview selftest는 의존성 검토 중·이번 RC 미포함.)
 
 **이 RC가 아직 제공하지 않는 것 (다음 단계)**:
 - **multi-agent handoff** 사용자 가이드·prompt template
