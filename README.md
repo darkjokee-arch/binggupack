@@ -5,6 +5,8 @@
 
 > **Evidence-backed context packs for multi-agent AI workflows.**
 > 여러 AI가 같은 작업 맥락을 이어받을 수 있게, 근거(evidence)가 붙은 context pack을 만들고 검증하는 도구입니다.
+> **BingguPack is a public tool that each user can clone and run locally with their own data.**
+> 각 사용자가 GitHub에서 받아 **자기 로컬 데이터**로 pack을 검증·저장·preview하는 공개형 개인용 도구입니다 (특정인 전용 아님).
 > Track1 public RC · internal codename: OpenBinggu
 > 버전: **v0.1.0-rc1** = read/dry-run + pack validation + MCP 5도구 → **v0.2.0-rc1** = +**local persistence**(candidate-only, opt-in, write 기본 OFF) → **v0.3.0-rc1** = +**manual one-shot capture**(read-only) → **v0.3.1-rc1** = +**batch pack staging loader** → **v0.4.0-rc1**(최신) = +**promotion preview**(read-only).
 > 🚀 처음이라면: [10분 튜토리얼](docs/BINGGUPACK_TUTORIAL.md)
@@ -28,6 +30,8 @@ BingguPack(개인용 트랙)은 개인이 자기 로컬에서 작업 맥락을 *
 
 > 자동으로 운영 그래프/DB에 쓰거나, 외부로 실 데이터를 보내지 않습니다(HOLD).
 
+**OpenCrab과의 역할 분리**: pack **생성**은 OpenCrab 도구 흐름(`opencrab.sh`)에서 수행합니다. BingguPack은 그렇게 만들어진 pack을 **검증(validate) → local staging 적재 → promotion preview**하는 공개 도구입니다. apply/finalize/upload는 별도 승인 단계이며 이 도구에 포함되지 않습니다.
+
 ---
 
 ## 이 공개본(RC)의 범위 / Scope of this public RC
@@ -49,9 +53,9 @@ BingguPack(개인용 트랙)은 개인이 자기 로컬에서 작업 맥락을 *
 
 > write·upload·apply·confirmed·push는 이 RC에 노출되지 않으며, 각각 별도 승인·구현이 필요합니다.
 
-## BingguPack 100% 전체 로드맵 / Full roadmap
+## BingguPack full roadmap / 전체 로드맵
 
-목표로 하는 "100% BingguPack"은 아래 전체 흐름입니다. 이 공개 RC는 그 중 **입력 ~ pack 검증 ~ MCP 기본**까지를 read/dry-run으로 닫은 1차판입니다.
+목표 로드맵은 아래 전체 흐름입니다. 이 공개 RC는 그 중 **입력 ~ pack 검증 ~ MCP 기본**까지를 read/dry-run으로 닫은 1차판입니다.
 
 ```
 입력 → 핵심문장 노드 → 동사형 edge + evidence_refs → pack 생성/검증
@@ -67,7 +71,7 @@ BingguPack(개인용 트랙)은 개인이 자기 로컬에서 작업 맥락을 *
 | manual one-shot capture(read-only) | ✅ **v0.3.0-rc1** — allowlist·denylist·rate limit·kill switch·fail-closed(selftest 10/10) |
 | batch pack staging loader | ✅ **v0.3.1-rc1** — pack 디렉터리→staging apply→read-back→rollback(selftest 10/10) |
 | promotion preview(read-only) | ✅ **v0.4.0-rc1** — D1~D4 변환·충돌·FTS/backup/rollback plan만, write 0(selftest 12/12) |
-| multi-agent handoff | ⏳ 가이드 예정 |
+| multi-agent handoff | ✅ Phase 3 guide provided — [가이드](docs/OPENBINGGU_PHASE3_MULTI_AGENT_HANDOFF_GUIDE.md) |
 | review / confirmed | ⏳ preview까지(confirmed는 사람 승인 기반) |
 | OpenCrab Pack v1 finalize | ⏳ Neo4j 이벤트 플로우 미완 |
 
