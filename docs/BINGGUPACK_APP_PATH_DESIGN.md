@@ -80,6 +80,32 @@
 | P5 | tool 응답 크기 상한(handoff_context Markdown이 잘리는 한계) | 전 플랫폼 |
 | P6 | 무료 hosted 런타임 후보(서버리스 cold start가 MCP 세션과 호환되는지) | 인프라 |
 
-## 8. 다음 단계 (전부 별도 GO)
+## 8. 역방향 round-trip roadmap — 대화 → candidate capture (planned, v1 범위 밖)
 
-① §7 P1~P6 실측 ② hosted 런타임 선택 ③ upload 게이트(publish guard) 연동 설계 ④ 코드 구현(이 문서 범위 밖).
+현재 설계(§1~§6)는 **BingguPack → chat app** 방향의 read-only context 제공이다.
+역방향 — **chat app 대화 → 사용자 승인 기반 BingguPack candidate capture** — 를 roadmap으로 명시한다.
+예: 사용자가 대화 중 `@BingguPack 이 대화를 pack 후보로 저장해줘`.
+
+### tool 후보 2종 (단계 분리)
+
+| tool | 단계 | 동작 |
+|---|---|---|
+| `conversation_capture_preview` | **먼저** (v1.5 후보) | 대화에서 핵심 문장/판단 후보를 추출해 **미리보기만** 반환 — 저장 0. PII/secret scan 결과(kind만)와 candidate 목록 표시 |
+| `conversation_candidate_save` | **나중** (별도 GO) | 사용자가 preview를 보고 **명시 승인한 항목만** candidate로 저장. v1에서는 제외 가능(preview만 planned로 두는 옵션 유효) |
+
+### 안전 원칙 (불변)
+
+1. **자동 저장 금지** — 어떤 경우에도 대화가 사용자 명시 요청·승인 없이 저장되지 않는다 (preview→사용자 승인→save 2단, capture 도구의 manual one-shot 원칙과 동일).
+2. **raw 대화 전체 저장 금지** — 핵심 문장/evidence chunk만 candidate화 (M1 capture와 동일 추출 모델).
+3. secret/PII scan **필수** — 검출 시 해당 항목 저장 거부(kind만 표시).
+4. **candidate-only** — confirmed 아님, promotion_allowed=false. 승격/확정은 기존 로컬 review 경로.
+5. **source pointer 기록** — source app·conversation 식별자(원문 아님)를 evidence 출처로 보존.
+6. delete/export 권한(저장된 capture의 삭제·반출)은 **추후 별도 설계**.
+
+### fallback
+
+앱/플랫폼이 역방향 저장을 지원하지 않으면: 사용자가 모바일 대화를 **export/copy → BingguPack CLI capture**(manual one-shot, v0.3 경로)로 넣는 방식이 공식 fallback.
+
+## 9. 다음 단계 (전부 별도 GO)
+
+① §7 P1~P6 실측 ② hosted 런타임 선택 ③ upload 게이트(publish guard) 연동 설계 ④ §8 conversation_capture_preview 상세 설계 ⑤ 코드 구현(이 문서 범위 밖).

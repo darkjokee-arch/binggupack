@@ -74,6 +74,7 @@ BingguPack(개인용 트랙)은 개인이 자기 로컬에서 작업 맥락을 *
 | multi-agent handoff | ✅ Phase 3 guide provided — [가이드](docs/OPENBINGGU_PHASE3_MULTI_AGENT_HANDOFF_GUIDE.md) |
 | review / confirmed | 🔜 **v0.5.0-rc1 예정** — reviewer/confirmed **preview**(dry-run·sandbox·synthetic) 9모듈, confirmed_created=0·applied=0·promoted=0·upload=0 불변을 doctor가 강제. confirmed 생성·적용은 계속 별도 단계 |
 | Hosted app / @BingguPack chat app | 📋 **planned** — 채팅 앱에서 `@BingguPack`처럼 pack context 호출. ChatGPT Apps/HTTPS MCP first, Claude/Gemini adapters later |
+| Conversation → candidate capture (round-trip) | 📋 **planned** — 대화에서 사용자 승인 기반 candidate capture(preview 먼저, 자동 저장 없음) — [App path 설계 §8](docs/BINGGUPACK_APP_PATH_DESIGN.md) |
 | OpenCrab Pack v1 finalize | ⏳ Neo4j 이벤트 플로우 미완 |
 
 > Neo4j는 위 표의 마지막 단계(finalize/upload)에서만 필요합니다. 평소 일상 작업에는 불필요합니다(아래 §Neo4j 참조).
