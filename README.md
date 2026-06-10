@@ -1,8 +1,10 @@
-marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dry-run)
+<!-- internal status tracker (운영 정책 상태 추적용, 사용자 안내 아님):
+     marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dry-run) -->
 
 # BingguPack
 
 > **Evidence-backed context packs for multi-agent AI workflows.**
+> 여러 AI가 같은 작업 맥락을 이어받을 수 있게, 근거(evidence)가 붙은 context pack을 만들고 검증하는 도구입니다.
 > Track1 public RC · internal codename: OpenBinggu
 > 버전: **v0.1.0-rc1** = read/dry-run + pack validation + MCP 5도구 → **v0.2.0-rc1** = +**local persistence**(candidate-only, opt-in, write 기본 OFF) → **v0.3.0-rc1** = +**manual one-shot capture**(read-only) → **v0.3.1-rc1** = +**batch pack staging loader** → **v0.4.0-rc1**(최신) = +**promotion preview**(read-only).
 > 🚀 처음이라면: [10분 튜토리얼](docs/BINGGUPACK_TUTORIAL.md)
@@ -88,11 +90,21 @@ BingguPack(개인용 트랙)은 개인이 자기 로컬에서 작업 맥락을 *
 
 ## Install / 설치
 
+macOS/Linux (bash):
 ```bash
 git clone https://github.com/darkjokee-arch/binggupack.git
 cd binggupack
-python -m venv .venv && . .venv/bin/activate   # 선택
+python -m venv .venv
+source .venv/bin/activate   # 선택
 # 표준 라이브러리 위주이므로 별도 의존성 최소
+```
+
+Windows (PowerShell):
+```powershell
+git clone https://github.com/darkjokee-arch/binggupack.git
+cd binggupack
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1   # 선택
 ```
 
 > ℹ️ 이 repo는 **Public**(최신 tag `v0.4.0-rc1`)이라 누구나 clone 할 수 있습니다.
@@ -149,8 +161,14 @@ batch pack 디렉터리(manifest.json + jsonl)를 local persistence staging에 *
 
 ```bash
 python scripts/openbinggu_batch_pack_loader.py --selftest          # synthetic/temp 전 과정 검증 (10/10 기대)
-# 자기 pack 적재(명시 opt-in 필수, 기본은 rollback 원복 / --keep 시 유지):
+# 자기 pack 적재(명시 opt-in 필수, 기본은 rollback 원복 / --keep 시 유지) — macOS/Linux:
 OPENBINGGU_HOME=<repo 밖 경로> python scripts/openbinggu_batch_pack_loader.py --pack-dir <pack 디렉터리> --enable-write
+```
+
+Windows (PowerShell)는 환경변수를 먼저 설정합니다:
+```powershell
+$env:OPENBINGGU_HOME = "<repo 밖 경로>"
+python scripts/openbinggu_batch_pack_loader.py --pack-dir <pack 디렉터리> --enable-write
 ```
 
 - write는 **기본 OFF**(`--enable-write` 없으면 거부), apply 직전 PII/secret 잔존 재스캔(kind만 출력) 후 검출 시 거부됩니다.

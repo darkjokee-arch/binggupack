@@ -48,10 +48,19 @@ python scripts/openbinggu_batch_pack_loader.py --selftest    # 10/10 기대
 
 ✅ 기대: synthetic pack으로 **apply → read-back → rollback(원복)** 전 과정이 temp에서 자동 검증됩니다. 내 데이터 0.
 
+> **내 pack은 어디서 오나?** pack 생성은 OpenCrab 도구 흐름(`opencrab.sh`)에서 수행하고, BingguPack은 그렇게 만들어진 pack을 **검증·적재·preview**하는 쪽을 담당합니다. 흐름 개요는 [USER_DRIVEN_OPENCRAB_UPLOAD_FLOW](OPENBINGGU_USER_DRIVEN_OPENCRAB_UPLOAD_FLOW.md) 참고. (여기서 OpenCrab apply/finalize/upload를 실행하라는 뜻이 아닙니다 — 그 단계들은 별도 승인 영역이며 이 튜토리얼 범위 밖입니다.)
+
 실제로 내 pack을 넣어보고 싶으면 (**명시 opt-in 필수**, 기본은 rollback 원복):
 
+macOS/Linux (bash):
 ```bash
 OPENBINGGU_HOME=<repo 밖 경로> python scripts/openbinggu_batch_pack_loader.py --pack-dir <pack 디렉터리> --enable-write
+```
+
+Windows (PowerShell):
+```powershell
+$env:OPENBINGGU_HOME = "<repo 밖 경로>"
+python scripts/openbinggu_batch_pack_loader.py --pack-dir <pack 디렉터리> --enable-write
 ```
 
 - write는 기본 OFF — `--enable-write` 없으면 거부됩니다.
@@ -70,8 +79,15 @@ python scripts/openbinggu_promotion_preview.py --pack-dir <pack 디렉터리> --
 
 자기 운영형 DB와 대조하고 싶으면 (read-only로만 엽니다):
 
+macOS/Linux (bash):
 ```bash
 OPENBINGGU_OPERATING_DB=<자기 DB 경로> python scripts/openbinggu_promotion_preview.py --pack-dir <dir> --domain D10
+```
+
+Windows (PowerShell):
+```powershell
+$env:OPENBINGGU_OPERATING_DB = "<자기 DB 경로>"
+python scripts/openbinggu_promotion_preview.py --pack-dir <dir> --domain D10
 ```
 
 ## 6. 다음 단계
