@@ -12,6 +12,7 @@
   --selftest    temp SQLite — 저장→resolve→기각 시나리오 구성 후 필터 전건 검증
   --real-smoke  real staging read-only 1회 (private 설정 모듈 환경 한정 — lazy import)
 """
+import hashlib
 import os
 import shutil
 import sys
@@ -28,6 +29,11 @@ from openbinggu_label_kind_map import classify_label_kind, KIND_KO  # noqa: E402
 
 STATUSES = ("all", "pending", "deprecated", "resolved")
 DISPLAY_CAP = 60
+
+
+def node_id8(node_id):
+    """변경 confirm 문구에 동반할 단축 식별자 — 4cli 결론 4(ACTION <n> <hash8>) 정본."""
+    return hashlib.sha256(node_id.encode("utf-8")).hexdigest()[:8]
 
 
 def list_candidates(db, status="all", kind=None):
@@ -54,21 +60,22 @@ def list_candidates(db, status="all", kind=None):
             continue
         if kind and kind_ko != kind:
             continue
-        rows.append({"node_id": nid, "kind": kind_ko, "state": state, "review": review,
-                     "sentence": (sent or "")[:DISPLAY_CAP], "evidence": ev,
+        rows.append({"node_id": nid, "id8": node_id8(nid), "kind": kind_ko, "state": state,
+                     "review": review, "sentence": (sent or "")[:DISPLAY_CAP], "evidence": ev,
                      "candidate_only": cand == 1 and promo == 0})
 
     lines = ["# candidate 목록 — %d건 (status=%s kind=%s · read-only · 실행 버튼 없음)"
              % (len(rows), status, kind or "전체"),
-             "", "| # | 도장 | state | review | 문장(발췌) | evidence | candidate |",
-             "|---|---|---|---|---|---|---|"]
+             "", "| # | id | 도장 | state | review | 문장(발췌) | evidence | candidate |",
+             "|---|---|---|---|---|---|---|---|"]
     for i, r in enumerate(rows, 1):
-        lines.append("| %d | %s | %s | %s | %s | %s | %s |" % (
-            i, r["kind"], r["state"], r["review"], r["sentence"],
+        lines.append("| %d | %s | %s | %s | %s | %s | %s | %s |" % (
+            i, r["id8"], r["kind"], r["state"], r["review"], r["sentence"],
             ",".join(e[:14] for e in r["evidence"]) or "-",
             "✓" if r["candidate_only"] else "⚠비후보"))
     lines.append("")
     lines.append("조회 전용입니다 — 아무것도 변경되지 않았습니다. 표시는 저장된 발췌(≤80자)의 60자 cap, 원문 전문은 저장되어 있지 않습니다.")
+    lines.append("변경 작업의 confirm 문구에는 # 와 id 를 함께 적습니다 (예: DEPRECATE 3 %s)." % (rows[2]["id8"] if len(rows) >= 3 else "a1b2c3d4"))
     return {"rows": rows, "markdown": "\n".join(lines), "non_candidate": non_candidate}
 
 
