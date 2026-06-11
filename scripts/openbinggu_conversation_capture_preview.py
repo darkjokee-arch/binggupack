@@ -26,6 +26,14 @@ EXCERPT = 80
 _SENT_SPLIT = re.compile(r"(?<=[.!?다음임함됨까요])\s+|\n+")
 _REDACT_RE = re.compile(r"\[REDACTED:\w+\]")
 
+# preview 전용 추가 PII (owner 6/11 결정 (a)): 사업자등록번호 형식/bare 10자리.
+# 공용 scan_residual_pii(batch_m1)는 "도메인 식별자 보존" 정책이라 무수정 — hosted 외부 표면인
+# preview 에서만 보수적으로 제외한다.
+_PREVIEW_PII_EXTRA = [
+    ("scan_bizno_fmt", re.compile(r"(?<!\d)\d{3}-\d{2}-\d{5}(?!\d)")),
+    ("scan_bizno_bare", re.compile(r"(?<!\d)\d{10}(?!\d)")),
+]
+
 
 def _meaningful(s):
     stripped = _REDACT_RE.sub("", s).strip()
@@ -64,7 +72,7 @@ def capture_preview(text, max_candidates=DEFAULT_MAX):
             excl("short_or_fragment")
             continue
         # PII/secret — redact 가 아니라 후보 제외 (owner 조건). 사유 kind 만 집계.
-        pii = scan_residual_pii(sent)
+        pii = scan_residual_pii(sent) + [k for k, rx in _PREVIEW_PII_EXTRA if rx.search(sent)]
         if pii:
             for k in pii:
                 excl("pii_" + k)
@@ -99,7 +107,8 @@ def capture_preview(text, max_candidates=DEFAULT_MAX):
         lines.append("")
         lines.append("(입력이 %d자 캡으로 절단됨)" % INPUT_CAP)
     lines.append("")
-    lines.append("입력은 모델이 전달한 대화 텍스트 기준입니다(원문 그대로 보장 없음). "
+    lines.append("입력은 모델이 전달한 대화 텍스트 기준입니다(원문 그대로 보장 없음 — "
+                 "모델 요약보다 원문 대화/로그를 넣을수록 도장 분류가 정확합니다). "
                  "미리보기일 뿐 아무것도 저장되지 않았습니다(nothing_saved=true). 등재는 로컬 승인 게이트에서만.")
 
     return {"candidates": candidates, "excluded_counts": excluded, "truncated": truncated,
@@ -156,6 +165,14 @@ def run_selftest():
     rec(3, "PII 문장 후보 제외(kind 카운트만)", len(r3["candidates"]) == 1
         and any(k.startswith("pii_") for k in r3["excluded_counts"])
         and "1234" not in r3["preview_markdown"])
+
+    # 3b. 사업자번호(형식/bare) — preview 전용 제외 (owner (a))
+    r3b = capture_preview("이 입찰은 보류한다. 협력사 사업자등록번호는 123-45-" + "67890 입니다. "
+                          "구계좌 사업자번호 12345" + "67890 등록 확인이 필요하다.")
+    rec(11, "bizno 형식/bare 후보 제외(카운트만)", len(r3b["candidates"]) == 1
+        and r3b["excluded_counts"].get("pii_scan_bizno_fmt", 0) >= 1
+        and r3b["excluded_counts"].get("pii_scan_bizno_bare", 0) >= 1
+        and "67890" not in r3b["preview_markdown"])
 
     # 4. 긴 대화 — 캡 절단 + max_candidates 상한
     long_text = "\n".join("케이스 %d 는 검토 후 보류한다." % i for i in range(2000))

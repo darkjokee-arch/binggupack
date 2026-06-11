@@ -56,6 +56,13 @@ const KW2 = ["service_?key", "api_?key", "sec" + "ret_?key", "client_?sec" + "re
   "access_?to" + "ken", "refresh_?to" + "ken", "pass" + "word", "passwd",
   "cookie", "authorization"].join("|");
 
+// preview 전용 추가 PII (owner 6/11 (a)): 사업자등록번호 — 공용 스캐너는 도메인 식별자 보존 정책이라
+// hosted 외부 표면인 preview 에서만 보수적으로 제외 (Python _PREVIEW_PII_EXTRA 1:1)
+const PREVIEW_PII_EXTRA: [string, RegExp][] = [
+  ["scan_bizno_fmt", /(?<!\d)\d{3}-\d{2}-\d{5}(?!\d)/],
+  ["scan_bizno_bare", /(?<!\d)\d{10}(?!\d)/],
+];
+
 const SCAN_SHAPES: [string, RegExp][] = [
   ["scan_rrn", /\d{6}[-\s.]\d{7}/],
   ["scan_rrn_nohp", /(?<![0-9])\d{13}(?![0-9])/],
@@ -81,6 +88,9 @@ const SECRET_RES: RegExp[] = [
 function scanPii(s: string): string[] {
   const found: string[] = [];
   for (const [kind, re] of SCAN_SHAPES) {
+    if (re.test(s)) found.push(kind);
+  }
+  for (const [kind, re] of PREVIEW_PII_EXTRA) {
     if (re.test(s)) found.push(kind);
   }
   return found;
@@ -151,7 +161,8 @@ export function capturePreview(text: string, maxCandidates?: number): Record<str
     lines.push("(입력이 " + INPUT_CAP + "자 캡으로 절단됨)");
   }
   lines.push("");
-  lines.push("입력은 모델이 전달한 대화 텍스트 기준입니다(원문 그대로 보장 없음). " +
+  lines.push("입력은 모델이 전달한 대화 텍스트 기준입니다(원문 그대로 보장 없음 — " +
+             "모델 요약보다 원문 대화/로그를 넣을수록 도장 분류가 정확합니다). " +
              "미리보기일 뿐 아무것도 저장되지 않았습니다(nothing_saved=true). 등재는 로컬 승인 게이트에서만.");
 
   return { candidates, excluded_counts: excluded, truncated,

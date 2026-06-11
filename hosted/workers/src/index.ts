@@ -442,7 +442,8 @@ const TOOLS: Record<string, ToolDef> = {
   },
   conversation_capture_preview: {
     description: "사용자가 전달한 대화 텍스트에서 핵심 문장 후보를 미리보기(5종 도장·헌법 판정). " +
-      "저장 0 — PII/secret 문장은 후보 제외(종류·개수만 표시). read-only.",
+      "저장 0 — PII/secret(사업자번호 포함) 문장은 후보 제외(종류·개수만 표시). " +
+      "모델 요약보다 원문 대화/로그 입력일수록 분류 정확. 화면 캡처/스크린샷 도구 아님. read-only.",
     inputSchema: { type: "object", properties: {
       text: { type: "string", description: "캡처 후보를 뽑을 대화 발췌 (사용자가 명시적으로 전달)" },
       max_candidates: { type: "integer", description: "기본 10, 최대 20" } },
