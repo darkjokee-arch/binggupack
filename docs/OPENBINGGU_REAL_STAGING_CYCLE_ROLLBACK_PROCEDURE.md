@@ -1,4 +1,7 @@
-# Real staging 1사이클 실연 — rollback 복구 절차 (실행 전 문서화, 2026-06-11)
+# Real staging 실연 — rollback 복구 절차 (실행 전 문서화, 2026-06-11)
+
+> **v0.8 쓰기 루프 1사이클(conv_save)에도 동일 적용** — 사이클 러너가 실행 직전 `snap_v08_before_<checksum>.sqlite`를 자동 확보. 복구 = 아래 §복구 절차에서 스냅샷 파일명만 교체. checksum 원복 검증 절차 동일(6/11 apply_once에서 기실증). v0.8 추가 변경 표면: nodes·edges·evidence·applied_registry·audit_log + **judgment_reviews**(판단 due) — 전부 단일 DB 파일이므로 스냅샷 복원으로 일괄 원복.
+> 스냅샷 평문 잔존 정책: 실연 검증 완료 후 owner 보고 시점에 보존/파기 결정(민감 노드 tombstone 시 이전 스냅샷 동반 파기).
 
 > owner 조건 8 "rollback 복구 절차는 실행 전 문서화" 이행 문서. 사이클 실행 **전에** 작성됨.
 
