@@ -1,0 +1,22 @@
+{
+ "case_id": "N-G2b",
+ "gate": "G2",
+ "expected_reason_code": "G2_SRCPTR_UNKNOWN",
+ "ops": [
+  {
+   "op": "set",
+   "file": "evidence_chunk.jsonl",
+   "path": "0:evidence_meta.raw_pointer",
+   "value": {
+    "join": [
+     "MASK_",
+     "UNDECIDED_",
+     "TOKEN"
+    ]
+   }
+  }
+ ],
+ "approval_input": null,
+ "db_setup": null,
+ "regression_state": null
+}

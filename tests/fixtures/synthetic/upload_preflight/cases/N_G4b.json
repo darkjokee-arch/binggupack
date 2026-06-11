@@ -1,0 +1,15 @@
+{
+ "case_id": "N-G4b",
+ "gate": "G4",
+ "expected_reason_code": "G4_EXCLUDE_FLAG_MISSING",
+ "ops": [
+  {
+   "op": "del",
+   "file": "evidence_chunk.jsonl",
+   "path": "0:evidence_meta.source_kind"
+  }
+ ],
+ "approval_input": null,
+ "db_setup": null,
+ "regression_state": null
+}

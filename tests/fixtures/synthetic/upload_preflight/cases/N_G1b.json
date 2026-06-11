@@ -1,0 +1,16 @@
+{
+ "case_id": "N-G1b",
+ "gate": "G1",
+ "expected_reason_code": "G1_SCHEMA_STOP",
+ "ops": [
+  {
+   "op": "set",
+   "file": "manifest.json",
+   "path": "promotion_allowed_default",
+   "value": true
+  }
+ ],
+ "approval_input": null,
+ "db_setup": null,
+ "regression_state": null
+}

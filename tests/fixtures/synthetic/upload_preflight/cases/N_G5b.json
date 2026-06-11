@@ -1,0 +1,16 @@
+{
+ "case_id": "N-G5b",
+ "gate": "G5",
+ "expected_reason_code": "G5_EMPTY_PACK",
+ "ops": [],
+ "approval_input": null,
+ "db_setup": {
+  "rows": [
+   {
+    "pack": "other",
+    "status": "candidate"
+   }
+  ]
+ },
+ "regression_state": null
+}

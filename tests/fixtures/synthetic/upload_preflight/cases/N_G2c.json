@@ -1,0 +1,20 @@
+{
+ "case_id": "N-G2c",
+ "gate": "G2",
+ "expected_reason_code": "G2_SRCPTR_EMPTY_SET",
+ "ops": [
+  {
+   "op": "del_key_all",
+   "file": "evidence_index.jsonl",
+   "path": "source_path"
+  },
+  {
+   "op": "del_key_all",
+   "file": "evidence_chunk.jsonl",
+   "path": "evidence_meta.raw_pointer"
+  }
+ ],
+ "approval_input": null,
+ "db_setup": null,
+ "regression_state": null
+}

@@ -8,7 +8,7 @@
 > **BingguPack is a public tool that each user can clone and run locally with their own data.**
 > 각 사용자가 GitHub에서 받아 **자기 로컬 데이터**로 pack을 검증·저장·preview하는 공개형 개인용 도구입니다 (특정인 전용 아님).
 > Track1 public RC · internal codename: OpenBinggu
-> 버전: **v0.1.0-rc1** = read/dry-run + pack validation + MCP 5도구 → **v0.2.0-rc1** = +**local persistence**(candidate-only, opt-in, write 기본 OFF) → **v0.3.0-rc1** = +**manual one-shot capture**(read-only) → **v0.3.1-rc1** = +**batch pack staging loader** → **v0.4.0-rc1** = +**promotion preview**(read-only) → **v0.5.0-rc1** = +**reviewer/confirmed preview** → **v0.6.0-rc1** = +**finalize dry-run generator** → **v0.6.1-rc1** = 문서/온보딩 fix + hosted MCP skeleton 로컬 PoC → **v0.7.0-rc1** = hosted connector 실구현(Claude custom connector 실동작 검증 — `docs/BINGGUPACK_HOSTED_CONNECTOR_PHASE1_RESULT.md`) → **v0.7.1-rc1**(최신 태그) = 실 pack(마스킹) hosted 탑재 + rollback 실증 + Claude·ChatGPT 양사 커넥터 검증 → main = +**conversation_capture_preview**(6번째 read-only 도구, 저장 0).
+> 버전: **v0.1.0-rc1** = read/dry-run + pack validation + MCP 5도구 → **v0.2.0-rc1** = +**local persistence**(candidate-only, opt-in, write 기본 OFF) → **v0.3.0-rc1** = +**manual one-shot capture**(read-only) → **v0.3.1-rc1** = +**batch pack staging loader** → **v0.4.0-rc1** = +**promotion preview**(read-only) → **v0.5.0-rc1** = +**reviewer/confirmed preview** → **v0.6.0-rc1** = +**finalize dry-run generator** → **v0.6.1-rc1** = 문서/온보딩 fix + hosted MCP skeleton 로컬 PoC → **v0.7.0-rc1** = hosted connector 실구현(Claude custom connector 실동작 검증 — `docs/BINGGUPACK_HOSTED_CONNECTOR_PHASE1_RESULT.md`) → **v0.7.1-rc1** = 실 pack(마스킹) hosted 탑재 + rollback 실증 + Claude·ChatGPT 양사 커넥터 검증 → **v0.7.2-rc1** = +**conversation_capture_preview**(hosted 6번째 read-only 도구, 저장 0) → **v0.8.0-rc1 / v0.8.1-rc1** = +**개인용 쓰기 루프(로컬 CLI, 저장)**: preview→명시 선택 저장(candidate-only)→4값 resolve 피드백, `--dry-run-temp` 공개 재현 → **v0.9.0-rc1**(최신 태그 = 현재 main) = +**후보 관리 UX 완성**: candidate_list 보기 · DEPRECATE(기각) · REPLACE(수정) · ACCEPT/UNACCEPT(수용·철회) · 4값 resolve.
 > 🚀 처음이라면: [10분 튜토리얼](docs/BINGGUPACK_TUTORIAL.md)
 > "100% 완성판" 아님(아래 §범위). 코드 라이선스 = **MIT**. enum(release_mode/entitlement) HOLD · production write 0.
 
@@ -45,13 +45,14 @@ BingguPack(개인용 트랙)은 개인이 자기 로컬에서 작업 맥락을 *
 - **(v0.2.0-rc1) local persistence**: 자기 로컬(`OPENBINGGU_HOME`)에 candidate graph 저장. **write 기본 OFF**·명시 opt-in 시에만·**CLI 전용(MCP write 도구 미노출)**·candidate-only(`promotion_allowed=0`). backup/rollback·C-2 1클릭·duplicate/freshness 검사·multi-user 격리. selftest 11/11 + read-only 재독 E2E 10/10.
 - **(v0.3.0-rc1) manual one-shot capture (read-only)**: 사용자가 명시 지정한 경로만 capture(allowlist only·denylist 우선·fail-closed). raw 저장 0·source pointer 공개 미포함·rate limit·kill switch. **write opt-in 없으면 staging write 0**, **hook/daemon NOT_STARTED**(설치/실행 0). selftest 10/10. (reviewer/confirmed preview는 v0.3.0 당시 미포함 — **v0.5.0-rc1에서 preview로 추가됨**, 아래 로드맵 표 참조.)
 
-**이 RC가 아직 제공하지 않는 것 (다음 단계)**:
-- **multi-agent handoff** 사용자 가이드·prompt template
+**이 RC가 아직 제공하지 않는 것 (planned — 구현된 것 아님)**:
+- **hosted write(save-intent)** — **planned (design complete, separate GO)**: 채팅(hosted)에서의 저장 버튼은 설계만 완료된 상태이며 live에 노출되지 않습니다(hosted는 read-only 6도구만). 저장은 현재 **로컬 CLI 쓰기 루프(v0.8)** 로만 동작합니다.
+- **OpenCrab upload** — **planned (design complete, separate GO)**: private upload preflight fixture 스펙까지 설계 완료(`docs/BINGGUPACK_OPENCRAB_UPLOAD_PREFLIGHT_FIXTURE_SPEC.md`), 실제 업로드는 미구현·미노출.
 - 실 **reviewer 인증·confirmed apply**(현재 preview까지, `confirmed_created=0`)
-- **OpenCrab Pack v1 finalize**(Neo4j import/check/export 이벤트 플로우)
+- **OpenCrab Pack v1 finalize** 실행(현재 dry-run generator까지 — Neo4j import/check/export 이벤트 플로우 미실행)
 - **자동수집** daemon/hook
 
-> write·upload·apply·confirmed·push는 이 RC에 노출되지 않으며, 각각 별도 승인·구현이 필요합니다.
+> upload·apply·confirmed·push·hosted write는 이 RC에 노출되지 않으며, 각각 별도 승인·구현이 필요합니다. 로컬 candidate 저장(쓰기 루프 v0.8)은 제공되지만 **opt-in·candidate-only·promotion_allowed=0** 입니다.
 
 ## BingguPack full roadmap / 전체 로드맵
 
@@ -75,8 +76,18 @@ BingguPack(개인용 트랙)은 개인이 자기 로컬에서 작업 맥락을 *
 | review / confirmed | ✅ **v0.5.0-rc1** — reviewer/confirmed **preview**(dry-run·sandbox·synthetic) 9모듈, confirmed_created=0·applied=0·promoted=0·upload=0 불변을 doctor가 강제. confirmed 생성·적용은 계속 별도 단계 |
 | OpenCrab Pack v1 finalize dry-run | ✅ **v0.6.0-rc1** — local generator(레이아웃 11종 로컬 조립), **Neo4j run 0 · upload/apply 0**. 실제 finalize/upload는 계속 HOLD |
 | Hosted app / @BingguPack chat app | ✅ **Claude + ChatGPT 양사 동작 확인(개인용)** — Cloudflare Workers 실배포 + **read-only 6 tool** (pack 조회 5종 + `conversation_capture_preview`) custom connector 실동작 검증(no-auth+비공개 토큰 경로). 실 pack은 **마스킹+게이트(G1~G6) 통과본만**, 데이터는 private 빌드(`hosted/workers/data/` gitignore — clean clone에서 real 빌드 실패가 정상/fail-closed). **connector 정본 = `hosted/workers/`(이 repo 동봉)** / Python skeleton = PoC archive(frozen). Gemini 등록·OAuth는 planned/HOLD |
-| Conversation → candidate capture (round-trip) | 🟡 **preview 단계 제공** — `conversation_capture_preview`(hosted 6번째 도구): 사용자가 전달한 대화 텍스트에서 핵심 문장 후보 미리보기(5종 분류·PII/secret 제외·**저장 0**). candidate **save**(저장)는 계속 planned — 자동 저장 없음 원칙 유지 |
-| OpenCrab Pack v1 finalize | ⏳ Neo4j 이벤트 플로우 미완 |
+| Conversation → candidate capture preview | ✅ **v0.7.2-rc1** — `conversation_capture_preview`(hosted 6번째 read-only 도구): 대화 텍스트에서 핵심 문장 후보 미리보기(5종 분류·PII/secret 제외·**저장 0**) |
+| 개인용 쓰기 루프(로컬 CLI 저장) | ✅ **v0.8.0/v0.8.1-rc1** — preview→**명시 선택**(`SAVE 3,5,7` confirm)→candidate 저장(원문 미저장·발췌만)→4값 resolve(`성공/실패/불확실/판정불가`, 기록만·자동 강등 0) 피드백. `--dry-run-temp` 14/14·resolve selftest 16/16. write는 opt-in·candidate-only |
+| 후보 관리 UX(보기·기각·수정·수용·철회) | ✅ **v0.9.0-rc1** — candidate_list(read-only 13/13)·`DEPRECATE <n> <id8>`(15/15)·`REPLACE <n> <id8> WITH <문장>`(16/16)·`ACCEPT/UNACCEPT <n> <id8>`(16/16)·통합 사이클 `--dry-run-temp` 17/17. 전부 human confirm 문구 정확 일치 의무·append-only 보존형 |
+| OpenCrab Pack v1 finalize 실행 | ⏳ Neo4j 이벤트 플로우 미완(dry-run generator까지) |
+
+**다음 단계 (planned — 전부 별도 GO, 미구현)**:
+
+| 항목 | 상태 |
+|---|---|
+| hosted write(save-intent) — 채팅에서 후보 저장 | 🟡 **planned (design complete, separate GO)** — 인증 상향·원격 staging 전송 경로·audit·rollback 선행 조건(E 체크리스트 4) 미해결, live 노출 0 |
+| OpenCrab private upload preflight | 🟡 **planned (design complete, separate GO)** — fixture 스펙 [`docs/BINGGUPACK_OPENCRAB_UPLOAD_PREFLIGHT_FIXTURE_SPEC.md`](docs/BINGGUPACK_OPENCRAB_UPLOAD_PREFLIGHT_FIXTURE_SPEC.md), 실제 업로드 0 |
+| v1.0 마감 | 🟡 planned — 후보 관리 파트는 완료 선언(2026-06-11), 잔여 라인 정리 후 태깅 |
 
 > Neo4j는 위 표의 마지막 단계(finalize/upload)에서만 필요합니다. 평소 일상 작업에는 불필요합니다(아래 §Neo4j 참조).
 > Internal module structure may change between RC releases. / 내부 모듈 구조는 RC 릴리스 사이에 변경될 수 있습니다.
@@ -120,7 +131,7 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1   # 선택
 ```
 
-> ℹ️ 이 repo는 **Public**(최신 tag `v0.6.1-rc1`)이라 누구나 clone 할 수 있습니다.
+> ℹ️ 이 repo는 **Public**(최신 tag `v0.9.0-rc1`)이라 누구나 clone 할 수 있습니다.
 
 ## Run selftest / 자체 검증 실행
 
@@ -148,6 +159,18 @@ python scripts/openbinggu_pack_validate.py --selftest
 python scripts/openbinggu_pack_consumer_smoke.py --selftest
 python scripts/openbinggu_path_safety_gate.py --selftest
 python scripts/openbinggu_mcp_path_gate_adapter.py --selftest
+```
+
+쓰기 루프(v0.8)·후보 관리 UX(v0.9.0-rc1)도 clean clone에서 temp-only로 재현 가능합니다:
+
+```bash
+python scripts/openbinggu_candidate_list_view.py --selftest            # 13/13 기대
+python scripts/openbinggu_candidate_deprecate_ux.py --selftest         # 15/15 기대
+python scripts/openbinggu_candidate_replace_ux.py --selftest           # 16/16 기대
+python scripts/openbinggu_owner_accept_ux.py --selftest                # 16/16 기대
+python scripts/openbinggu_v08_review_resolve_4values.py --selftest     # 16/16 기대
+python scripts/openbinggu_v08_real_cycle_once.py --dry-run-temp        # 14/14 기대 (쓰기 루프 통합, temp만)
+python scripts/openbinggu_v1_candidate_cycle_real_once.py --dry-run-temp  # 17/17 기대 (후보 관리 통합 사이클, temp만)
 ```
 
 각 명령은 마지막에 `GATE: GO` 를 출력하고 종료코드 `0` 이면 통과입니다. 하나라도 `GATE: GO` 가 아니거나 종료코드가 0이 아니면 사용을 중단하고 이슈를 확인하세요.
@@ -252,4 +275,4 @@ This project is licensed under the **MIT License** — see the [LICENSE](LICENSE
 
 - 개인용(트랙1): 로컬 사용 + 공개 준비(RC) — fail-closed dry-run 완료.
 - 팀 유료(트랙2): DEFER. 불특정 다수 marketplace: BLOCK.
-- 실제 GitHub: **Public 공개(최신 `v0.6.1-rc1`, prerelease).**
+- 실제 GitHub: **Public 공개(최신 `v0.9.0-rc1`, prerelease).**

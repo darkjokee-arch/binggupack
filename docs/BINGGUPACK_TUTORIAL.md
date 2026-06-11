@@ -1,8 +1,8 @@
-# BingguPack 10분 튜토리얼 — clone부터 promotion preview까지
+# BingguPack 10분 튜토리얼 — clone부터 후보 관리(candidate UX)까지
 
 > 이 문서는 BingguPack을 처음 받은 사용자가 **데이터 없이도** 전체 흐름을 따라해 보는 가이드입니다.
 > 모든 단계는 로컬 synthetic/temp 데이터만 사용하며, 운영 저장소를 변경하지 않습니다.
-> 이 튜토리얼은 **CLI/local 흐름** 기준입니다 — 채팅 앱에서 `@BingguPack`처럼 호출하는 앱/모바일 경로는 roadmap 단계(planned)입니다.
+> 이 튜토리얼은 **CLI/local 흐름** 기준입니다 — 채팅 앱 경로(hosted custom connector)는 **read-only 6도구**가 Claude·ChatGPT에서 동작 확인되었습니다(배포 방법: `../hosted/workers/README.md`). 채팅에서의 **저장(save-intent)은 planned**(design complete, separate GO)이며 아직 없습니다.
 
 ## 0. 준비물
 
@@ -91,7 +91,32 @@ $env:OPENBINGGU_OPERATING_DB = "<자기 DB 경로>"
 python scripts/openbinggu_promotion_preview.py --pack-dir <dir> --domain D10
 ```
 
-## 6. 다음 단계
+## 6. 후보 관리 UX 따라하기 (v0.9.0-rc1, temp-only)
+
+저장된 후보(candidate)를 **보기 → 기각 → 수정 → 수용 → 철회 → 피드백 resolve**로 관리하는 전체 사이클을 temp DB에서 안전하게 체험할 수 있습니다(내 데이터 0, 실행 후 원복):
+
+```bash
+python scripts/openbinggu_v1_candidate_cycle_real_once.py --dry-run-temp   # 17/17 기대
+```
+
+✅ 기대: `RESULT: 17/17 PASS` + `GATE: GO` + 종료코드 `0`.
+
+각 단계의 **confirm 문구 형식** (행 번호 `<n>` + id 칼럼의 `<id8>` 함께 — 인덱스 단독 금지):
+
+| 작업 | confirm 문구 예시 | 효과 |
+|---|---|---|
+| 목록 보기 | (read-only — confirm 불필요) | 행 번호·id8·상태·kind 표시, DB 무변 |
+| 기각 | `DEPRECATE 3 a1b2c3d4` | 보존형 제외(삭제 아님) — active 뷰에서만 빠짐 |
+| 수정 | `REPLACE 2 a1b2c3d4 WITH 수정된 문장` | 전임자 deprecate(+back-link) 후 신규 candidate로 저장 게이트 전부 재통과 (in-place 수정 없음) |
+| 수용 | `ACCEPT 5 a1b2c3d4` | append-only 수용 event (후보 row는 byte-identical) |
+| 철회 | `UNACCEPT 5 a1b2c3d4` | 보존형 철회 event (삭제 0) |
+| 피드백 | resolve 4값: `성공/실패/불확실/판정불가` + 사유 | 기록만 — `실패`여도 자동 강등 0 |
+
+- confirm 문구가 정확히 일치하지 않으면 BLOCK, `actor=auto`도 전부 BLOCK(사람 발화만).
+- 모듈별 selftest 기대값: 목록 13/13 · 기각 15/15 · 수정 16/16 · 수용 16/16 · resolve 16/16 (명령은 `../INSTALL.md` 참조).
+- 쓰기 루프(preview→선택 저장→피드백) 통합은 `python scripts/openbinggu_v08_real_cycle_once.py --dry-run-temp` (14/14 기대).
+
+## 7. 다음 단계
 
 - **여러 AI에 pack 넘기기**: [Multi-agent handoff guide](OPENBINGGU_PHASE3_MULTI_AGENT_HANDOFF_GUIDE.md)
 - **내 pack을 공개하기 전**: README의 "Validate your real data" 절차 필수 — `doctor --tree <공개 후보 트리>`가 CLEAN이어야 하고, 검출 1건이라도 있으면 공개가 차단(BLOCK)됩니다.

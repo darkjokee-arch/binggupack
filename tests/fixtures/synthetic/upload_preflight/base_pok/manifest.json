@@ -1,0 +1,18 @@
+{
+  "format_version": "opencrab-pack-v1",
+  "pack_id": "upload_preflight_pok_v1",
+  "pack_type": "candidate",
+  "status": "validated",
+  "visibility": "private",
+  "scope": "domain:bid",
+  "promotion_allowed_default": false,
+  "depends_on": [],
+  "cross_pack_tags": [],
+  "merge_policy": {"mode": "review", "target": "staging", "cross_pack": "isolated"},
+  "evidence_policy": {"min_evidence": 1, "source": "synthetic_fixture"},
+  "risk_level": "low",
+  "created_from": "upload_preflight_fixture_spec",
+  "blocked_by_v09": true,
+  "counts": {"nodes": 3, "edges": 2, "evidence": 3},
+  "files": ["manifest.json", "nodes.jsonl", "edges.jsonl", "evidence_index.jsonl", "evidence_chunk.jsonl"]
+}

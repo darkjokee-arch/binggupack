@@ -1,0 +1,9 @@
+{
+ "case_id": "N-G7c",
+ "gate": "G7",
+ "expected_reason_code": "G7_CONFIRM_MISMATCH",
+ "ops": [],
+ "approval_input": "UPLOAD other_synth_pack {hash8} IRREVERSIBLE",
+ "db_setup": null,
+ "regression_state": null
+}

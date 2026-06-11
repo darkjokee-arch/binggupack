@@ -1,0 +1,9 @@
+{
+ "case_id": "N-G7b",
+ "gate": "G7",
+ "expected_reason_code": "NOT_APPROVED",
+ "ops": [],
+ "approval_input": null,
+ "db_setup": null,
+ "regression_state": null
+}

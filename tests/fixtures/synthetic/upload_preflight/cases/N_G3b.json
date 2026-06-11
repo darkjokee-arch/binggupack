@@ -1,0 +1,23 @@
+{
+ "case_id": "N-G3b",
+ "gate": "G3",
+ "expected_reason_code": "G3_PII_HIT",
+ "ops": [
+  {
+   "op": "set",
+   "file": "evidence_chunk.jsonl",
+   "path": "0:text",
+   "value": {
+    "join": [
+     "담당자 메일 ",
+     "synth@",
+     "example.com",
+     " 로 회신함(합성)."
+    ]
+   }
+  }
+ ],
+ "approval_input": null,
+ "db_setup": null,
+ "regression_state": null
+}

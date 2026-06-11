@@ -1,0 +1,3 @@
+{"evidence_id": "EVU-1", "kind": "file_pointer", "source_path": "seed/upload_preflight_glossary.md", "domain": "SEED_BID", "promotion_allowed": false, "note": "synthetic pointer (합성)"}
+{"evidence_id": "EVU-2", "kind": "file_pointer", "source_path": "seed/upload_preflight_rules.md", "domain": "SEED_BID", "promotion_allowed": false, "note": "synthetic pointer (합성)"}
+{"evidence_id": "EVU-3", "kind": "file_pointer", "source_path": "seed/upload_preflight_notice.md", "domain": "SEED_BID", "promotion_allowed": false, "note": "synthetic pointer (합성)"}

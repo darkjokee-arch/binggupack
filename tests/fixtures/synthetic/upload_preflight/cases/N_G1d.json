@@ -1,0 +1,25 @@
+{
+ "case_id": "N-G1d",
+ "gate": "G1",
+ "expected_reason_code": "G1_REVIEW_ONLY",
+ "ops": [
+  {
+   "op": "set",
+   "file": "manifest.json",
+   "path": "cross_pack_tags",
+   "value": [
+    "synth_bid",
+    "synth_contract"
+   ]
+  },
+  {
+   "op": "set",
+   "file": "manifest.json",
+   "path": "merge_policy.cross_pack",
+   "value": "fuzzy"
+  }
+ ],
+ "approval_input": null,
+ "db_setup": null,
+ "regression_state": null
+}

@@ -1,0 +1,23 @@
+{
+ "case_id": "N-G6a",
+ "gate": "G6",
+ "expected_reason_code": "G6_SERIALIZED_LEAK",
+ "ops": [
+  {
+   "op": "set",
+   "file": "nodes.jsonl",
+   "path": "0:properties.sentence",
+   "value": {
+    "join": [
+     "복구 폴더 표식 ",
+     "_bac",
+     "kup",
+     " 잔존(합성)."
+    ]
+   }
+  }
+ ],
+ "approval_input": null,
+ "db_setup": null,
+ "regression_state": null
+}

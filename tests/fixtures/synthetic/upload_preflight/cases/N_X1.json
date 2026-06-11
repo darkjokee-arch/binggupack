@@ -1,0 +1,10 @@
+{
+ "case_id": "N-X1",
+ "gate": "X",
+ "expected_reason_code": "APPROVAL_TOKEN_CONSUMED",
+ "ops": [],
+ "approval_input": "UPLOAD {pack_id} {hash8} IRREVERSIBLE",
+ "db_setup": null,
+ "regression_state": null,
+ "replay_pok": true
+}

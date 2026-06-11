@@ -1,0 +1,23 @@
+{
+ "case_id": "N-G3a",
+ "gate": "G3",
+ "expected_reason_code": "G3_PII_HIT",
+ "ops": [
+  {
+   "op": "set",
+   "file": "nodes.jsonl",
+   "path": "0:properties.sentence",
+   "value": {
+    "join": [
+     "거래처 사업자번호 ",
+     "123-45-",
+     "67890",
+     " 확인이 필요하다(합성)."
+    ]
+   }
+  }
+ ],
+ "approval_input": null,
+ "db_setup": null,
+ "regression_state": null
+}

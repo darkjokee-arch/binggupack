@@ -1,0 +1,13 @@
+{
+ "case_id": "N-G7e",
+ "gate": "G7",
+ "expected_reason_code": "REGRESSION_FAIL",
+ "ops": [],
+ "approval_input": "UPLOAD {pack_id} {hash8} IRREVERSIBLE",
+ "db_setup": null,
+ "regression_state": {
+  "marketplace_enabled": true,
+  "enum_status": "HOLD",
+  "team_billing_code_exists": false
+ }
+}

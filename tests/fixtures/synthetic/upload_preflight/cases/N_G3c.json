@@ -1,0 +1,23 @@
+{
+ "case_id": "N-G3c",
+ "gate": "G3",
+ "expected_reason_code": "G3_SECRET_HIT",
+ "ops": [
+  {
+   "op": "set",
+   "file": "nodes.jsonl",
+   "path": "0:properties.sentence",
+   "value": {
+    "join": [
+     "발급 식별자 ",
+     "ghp_",
+     "SYNTHFIXTURE000001",
+     " (합성, 실키 아님)"
+    ]
+   }
+  }
+ ],
+ "approval_input": null,
+ "db_setup": null,
+ "regression_state": null
+}

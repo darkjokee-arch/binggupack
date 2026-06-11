@@ -1,0 +1,18 @@
+{
+ "case_id": "N-G6b",
+ "gate": "G6",
+ "expected_reason_code": "G6_VIEW_OVERSIZE",
+ "ops": [
+  {
+   "op": "pad",
+   "file": "nodes.jsonl",
+   "path": "",
+   "value": {
+    "count": 200
+   }
+  }
+ ],
+ "approval_input": null,
+ "db_setup": null,
+ "regression_state": null
+}

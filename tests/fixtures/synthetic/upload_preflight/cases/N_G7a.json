@@ -1,0 +1,9 @@
+{
+ "case_id": "N-G7a",
+ "gate": "G7",
+ "expected_reason_code": "G7_CONFIRM_MISMATCH",
+ "ops": [],
+ "approval_input": "upload {pack_id} {hash8}",
+ "db_setup": null,
+ "regression_state": null
+}

@@ -1,0 +1,16 @@
+{
+ "case_id": "N-G1c",
+ "gate": "G1",
+ "expected_reason_code": "G1_HARD_FLAG_TRUE",
+ "ops": [
+  {
+   "op": "set",
+   "file": "manifest.json",
+   "path": "opencrab_ingest_allowed",
+   "value": true
+  }
+ ],
+ "approval_input": null,
+ "db_setup": null,
+ "regression_state": null
+}

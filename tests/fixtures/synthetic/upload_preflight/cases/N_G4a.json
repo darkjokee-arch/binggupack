@@ -1,0 +1,27 @@
+{
+ "case_id": "N-G4a",
+ "gate": "G4",
+ "expected_reason_code": "G4_EPHEMERAL_INCLUDED",
+ "ops": [
+  {
+   "op": "append_line",
+   "file": "evidence_chunk.jsonl",
+   "path": "",
+   "value": {
+    "item_id": "EVS-x9",
+    "text": "대화 중 임시 메모 1문장(합성).",
+    "source": "seed/upload_ephemeral_note.md",
+    "evidence_meta": {
+     "raw_pointer": "seed/upload_ephemeral_note.md",
+     "redaction_applied": true,
+     "redaction_hits": 0,
+     "scope": "domain:bid",
+     "source_kind": "conv_self_ephemeral"
+    }
+   }
+  }
+ ],
+ "approval_input": null,
+ "db_setup": null,
+ "regression_state": null
+}

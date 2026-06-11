@@ -1,0 +1,24 @@
+{
+ "case_id": "N-G5a",
+ "gate": "G5",
+ "expected_reason_code": "G5_NON_CANDIDATE_FOUND",
+ "ops": [],
+ "approval_input": null,
+ "db_setup": {
+  "rows": [
+   {
+    "pack": "self",
+    "status": "candidate"
+   },
+   {
+    "pack": "self",
+    "status": "validated"
+   },
+   {
+    "pack": "self",
+    "status": "confirmed"
+   }
+  ]
+ },
+ "regression_state": null
+}

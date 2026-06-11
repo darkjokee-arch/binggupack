@@ -1,0 +1,21 @@
+{
+ "case_id": "N-G2a",
+ "gate": "G2",
+ "expected_reason_code": "G2_SRCPTR_DIRTY",
+ "ops": [
+  {
+   "op": "set",
+   "file": "evidence_index.jsonl",
+   "path": "0:source_path",
+   "value": {
+    "join": [
+     "C:",
+     "\\Users\\PC\\synthetic\\x.md"
+    ]
+   }
+  }
+ ],
+ "approval_input": null,
+ "db_setup": null,
+ "regression_state": null
+}
