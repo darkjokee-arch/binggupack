@@ -9,7 +9,9 @@
   python binggu.py init                            내 장부 생성 (~/.binggupack/ledger.sqlite)
   python binggu.py status                          장부 요약
   python binggu.py preview "<대화/메모 텍스트>"      저장 후보 미리보기 (저장 0)
-  python binggu.py save "<텍스트>" --pick 1,3 --confirm "SAVE 1,3" [--due 2026-07-01]
+  python binggu.py save "<텍스트>" --preview-id <preview가 표시한 id> \
+                   --pick 1,3 --confirm "SAVE 1,3" [--due 2026-07-01]
+                   (preview 없이 raw text 직행 저장은 BLOCK — 사람이 보고 고른 것만 저장)
   python binggu.py list [--status pending|deprecated|resolved] [--kind 판단|상태|개념|문서|증거]
   python binggu.py deprecate <n> <id8> --reason "..." --confirm "DEPRECATE <n> <id8>"
   python binggu.py replace <n> <id8> --with "<수정문장>" --reason "..." \
@@ -107,16 +109,29 @@ def cmd_status(a):
     return 0
 
 
+def _preview_id(text):
+    import hashlib
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:8]
+
+
 def cmd_preview(a):
     pv = capture_preview(a.text)
     print(pv["preview_markdown"])
+    pid = _preview_id(a.text)
+    print("\npreview_id: %s" % pid)
     if pv["candidates"]:
-        ex = ",".join(str(i) for i in range(1, len(pv["candidates"]) + 1))
-        print("\n저장하려면:  python binggu.py save \"<같은 텍스트>\" --pick %s --confirm \"SAVE %s\"" % (ex, ex))
+        print("⚠ 외부 사실(릴리스 상태·업로드 여부·등급 등)은 실측 확인 전에 저장하지 마세요.")
+        print("저장은 번호를 직접 골라서:  python binggu.py save \"<같은 텍스트>\" --preview-id %s "
+              "--pick <고른 번호들> --confirm \"SAVE <고른 번호들>\"" % pid)
     return 0
 
 
 def cmd_save(a):
+    # 승인 정책: preview 를 실제로 본 텍스트만 저장 가능 — raw text 직행 저장 차단
+    if a.preview_id != _preview_id(a.text):
+        print("BLOCK: preview_required_mismatch — 먼저 preview 를 실행하고, "
+              "거기 표시된 preview_id 와 같은 텍스트로 저장하세요.")
+        return 1
     db, snap_dir = _open(a.ledger)
     idx = [int(x) for x in a.pick.split(",") if x.strip()]
     r = save_selected(db, a.text, idx, {"actor": "human", "confirm": a.confirm},
@@ -229,7 +244,11 @@ def selftest():
     TEXT = ("이 입찰은 마진이 낮아 보류한다. 백필 작업이 진행 중이다. "
             "낙찰하한율은 기초금액 대비 최저 투찰 비율을 말한다.")
     ck("2_preview(저장0)", cmd_preview(args(text=TEXT)) == 0)
-    ck("3_save", cmd_save(args(text=TEXT, pick="1,2,3", confirm="SAVE 1,2,3",
+    ck("2b_preview없는_save_BLOCK", cmd_save(args(text=TEXT, preview_id="deadbeef",
+                                                  pick="1,2,3", confirm="SAVE 1,2,3",
+                                                  due=None)) == 1)
+    ck("3_save", cmd_save(args(text=TEXT, preview_id=_preview_id(TEXT),
+                               pick="1,2,3", confirm="SAVE 1,2,3",
                                due="2099-12-31")) == 0)
     db, _ = _open(ledger)
     rows = list_candidates(db)["rows"]
@@ -291,6 +310,7 @@ def main():
     sub.add_parser("status")
     sp = sub.add_parser("preview"); sp.add_argument("text")
     sp = sub.add_parser("save"); sp.add_argument("text")
+    sp.add_argument("--preview-id", required=True, dest="preview_id")
     sp.add_argument("--pick", required=True); sp.add_argument("--confirm", required=True)
     sp.add_argument("--due", default=None)
     sp = sub.add_parser("list"); sp.add_argument("--status", default=None)

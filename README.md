@@ -17,14 +17,18 @@ python scripts/openbinggu_doctor.py --selftest   # 12/12 GATE GO 확인
 
 python binggu.py init                            # 내 장부 생성 (~/.binggupack/ledger.sqlite)
 python binggu.py preview "이 입찰은 마진이 낮아 보류한다. 백필 작업이 진행 중이다."
+# → 후보 표 + preview_id 가 표시됨. 번호를 직접 고른 뒤:
 python binggu.py save "이 입찰은 마진이 낮아 보류한다. 백필 작업이 진행 중이다." \
-                 --pick 1,2 --confirm "SAVE 1,2"
+                 --preview-id <표시된 id> --pick 1,2 --confirm "SAVE 1,2"
 python binggu.py list                            # 도장·id·문장 발췌 목록
 python binggu.py status
 ```
 
-`preview`는 문장을 **판단/상태/개념/문서/증거** 5종 도장으로 분류해 보여주기만 하고(저장 0),
-`save`는 confirm 문구가 정확히 일치할 때만 저장합니다. 저장되는 것은 80자 이내 발췌뿐입니다.
+**저장 흐름(고정)**: "저장하고 싶다"는 의도는 preview의 시작일 뿐, 실행 승인이 아닙니다.
+① 의도 → ② `preview` 생성 → ③ preview_id 발급 → ④ 후보 번호 표시 → ⑤ **사람이 번호 선택** →
+⑥ confirm 문구 입력 → ⑦ 그때 저장. 의도만으로 자동 저장·raw text 직행 save·번호 없는 save·
+preview_id 없는 save는 전부 BLOCK 됩니다. 저장되는 것은 80자 이내 발췌뿐입니다.
+외부 사실(릴리스 상태·업로드 여부·등급 등)은 실측 확인과 본인 판단이 일치할 때만 저장하세요.
 
 ## 후보 관리 / Candidate management
 
