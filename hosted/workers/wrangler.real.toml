@@ -1,0 +1,7 @@
+# U3 — 실 pack private 빌드 (GO-HOSTED-REALPACK-LOCAL).
+# name은 라이브 워커와 동일 — 같은 워커의 새 버전으로 배포되어
+# `npx wrangler rollback`으로 toy-only 구버전 복귀 = 비상 셧다운 (설계 §4).
+# deploy는 별도 GO: npx wrangler deploy --config wrangler.real.toml
+name = "binggupack-workers-port-local"
+main = "src/index.real.ts"
+compatibility_date = "2025-05-01"

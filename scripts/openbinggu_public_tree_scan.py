@@ -40,6 +40,8 @@ _NAMEPATH = [
     ("path_credential", re.compile(r"credential", re.I)),
     ("path_private_key", re.compile(r"(private_key|id_rsa|\.pem$|\.key$)", re.I)),
     ("path_cert_npki", re.compile(r"(npki|gpki|\.der$|\.pfx$)", re.I)),
+    # 실 pack private 데이터 경로 — 공개 트리에 존재 자체가 BLOCK (GO-HOSTED-REALPACK-LOCAL U4)
+    ("path_private_pack_data", re.compile(r"hosted[\\/]workers[\\/]data[\\/]", re.I)),
 ]
 
 

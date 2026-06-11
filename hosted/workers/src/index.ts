@@ -74,7 +74,7 @@ const PACK_SPECS: [string, string, NodeRow[], EdgeRow[]][] = [
   ], [["e1", "n2", "refines", "n1"]]],
 ];
 
-interface Pack {
+export interface Pack {
   manifest: Record<string, any>;
   nodes: any[];
   edges: any[];
@@ -194,10 +194,10 @@ function consume(pack: Pack): any {
 
 // ---------------- pack store (read-only) ----------------
 
-class PackStore {
+export class PackStore {
   private views: Record<string, any> = {};
-  constructor() {
-    for (const pack of makeToyPacks()) {
+  constructor(packs: Pack[] = makeToyPacks()) {
+    for (const pack of packs) {
       const view = consume(pack);
       if (view.pack_id) this.views[view.pack_id] = view;
     }
@@ -321,16 +321,17 @@ function toolNodeEdgeLookup(store: PackStore, args: Record<string, any>): any {
 function toolHandoffContext(store: PackStore, args: Record<string, any>): any {
   const v = store.get(reqStr(args, "pack_id"));
   const maxNodes = Math.max(1, Math.min(toInt(args.max_nodes ?? 15), 30));
+  const offset = Math.max(0, toInt(args.offset ?? 0)); // U6 — 분할 소비(2순위 pack 분할의 전제)
   const topic = String(args.topic ?? "").trim().toLowerCase();
   const nodes = v.nodes;
-  let picked: any[];
+  let pool: any[];
   if (topic) {
     const filtered = nodes.filter((n: any) => n.claim.toLowerCase().includes(topic));
-    picked = filtered.length ? filtered : nodes;
+    pool = filtered.length ? filtered : nodes;
   } else {
-    picked = nodes;
+    pool = nodes;
   }
-  picked = picked.slice(0, maxNodes);
+  const picked = pool.slice(offset, offset + maxNodes);
   const pickedIds = new Set(picked.map((n: any) => n.id));
   const lines = [
     "# BingguPack handoff context — " + v.pack_id,
@@ -347,9 +348,15 @@ function toolHandoffContext(store: PackStore, args: Record<string, any>): any {
       lines.push(`- ${e.source} -${e.relation}-> ${e.target} (evidence: ${e.evidence_refs.join(", ")})`);
     }
   }
+  const truncated = offset + picked.length < pool.length;
+  if (truncated) {
+    lines.push("");
+    lines.push(`…(노드 ${pool.length}개 중 ${offset + 1}~${offset + picked.length} 표시 — 다음은 offset=${offset + picked.length} 로 재호출)`);
+  }
   const md = lines.join("\n");
-  return { context_markdown: md, nodes_included: picked.length,
-           truncated: picked.length < nodes.length };
+  const out: Record<string, any> = { context_markdown: md, nodes_included: picked.length, truncated };
+  if (truncated) out.next_offset = offset + picked.length;
+  return out;
 }
 
 // §4 — 공통 annotations: 전 tool read-only·비파괴·멱등·closed-world
@@ -435,11 +442,13 @@ const TOOLS: Record<string, ToolDef> = {
     description: "모델 투입용 context Markdown(mobile fallback과 동일 형식). read-only.",
     inputSchema: { type: "object", properties: {
       pack_id: { type: "string" }, topic: { type: "string" },
-      max_nodes: { type: "integer", description: "기본 15, 최대 30" } },
+      max_nodes: { type: "integer", description: "기본 15, 최대 30" },
+      offset: { type: "integer", description: "노드 시작 위치(기본 0) — truncated=true면 next_offset으로 재호출" } },
       required: ["pack_id"] },
     outputSchema: { type: "object", properties: {
       context_markdown: { type: "string" }, nodes_included: { type: "integer" },
-      truncated: { type: "boolean" } },
+      truncated: { type: "boolean" },
+      next_offset: { type: "integer", description: "truncated=true일 때만 포함 — 다음 호출 offset" } },
       required: ["context_markdown", "nodes_included", "truncated"] },
     handler: toolHandoffContext,
   },
@@ -450,6 +459,8 @@ const TOOLS: Record<string, ToolDef> = {
 function leakScan(text: string): string[] {
   return LEAK_PATTERNS.filter(([, re]) => re.test(text)).map(([pat]) => pat);
 }
+
+const CUT_FOOTER = "\n\n…(응답 캡으로 절단됨 — max_nodes 축소 또는 offset 지정으로 재호출)";
 
 function fitResult(result: Record<string, any>): Record<string, any> {
   for (let i = 0; i < 8; i++) {
@@ -464,7 +475,13 @@ function fitResult(result: Record<string, any>): Record<string, any> {
       }
     }
     if (typeof result.context_markdown === "string" && result.context_markdown.length > 1000) {
-      result.context_markdown = result.context_markdown.slice(0, Math.floor(result.context_markdown.length / 2));
+      // U6 — 절단을 줄 경계로 + 재호출 안내 푸터 (반복 halving 시 푸터 중복 방지)
+      const md = result.context_markdown;
+      const target = Math.floor(md.length / 2);
+      const nl = md.lastIndexOf("\n", target);
+      let cutMd = md.slice(0, nl > 200 ? nl : target);
+      if (!cutMd.endsWith(CUT_FOOTER)) cutMd += CUT_FOOTER;
+      result.context_markdown = cutMd;
       cut = true;
     }
     result.truncated = true;
@@ -555,7 +572,9 @@ interface Env {
   MCP_PATH_TOKEN?: string;
 }
 
-export default {
+// store 주입형 핸들러 팩토리 — toy(기본 STORE)와 실 pack 빌드(index.real.ts)가 동일 코드 경로 공유
+export function makeFetchHandler(store: PackStore) {
+  return {
   async fetch(request: Request, env: Env): Promise<Response> {
     // 변수명에 token·secret 류 + '=' 조합 금지 — 공개 트리 secret 스캐너 자기검출 회피 (6/10 박제)
     const pathKey = (env.MCP_PATH_TOKEN ?? "").trim();
@@ -586,7 +605,7 @@ export default {
     }
     let resp: Record<string, any> | null;
     try {
-      resp = handleRpc(STORE, rpc);
+      resp = handleRpc(store, rpc);
     } catch { // 미상 예외 — 내부 정보 미노출 정적 -32603
       resp = { jsonrpc: "2.0", id: rpc.id ?? null,
                error: { code: -32603, message: "internal error" } };
@@ -596,7 +615,10 @@ export default {
       status: 200, headers: { "Content-Type": "application/json" },
     });
   },
-};
+  };
+}
+
+export default makeFetchHandler(STORE);
 
 // 테스트 전용 노출 — Workers 런타임은 default export만 사용 (S28 절단 경로 실발동 검증용)
 export const __test = { fitResult, leakScan, pyDumps };

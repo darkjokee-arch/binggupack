@@ -19,6 +19,7 @@ reports/
 reviews/
 captures/
 packs/private/
+hosted/workers/data/
 
 # 빌드/임시
 tmp/
