@@ -198,10 +198,17 @@ function consume(pack: Pack): any {
 
 export class PackStore {
   private views: Record<string, any> = {};
+  // v2.1: 원문 발췌(chunk text) 보관 — 검색이 short_label뿐 아니라 원문도 치도록 (read-only)
+  private evTexts: Record<string, Record<string, string>> = {};
   constructor(packs: Pack[] = makeToyPacks()) {
     for (const pack of packs) {
       const view = consume(pack);
-      if (view.pack_id) this.views[view.pack_id] = view;
+      if (view.pack_id) {
+        this.views[view.pack_id] = view;
+        const t: Record<string, string> = {};
+        for (const c of pack.evChunk) t[c.item_id] = c.text ?? "";
+        this.evTexts[view.pack_id] = t;
+      }
     }
   }
   ids(): string[] {
@@ -210,6 +217,9 @@ export class PackStore {
   get(packId: string): any {
     if (!(packId in this.views)) throw new ToolError("PACK_NOT_FOUND", "pack_id not found: " + packId);
     return this.views[packId];
+  }
+  texts(packId: string): Record<string, string> {
+    return this.evTexts[packId] ?? {};
   }
 }
 
@@ -239,7 +249,7 @@ function countOcc(text: string, term: string): number {
 }
 
 function toolPackList(store: PackStore, args: Record<string, any>): any {
-  const limit = Math.max(1, Math.min(toInt(args.limit ?? 20), 50));
+  const limit = Math.max(1, Math.min(toInt(args.limit ?? 20), 70)); // v2.1: MAX_PACKS 70 정합
   const packs = store.ids().slice(0, limit).map((pid) => {
     const v = store.get(pid);
     return { pack_id: pid, title: v.scope ?? "", counts: v.counts,
@@ -261,22 +271,31 @@ function toolPackSummary(store: PackStore, args: Record<string, any>): any {
 }
 
 function toolEvidenceSearch(store: PackStore, args: Record<string, any>): any {
-  const v = store.get(reqStr(args, "pack_id"));
   const query = reqStr(args, "query");
   if (!(query.length >= 2 && query.length <= 200)) {
     throw new ToolError("QUERY_TOO_SHORT", "query must be 2~200 chars");
   }
   const limit = Math.max(1, Math.min(toInt(args.limit ?? 5), 20));
+  // v2.1: pack_id 생략 시 전 팩 검색 (62팩 분할 구조에서 팩 위치를 몰라도 검색 가능)
+  const packIds = args.pack_id ? [String(args.pack_id)] : store.ids();
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
   const hits: any[] = [];
-  for (const n of v.nodes) {
-    const text = n.claim.toLowerCase();
-    let score = 0;
-    for (const t of terms) score += countOcc(text, t);
-    if (score > 0) {
-      for (const eid of n.evidence_refs) {
-        hits.push({ evidence_id: eid, sentence_excerpt: n.claim.slice(0, EXCERPT_MAX),
-                    score, candidate: true });
+  for (const pid of packIds) {
+    const v = store.get(pid);
+    const texts = store.texts(pid);
+    for (const n of v.nodes) {
+      const refs: string[] = n.evidence_refs ?? [];
+      if (refs.length === 1 && refs[0] === n.id) continue; // 증거 노드 자기참조 — 본문은 chunk로 검색
+      const claim = n.claim.toLowerCase();
+      const fullList = refs.map((r: string) => texts[r] ?? "");
+      const full = fullList.join(" ").toLowerCase();
+      let score = 0;
+      for (const t of terms) score += countOcc(claim, t) * 2 + countOcc(full, t);
+      if (score > 0) {
+        const excerptSrc =
+          fullList.find((x: string) => terms.some((t) => x.toLowerCase().includes(t))) || n.claim;
+        hits.push({ pack_id: pid, node_id: n.id, evidence_id: refs[0] ?? "",
+                    sentence_excerpt: excerptSrc.slice(0, EXCERPT_MAX), score, candidate: true });
       }
     }
   }
@@ -408,13 +427,15 @@ const TOOLS: Record<string, ToolDef> = {
     handler: toolPackSummary,
   },
   evidence_search: {
-    description: "pack 내 evidence 발췌 검색(상위 N, candidate 표시 유지). read-only.",
+    description: "evidence 발췌 검색(원문+요지, 상위 N). pack_id 생략 시 전 팩 검색. read-only.",
     inputSchema: { type: "object", properties: {
-      pack_id: { type: "string" }, query: { type: "string", description: "2~200자" },
+      pack_id: { type: "string", description: "생략 시 전 팩" },
+      query: { type: "string", description: "2~200자" },
       limit: { type: "integer", description: "기본 5, 최대 20" } },
-      required: ["pack_id", "query"] },
+      required: ["query"] },
     outputSchema: { type: "object", properties: {
       hits: { type: "array", items: { type: "object", properties: {
+        pack_id: { type: "string" }, node_id: { type: "string" },
         evidence_id: { type: "string" }, sentence_excerpt: { type: "string" },
         score: { type: "integer" }, candidate: { type: "boolean" } },
         required: ["evidence_id", "sentence_excerpt", "score", "candidate"] } },

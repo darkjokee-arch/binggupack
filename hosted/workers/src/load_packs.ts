@@ -5,7 +5,7 @@
 import type { Pack } from "./index";
 
 const FORMAT_VERSION = "opencrab-pack-v1";
-const MAX_PACKS = 20;
+const MAX_PACKS = 70; // v2.1: 전역 문서 5종 그래프 62팩 실측 (budget.md) — 팩당 view 캡은 불변
 
 function fail(msg: string): never {
   throw new Error("LOADPACKS_INVALID: " + msg);
@@ -63,7 +63,8 @@ export function loadPacks(raw: unknown): Pack[] {
         if (it.promotion_allowed) fail(kind + " promotion_allowed must be false: " + itemId);
         if (!(it.properties ?? {}).candidate) fail(kind + " must be candidate: " + itemId);
         const refs = asArr(it.evidence_refs ?? [], itemId + ".evidence_refs");
-        if (kind === "node" && refs.length === 0) fail("node without evidence_refs: " + itemId);
+        // v2.1: 노드뿐 아니라 엣지도 증빙 의무 (근거 없는 연결 차단 — 그래프 문법 스펙)
+        if (refs.length === 0) fail(kind + " without evidence_refs: " + itemId);
         for (const r of refs) {
           if (!evIds.has(r)) fail("evidence_ref not in evidence_index: " + itemId);
         }
