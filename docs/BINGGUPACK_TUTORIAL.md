@@ -116,6 +116,15 @@ python scripts/openbinggu_v1_candidate_cycle_real_once.py --dry-run-temp   # 17/
 - 모듈별 selftest 기대값: 목록 13/13 · 기각 15/15 · 수정 16/16 · 수용 16/16 · resolve 16/16 (명령은 `../INSTALL.md` 참조).
 - 쓰기 루프(preview→선택 저장→피드백) 통합은 `python scripts/openbinggu_v08_real_cycle_once.py --dry-run-temp` (14/14 기대).
 
+### 내 영속 장부 시작 (v1.0.0)
+
+```bash
+python binggu.py init
+python binggu.py preview "오늘 정리할 문장들"
+```
+
+자세한 명령은 README의 후보 관리 표 참조.
+
 ## 7. 다음 단계
 
 - **여러 AI에 pack 넘기기**: [Multi-agent handoff guide](OPENBINGGU_PHASE3_MULTI_AGENT_HANDOFF_GUIDE.md)
