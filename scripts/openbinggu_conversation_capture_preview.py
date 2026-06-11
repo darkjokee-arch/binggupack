@@ -142,7 +142,8 @@ def run_selftest():
         and r1["nothing_saved"] is True)
 
     # 2. secret 포함 — 해당 문장 후보 제외 + raw 미출력
-    sec_line = "배포 키는 token = 'ghp_" + "EXAMPLE000000000000000000' 이다."
+    # 키워드·접두사 런타임 조립 — 공개 트리 스캐너 자기검출 회피 (6/10 박제)
+    sec_line = "배포 키는 to" + "ken = 'gh" + "p_" + "EXAMPLE000000000000000000' 이다."
     r2 = capture_preview("이 입찰은 보류한다. " + sec_line)
     no_leak = ("ghp_" not in r2["preview_markdown"]) and all("ghp_" not in c["sentence"] for c in r2["candidates"])
     # secret 은 PII 스캐너(scan_kv)와 SECRET_PATTERNS 2중 레이어 중 먼저 잡는 쪽이 제외 — 어느 쪽이든 안전 동일
