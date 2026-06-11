@@ -35,14 +35,20 @@ sys.path.insert(0, str(SCRIPTS))
 import watcher_capture_mvp1 as mvp1            # Step0+1 (capture/to_evidence) 재사용
 import openbinggu_incoming_to_staging as v011  # secret 패턴 재사용 (_has_secret)
 import localbinggu_incoming_loader as v07loader  # v0.7 7불변식 검증 (Step3 아님)
+import openbinggu_label_kind_map as lkmap      # G0 — 5종 분류 + 한영 매핑 단일 정본
+import openbinggu_a0_node_dryrun as a0         # G0 — 노드 헌법 shadow 판정 (기록만, stop은 기존 가드)
 # 주의: localbinggu_match_policy(Step3) 는 import 하지 않는다.
 
 DOMAIN = "STAGING_UNASSIGNED"
 REDACT_RE = re.compile(r"\[REDACTED:\d+\]")
 
+# G0 — 생성 주체 attribution (PROV). 멱등 유지를 위해 timestamp 미포함(deterministic 값만).
+GENERATED_BY = {"extractor": "watcher_candidate_mvp2", "rule_version": "g0.1"}
+
 # 출력 키 whitelist (이 외 키는 절대 생성 안 함)
 NODE_KEYS = {"id", "space", "node_type", "label", "properties", "evidence_refs", "promotion_allowed"}
-PROP_KEYS = {"label_kind", "sentence", "domain", "candidate", "evidence_status", "origin"}
+PROP_KEYS = {"label_kind", "sentence", "domain", "candidate", "evidence_status", "origin",
+             "rule_id", "generated_by", "a0_verdict"}
 EVIDX_KEYS = {"evidence_id", "kind", "source_path", "domain", "promotion_allowed", "note"}
 
 
@@ -76,18 +82,29 @@ def to_nodes(chunks):
         if _has_secret(sent):  # 3차 재검사
             stops.append({"item_id": item_id, "reason": "secret residual (3rd scan)"})
             continue
+        # G0 — deterministic 5종 분류 (매칭 실패 = 판단 fallback, 현행 동일값)
+        kind, rule_id = lkmap.classify_label_kind(sent)
+        space, ntype = lkmap.KIND_TO_SPACE_NTYPE[kind]
+        # G0 — A0 노드 헌법 shadow 판정 (기록만. 캡처 문장 품질 개선 전까지 stop 미적용)
+        a0_res = a0.classify_node(
+            {"id": "node:STAGING:wch:" + _sha8(item_id), "sentence": sent,
+             "node_type": lkmap.KO2EN[kind], "evidence_refs": [item_id]},
+            status="candidate")
         node = {
             "id": "node:STAGING:wch:" + _sha8(item_id),
-            "space": "claim",
-            "node_type": "Claim",
+            "space": space,
+            "node_type": ntype,
             "label": sent,
             "properties": {
-                "label_kind": "판단",
+                "label_kind": kind,
                 "sentence": sent,
                 "domain": DOMAIN,
                 "candidate": True,
                 "evidence_status": "partial",
                 "origin": "watcher",
+                "rule_id": rule_id,
+                "generated_by": dict(GENERATED_BY),
+                "a0_verdict": a0_res["verdict"],
             },
             "evidence_refs": [item_id],
             "promotion_allowed": False,
