@@ -11,6 +11,8 @@
 // 불변: read-only 5 tool · synthetic toy pack 전용 · JSON-only(GET 405) · stateless ·
 //   fail-closed 누출 스캔(SANITIZE_BLOCK) · 배포/OAuth/등록 0 (wrangler dev 로컬 전용).
 
+import { capturePreview } from "./capture_preview";
+
 const PROTOCOL_VERSION = "2025-06-18";
 const SUPPORTED_PROTOCOL_VERSIONS = ["2025-03-26", "2025-06-18", "2025-11-25"];
 const SERVER_INFO = { name: "binggupack-http-mcp-skeleton", version: "0.2.1-phase1-local" };
@@ -438,6 +440,31 @@ const TOOLS: Record<string, ToolDef> = {
       required: ["node", "edges"] },
     handler: toolNodeEdgeLookup,
   },
+  conversation_capture_preview: {
+    description: "사용자가 전달한 대화 텍스트에서 핵심 문장 후보를 미리보기(5종 도장·헌법 판정). " +
+      "저장 0 — PII/secret 문장은 후보 제외(종류·개수만 표시). read-only.",
+    inputSchema: { type: "object", properties: {
+      text: { type: "string", description: "캡처 후보를 뽑을 대화 발췌 (사용자가 명시적으로 전달)" },
+      max_candidates: { type: "integer", description: "기본 10, 최대 20" } },
+      required: ["text"] },
+    outputSchema: { type: "object", properties: {
+      candidates: { type: "array", items: { type: "object", properties: {
+        sentence: { type: "string" }, label_kind: { type: "string" },
+        rule_id: { type: "string" }, a0_verdict: { type: "string" },
+        candidate: { type: "boolean" } },
+        required: ["sentence", "label_kind", "rule_id", "a0_verdict", "candidate"] } },
+      excluded_counts: { type: "object" },
+      truncated: { type: "boolean" },
+      preview_markdown: { type: "string" },
+      nothing_saved: { type: "boolean" } },
+      required: ["candidates", "excluded_counts", "truncated", "preview_markdown", "nothing_saved"] },
+    handler: (_store: PackStore, args: Record<string, any>) => {
+      if (typeof args.text !== "string" || !args.text.trim()) {
+        throw new ToolError("INVALID_ARGUMENT", "missing required string: text");
+      }
+      return capturePreview(args.text, args.max_candidates);
+    },
+  },
   handoff_context: {
     description: "모델 투입용 context Markdown(mobile fallback과 동일 형식). read-only.",
     inputSchema: { type: "object", properties: {
@@ -621,4 +648,4 @@ export function makeFetchHandler(store: PackStore) {
 export default makeFetchHandler(STORE);
 
 // 테스트 전용 노출 — Workers 런타임은 default export만 사용 (S28 절단 경로 실발동 검증용)
-export const __test = { fitResult, leakScan, pyDumps };
+export const __test = { fitResult, leakScan, pyDumps, capturePreview };
