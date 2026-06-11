@@ -1,260 +1,108 @@
-<!-- internal status tracker (운영 정책 상태 추적용, 사용자 안내 아님):
-     marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dry-run) -->
-
 # BingguPack
 
-> **Evidence-backed context packs for multi-agent AI workflows.**
-> 여러 AI가 같은 작업 맥락을 이어받을 수 있게, 근거(evidence)가 붙은 context pack을 만들고 검증하는 도구입니다.
-> **BingguPack is a public tool that each user can clone and run locally with their own data.**
-> 각 사용자가 GitHub에서 받아 **자기 로컬 데이터**로 pack을 검증·저장·preview하는 공개형 개인용 도구입니다 (특정인 전용 아님).
-> Track1 public RC · internal codename: OpenBinggu
-> 버전: **v0.1.0-rc1** = read/dry-run + pack validation + MCP 5도구 → **v0.2.0-rc1** = +**local persistence**(candidate-only, opt-in, write 기본 OFF) → **v0.3.0-rc1** = +**manual one-shot capture**(read-only) → **v0.3.1-rc1** = +**batch pack staging loader** → **v0.4.0-rc1** = +**promotion preview**(read-only) → **v0.5.0-rc1** = +**reviewer/confirmed preview** → **v0.6.0-rc1** = +**finalize dry-run generator** → **v0.6.1-rc1** = 문서/온보딩 fix + hosted MCP skeleton 로컬 PoC → **v0.7.0-rc1** = hosted connector 실구현(Claude custom connector 실동작 검증 — `docs/BINGGUPACK_HOSTED_CONNECTOR_PHASE1_RESULT.md`) → **v0.7.1-rc1** = 실 pack(마스킹) hosted 탑재 + rollback 실증 + Claude·ChatGPT 양사 커넥터 검증 → **v0.7.2-rc1** = +**conversation_capture_preview**(hosted 6번째 read-only 도구, 저장 0) → **v0.8.0-rc1 / v0.8.1-rc1** = +**개인용 쓰기 루프(로컬 CLI, 저장)**: preview→명시 선택 저장(candidate-only)→4값 resolve 피드백, `--dry-run-temp` 공개 재현 → **v0.9.0-rc1**(최신 태그 = 현재 main) = +**후보 관리 UX 완성**: candidate_list 보기 · DEPRECATE(기각) · REPLACE(수정) · ACCEPT/UNACCEPT(수용·철회) · 4값 resolve.
-> 🚀 처음이라면: [10분 튜토리얼](docs/BINGGUPACK_TUTORIAL.md)
-> "100% 완성판" 아님(아래 §범위). 코드 라이선스 = **MIT**. enum(release_mode/entitlement) HOLD · production write 0.
+**대화에서 건진 판단을, 사람이 도장 찍어 쌓는 개인 지식장부.**
+AI와의 대화·메모에서 건질 문장(판단/상태/개념)을 후보로 떠서, 사람이 직접 confirm 문구를
+타이핑해야만 저장·기각·수정·수용되는 **로컬 우선(local-first) 후보 관리 시스템**입니다.
 
----
+- 최신 공개판: **v1.0.0-rc1** (`personal local completion` — prerelease)
+- 자동으로 되는 것: **없음.** 모든 변경은 사람의 정확한 confirm 문구가 게이트입니다.
+- 절대 안 하는 것: 원문 전문 저장(발췌만) · 자동 확정(confirmed 0) · 자동 업로드.
 
-> ⚠️ **No author private data included / 작성자 개인 데이터 미포함**
-> This repository contains framework/skeleton, validators, schema, synthetic fixtures, and toy examples only.
-> 이 저장소는 프레임워크/스켈레톤·검증기·스키마·합성 fixture·toy 예시만 포함합니다. 작성자의 실제 그래프/DB/리뷰/캡처/evidence 원문은 포함하지 않습니다.
+## 3분 시작 / Quick start
 
----
-
-## What is BingguPack (Personal Track)
-
-BingguPack(개인용 트랙)은 개인이 자기 로컬에서 작업 맥락을 **candidate pack**(검토 전 후보 묶음)으로 만들고, 그 pack을 **검증(dry-run)** 한 뒤, 원하면 **공개 가능한 형태로만** 다른 사람과 나눌 수 있게 하는 도구입니다.
-
-- **개인용/로컬 우선**: pack은 기본적으로 `owner + AI` 내부에서만 동작합니다.
-- **candidate-first / review-only**: 수집·생성물은 전부 candidate이며 자동 승격(promotion)되지 않습니다.
-- **fail-closed 공개**: GitHub 공개 시 dirty/unknown source pointer는 **기본 차단(BLOCK)** 됩니다.
-
-> 자동으로 운영 그래프/DB에 쓰거나, 외부로 실 데이터를 보내지 않습니다(HOLD).
-
-**OpenCrab과의 역할 분리**: pack **생성**은 OpenCrab 도구 흐름(`opencrab.sh`)에서 수행합니다. BingguPack은 그렇게 만들어진 pack을 **검증(validate) → local staging 적재 → promotion preview**하는 공개 도구입니다. apply/finalize/upload는 별도 승인 단계이며 이 도구에 포함되지 않습니다.
-
----
-
-## 이 공개본(RC)의 범위 / Scope of this public RC
-
-이 저장소는 **BingguPack Track1 공개 1차판(public RC)** 입니다. **"BingguPack 100% 완성판"이 아닙니다.** 모든 사용자 환경에서의 동작을 보장하지 않습니다(자기 로컬 검증 필수, 아래 참조).
-
-**이 RC가 제공하는 것 (read / dry-run / 검증 중심)**:
-- pack **검증**(validate)·소비 smoke(consumer)·공개 fail-closed 게이트(publish_guard) — 전부 read/dry-run
-- **MCP 기본판**: read/dry-run **5도구**(pack_build·pack_validate·consumer_smoke·publish_guard_dryrun·selftest) 노출, `inputSchema`·`tools/call content` MCP 표준 준수, write/upload/apply/push/confirmed 도구 **미노출**
-- doctor **12/12** selftest, 공개 후보 트리 secret/PII scan(`--tree`)
-- **(v0.2.0-rc1) local persistence**: 자기 로컬(`OPENBINGGU_HOME`)에 candidate graph 저장. **write 기본 OFF**·명시 opt-in 시에만·**CLI 전용(MCP write 도구 미노출)**·candidate-only(`promotion_allowed=0`). backup/rollback·C-2 1클릭·duplicate/freshness 검사·multi-user 격리. selftest 11/11 + read-only 재독 E2E 10/10.
-- **(v0.3.0-rc1) manual one-shot capture (read-only)**: 사용자가 명시 지정한 경로만 capture(allowlist only·denylist 우선·fail-closed). raw 저장 0·source pointer 공개 미포함·rate limit·kill switch. **write opt-in 없으면 staging write 0**, **hook/daemon NOT_STARTED**(설치/실행 0). selftest 10/10. (reviewer/confirmed preview는 v0.3.0 당시 미포함 — **v0.5.0-rc1에서 preview로 추가됨**, 아래 로드맵 표 참조.)
-
-**이 RC가 아직 제공하지 않는 것 (planned — 구현된 것 아님)**:
-- **hosted write(save-intent)** — **planned (design complete, separate GO)**: 채팅(hosted)에서의 저장 버튼은 설계만 완료된 상태이며 live에 노출되지 않습니다(hosted는 read-only 6도구만). 저장은 현재 **로컬 CLI 쓰기 루프(v0.8)** 로만 동작합니다.
-- **OpenCrab upload** — **planned (design complete, separate GO)**: private upload preflight fixture 스펙까지 설계 완료(`docs/BINGGUPACK_OPENCRAB_UPLOAD_PREFLIGHT_FIXTURE_SPEC.md`), 실제 업로드는 미구현·미노출.
-- 실 **reviewer 인증·confirmed apply**(현재 preview까지, `confirmed_created=0`)
-- **OpenCrab Pack v1 finalize** 실행(현재 dry-run generator까지 — Neo4j import/check/export 이벤트 플로우 미실행)
-- **자동수집** daemon/hook
-
-> upload·apply·confirmed·push·hosted write는 이 RC에 노출되지 않으며, 각각 별도 승인·구현이 필요합니다. 로컬 candidate 저장(쓰기 루프 v0.8)은 제공되지만 **opt-in·candidate-only·promotion_allowed=0** 입니다.
-
-## BingguPack full roadmap / 전체 로드맵
-
-목표 로드맵은 아래 전체 흐름입니다. 이 공개 RC는 그 중 **입력 ~ pack 검증 ~ MCP 기본**까지를 read/dry-run으로 닫은 1차판입니다.
-
-```
-입력 → 핵심문장 노드 → 동사형 edge + evidence_refs → pack 생성/검증
-  → local persistence(로컬 후보 저장) → multi-agent handoff(여러 AI 이어받기)
-  → review/confirmed(사람 승인 후 확정) → OpenCrab Pack v1 finalize(필요 시 업로드)
-```
-
-| 흐름 | 공개 RC 상태 |
-|---|---|
-| 입력 / 핵심문장 / edge·evidence / pack 생성·검증 | ✅ read/dry-run 제공 |
-| MCP read/dry-run 5도구(기본 도구 노출/호출 검증 완료) | ✅ 제공 |
-| local persistence(로컬 후보 저장) | ✅ **v0.2.0-rc1** — candidate-only·opt-in·write 기본 OFF(selftest 11/11 + 재독 E2E 10/10) |
-| manual one-shot capture(read-only) | ✅ **v0.3.0-rc1** — allowlist·denylist·rate limit·kill switch·fail-closed(selftest 10/10) |
-| batch pack staging loader | ✅ **v0.3.1-rc1** — pack 디렉터리→staging apply→read-back→rollback(selftest 10/10) |
-| promotion preview(read-only) | ✅ **v0.4.0-rc1** — D1~D4 변환·충돌·FTS/backup/rollback plan만, write 0(selftest 12/12) |
-| multi-agent handoff | ✅ Phase 3 guide provided — [가이드](docs/OPENBINGGU_PHASE3_MULTI_AGENT_HANDOFF_GUIDE.md) |
-| review / confirmed | ✅ **v0.5.0-rc1** — reviewer/confirmed **preview**(dry-run·sandbox·synthetic) 9모듈, confirmed_created=0·applied=0·promoted=0·upload=0 불변을 doctor가 강제. confirmed 생성·적용은 계속 별도 단계 |
-| OpenCrab Pack v1 finalize dry-run | ✅ **v0.6.0-rc1** — local generator(레이아웃 11종 로컬 조립), **Neo4j run 0 · upload/apply 0**. 실제 finalize/upload는 계속 HOLD |
-| Hosted app / @BingguPack chat app | ✅ **Claude + ChatGPT 양사 동작 확인(개인용)** — Cloudflare Workers 실배포 + **read-only 6 tool** (pack 조회 5종 + `conversation_capture_preview`) custom connector 실동작 검증(no-auth+비공개 토큰 경로). 실 pack은 **마스킹+게이트(G1~G6) 통과본만**, 데이터는 private 빌드(`hosted/workers/data/` gitignore — clean clone에서 real 빌드 실패가 정상/fail-closed). **connector 정본 = `hosted/workers/`(이 repo 동봉)** / Python skeleton = PoC archive(frozen). Gemini 등록·OAuth는 planned/HOLD |
-| Conversation → candidate capture preview | ✅ **v0.7.2-rc1** — `conversation_capture_preview`(hosted 6번째 read-only 도구): 대화 텍스트에서 핵심 문장 후보 미리보기(5종 분류·PII/secret 제외·**저장 0**) |
-| 개인용 쓰기 루프(로컬 CLI 저장) | ✅ **v0.8.0/v0.8.1-rc1** — preview→**명시 선택**(`SAVE 3,5,7` confirm)→candidate 저장(원문 미저장·발췌만)→4값 resolve(`성공/실패/불확실/판정불가`, 기록만·자동 강등 0) 피드백. `--dry-run-temp` 14/14·resolve selftest 16/16. write는 opt-in·candidate-only |
-| 후보 관리 UX(보기·기각·수정·수용·철회) | ✅ **v0.9.0-rc1** — candidate_list(read-only 13/13)·`DEPRECATE <n> <id8>`(15/15)·`REPLACE <n> <id8> WITH <문장>`(16/16)·`ACCEPT/UNACCEPT <n> <id8>`(16/16)·통합 사이클 `--dry-run-temp` 17/17. 전부 human confirm 문구 정확 일치 의무·append-only 보존형 |
-| OpenCrab Pack v1 finalize 실행 | ⏳ Neo4j 이벤트 플로우 미완(dry-run generator까지) |
-
-**다음 단계 (planned — 전부 별도 GO, 미구현)**:
-
-| 항목 | 상태 |
-|---|---|
-| hosted write(save-intent) — 채팅에서 후보 저장 | 🟡 **planned (design complete, separate GO)** — 인증 상향·원격 staging 전송 경로·audit·rollback 선행 조건(E 체크리스트 4) 미해결, live 노출 0 |
-| OpenCrab private upload preflight | 🟡 **planned (design complete, separate GO)** — fixture 스펙 [`docs/BINGGUPACK_OPENCRAB_UPLOAD_PREFLIGHT_FIXTURE_SPEC.md`](docs/BINGGUPACK_OPENCRAB_UPLOAD_PREFLIGHT_FIXTURE_SPEC.md), 실제 업로드 0 |
-| v1.0 마감 | 🟡 planned — 후보 관리 파트는 완료 선언(2026-06-11), 잔여 라인 정리 후 태깅 |
-
-> Neo4j는 위 표의 마지막 단계(finalize/upload)에서만 필요합니다. 평소 일상 작업에는 불필요합니다(아래 §Neo4j 참조).
-> Internal module structure may change between RC releases. / 내부 모듈 구조는 RC 릴리스 사이에 변경될 수 있습니다.
-
-**사용 경로 3가지 / Three usage paths**:
-1. **CLI/local path (현재 RC)** — 이 저장소의 도구로 자기 로컬에서 pack 검증·적재·preview.
-2. **Mobile handoff path** — 모바일/웹 채팅에서는 pack 요약·prompt template을 붙여넣는 handoff fallback ([Phase 3 가이드](docs/OPENBINGGU_PHASE3_MULTI_AGENT_HANDOFF_GUIDE.md)).
-3. **App path (동작 중)** — hosted MCP(custom connector)로 채팅 앱에서 호출: **Claude·ChatGPT 검증 완료(read-only 6 tool)**, Gemini는 planned. 배포 방법은 [`hosted/workers/README.md`](hosted/workers/README.md).
-
----
-
-## Requirements / 요구사항
-
-- Python 3.10+ (표준 라이브러리 위주)
-- OS: Windows / macOS / Linux (경로는 OS에 맞게)
-- 외부 네트워크 불필요 (selftest는 모두 로컬 synthetic)
-
-## Neo4j (when needed) / Neo4j는 언제 필요한가
-
-- 개인영속/일상 작업은 **LocalCrab/BingguPack local store + JSONL/SQLite backend**로 동작합니다.
-- **평소 Neo4j 서버는 불필요**합니다(서버 0, neo4j-cypher MCP 미등록).
-- Neo4j는 **OpenCrab Pack v1 finalize/upload 시점에만 required**입니다 (`validate → Neo4j import/check → Neo4j graph export → package`).
-- canonical graph = **JSONL**(`graph/nodes.jsonl`·`graph/edges.jsonl`). Neo4j는 그 시점의 검증/재현용이며 JSONL을 대체하지 않습니다.
-
-## Install / 설치
-
-macOS/Linux (bash):
 ```bash
-git clone https://github.com/darkjokee-arch/binggupack.git
+git clone https://github.com/darkjokee-arch/binggupack
 cd binggupack
-python -m venv .venv
-source .venv/bin/activate   # 선택
-# 표준 라이브러리 위주이므로 별도 의존성 최소
+python scripts/openbinggu_doctor.py --selftest   # 12/12 GATE GO 확인
+
+python binggu.py init                            # 내 장부 생성 (~/.binggupack/ledger.sqlite)
+python binggu.py preview "이 입찰은 마진이 낮아 보류한다. 백필 작업이 진행 중이다."
+python binggu.py save "이 입찰은 마진이 낮아 보류한다. 백필 작업이 진행 중이다." \
+                 --pick 1,2 --confirm "SAVE 1,2"
+python binggu.py list                            # 도장·id·문장 발췌 목록
+python binggu.py status
 ```
 
-Windows (PowerShell):
-```powershell
-git clone https://github.com/darkjokee-arch/binggupack.git
-cd binggupack
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1   # 선택
-```
+`preview`는 문장을 **판단/상태/개념/문서/증거** 5종 도장으로 분류해 보여주기만 하고(저장 0),
+`save`는 confirm 문구가 정확히 일치할 때만 저장합니다. 저장되는 것은 80자 이내 발췌뿐입니다.
 
-> ℹ️ 이 repo는 **Public**(최신 tag `v0.9.0-rc1`)이라 누구나 clone 할 수 있습니다.
+## 후보 관리 / Candidate management
 
-## Run selftest / 자체 검증 실행
+목록의 `#`(번호)와 `id`(8자리)를 함께 적어야 어떤 변경도 통과합니다 — 목록이 바뀌면 자동 차단.
 
-공개본이 정상 동작하는지 확인하는 가장 빠른 방법은 **doctor 한 명령**입니다. 모두 로컬 synthetic 데이터만 사용하며 운영 저장소를 변경하지 않습니다.
+| 하고 싶은 것 | 명령 (confirm 형식) |
+|---|---|
+| 기각 (보존+기본조회 제외) | `binggu.py deprecate <n> <id8> --reason "..." --confirm "DEPRECATE <n> <id8>"` |
+| 수정 (in-place 금지: 기각+신규 묶음) | `binggu.py replace <n> <id8> --with "<수정문장>" --reason "..." --confirm "REPLACE <n> <id8> WITH <수정문장>"` |
+| 수용 기록 | `binggu.py accept <n> <id8> --reason "..." --confirm "ACCEPT <n> <id8>"` |
+| 수용 철회 (보존형) | `binggu.py unaccept <n> <id8> --reason "..." --confirm "UNACCEPT <n> <id8>"` |
+| 검증 예정일 등록 | `binggu.py due <n> <id8> --date 2026-07-01` |
+| 검증 결과 기록 (4값) | `binggu.py resolve <n> <id8> --outcome 성공\|실패\|불확실\|판정불가 --reason "..."` |
+| due 경과 리마인드 | `binggu.py reminders` |
+
+설계 원칙:
+- **기각은 삭제가 아닙니다** — 물리 보존 + 기본 조회 제외(언제든 추적 가능).
+- **수정은 덮어쓰기가 아닙니다** — 원본 기각(`replaced_by` 역링크) + 수정본 신규 저장. 같은 내용
+  재생성은 유니코드 정규화 해시로 차단됩니다.
+- **수용(owner_accepted)은 확정이 아닙니다** — append 이벤트 기록일 뿐, 노드는 1바이트도 안 변하며
+  철회·재수용 이력이 전부 남습니다. `confirmed`는 이 시스템에 존재하지 않습니다.
+- **검증 결과는 기록일 뿐입니다** — `실패`를 줘도 자동 강등되지 않습니다(강등은 사람의 별도 기각).
+
+## 안전 불변식 / Safety invariants
+
+매 변경마다 강제되고, 전부 selftest로 증명됩니다(약속이 아니라 테스트):
+
+- 원문 전문 저장 0 (문장 발췌만) · PII/secret/사업자번호 저장 게이트 재스캔
+- candidate-only (`promotion_allowed=0` 전수) · 자동 강등/확정/업로드 0
+- 모든 변경 전 스냅샷 + checksum rollback (중간 실패 = 원복)
+- append-only audit chain (변조 시 BROKEN 검출)
+
+## 검증 / Verify (실측 기대값)
 
 ```bash
-python scripts/openbinggu_doctor.py --selftest   # 공개 전 필수 검사 묶음(권장 진입점)
+python scripts/openbinggu_doctor.py --selftest                      # 12/12
+python binggu.py --selftest                                         # 14/14 (CLI 풀 사이클)
+python scripts/openbinggu_v1_candidate_cycle_real_once.py --dry-run-temp   # 17/17 (통합 사이클)
+python scripts/openbinggu_conversation_candidate_save.py --selftest # 12/12 (저장 게이트)
+python scripts/openbinggu_candidate_list_view.py --selftest         # 13/13 (목록)
+python scripts/openbinggu_candidate_deprecate_ux.py --selftest      # 15/15 (기각)
+python scripts/openbinggu_candidate_replace_ux.py --selftest        # 16/16 (수정)
+python scripts/openbinggu_owner_accept_ux.py --selftest             # 16/16 (수용)
+python scripts/openbinggu_v08_review_resolve_4values.py --selftest  # 16/16 (4값 resolve)
+python scripts/openbinggu_save_intent_outbox_runner.py --selftest   # 16/16 (save-intent outbox)
+python scripts/openbinggu_upload_preflight.py --selftest            # 37/37 (업로드 preflight)
+python scripts/openbinggu_v08_real_cycle_once.py --dry-run-temp     # 14/14 (쓰기 루프)
+python scripts/openbinggu_public_tree_scan.py --tree .              # CLEAN
 ```
 
-doctor는 아래 검사를 한 번에 호출하고 **요약(PASS/FAIL·reason_code·count)만** 출력합니다(raw 경로/secret 미출력):
-1. scope_envelope_dryrun  2. watcher_pack_builder_m0  3. pack_validate
-4. pack_consumer_smoke    5. path_safety_gate          6. mcp_path_gate_adapter
-7. public_tree_scan       8. c2_guard_selftest(C-2 단일통제 21/21)
-9. staging_write_selftest(temp DB, 운영 write 0)
-10. phase4_reviewer_confirmed(preview 불변 강제: confirmed_created=0·applied=0·promoted=0·upload=0)
-+ secret/PII scan(dry-run stub) + real_tree_scan(--tree 지정 시) + operating store 불변 확인
-→ 총 **12/12 PASS · GATE=GO** 기대
+요구사항: **Python 3.10+** 표준 라이브러리만(외부 의존성 0). Windows/macOS/Linux.
+더 자세한 절차는 [INSTALL.md](INSTALL.md), 따라하기는 [docs/BINGGUPACK_TUTORIAL.md](docs/BINGGUPACK_TUTORIAL.md).
 
-개별 실행도 가능합니다:
+## Pack — 장부를 묶어서 옮기기
+
+장부/문서를 **pack**(jsonl 묶음)으로 만들어 검증·공유할 수 있습니다. pack은 언제나 candidate이며,
+받는 쪽 운영 그래프에 자동 반영되지 않습니다.
 
 ```bash
-python scripts/openbinggu_scope_envelope_dryrun.py --selftest
-python scripts/watcher_pack_builder_m0.py --selftest
-python scripts/openbinggu_pack_validate.py --selftest
-python scripts/openbinggu_pack_consumer_smoke.py --selftest
-python scripts/openbinggu_path_safety_gate.py --selftest
-python scripts/openbinggu_mcp_path_gate_adapter.py --selftest
+# toy pack 읽기 흐름 확인
+python scripts/openbinggu_pack_consumer_smoke.py tests/fixtures/synthetic/toy_public_pack_cross_root_read_ok.json
+# 공개·업로드 전 fail-closed 게이트 (G1~G7)
+python scripts/openbinggu_upload_preflight.py <pack_dir> [<temp_staging_db>]
 ```
 
-쓰기 루프(v0.8)·후보 관리 UX(v0.9.0-rc1)도 clean clone에서 temp-only로 재현 가능합니다:
+업로드 preflight는 **승인 문구를 사람이 직접 타이핑**해야 하고(`UPLOAD <pack_id> <hash8> IRREVERSIBLE`),
+전송 직전 full SHA-256 재검증에 실패하면 무조건 중단됩니다. 실 전송은 의도적으로 미구현(별도 결정)입니다.
 
-```bash
-python scripts/openbinggu_candidate_list_view.py --selftest            # 13/13 기대
-python scripts/openbinggu_candidate_deprecate_ux.py --selftest         # 15/15 기대
-python scripts/openbinggu_candidate_replace_ux.py --selftest           # 16/16 기대
-python scripts/openbinggu_owner_accept_ux.py --selftest                # 16/16 기대
-python scripts/openbinggu_v08_review_resolve_4values.py --selftest     # 16/16 기대
-python scripts/openbinggu_v08_real_cycle_once.py --dry-run-temp        # 14/14 기대 (쓰기 루프 통합, temp만)
-python scripts/openbinggu_v1_candidate_cycle_real_once.py --dry-run-temp  # 17/17 기대 (후보 관리 통합 사이클, temp만)
-```
+## 현재 제공 / Planned
 
-각 명령은 마지막에 `GATE: GO` 를 출력하고 종료코드 `0` 이면 통과입니다. 하나라도 `GATE: GO` 가 아니거나 종료코드가 0이 아니면 사용을 중단하고 이슈를 확인하세요.
-
-## Use a pack / pack 사용 예시
-
-다른 사람이 공개한 pack(또는 toy 예시)을 받아 읽는 흐름:
-
-```bash
-# 1) toy/synthetic pack 예시 위치
-#    tests/fixtures/synthetic/toy_public_pack_cross_root_read_ok.json
-#    (다른 user_root 가 public pack 을 읽을 수 있는 synthetic 예시)
-
-# 2) consumer smoke 로 읽기 흐름 확인
-python scripts/openbinggu_pack_consumer_smoke.py --selftest
-```
-
-- 공개(public) pack은 owner가 아닌 다른 사용자도 읽을 수 있습니다(읽기 전용).
-- private/team pack은 다른 user_root에서 읽으면 **거부(deny-by-default)** 됩니다.
-- pack은 candidate이며, 받은 쪽에서 자동으로 자기 그래프에 병합되지 않습니다(검토 후 수동).
-
-### Load a batch pack into local staging / batch pack을 로컬 staging에 적재해 보기
-
-batch pack 디렉터리(manifest.json + jsonl)를 local persistence staging에 **apply → read-back → rollback(원복)** 까지 한 번에 검증:
-
-```bash
-python scripts/openbinggu_batch_pack_loader.py --selftest          # synthetic/temp 전 과정 검증 (10/10 기대)
-# 자기 pack 적재(명시 opt-in 필수, 기본은 rollback 원복 / --keep 시 유지) — macOS/Linux:
-OPENBINGGU_HOME=<repo 밖 경로> python scripts/openbinggu_batch_pack_loader.py --pack-dir <pack 디렉터리> --enable-write
-```
-
-Windows (PowerShell)는 환경변수를 먼저 설정합니다:
-```powershell
-$env:OPENBINGGU_HOME = "<repo 밖 경로>"
-python scripts/openbinggu_batch_pack_loader.py --pack-dir <pack 디렉터리> --enable-write
-```
-
-- write는 **기본 OFF**(`--enable-write` 없으면 거부), apply 직전 PII/secret 잔존 재스캔(kind만 출력) 후 검출 시 거부됩니다.
-- manifest가 `pack_type=candidate` + `promotion_allowed_default=false`가 아니면 load 자체를 거부합니다(fail-closed).
-
-### Preview a promotion / 승격 전 preview (v0.4.0-rc1, read-only)
-
-batch pack을 로컬 운영형 그래프로 승격하기 **전에**, 어떤 변환(D1~D4)·id 충돌·FTS 색인 추가·backup/rollback 준비가 필요한지 **미리 보여주는 plan 도구**입니다. target DB는 항상 read-only로만 열며 **어떤 write도 하지 않습니다**(승격 실행기는 이 RC에 미포함). `OPENBINGGU_OPERATING_DB` 미지정 시 synthetic temp DB로 시연합니다.
-
-```bash
-python scripts/openbinggu_promotion_preview.py --selftest                    # 12/12 PASS GATE=GO 기대
-python scripts/openbinggu_promotion_preview.py --pack-dir <pack 디렉터리> --domain D10
-```
-
-> 변환 규칙·target schema contract·contentless FTS 검증법은 [Promotion Preview 설계](docs/OPENBINGGU_PROMOTION_PREVIEW_DESIGN.md) 참조.
-
-## Multi-agent handoff / 여러 AI에 pack 넘기기
-
-하나의 pack을 **Claude·Codex·ChatGPT·Gemini**가 같은 맥락으로 이어받게 하는 방법은 [Multi-agent handoff guide](docs/OPENBINGGU_PHASE3_MULTI_AGENT_HANDOFF_GUIDE.md)를 참고하세요. 4개 모델용 **prompt template**과 consumer 규칙을 포함합니다. 핵심:
-
-- **evidence_refs 기반 답변**: pack의 evidence_refs로 뒷받침되는 사실만 답하고, 없으면 "pack에 근거 없음"이라고 답합니다(**추측 금지**).
-- **evidence 없는 edge는 candidate**: 새 node→node 관계는 evidence 직접성이 없으면 confirmed가 아닌 candidate 제안으로만 표시합니다.
-- **충돌 보존 / 자동 병합·승격 금지**: contradicts edge는 양쪽을 다 제시하고, 받은 pack을 자기 그래프에 자동 반영하지 않습니다(검토 후 수동, confirmed는 별도).
-- 출처는 node_id/evidence_id만 표기(raw 경로·secret 미출력).
-
-## Validate your real data / 실데이터 검증 (공개·업로드 전, 사용자 로컬에서만)
-
-> ⚠️ selftest가 `GATE: GO`여도 그건 "검사기가 맞다"는 뜻이지 "당신의 실제 데이터가 안전하다"는 뜻이 아닙니다. 공개/업로드 전, **자기 로컬 데이터(공개 후보 트리)** 로 한 번 더 검증하세요. 이 검증은 **사용자 자기 머신에서만** 수행하며, 작성자/운영자가 당신의 데이터를 대신 스캔하지 않습니다.
-
-1. clean repo 후보 트리 선택(공개 대상만 복사, 실 그래프/DB/.env 미복사)
-2. `python scripts/openbinggu_doctor.py --selftest`
-3. 공개 후보 트리 secret/PII scan: `python scripts/openbinggu_doctor.py --tree <공개_후보_트리>`
-   (또는 `python scripts/openbinggu_public_tree_scan.py --tree <ROOT>`)
-4. 결과는 **요약(count·reason_code·file_id)만** 확인 — raw 경로/원문/secret은 보지 않음
-5. 검출 **1건 이상이면 verdict=BLOCK / GATE=NO-GO**(공개·업로드 차단)
-6. 모두 0(CLEAN)일 때만, 요약을 보고 **본인이 수동 승인** → 그 후에만 push/upload
-
-> 상세: [REAL_DATA_VALIDATION_PROCEDURE](docs/OPENBINGGU_REAL_DATA_VALIDATION_PROCEDURE.md). GitHub 공개와 OpenCrab 업로드는 동일 BLOCK 기준·동일 수동 승인 게이트. scan은 read-only이며 raw 경로/내용/secret을 출력하지 않습니다(file_id·reason_code·count만).
-
-## Publish your own pack / 내 pack 공개 (요약)
-
-공개 전 [Public Release Checklist](docs/OPENBINGGU_PUBLIC_RELEASE_CHECKLIST.md)를 전수 통과해야 합니다. 핵심:
-
-1. 작성자 실데이터(그래프/DB/리뷰/캡처/evidence 원문) 미포함.
-2. `.env`/token/key/credential 0, secret/PII scan PASS(검출 시 존재·길이만 보고, raw 미출력).
-3. **source pointer가 dirty/unknown이면 공개 BLOCK**(비공개 절대경로·사내 URL·localhost·내부 IP 등).
-4. 공개 직전 **owner 1회 수동 승인** 후에만 push.
-
-> 자동 sanitizer/치환으로 통과시키지 않습니다(정책: 차단만 유지 — [SANITIZER_POLICY_BLOCK_ONLY](docs/OPENBINGGU_SANITIZER_POLICY_BLOCK_ONLY.md)).
+| 영역 | 상태 |
+|---|---|
+| 로컬 후보 관리(저장→기각→수정→수용→4값 검증) | ✅ v1.0.0-rc1 — real 1사이클 13/13 + clean clone 17/17 검증 |
+| `binggu` CLI (내 장부 진입점) | ✅ v1.0.0-rc1 |
+| hosted 조회 (Claude/ChatGPT 채팅에서 장부 read-only) | ✅ 동작 검증됨 — 단 각자 자기 워커를 배포해야 함(`hosted/`), 공용 서버 없음 |
+| hosted 저장(save-intent) | 🔜 planned — 설계 완료(`docs/BINGGUPACK_HOSTED_SAVE_INTENT_DESIGN.md`), 로컬 outbox 러너까지 구현. live 노출은 인증·canary·audit·rollback 게이트 통과 후 별도 결정 |
+| OpenCrab private 업로드 | 🔜 planned — preflight(G1~G7)까지 구현·검증, 실 전송은 별도 결정 |
+| 팀/공유/마켓플레이스/과금 | ❌ 범위 밖 (정책 미정) |
 
 ## Do NOT / 금지·주의사항
 
@@ -273,6 +121,6 @@ This project is licensed under the **MIT License** — see the [LICENSE](LICENSE
 
 ## Status / 상태
 
-- 개인용(트랙1): 로컬 사용 + 공개 준비(RC) — fail-closed dry-run 완료.
+- 개인용(트랙1): **v1.0.0-rc1 — 후보 관리 전 구간 완성**(temp+real+clean clone 검증). `binggu` CLI로 개인 장부 실사용 가능.
 - 팀 유료(트랙2): DEFER. 불특정 다수 marketplace: BLOCK.
-- 실제 GitHub: **Public 공개(최신 `v0.9.0-rc1`, prerelease).**
+- 실제 GitHub: **Public 공개(최신 `v1.0.0-rc1`, prerelease).**
