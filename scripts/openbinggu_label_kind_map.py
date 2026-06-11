@@ -91,13 +91,19 @@ def _selftest():
         print("  [%s] %-14s rule=%-18s %s" % ("OK" if ok else "FAIL", kind, rule, s[:34]))
 
     # 매핑 정합: merge_adapter NODE_MAP 과 일치 + 양방향 무손실 + A0 LABEL_KINDS 일치
+    # merge_adapter 는 비공개 작업트리 전용 — clean clone(public repo)엔 없으므로 부재 시 skip.
     import importlib
-    ma = importlib.import_module("localbinggu_merge_adapter")
     a0 = importlib.import_module("openbinggu_a0_node_dryrun")
-    map_match = all(KIND_TO_SPACE_NTYPE[k] == ma.NODE_MAP[k] for k in KIND_KO)
+    try:
+        ma = importlib.import_module("localbinggu_merge_adapter")
+        map_match = all(KIND_TO_SPACE_NTYPE[k] == ma.NODE_MAP[k] for k in KIND_KO)
+        map_label = "merge_adapter_NODE_MAP_일치"
+    except ImportError:
+        map_match = True
+        map_label = "merge_adapter_NODE_MAP_일치 (모듈 부재 — public clone, skip)"
     roundtrip = all(EN2KO[KO2EN[k]] == k for k in KIND_KO)
     a0_match = set(KO2EN.values()) == a0.LABEL_KINDS
-    for name, ok in [("merge_adapter_NODE_MAP_일치", map_match),
+    for name, ok in [(map_label, map_match),
                      ("한영_왕복_무손실", roundtrip),
                      ("A0_LABEL_KINDS_일치", a0_match)]:
         all_ok = all_ok and ok
