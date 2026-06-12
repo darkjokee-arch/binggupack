@@ -1,0 +1,16 @@
+# V2-2 — save-intent v2 운영 worker (라이브 D3' canary 전용 라인).
+# owner 승인 문구("V2-2 배포 고", 2026-06-12) 하에만 deploy.
+# 읽기 라인(binggupack-workers-port-local)·로컬 라인(binggupack-save-intent-v2-local)과 name 완전 분리.
+# 기본 상태 = inbox 잠김(fail-closed) — secret 미주입 시 503 not configured.
+# 운영 수칙: Workers Logs/observability 켜지 말 것 (payload 기록 차단).
+name = "binggupack-save-intent-v2"
+main = "src/index.save_v2.ts"
+compatibility_date = "2025-05-01"
+
+[[durable_objects.bindings]]
+name = "INBOX"
+class_name = "IntentInbox"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["IntentInbox"]

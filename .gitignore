@@ -26,3 +26,6 @@ tmp/
 __pycache__/
 *.bak_*
 *.zip
+
+# 로컬 키 사본 — 절대 커밋 금지
+.dev.vars*
