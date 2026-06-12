@@ -13,7 +13,7 @@ AI와의 대화·메모에서 건질 문장(판단/상태/개념)을 후보로 �
 ```bash
 git clone https://github.com/darkjokee-arch/binggupack
 cd binggupack
-python scripts/openbinggu_doctor.py --selftest   # 12/12 GATE GO 확인
+python scripts/openbinggu_doctor.py --selftest   # 15/15 GATE GO 확인
 
 python binggu.py init                            # 내 장부 생성 (~/.binggupack/ledger.sqlite)
 python binggu.py preview "이 입찰은 마진이 낮아 보류한다. 백필 작업이 진행 중이다."
@@ -22,6 +22,13 @@ python binggu.py save "이 입찰은 마진이 낮아 보류한다. 백필 작�
                  --preview-id <표시된 id> --pick 1,2 --confirm "SAVE 1,2"
 python binggu.py list                            # 도장·id·문장 발췌 목록
 python binggu.py status
+```
+
+PowerShell에서는 `\` 줄바꿈이 동작하지 않습니다 — save를 한 줄로 실행하거나 백틱(`` ` ``)으로 잇고,
+`--pick 1,2`처럼 쉼표가 든 인자는 배열로 해석되지 않게 반드시 따옴표로 감싸세요:
+
+```powershell
+python binggu.py save "이 입찰은 마진이 낮아 보류한다. 백필 작업이 진행 중이다." --preview-id <표시된 id> --pick "1,2" --confirm "SAVE 1,2"
 ```
 
 **저장 흐름(고정)**: "저장하고 싶다"는 의도는 preview의 시작일 뿐, 실행 승인이 아닙니다.
@@ -64,8 +71,8 @@ preview_id 없는 save는 전부 BLOCK 됩니다. 저장되는 것은 80자 이�
 ## 검증 / Verify (실측 기대값)
 
 ```bash
-python scripts/openbinggu_doctor.py --selftest                      # 12/12
-python binggu.py --selftest                                         # 14/14 (CLI 풀 사이클)
+python scripts/openbinggu_doctor.py --selftest                      # 15/15
+python binggu.py --selftest                                         # 15/15 (CLI 풀 사이클)
 python scripts/openbinggu_v1_candidate_cycle_real_once.py --dry-run-temp   # 17/17 (통합 사이클)
 python scripts/openbinggu_conversation_candidate_save.py --selftest # 12/12 (저장 게이트)
 python scripts/openbinggu_candidate_list_view.py --selftest         # 13/13 (목록)
@@ -78,6 +85,8 @@ python scripts/openbinggu_upload_preflight.py --selftest            # 37/37 (업
 python scripts/openbinggu_v08_real_cycle_once.py --dry-run-temp     # 14/14 (쓰기 루프)
 python scripts/openbinggu_public_tree_scan.py --tree .              # CLEAN
 ```
+
+각 selftest는 마지막에 `GATE: GO`가 찍히고 exit code 0이면 정상입니다.
 
 요구사항: **Python 3.10+** 표준 라이브러리만(외부 의존성 0). Windows/macOS/Linux.
 더 자세한 절차는 [INSTALL.md](INSTALL.md), 따라하기는 [docs/BINGGUPACK_TUTORIAL.md](docs/BINGGUPACK_TUTORIAL.md).

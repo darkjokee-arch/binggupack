@@ -49,6 +49,11 @@ def _fid(rel):
     return "f_" + hashlib.sha256(rel.replace("\\", "/").lower().encode("utf-8", "replace")).hexdigest()[:8]
 
 
+def _open_text(path):
+    """텍스트 read 핸들(selftest 에서 읽기 실패 시뮬레이션용 분리)."""
+    return open(path, "r", encoding="utf-8", errors="replace")
+
+
 def _ignored(rel, ignore_globs):
     relu = rel.replace("\\", "/")
     for g in ignore_globs or ():
@@ -68,6 +73,8 @@ def scan_public_tree(root, ignore_globs=()):
     by_reason = {}
     scanned = 0
     skipped = 0
+    # content 미검사 사유별 집계(fail-open 가시화): ext=화이트리스트 밖 / size=512KB 초과 / read_error=읽기 실패
+    content_skipped = {"ext": 0, "size": 0, "read_error": 0}
 
     for dirpath, dirnames, filenames in os.walk(root):
         for fn in filenames:
@@ -85,24 +92,34 @@ def scan_public_tree(root, ignore_globs=()):
                     findings.append({"reason_code": code, "file_id": fid, "where": "path"})
                     by_reason[code] = by_reason.get(code, 0) + 1
 
-            # 2) 내용 기반(텍스트, 크기 제한)
+            # 2) 내용 기반(텍스트, 크기 제한) — 미검사 파일은 집계해 노출
             ext = os.path.splitext(fn)[1].lower()
+            if ext not in _TEXT_EXT:
+                content_skipped["ext"] += 1
+                continue
             try:
-                if ext in _TEXT_EXT and os.path.getsize(full) <= _MAX_BYTES:
-                    with open(full, "r", encoding="utf-8", errors="replace") as fh:
-                        for lineno, line in enumerate(fh, 1):
-                            for code, rx in _CONTENT:
-                                if rx.search(line):
-                                    # raw 라인 미저장: 위치는 line 번호 라벨만
-                                    findings.append({"reason_code": code, "file_id": fid,
-                                                     "where": "L%d" % lineno})
-                                    by_reason[code] = by_reason.get(code, 0) + 1
+                if os.path.getsize(full) > _MAX_BYTES:
+                    content_skipped["size"] += 1
+                    continue
+                with _open_text(full) as fh:
+                    for lineno, line in enumerate(fh, 1):
+                        for code, rx in _CONTENT:
+                            if rx.search(line):
+                                # raw 라인 미저장: 위치는 line 번호 라벨만
+                                findings.append({"reason_code": code, "file_id": fid,
+                                                 "where": "L%d" % lineno})
+                                by_reason[code] = by_reason.get(code, 0) + 1
             except Exception:
-                pass  # 읽기 실패는 무시(raw 노출 0)
+                # 읽기 실패 = 검사 불능 → fail-closed: BLOCK 사유로 승격(raw 노출 0)
+                content_skipped["read_error"] += 1
+                findings.append({"reason_code": "content_read_error", "file_id": fid,
+                                 "where": "content"})
+                by_reason["content_read_error"] = by_reason.get("content_read_error", 0) + 1
 
     hits = len(findings)
     return {
         "scanned": scanned, "skipped_ignored": skipped, "hits": hits,
+        "content_skipped": content_skipped,  # 미검사 카운트 노출(fail-open 방지)
         "by_reason": dict(sorted(by_reason.items())),
         "findings": findings,            # file_id/reason_code/where 만 (raw 경로/내용 0)
         "verdict": "BLOCK" if hits > 0 else "CLEAN",
@@ -136,12 +153,26 @@ def _build_fixture(base):
     w(os.path.join(dirty, "config.py"), "to" + "ken = '" + "ghp_" + "EXAMPLE000000000000000000'\n")
     w(os.path.join(dirty, "data", "id_rsa"), "-----BEGIN OPENSSH PRIVATE" + " KEY-----\nEXAMPLE\n")
     w(os.path.join(dirty, "notes.txt"), "contact 010-" + "0000-0000\nrrn " + "900101" + "-1000000\n")
-    return clean, dirty
+
+    # skip: content 미검사 사유별 집계 검증용(내용 자체는 clean)
+    skip = os.path.join(base, "skip_tree")
+    os.makedirs(skip, exist_ok=True)
+    w(os.path.join(skip, "blob.bin"), "binary-ish payload (ext whitelist 밖)\n")
+    w(os.path.join(skip, "big.txt"), "x" * (_MAX_BYTES + 1))
+    w(os.path.join(skip, "locked.txt"), "normal readable text\n")
+
+    # neg(음성 fixture): 스캔이 반드시 잡아야 할 합성 위반 1건 — credentials 경로+secret 내용
+    neg = os.path.join(base, "neg_tree")
+    os.makedirs(os.path.join(neg, "config"), exist_ok=True)
+    w(os.path.join(neg, "config", "credentials.txt"),
+      "api_" + "key = " + "AKIA" + "0000EXAMPLE0000\n")
+    return clean, dirty, skip, neg
 
 
 def _selftest():
+    global _open_text
     base = os.path.join(os.environ.get("TEMP", "/tmp"), "openbinggu_public_tree_scan_fixture")
-    clean, dirty = _build_fixture(base)
+    clean, dirty, skip, neg = _build_fixture(base)
 
     print("=" * 72)
     print("OpenBinggu public tree secret/PII scanner (synthetic / selftest)")
@@ -150,28 +181,53 @@ def _selftest():
     all_ok = True
     raw_leak = False
 
-    def check(name, root, expect_verdict, ignore=(), expect_min_hits=None):
+    def check(name, root, expect_verdict, ignore=(), expect_min_hits=None, expect_skip=None):
         nonlocal all_ok, raw_leak
         r = scan_public_tree(root, ignore_globs=ignore)
         ok = (r["verdict"] == expect_verdict)
         if expect_min_hits is not None:
             ok = ok and (r["hits"] >= expect_min_hits)
+        if expect_skip is not None:
+            for k, v in expect_skip.items():
+                ok = ok and (r["content_skipped"].get(k) == v)
         # raw 미출력 검증: findings 값에 절대경로/실내용 흔적 없어야(파일명/경로 substring 금지)
         import json as _json
         blob = _json.dumps(r, ensure_ascii=False)
-        for token in (root, ".env", "id_rsa", "AKIA" + "0000EXAMPLE0000", "900101" + "-1000000", "010-" + "0000-0000"):
+        for token in (root, ".env", "id_rsa", "AKIA" + "0000EXAMPLE0000", "900101" + "-1000000",
+                      "010-" + "0000-0000", "credentials.txt", "blob.bin", "locked.txt"):
             if token in blob:
                 raw_leak = True
         all_ok = all_ok and ok
-        print("  [%s] %-26s verdict=%-5s hits=%-2d by_reason=%s"
-              % ("OK" if ok else "FAIL", name, r["verdict"], r["hits"], r["by_reason"]))
+        print("  [%s] %-26s verdict=%-5s hits=%-2d content_skipped=%s by_reason=%s"
+              % ("OK" if ok else "FAIL", name, r["verdict"], r["hits"],
+                 r["content_skipped"], r["by_reason"]))
         return r
 
-    check("clean_tree_pass", clean, "CLEAN", expect_min_hits=0)
+    check("clean_tree_pass", clean, "CLEAN", expect_min_hits=0,
+          expect_skip={"ext": 0, "size": 0, "read_error": 0})
     check("dirty_tree_block", dirty, "BLOCK", expect_min_hits=4)
     # ignore 연동: .env / id_rsa 제외해도 config.py(token)·notes.txt(PII) 남아 여전히 BLOCK
     check("dirty_with_ignore_still_block", dirty, "BLOCK",
           ignore=("*/.env", ".env", "*/id_rsa", "id_rsa"), expect_min_hits=2)
+    # content skip 집계 노출: ext 밖 1 + 512KB 초과 1 (읽기 실패 없음 → CLEAN)
+    check("skip_counts_exposed_clean", skip, "CLEAN", expect_min_hits=0,
+          expect_skip={"ext": 1, "size": 1, "read_error": 0})
+    # 읽기 실패 = fail-closed BLOCK 승격(시뮬레이션: locked.txt 만 read 실패)
+    _orig_open = _open_text
+
+    def _failing_open(path):
+        if os.path.basename(path) == "locked.txt":
+            raise OSError("simulated read failure")
+        return _orig_open(path)
+
+    _open_text = _failing_open
+    try:
+        check("read_error_fail_closed", skip, "BLOCK", expect_min_hits=1,
+              expect_skip={"ext": 1, "size": 1, "read_error": 1})
+    finally:
+        _open_text = _orig_open
+    # 음성 fixture: 합성 위반 1건(credentials 경로 + secret 내용)은 반드시 검출
+    check("neg_fixture_must_detect", neg, "BLOCK", expect_min_hits=1)
 
     print("\n  raw_value_not_leaked:", (not raw_leak))
     print("  operating_store_unchanged: True (fixture=temp, 트리 read-only scan)")
@@ -188,8 +244,9 @@ def main():
     elif args[0] == "--tree" and len(args) >= 2:
         r = scan_public_tree(args[1])
         # 요약만 출력(raw 미출력)
-        print("scanned=%d skipped_ignored=%d hits=%d verdict=%s by_reason=%s"
-              % (r["scanned"], r["skipped_ignored"], r["hits"], r["verdict"], r["by_reason"]))
+        print("scanned=%d skipped_ignored=%d content_skipped=%s hits=%d verdict=%s by_reason=%s"
+              % (r["scanned"], r["skipped_ignored"], r["content_skipped"],
+                 r["hits"], r["verdict"], r["by_reason"]))
         sys.exit(0 if r["verdict"] == "CLEAN" else 1)
     else:
         print("usage: openbinggu_public_tree_scan.py [--selftest | --tree <ROOT>]")

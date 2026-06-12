@@ -16,7 +16,12 @@ from openbinggu_staging_write_selftest import OPERATING_PATHS  # noqa: E402
 from openbinggu_deprecate_and_remind_g3 import (  # noqa: E402
     open_g3, deprecate_item, active_view, set_review_due, list_due_reminders)
 from openbinggu_proposal_to_verb_edge_g2c import finalize_proposal  # noqa: E402
-from openbinggu_real_staging_apply_once import REAL_STAGING_DB, SNAP_DIR, _wal_checkpoint  # noqa: E402
+try:
+    from openbinggu_real_staging_apply_once import REAL_STAGING_DB, SNAP_DIR, _wal_checkpoint  # noqa: E402
+except ImportError:
+    print("이 스크립트는 비공개 운영 모듈이 필요합니다(openbinggu_real_staging_apply_once — 공개 repo 범위 밖).")
+    print("공개 대안: python scripts/openbinggu_deprecate_and_remind_g3.py (temp SQLite G3 selftest)")
+    sys.exit(2)
 
 PII_NODE = "node:STAGING:wch:4cf0c23e"   # "주민[REDACTED] 정보가 본문에 포함되어 있다" — 사례 기술인데 판단 분류 = 오분류 기각 실연
 DUE_NODE = "node:STAGING:wch:df4613cd"   # "도메인 식별자로 보존되어야 한다" — 판단성 문장, 검증예정일 실연

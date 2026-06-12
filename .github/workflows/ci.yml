@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Doctor selftest (15 checks, GATE=GO required)
+        run: python scripts/openbinggu_doctor.py --selftest
+
+      - name: Public tree secret/PII scan (verdict=CLEAN required)
+        run: python scripts/openbinggu_public_tree_scan.py --tree .

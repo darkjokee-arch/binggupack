@@ -7,6 +7,7 @@
 // live 노출 = A-2 owner GO 전 금지. 변수명 token/secret '=' 조합 회피 (6/10 박제).
 import { IntentInbox } from "./save_intent_v2";
 import { capturePreview } from "./capture_preview";
+import { hex, sigV2Only, verifySig } from "./save_common";
 
 export { IntentInbox };
 
@@ -15,7 +16,6 @@ const TEXT_CAP = 36000;
 const INDICES_CAP = 64;
 const DEFAULT_TTL_S = 86400;
 const DEFAULT_INBOX_CAP = 32;
-const SIG_WINDOW_S = 300;
 // 4cli 20260612_1420 both_reject→단순화: 폰 미리보기·PC 러너 후보 상한 단일 고정.
 // PC 러너 capture_preview 기본(DEFAULT_MAX=10)과 반드시 동일해야 번호 일치(임의 max 금지).
 const CANDIDATE_MAX = 10;
@@ -24,17 +24,6 @@ const SUPPORTED_PROTOCOL_VERSIONS = ["2025-03-26", "2025-06-18", "2025-11-25"];
 const SERVER_INFO = { name: "binggupack-save-intent", version: "2.0" };
 
 const ENC = new TextEncoder();
-
-function hex(buf: ArrayBuffer): string {
-  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-function timingSafeEqHex(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let d = 0;
-  for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return d === 0;
-}
 
 // 러너 intent_hash 와 바이트 동일 의무: sha256(text + "|" + indices.join(",") + "|" + confirm)[:16]
 async function intentHash(text: string, indices: number[], confirm: string): Promise<string> {
@@ -109,24 +98,13 @@ function originOk(request: Request): boolean {
   return request.headers.get("Origin") === null;
 }
 
-async function verifySig(signMaterial: string, request: Request, bodyText: string,
-                         nowS: number): Promise<boolean> {
-  const ts = request.headers.get("X-BGP-TS");
-  const sig = request.headers.get("X-BGP-SIG");
-  if (!ts || !sig || !signMaterial) return false;
-  const t = parseInt(ts, 10);
-  if (!Number.isInteger(t) || Math.abs(nowS - t) > SIG_WINDOW_S) return false;
-  const bodyHash = hex(await crypto.subtle.digest("SHA-256", ENC.encode(bodyText)));
-  const key = await crypto.subtle.importKey(
-    "raw", ENC.encode(signMaterial), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const mac = hex(await crypto.subtle.sign("HMAC", key, ENC.encode(ts + "." + bodyHash)));
-  return timingSafeEqHex(mac, sig.toLowerCase());
-}
+// HMAC 검증 단일 출처 = save_common.verifySig (신형 method+path 우선 · 구형 하위호환)
 
 interface SaveMcpEnv {
   SAVE_PATH_TOKEN?: string;
   SAVE_SIGN_SECRET?: string;
   SAVE_INBOX_CAP?: string;
+  SAVE_SIG_V2_ONLY?: string;       // "1"/"true" = 신형 서명 전용 (기본 false = 구형 수용)
   INBOX: DurableObjectNamespace;
 }
 
@@ -208,7 +186,11 @@ export function makeSaveMcpHandler() {
         if (rpc === null || typeof rpc !== "object" || Array.isArray(rpc)) {
           return denyJson(400, "invalid json");
         }
-        return handleMcp(rpc, env, stub);
+        try {
+          return await handleMcp(rpc, env, stub);
+        } catch { // 미상 예외 — 내부 정보 미노출 정적 -32603 (index.ts 패턴 재사용)
+          return rpcError(rpc.id ?? null, -32603, "internal error");
+        }
       }
 
       // 인출·관리 (PC 러너) — HMAC
@@ -219,7 +201,7 @@ export function makeSaveMcpHandler() {
         if (!originOk(request)) return denyJson(403, "origin not allowed");
         const signMaterial = (env.SAVE_SIGN_SECRET ?? "").trim();
         const bodyText = await request.text();
-        if (!(await verifySig(signMaterial, request, bodyText, nowS))) {
+        if (!(await verifySig(signMaterial, request, bodyText, nowS, sigV2Only(env.SAVE_SIG_V2_ONLY)))) {
           return denyJson(401, "bad signature");
         }
         if (sub === "pull") return stub.fetch("https://do/drain", { method: "POST" });

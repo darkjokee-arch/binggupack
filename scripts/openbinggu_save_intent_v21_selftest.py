@@ -27,7 +27,6 @@ v1 라이브 부적합 5결함(§0)에 대한 구조 응답을 로컬에서 검�
 금지: deploy 0 · live 호출 0 · 외부 네트워크 0 (127.0.0.1 한정) · 실 DB 0.
 """
 import hashlib
-import hmac as hmac_mod
 import json
 import os
 import shutil
@@ -47,6 +46,7 @@ PORT = 8797
 BASE_HOST = "http://127.0.0.1:%d" % PORT
 
 sys.path.insert(0, HERE)
+from binggupack_sign_util import signed_headers  # noqa: E402 — HMAC 단일 출처 (L-8)
 from openbinggu_save_intent_outbox_runner import intent_hash  # noqa: E402
 
 RESULTS = []
@@ -55,14 +55,6 @@ RESULTS = []
 def rec(cid, desc, ok):
     RESULTS.append((cid, desc, ok))
     print("[%s] %s %s" % ("OK" if ok else "NG", cid, desc))
-
-
-def signed_headers(sign_material, body_bytes, ts=None):
-    ts = str(ts if ts is not None else int(time.time()))
-    body_hash = hashlib.sha256(body_bytes).hexdigest()
-    mac = hmac_mod.new(sign_material.encode("utf-8"),
-                       (ts + "." + body_hash).encode("utf-8"), hashlib.sha256).hexdigest()
-    return {"X-BGP-TS": ts, "X-BGP-SIG": mac}
 
 
 def http(method, url, body=None, headers=None):
@@ -120,32 +112,35 @@ def main():
         it = mk_intent("합성 v21 대화 — " + marker + " — 이 입찰은 마진이 낮아 보류한다.", [1])
         body = json.dumps(it).encode("utf-8")
 
-        st, rb = http("POST", base + "/intent", body, signed_headers(sign_material, body))
+        st, rb = http("POST", base + "/intent", body, signed_headers(sign_material, body, base + "/intent"))
         rec("S1", "기본 비활성 — 서명 put도 503 (fail-closed 기본 off)",
             st == 503 and "inbox_disabled" in rb)
 
         eb = b"{}"
-        st, rb = http("POST", base + "/admin/enable", eb, signed_headers(sign_material, eb))
+        st, rb = http("POST", base + "/admin/enable", eb, signed_headers(sign_material, eb, base + "/admin/enable"))
         rec("S2", "admin/enable(서명) 200", st == 200)
 
         st, _ = http("POST", base + "/intent", body)
         rec("S3", "무서명 put 401", st == 401)
         st, _ = http("POST", base + "/intent", body,
-                     signed_headers(sign_material, body, ts=int(time.time()) - 301))
+                     signed_headers(sign_material, body, base + "/intent",
+                                    ts=int(time.time()) - 301))
         rec("S4", "ts 창 밖(-301s) 401", st == 401)
         tam = json.dumps(dict(it, text=it["text"] + "x")).encode("utf-8")
-        st, _ = http("POST", base + "/intent", tam, signed_headers(sign_material, body))
+        st, _ = http("POST", base + "/intent", tam,
+                     signed_headers(sign_material, body, base + "/intent"))
         rec("S5", "body 변조(서명 원본 기준) 401", st == 401)
         st, _ = http("POST", BASE_HOST + "/save2/wrongkey000/intent", body,
-                     signed_headers(sign_material, body))
+                     signed_headers(sign_material, body, BASE_HOST + "/save2/wrongkey000/intent"))
         rec("S6", "오토큰 경로 404", st == 404)
 
-        st, rb = http("POST", base + "/intent", body, signed_headers(sign_material, body))
+        st, rb = http("POST", base + "/intent", body, signed_headers(sign_material, body, base + "/intent"))
         rec("S7", "정상 put 200 + intent_id",
             st == 200 and json.loads(rb).get("intent_id") == it["intent_id"])
 
         bad = json.dumps(dict(it, schema_ver=2)).encode("utf-8")
-        st, rb = http("POST", base + "/intent", bad, signed_headers(sign_material, bad))
+        st, rb = http("POST", base + "/intent", bad,
+                      signed_headers(sign_material, bad, base + "/intent"))
         rec("S8", "shape 거부 schema_ver=2 → 400", st == 400 and "schema_mismatch" in rb)
 
         # S9 — cap=5 전역 단일 카운트: 현재 1건 적재 → +4 = 5 → 6번째 503
@@ -153,16 +148,18 @@ def main():
         for i in range(4):
             x = mk_intent("cap 채움 %d — 이 검토는 보류한다." % i, [1])
             xb = json.dumps(x).encode("utf-8")
-            st, _ = http("POST", base + "/intent", xb, signed_headers(sign_material, xb))
+            st, _ = http("POST", base + "/intent", xb,
+                         signed_headers(sign_material, xb, base + "/intent"))
             ok9 = ok9 and st == 200
         x6 = mk_intent("cap 초과 — 이 검토는 보류한다.", [1])
         x6b = json.dumps(x6).encode("utf-8")
-        st, rb = http("POST", base + "/intent", x6b, signed_headers(sign_material, x6b))
+        st, rb = http("POST", base + "/intent", x6b,
+                      signed_headers(sign_material, x6b, base + "/intent"))
         rec("S9", "cap 전역 단일 카운트 — 6번째 503 store_full",
             ok9 and st == 503 and "store_full" in rb)
 
         pb = b"{}"
-        st, rb = http("POST", base + "/pull", pb, signed_headers(sign_material, pb))
+        st, rb = http("POST", base + "/pull", pb, signed_headers(sign_material, pb, base + "/pull"))
         ok10 = False
         if st == 200:
             arr = json.loads(rb).get("intents", [])
@@ -173,7 +170,7 @@ def main():
                                     mine[0]["confirm"]) == mine[0]["intent_id"])
         rec("S10", "pull 전건(5)+재해시 일치", ok10)
 
-        st, rb = http("POST", base + "/pull", pb, signed_headers(sign_material, pb))
+        st, rb = http("POST", base + "/pull", pb, signed_headers(sign_material, pb, base + "/pull"))
         rec("S11", "2차 pull 0건 (atomic drain)",
             st == 200 and json.loads(rb).get("intents") == [])
 
@@ -181,14 +178,15 @@ def main():
         sh = mk_intent("ttl 만료 케이스 — 보류한다.", [1])
         sh["ttl_s"] = 1
         shb = json.dumps(sh).encode("utf-8")
-        st, _ = http("POST", base + "/intent", shb, signed_headers(sign_material, shb))
+        st, _ = http("POST", base + "/intent", shb,
+                     signed_headers(sign_material, shb, base + "/intent"))
         time.sleep(2.5)
-        st, rb = http("POST", base + "/pull", pb, signed_headers(sign_material, pb))
+        st, rb = http("POST", base + "/pull", pb, signed_headers(sign_material, pb, base + "/pull"))
         rec("S12", "TTL 만료 후 pull 0건 (만료=삭제)",
             st == 200 and json.loads(rb).get("intents") == [])
 
-        st, _ = http("POST", base + "/admin/disable", eb, signed_headers(sign_material, eb))
-        st, rb = http("POST", base + "/intent", body, signed_headers(sign_material, body))
+        st, _ = http("POST", base + "/admin/disable", eb, signed_headers(sign_material, eb, base + "/admin/disable"))
+        st, rb = http("POST", base + "/intent", body, signed_headers(sign_material, body, base + "/intent"))
         rec("S13", "disable 후 put 503 (재폐쇄)", st == 503 and "inbox_disabled" in rb)
 
         try:

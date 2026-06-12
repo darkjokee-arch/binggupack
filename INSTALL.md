@@ -2,7 +2,7 @@
 
 > OpenBinggu is the legacy/internal codename for BingguPack.
 
-> **Track1 public RC** — v0.1.0-rc1: read/dry-run + pack validation + MCP 5도구 / v0.2.0-rc1: +local persistence(candidate-only, opt-in, write 기본 OFF) / v0.3.0-rc1: +manual one-shot capture(read-only) / v0.3.1-rc1: +batch pack staging loader / v0.4.0-rc1: +promotion preview(read-only) / v0.5.0-rc1: +reviewer/confirmed preview(read-only) / v0.6.0-rc1: +finalize dry-run generator / v0.6.1-rc1: 문서·온보딩 fix + hosted MCP skeleton 로컬 PoC / v0.7.0-rc1: hosted connector 실구현(`docs/BINGGUPACK_HOSTED_CONNECTOR_PHASE1_RESULT.md`) / v0.7.1-rc1: 실 pack(마스킹) hosted 탑재 + Claude·ChatGPT 양사 커넥터 검증 / v0.7.2-rc1: +conversation_capture_preview(hosted 6번째 read-only 도구, 저장 0) / v0.8.0·v0.8.1-rc1: +개인용 쓰기 루프(로컬 CLI 저장, candidate-only) / v0.9.0-rc1: +후보 관리 UX 완성(candidate_list·DEPRECATE·REPLACE·ACCEPT/UNACCEPT·4값 resolve) / v1.0.0-rc1: +save-intent outbox·upload preflight / **v1.0.0(최신, 정식)**: +binggu CLI(개인 장부 진입점 — `python binggu.py init`). hosted write(save-intent)·OpenCrab upload는 **planned (design complete, separate GO)** — 구현·노출 0. "100% 완성판"이 아니며, 모든 사용자 환경 동작을 보장하지 않습니다. 전체 로드맵·범위는 `README.md`, 따라하기는 `docs/BINGGUPACK_TUTORIAL.md` 참조.
+> **Track1 public RC** — v0.1.0-rc1: read/dry-run + pack validation + MCP 5도구 / v0.2.0-rc1: +local persistence(candidate-only, opt-in, write 기본 OFF) / v0.3.0-rc1: +manual one-shot capture(read-only) / v0.3.1-rc1: +batch pack staging loader / v0.4.0-rc1: +promotion preview(read-only) / v0.5.0-rc1: +reviewer/confirmed preview(read-only) / v0.6.0-rc1: +finalize dry-run generator / v0.6.1-rc1: 문서·온보딩 fix + hosted MCP skeleton 로컬 PoC / v0.7.0-rc1: hosted connector 실구현(`docs/BINGGUPACK_HOSTED_CONNECTOR_PHASE1_RESULT.md`) / v0.7.1-rc1: 실 pack(마스킹) hosted 탑재 + Claude·ChatGPT 양사 커넥터 검증 / v0.7.2-rc1: +conversation_capture_preview(hosted 6번째 read-only 도구, 저장 0) / v0.8.0·v0.8.1-rc1: +개인용 쓰기 루프(로컬 CLI 저장, candidate-only) / v0.9.0-rc1: +후보 관리 UX 완성(candidate_list·DEPRECATE·REPLACE·ACCEPT/UNACCEPT·4값 resolve) / v1.0.0-rc1: +save-intent outbox·upload preflight / v1.0.0(정식 동결): +binggu CLI(개인 장부 진입점 — `python binggu.py init`) / v1.1.0: +그래프 문법 스펙(5종 노드·동사 엣지·증빙 의무)·전 팩 원문 검색 / **v1.2.0(최신)**: +hosted 저장(save-intent — 폰 미리보기→`SAVE n`→PC 러너 pull→로컬 장부 저장, 동작 검증됨·`README.md` 상태표 참조) + pack browsing 개선. OpenCrab upload는 **planned**(preflight G1~G7까지 구현·검증, 실 전송은 별도 결정) — 실 전송 구현·노출 0. "100% 완성판"이 아니며, 모든 사용자 환경 동작을 보장하지 않습니다. 전체 로드맵·범위는 `README.md`, 따라하기는 `docs/BINGGUPACK_TUTORIAL.md` 참조.
 
 ## Requirements / 요구사항
 - Python 3.10+ (표준 라이브러리 위주)
@@ -28,7 +28,7 @@ python -m venv .venv
 
 ## Verify / 동작 확인 (권장 진입점)
 ```bash
-python scripts/openbinggu_doctor.py --selftest          # 12/12 PASS GATE=GO 기대
+python scripts/openbinggu_doctor.py --selftest          # 15/15 PASS GATE=GO 기대
 python scripts/openbinggu_doctor.py --tree examples/toy_project   # CLEAN 기대
 ```
 
@@ -65,7 +65,7 @@ python scripts/openbinggu_finalize_dryrun.py --selftest   # 10/10 PASS GATE=GO �
 python scripts/openbinggu_v08_real_cycle_once.py --dry-run-temp          # 14/14 PASS GATE=GO 기대 (preview→선택 저장→피드백 통합, temp만)
 python scripts/openbinggu_v08_review_resolve_4values.py --selftest       # 16/16 PASS GATE=GO 기대 (4값 resolve: 성공/실패/불확실/판정불가)
 ```
-> 저장은 **로컬 CLI 전용·opt-in·candidate-only**(`promotion_allowed=0`)이며 원문(대화 전문)은 저장되지 않습니다(선택 문장 발췌만). resolve는 **기록만** — `실패`여도 자동 강등 0. hosted(채팅)에서의 저장(save-intent)은 **planned (design complete, separate GO)** 로 이 RC에 노출되지 않습니다.
+> 저장은 **로컬 CLI 전용·opt-in·candidate-only**(`promotion_allowed=0`)이며 원문(대화 전문)은 저장되지 않습니다(선택 문장 발췌만). resolve는 **기록만** — `실패`여도 자동 강등 0. hosted(채팅)에서의 저장(save-intent)은 **v1.2.0부터 동작 검증됨** — `README.md` 상태표·`docs/BINGGUPACK_HOSTED_SAVE_INTENT_DESIGN.md` 참조 (이 selftest는 로컬 CLI 경로만 검증).
 
 ## Candidate management UX selftest / 후보 관리 UX 검증 (v0.9.0-rc1, temp-only)
 ```bash

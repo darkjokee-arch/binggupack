@@ -2,7 +2,7 @@
 
 > 이 문서는 BingguPack을 처음 받은 사용자가 **데이터 없이도** 전체 흐름을 따라해 보는 가이드입니다.
 > 모든 단계는 로컬 synthetic/temp 데이터만 사용하며, 운영 저장소를 변경하지 않습니다.
-> 이 튜토리얼은 **CLI/local 흐름** 기준입니다 — 채팅 앱 경로(hosted custom connector)는 **read-only 6도구**가 Claude·ChatGPT에서 동작 확인되었습니다(배포 방법: `../hosted/workers/README.md`). 채팅에서의 **저장(save-intent)은 planned**(design complete, separate GO)이며 아직 없습니다.
+> 이 튜토리얼은 **CLI/local 흐름** 기준입니다 — 채팅 앱 경로(hosted custom connector)는 **read-only 6도구**가 Claude·ChatGPT에서 동작 확인되었습니다(배포 방법: `../hosted/workers/README.md`). 채팅에서의 **저장(save-intent)은 v1.2.0부터 동작 검증**되었습니다 — 폰 미리보기→`SAVE n`→PC 러너 pull→로컬 장부 저장 (`../README.md` 상태표·`BINGGUPACK_HOSTED_SAVE_INTENT_DESIGN.md` 참조).
 
 ## 0. 준비물
 
@@ -22,7 +22,7 @@ cd binggupack
 python scripts/openbinggu_doctor.py --selftest
 ```
 
-✅ 기대: 마지막에 `summary: 12/12 PASS` + `GATE: GO` + 종료코드 `0`.
+✅ 기대: 마지막에 `summary: 15/15 PASS` + `GATE: GO` + 종료코드 `0`.
 (버전에 따라 검사 개수는 늘어날 수 있습니다 — `GATE: GO` + 종료코드 `0`이면 정상입니다. `GATE: GO`가 아니거나 종료코드가 0이 아닐 때만 사용을 멈추고 이슈를 확인하세요.)
 
 ## 3. toy 예제로 pack 흐름 보기
@@ -49,7 +49,7 @@ python scripts/openbinggu_batch_pack_loader.py --selftest    # 10/10 기대
 
 ✅ 기대: synthetic pack으로 **apply → read-back → rollback(원복)** 전 과정이 temp에서 자동 검증됩니다. 내 데이터 0.
 
-> **내 pack은 어디서 오나?** pack 생성은 OpenCrab 도구 흐름(`opencrab.sh`)에서 수행하고, BingguPack은 그렇게 만들어진 pack을 **검증·적재·preview**하는 쪽을 담당합니다. 흐름 개요는 [USER_DRIVEN_OPENCRAB_UPLOAD_FLOW](OPENBINGGU_USER_DRIVEN_OPENCRAB_UPLOAD_FLOW.md) 참고. (여기서 OpenCrab apply/finalize/upload를 실행하라는 뜻이 아닙니다 — 그 단계들은 별도 승인 영역이며 이 튜토리얼 범위 밖입니다.)
+> **내 pack은 어디서 오나?** pack 생성은 이 repo의 빌더 `scripts/watcher_pack_builder_m0.py <입력 디렉터리>`(3단계에서 selftest로 본 그 스크립트)로 로컬에서 수행하고, BingguPack은 그렇게 만들어진 pack을 **검증·적재·preview**하는 쪽을 담당합니다. 흐름 개요는 [USER_DRIVEN_OPENCRAB_UPLOAD_FLOW](OPENBINGGU_USER_DRIVEN_OPENCRAB_UPLOAD_FLOW.md) 참고. (여기서 OpenCrab apply/finalize/upload를 실행하라는 뜻이 아닙니다 — 그 단계들은 별도 승인 영역이며 이 튜토리얼 범위 밖입니다.)
 
 실제로 내 pack을 넣어보고 싶으면 (**명시 opt-in 필수**, 기본은 rollback 원복):
 
@@ -128,7 +128,7 @@ python binggu.py preview "오늘 정리할 문장들"
 ## 7. 다음 단계
 
 - **여러 AI에 pack 넘기기**: [Multi-agent handoff guide](OPENBINGGU_PHASE3_MULTI_AGENT_HANDOFF_GUIDE.md)
-- **내 pack을 공개하기 전**: README의 "Validate your real data" 절차 필수 — `doctor --tree <공개 후보 트리>`가 CLEAN이어야 하고, 검출 1건이라도 있으면 공개가 차단(BLOCK)됩니다.
+- **내 pack을 공개하기 전**: [실데이터 검증 절차](OPENBINGGU_REAL_DATA_VALIDATION_PROCEDURE.md) 필수 — `doctor --tree <공개 후보 트리>`가 CLEAN이어야 하고, 검출 1건이라도 있으면 공개가 차단(BLOCK)됩니다.
 
 ## 막혔을 때
 

@@ -25,7 +25,6 @@
 전부 통과 = GATE=GO exit 0 / 실패 = BLOCK exit 1.
 """
 import hashlib
-import hmac as hmac_mod
 import json
 import os
 import shutil
@@ -44,6 +43,7 @@ PORT = 8796
 BASE = "http://127.0.0.1:%d" % PORT
 
 sys.path.insert(0, HERE)
+from binggupack_sign_util import signed_headers as sig  # noqa: E402 — HMAC 단일 출처 (L-8)
 from openbinggu_save_intent_outbox_runner import intent_hash  # noqa: E402
 
 RESULTS = []
@@ -52,13 +52,6 @@ RESULTS = []
 def rec(cid, desc, ok):
     RESULTS.append((cid, desc, ok))
     print("[%s] %s %s" % ("OK" if ok else "NG", cid, desc))
-
-
-def sig(sm, body, ts=None):
-    ts = str(ts if ts is not None else int(time.time()))
-    bh = hashlib.sha256(body).hexdigest()
-    mac = hmac_mod.new(sm.encode(), (ts + "." + bh).encode(), hashlib.sha256).hexdigest()
-    return {"X-BGP-TS": ts, "X-BGP-SIG": mac}
 
 
 def http(method, url, body=None, headers=None):
@@ -147,7 +140,7 @@ def main():
         rec("M3", "기본 비활성 → tools/call isError(inbox_disabled)",
             res.get("isError") is True and "inbox_disabled" in json.dumps(res))
 
-        st, _ = http("POST", save + "/admin/enable", eb, sig(sm, eb))
+        st, _ = http("POST", save + "/admin/enable", eb, sig(sm, eb, save + "/admin/enable"))
         rec("A1", "admin/enable (HMAC) 200", st == 200)
 
         st, rb = http("POST", mcp_url, json.dumps(call).encode())
@@ -183,17 +176,17 @@ def main():
         st, _ = http("POST", BASE + "/mcp2/wrongkey000", json.dumps(mcp(5, "ping")).encode())
         rec("M8", "오경로키 404", st == 404)
 
-        st, rb = http("POST", save + "/pull", eb, sig(sm, eb))
+        st, rb = http("POST", save + "/pull", eb, sig(sm, eb, save + "/pull"))
         arr = json.loads(rb).get("intents", []) if st == 200 else []
         ok = len(arr) == 1 and intent_hash(arr[0]["text"], arr[0]["indices"],
                                            arr[0]["confirm"]) == arr[0]["intent_id"]
         rec("P1", "pull(HMAC) drain + 재해시 일치", ok)
         st, _ = http("POST", save + "/pull", eb)
         rec("P2", "무서명 pull 401", st == 401)
-        st, rb = http("POST", save + "/pull", eb, sig(sm, eb))
+        st, rb = http("POST", save + "/pull", eb, sig(sm, eb, save + "/pull"))
         rec("P3", "2차 pull 0건 (atomic drain)", st == 200 and json.loads(rb).get("intents") == [])
 
-        http("POST", save + "/admin/disable", eb, sig(sm, eb))
+        http("POST", save + "/admin/disable", eb, sig(sm, eb, save + "/admin/disable"))
         st, rb = http("POST", mcp_url, json.dumps(call).encode())
         res = json.loads(rb).get("result", {}) if st == 200 else {}
         rec("A2", "disable 후 tools/call isError(inbox_disabled)",

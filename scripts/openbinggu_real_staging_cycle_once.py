@@ -19,7 +19,13 @@ sys.path.insert(0, os.path.join(BASE, "scripts"))
 from openbinggu_staging_write_selftest import OPERATING_PATHS  # noqa: E402
 from openbinggu_proposal_batch_approval_g2b import open_staging, build_batch, decide_batch  # noqa: E402
 from openbinggu_proposal_to_verb_edge_g2c import finalize_proposal, reject_proposal, _staging_node_view  # noqa: E402
-from openbinggu_real_staging_apply_once import REAL_STAGING_DB, SNAP_DIR, _wal_checkpoint  # noqa: E402
+try:
+    from openbinggu_real_staging_apply_once import REAL_STAGING_DB, SNAP_DIR, _wal_checkpoint  # noqa: E402
+except ImportError:
+    print("이 스크립트는 비공개 운영 모듈이 필요합니다(openbinggu_real_staging_apply_once — 공개 repo 범위 밖).")
+    print("공개 대안: python scripts/openbinggu_v08_real_cycle_once.py --dry-run-temp (temp SQLite 동일 사이클)")
+    print("          python scripts/openbinggu_proposal_batch_approval_g2b.py / openbinggu_proposal_to_verb_edge_g2c.py (selftest)")
+    sys.exit(2)
 import watcher_edge_proposal_g2 as wprop  # noqa: E402
 
 # 실연 대상 (syn_plain 그룹 — 도메인 원칙 설명 문장 3종)

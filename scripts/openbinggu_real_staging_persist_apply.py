@@ -20,10 +20,15 @@ BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "scripts"))
 
 from openbinggu_staging_write_selftest import StagingDB, staging_apply, OPERATING_PATHS  # noqa: E402
-from openbinggu_real_staging_apply_once import (  # noqa: E402  (무수정 재사용)
-    load_m1_batch_pack, gate_recheck, _wal_checkpoint,
-    REAL_STAGING_DIR, REAL_STAGING_DB, SNAP_DIR, GO_PHRASE, FLAG_ON, EMERGENCY, STATE_DIR,
-)
+try:
+    from openbinggu_real_staging_apply_once import (  # noqa: E402  (무수정 재사용)
+        load_m1_batch_pack, gate_recheck, _wal_checkpoint,
+        REAL_STAGING_DIR, REAL_STAGING_DB, SNAP_DIR, GO_PHRASE, FLAG_ON, EMERGENCY, STATE_DIR,
+    )
+except ImportError:
+    print("이 스크립트는 비공개 운영 모듈이 필요합니다(openbinggu_real_staging_apply_once — 공개 repo 범위 밖).")
+    print("공개 대안: python scripts/openbinggu_staging_write_selftest.py (temp SQLite staging write selftest)")
+    sys.exit(2)
 from watcher_batch_m1 import scan_residual_pii  # noqa: E402
 
 

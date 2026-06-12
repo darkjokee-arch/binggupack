@@ -26,7 +26,7 @@ import tempfile
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "scripts"))
 
-from openbinggu_staging_write_selftest import OPERATING_PATHS  # noqa: E402
+from openbinggu_staging_write_selftest import OPERATING_PATHS, _now_iso  # noqa: E402
 from openbinggu_deprecate_and_remind_g3 import open_g3, deprecate_item  # noqa: E402
 from openbinggu_candidate_list_view import list_candidates, node_id8, T1  # noqa: E402
 from openbinggu_conversation_candidate_save import save_selected  # noqa: E402
@@ -40,7 +40,6 @@ CREATE TABLE IF NOT EXISTS owner_acceptances(
     ts TEXT);
 CREATE INDEX IF NOT EXISTS idx_owner_acceptances_node ON owner_acceptances(node_id, event_id);
 """
-TS = "2026-06-11"
 
 
 def open_accept(path):
@@ -102,7 +101,7 @@ def _gate(db, action, verb, index, node_hash8, reason, ctx, status, kind):
     return row, None
 
 
-def accept_from_list(db, index, node_hash8, reason, ctx, status="all", kind=None):
+def accept_from_list(db, index, node_hash8, reason, ctx, status="all", kind=None, ts=None):
     """목록 인덱스 1건 수용 기록. confirm="ACCEPT <index> <id8>" 정확 일치 의무.
     candidate row 무변 — owner_acceptances 에 event 1행 append 만."""
     row, blocked = _gate(db, "owner_accept", "ACCEPT", index, node_hash8, reason, ctx, status, kind)
@@ -120,15 +119,16 @@ def accept_from_list(db, index, node_hash8, reason, ctx, status="all", kind=None
         return block("target_not_active")          # deprecated wins
     if latest_event(db, row["node_id"]) == "owner_accepted":
         return block("already_accepted")           # duplicate = 명시 BLOCK (정책 고정)
-    db.con.execute("INSERT INTO owner_acceptances(node_id,event,reason,ts) VALUES(?,?,?,?)",
-                   (row["node_id"], "owner_accepted", reason[:200], TS))
-    db.con.commit()
-    db.audit_append(ctx.get("actor", "human"), "owner_accept", row["node_id"],
-                    "ALLOW", reason[:80], before, db.store_checksum())
+    with db.write_lock():
+        db.con.execute("INSERT INTO owner_acceptances(node_id,event,reason,ts) VALUES(?,?,?,?)",
+                       (row["node_id"], "owner_accepted", reason[:200], _now_iso(ts)))
+        db.con.commit()
+        db.audit_append(ctx.get("actor", "human"), "owner_accept", row["node_id"],
+                        "ALLOW", reason[:80], before, db.store_checksum(), ts=ts)
     return {"applied": True, "node_id": row["node_id"], "event": "owner_accepted"}
 
 
-def unaccept_from_list(db, index, node_hash8, reason, ctx, status="all", kind=None):
+def unaccept_from_list(db, index, node_hash8, reason, ctx, status="all", kind=None, ts=None):
     """수용 철회 — 삭제 아닌 보존형 event append. confirm="UNACCEPT <index> <id8>"."""
     row, blocked = _gate(db, "owner_unaccept", "UNACCEPT", index, node_hash8, reason, ctx, status, kind)
     if blocked:
@@ -138,11 +138,12 @@ def unaccept_from_list(db, index, node_hash8, reason, ctx, status="all", kind=No
         db.audit_append(ctx.get("actor", "human"), "owner_unaccept", row["node_id"],
                         "BLOCK", "not_currently_accepted", before, before)
         return {"applied": False, "reason": "not_currently_accepted"}
-    db.con.execute("INSERT INTO owner_acceptances(node_id,event,reason,ts) VALUES(?,?,?,?)",
-                   (row["node_id"], "owner_unaccept", reason[:200], TS))
-    db.con.commit()
-    db.audit_append(ctx.get("actor", "human"), "owner_unaccept", row["node_id"],
-                    "ALLOW", reason[:80], before, db.store_checksum())
+    with db.write_lock():
+        db.con.execute("INSERT INTO owner_acceptances(node_id,event,reason,ts) VALUES(?,?,?,?)",
+                       (row["node_id"], "owner_unaccept", reason[:200], _now_iso(ts)))
+        db.con.commit()
+        db.audit_append(ctx.get("actor", "human"), "owner_unaccept", row["node_id"],
+                        "ALLOW", reason[:80], before, db.store_checksum(), ts=ts)
     return {"applied": True, "node_id": row["node_id"], "event": "owner_unaccept"}
 
 
@@ -153,7 +154,7 @@ def _insert_shift_node(db):
     db.con.execute(
         "INSERT INTO nodes(node_id,node_type,sentence,candidate,promotion_allowed,state,pack_id,content_hash,created_at) "
         "VALUES('node:AAA:shift','judgment','[검증픽스처] 목록 시프트 유발용 판단이다.',1,0,'active','accux_fix',?, ?)",
-        (_hash("node:AAA:shift"), TS))
+        (_hash("node:AAA:shift"), _now_iso()))
     db.con.commit()
 
 

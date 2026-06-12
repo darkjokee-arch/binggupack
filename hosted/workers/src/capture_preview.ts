@@ -85,7 +85,8 @@ const SECRET_RES: RegExp[] = [
   /(?<![A-Za-z0-9])[A-Za-z0-9+/]{40,}={0,2}(?![A-Za-z0-9])/,
 ];
 
-function scanPii(s: string): string[] {
+// L-1: index.ts 런타임 leakScan PII 백스톱이 동일 패턴을 재사용 (export)
+export function scanPii(s: string): string[] {
   const found: string[] = [];
   for (const [kind, re] of SCAN_SHAPES) {
     if (re.test(s)) found.push(kind);

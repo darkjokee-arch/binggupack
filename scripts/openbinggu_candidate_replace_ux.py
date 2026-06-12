@@ -18,6 +18,7 @@ CLI: python openbinggu_candidate_replace_ux.py --selftest
      (real staging 적용은 별도 GO 필요 — 본 단계는 temp selftest만)
 """
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -29,7 +30,7 @@ import unicodedata
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "scripts"))
 
-from openbinggu_staging_write_selftest import staging_apply, OPERATING_PATHS, _hash  # noqa: E402
+from openbinggu_staging_write_selftest import staging_apply, OPERATING_PATHS, _hash, _now_iso  # noqa: E402
 from openbinggu_deprecate_and_remind_g3 import open_g3, deprecate_item, active_view  # noqa: E402
 from openbinggu_candidate_list_view import list_candidates, node_id8, T1  # noqa: E402
 from openbinggu_conversation_candidate_save import save_selected, _sent_hash  # noqa: E402
@@ -53,11 +54,53 @@ def _canonical_hash(s):
     return hashlib.sha256(s.strip().casefold().encode("utf-8")).hexdigest()
 
 
+def _journal_path(snap_dir, before):
+    return os.path.join(snap_dir, "journal_replace_" + _hash(before) + ".json")
+
+
+def pending_replace_journals(snap_dir):
+    """잔존 journal 마커 목록 (L-2) — 묶음(기각+신규+audit) 중 crash 시 마커가 남아
+    "기각만 되고 신규 미생성" 상태를 다음 실행이 감지·복구 안내할 수 있게 한다."""
+    if not os.path.isdir(snap_dir):
+        return []
+    return sorted(os.path.join(snap_dir, f) for f in os.listdir(snap_dir)
+                  if f.startswith("journal_replace_") and f.endswith(".json"))
+
+
+def recover_pending_replace(db, journal_path):
+    """잔존 journal 복구 — 묶음 시작 직전 스냅샷으로 파일 원복(부분쓰기 제거) + audit + 마커 제거."""
+    with open(journal_path, "r", encoding="utf-8") as f:
+        j = json.load(f)
+    snap = j["snapshot"]
+    if not os.path.exists(snap):
+        return {"recovered": False, "reason": "snapshot_missing"}
+    db.con.close()
+    for ext in ("-wal", "-shm"):
+        p = db.path + ext
+        if os.path.exists(p):
+            os.remove(p)
+    shutil.copy2(snap, db.path)
+    db.con = sqlite3.connect(db.path)
+    db.con.execute("PRAGMA journal_mode=WAL")
+    db.con.execute("PRAGMA busy_timeout=5000")
+    db.audit_append(j.get("actor", "human"), "replace_ux",
+                    "%s>%s" % (j["old_node_id"], j["new_node_id"]),
+                    "BLOCK", "recovered_from_journal", j["before_checksum"], db.store_checksum())
+    os.remove(journal_path)
+    return {"recovered": True, "snapshot": snap}
+
+
 def replace_from_list(db, index, node_hash8, new_sentence, reason, ctx, snap_dir,
                       status="all", kind=None):
     """목록 인덱스 1건 교체 = 기각(replaced_by)+신규 candidate 저장 묶음.
     confirm="REPLACE <index> <node_hash8> WITH <new_sentence>" 정확 일치 의무.
     반환 {applied, reason | old_node_id, new_node_id, snapshot, supersedes_written}."""
+    # L-2: 잔존 journal = 직전 묶음이 crash 로 중단(기각만 되고 신규 미생성 가능) —
+    # DB 상태 불확정이므로 audit append 없이 즉시 차단 + 복구 안내.
+    resid = pending_replace_journals(snap_dir)
+    if resid:
+        return {"applied": False, "reason": "pending_replace_journal", "journals": resid,
+                "recovery": "recover_pending_replace(db, journals[0]) — 스냅샷 원복 후 재시도"}
     before = db.store_checksum()
 
     def block(rc):
@@ -115,66 +158,80 @@ def replace_from_list(db, index, node_hash8, new_sentence, reason, ctx, snap_dir
 
     new_nid = "node:CONV:" + _sent_hash(new_sentence)
 
-    # ---- 묶음 스냅샷 1회 선확보 (WAL checkpoint 후 main 파일 copy → 완전 스냅샷) ----
-    db.con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    snap = os.path.join(snap_dir, "snap_replace_" + _hash(before))
-    shutil.copy2(db.path, snap)
+    # ---- 묶음 전체 lock (이중 실행 감지) — 내부 모듈은 같은 pid 재진입 허용 ----
+    with db.write_lock():
+        # ---- 묶음 스냅샷 1회 선확보 — StagingDB.snapshot 표준 (checkpoint 후 copy) ----
+        snap = db.snapshot(snap_dir, "snap_replace_" + _hash(before))
 
-    def rollback(rc):
-        """파일 원복 — 잔존 WAL/SHM 제거(재적용 방지) 후 스냅샷 copy back + ROLLBACK audit."""
-        db.con.close()
-        for ext in ("-wal", "-shm"):
-            p = db.path + ext
-            if os.path.exists(p):
-                os.remove(p)
-        shutil.copy2(snap, db.path)
-        db.con = sqlite3.connect(db.path)
-        db.con.execute("PRAGMA journal_mode=WAL")
-        db.audit_append(ctx.get("actor", "human"), "replace_ux", "%s>%s" % (old_nid, new_nid),
-                        "BLOCK", "rolled_back:" + rc, before, db.store_checksum())
-        return {"applied": False, "reason": "rolled_back:" + rc}
+        # ---- journal 마커 (L-2) — 묶음 시작 기록. 완료/원복 끝에서 제거, crash 잔존 시 다음 실행 차단.
+        # 내부 모듈(deprecate_item·staging_apply·audit_append)이 각자 commit 하므로 외곽 단일
+        # BEGIN IMMEDIATE 불가 — 스냅샷+compensation 에 journal 로 crash 구간을 닫는다.
+        jpath = _journal_path(snap_dir, before)
+        with open(jpath, "w", encoding="utf-8") as f:
+            json.dump({"old_node_id": old_nid, "new_node_id": new_nid, "snapshot": snap,
+                       "before_checksum": before, "actor": ctx.get("actor", "human")}, f)
 
-    # ---- (a) 원본 기각 — replaced_by prefix (정방향 링크 = 단일 소스) ----
-    rd = deprecate_item(db, "node", old_nid,
-                        "replaced_by:%s|%s" % (new_nid, reason[:80]), ctx, snap_dir)
-    if not rd.get("applied"):
-        return rollback("deprecate:" + str(rd.get("reason")))
+        def rollback(rc):
+            """파일 원복 — 잔존 WAL/SHM 제거(재적용 방지) 후 스냅샷 copy back + ROLLBACK audit."""
+            db.con.close()
+            for ext in ("-wal", "-shm"):
+                p = db.path + ext
+                if os.path.exists(p):
+                    os.remove(p)
+            shutil.copy2(snap, db.path)
+            db.con = sqlite3.connect(db.path)
+            db.con.execute("PRAGMA journal_mode=WAL")
+            db.con.execute("PRAGMA busy_timeout=5000")
+            db.audit_append(ctx.get("actor", "human"), "replace_ux", "%s>%s" % (old_nid, new_nid),
+                            "BLOCK", "rolled_back:" + rc, before, db.store_checksum())
+            if os.path.exists(jpath):  # 원복 완료 후에만 마커 해제 (중간 crash 시 잔존 → 복구 안내)
+                os.remove(jpath)
+            return {"applied": False, "reason": "rolled_back:" + rc}
 
-    # ---- (b) 신규 candidate 저장 — save 모듈과 동일 mini-pack 구조 + staging_apply 경유 ----
-    _space, ntype = lkmap.KIND_TO_SPACE_NTYPE[kind_ko]
-    eid = "EVC-CONV-" + _sent_hash(new_sentence)
-    th = _hash(new_sentence)  # capture 시점 동결 (자기증빙 동어반복 — conv-self prefix 명시)
-    pack = {"pack_id": "convr_" + _hash(new_sentence)[:8], "content": new_sentence,
-            "nodes": [{"id": new_nid, "type": ntype, "sentence": new_sentence}],
-            "edges": [{"id": "edge:CONV:" + _sent_hash(new_sentence),
-                       "relation": "evidence_supports", "source": eid, "target": new_nid,
-                       "evidence_refs": [eid]}],
-            "evidence": [{"id": eid, "sentence": new_sentence,
-                          "source_pointer_id": "conv-self:" + _sent_hash(new_sentence),
-                          "source_missing": False, "source_hash": th, "captured_hash": th,
-                          "redaction_policy": "v1"}]}
-    ra = staging_apply(db, pack,
-                       {"actor": ctx.get("actor", "human"),
-                        **{k: v for k, v in ctx.items()
-                           if k in ("backup_fail", "wal_abort", "checksum_mismatch")}},
-                       snap_dir)
-    if not ra.get("applied"):
-        return rollback("staging_apply:" + str(ra.get("reason")))
+        # ---- (a) 원본 기각 — replaced_by prefix (정방향 링크 = 단일 소스) ----
+        rd = deprecate_item(db, "node", old_nid,
+                            "replaced_by:%s|%s" % (new_nid, reason[:80]), ctx, snap_dir)
+        if not rd.get("applied"):
+            return rollback("deprecate:" + str(rd.get("reason")))
+        if ctx.get("crash_after_deprecate"):  # selftest 전용 — 프로세스 중단 시뮬(rollback 미수행)
+            raise RuntimeError("crash_sim_after_deprecate")
 
-    # ---- 역링크 + 종결 audit — 보호 영역 안 (적대 검증 관찰 반영: 비원자 tail 제거) ----
-    try:
-        cols = [c[1] for c in db.con.execute("PRAGMA table_info(nodes)")]
-        supersedes_written = False
-        if "supersedes" in cols:
-            db.con.execute("UPDATE nodes SET supersedes=? WHERE node_id=?", (old_nid, new_nid))
-            db.con.commit()
-            supersedes_written = True
-        # 묶음 종결 audit 1건 — pack_id 필드에 원본>신규 (단일 행 양끝 추적)
-        db.audit_append(ctx.get("actor", "human"), "candidate_replace",
-                        "%s>%s" % (old_nid, new_nid), "ALLOW", "replaced|" + reason[:60],
-                        before, db.store_checksum())
-    except Exception as e:
-        return rollback("finalize:" + type(e).__name__)
+        # ---- (b) 신규 candidate 저장 — save 모듈과 동일 mini-pack 구조 + staging_apply 경유 ----
+        _space, ntype = lkmap.KIND_TO_SPACE_NTYPE[kind_ko]
+        eid = "EVC-CONV-" + _sent_hash(new_sentence)
+        th = _hash(new_sentence)  # capture 시점 동결 (자기증빙 동어반복 — conv-self prefix 명시)
+        pack = {"pack_id": "convr_" + _hash(new_sentence)[:8], "content": new_sentence,
+                "nodes": [{"id": new_nid, "type": ntype, "sentence": new_sentence}],
+                "edges": [{"id": "edge:CONV:" + _sent_hash(new_sentence),
+                           "relation": "evidence_supports", "source": eid, "target": new_nid,
+                           "evidence_refs": [eid]}],
+                "evidence": [{"id": eid, "sentence": new_sentence,
+                              "source_pointer_id": "conv-self:" + _sent_hash(new_sentence),
+                              "source_missing": False, "source_hash": th, "captured_hash": th,
+                              "redaction_policy": "v1"}]}
+        ra = staging_apply(db, pack,
+                           {"actor": ctx.get("actor", "human"),
+                            **{k: v for k, v in ctx.items()
+                               if k in ("backup_fail", "wal_abort", "checksum_mismatch")}},
+                           snap_dir)
+        if not ra.get("applied"):
+            return rollback("staging_apply:" + str(ra.get("reason")))
+
+        # ---- 역링크 + 종결 audit — 보호 영역 안 (적대 검증 관찰 반영: 비원자 tail 제거) ----
+        try:
+            cols = [c[1] for c in db.con.execute("PRAGMA table_info(nodes)")]
+            supersedes_written = False
+            if "supersedes" in cols:
+                db.con.execute("UPDATE nodes SET supersedes=? WHERE node_id=?", (old_nid, new_nid))
+                db.con.commit()
+                supersedes_written = True
+            # 묶음 종결 audit 1건 — pack_id 필드에 원본>신규 (단일 행 양끝 추적)
+            db.audit_append(ctx.get("actor", "human"), "candidate_replace",
+                            "%s>%s" % (old_nid, new_nid), "ALLOW", "replaced|" + reason[:60],
+                            before, db.store_checksum())
+            os.remove(jpath)  # 묶음 완료 — 마커 해제
+        except Exception as e:
+            return rollback("finalize:" + type(e).__name__)
     return {"applied": True, "old_node_id": old_nid, "new_node_id": new_nid,
             "snapshot": snap, "supersedes_written": supersedes_written}
 
@@ -185,8 +242,8 @@ def _insert_shift_node(db):
     """정렬상 맨 앞에 오는 노드 삽입 — stale 목록 인덱스 시프트 재현용(기각 UX 패턴)."""
     db.con.execute(
         "INSERT INTO nodes(node_id,node_type,sentence,candidate,promotion_allowed,state,pack_id,content_hash,created_at) "
-        "VALUES('node:AAA:shift','judgment','[검증픽스처] 목록 시프트 유발용 판단이다.',1,0,'active','repux_fix',?, '2026-06-11')",
-        (_hash("node:AAA:shift"),))
+        "VALUES('node:AAA:shift','judgment','[검증픽스처] 목록 시프트 유발용 판단이다.',1,0,'active','repux_fix',?,?)",
+        (_hash("node:AAA:shift"), _now_iso()))
     db.con.commit()
 
 
@@ -250,6 +307,7 @@ def main_selftest():
        and nrow == ("active", 1, 0, j_nid) and r1["supersedes_written"]
        and ev == 1 and eg == 1 and aud1 == 1
        and j_nid not in act["nodes"] and new_nid in act["nodes"])
+    ck("1b_성공후_journal_잔존0", pending_replace_journals(snap_dir) == [])
 
     # 2. stale 목록 오지정 BLOCK — 사용자가 본 목록이 시프트 노드 삽입으로 어긋남
     rows2 = list_candidates(db)["rows"]
@@ -339,6 +397,33 @@ def main_selftest():
     ck("9_중간실패_원복(원본active+부분쓰기0+ROLLBACK_audit)",
        (not r9["applied"]) and r9["reason"].startswith("rolled_back:staging_apply:")
        and s_st9 == "active" and cs9a == cs9b and n9a == n9b and ghost9 == 0 and rb_aud == 1)
+    ck("9b_원복후_journal_잔존0", pending_replace_journals(snap_dir) == [])
+
+    # 9c. crash 시뮬 (L-2) — deprecate 직후 중단(rollback 미수행) → journal 잔존이
+    #     다음 실행을 차단(기각만 되고 신규 미생성 상태 진입 금지) + 복구로 DB 원상태.
+    NEW9C = "이 항목은 재공고 이후에 다시 판단한다."
+    cs9c = db.store_checksum()
+    try:
+        replace_from_list(db, i3, h3, NEW9C, "사유",
+                          _ctx(i3, h3, NEW9C, crash_after_deprecate=True), snap_dir)
+        crashed = False
+    except RuntimeError:
+        crashed = True
+    s_mid = db.con.execute("SELECT state FROM nodes WHERE node_id=?", (s_nid,)).fetchone()[0]
+    ghost_mid = db.con.execute("SELECT count(*) FROM nodes WHERE node_id=?",
+                               ("node:CONV:" + _sent_hash(NEW9C),)).fetchone()[0]
+    resid = pending_replace_journals(snap_dir)
+    rblock = replace_from_list(db, i3, h3, NEW9C, "사유", _ctx(i3, h3, NEW9C), snap_dir)
+    rec = recover_pending_replace(db, resid[0]) if resid else {"recovered": False}
+    cs9d = db.store_checksum()
+    s_rec = db.con.execute("SELECT state FROM nodes WHERE node_id=?", (s_nid,)).fetchone()[0]
+    rec_aud = db.con.execute("SELECT count(*) FROM audit_log WHERE action='replace_ux' "
+                             "AND reason_code='recovered_from_journal'").fetchone()[0]
+    ck("9c_crash잔존_차단+복구_원상태(기각만되고_신규미생성_불가)",
+       crashed and s_mid == "deprecated" and ghost_mid == 0 and len(resid) == 1
+       and (not rblock["applied"]) and rblock["reason"] == "pending_replace_journal"
+       and rec["recovered"] and cs9d == cs9c and s_rec == "active" and rec_aud == 1
+       and pending_replace_journals(snap_dir) == [])
 
     # 10. raw 원문(긴 원본 텍스트 전문) 미저장
     blob = "\n".join(str(row) for t in ("nodes", "edges", "evidence", "deprecations", "audit_log")

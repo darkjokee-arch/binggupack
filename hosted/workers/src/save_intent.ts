@@ -1,3 +1,6 @@
+// ⚠ SUPERSEDED (2026-06-12) — v1 보존본. 현행 = save_intent_v2.ts(+save_common.ts)·save_intent_mcp.ts.
+//   in-memory Map(isolate별 cap 결함)·경로키 단독 인증은 V2 RFC(docs/BINGGUPACK_SAVE_INTENT_V2_RFC.md)로 폐기.
+//   신규 작업·수정 금지 — 참조용으로만 보존 (코드 무수정 원칙, L-7).
 // save_intent.ts — D3: hosted save-intent 적재 전용 worker (로컬 wrangler dev 한정).
 // 설계 정본: docs/BINGGUPACK_HOSTED_SAVE_INTENT_DESIGN.md
 // 원칙(설계 §0): worker = 전달 통로(적재만). DB write 0 · payload 로깅 0(non-retention) ·

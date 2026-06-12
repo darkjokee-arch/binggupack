@@ -11,7 +11,7 @@
 // 불변: read-only 5 tool · synthetic toy pack 전용 · JSON-only(GET 405) · stateless ·
 //   fail-closed 누출 스캔(SANITIZE_BLOCK) · 배포/OAuth/등록 0 (wrangler dev 로컬 전용).
 
-import { capturePreview } from "./capture_preview";
+import { capturePreview, scanPii } from "./capture_preview";
 
 const PROTOCOL_VERSION = "2025-06-18";
 const SUPPORTED_PROTOCOL_VERSIONS = ["2025-03-26", "2025-06-18", "2025-11-25"];
@@ -587,6 +587,16 @@ function handleRpc(store: PackStore, rpc: Record<string, any>): Record<string, a
     const leaks = leakScan(text);
     if (leaks.length) { // fail-closed: 내부 흔적 검출 시 결과 자체를 내보내지 않음
       out = { error_code: "SANITIZE_BLOCK", message: "internal trace detected; blocked" };
+      text = pyDumps(out);
+      isErr = true;
+    }
+    // L-1 — PII regex 백스톱: capture_preview의 SCAN_SHAPES+PREVIEW_PII_EXTRA(주민/전화/사업자/
+    // 이메일 등) 재사용. 정상 경로는 PII가 못 들어오지만 마지막 방어선으로 응답 직전 1회 스캔,
+    // 검출 시 응답 전체 BLOCK(fail-closed). 로그는 패턴 종류만 — 원문/매치값 0.
+    const piiKinds = scanPii(text);
+    if (piiKinds.length) {
+      console.log("PII_BLOCK kinds=" + piiKinds.join(","));
+      out = { error_code: "PII_BLOCK", message: "pii pattern detected; response blocked" };
       text = pyDumps(out);
       isErr = true;
     }

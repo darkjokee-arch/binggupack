@@ -7,29 +7,16 @@
 // live 노출 = V2-4 owner 명시 GO 전 금지. deploy 금지 — wrangler.save_v2.toml 참조.
 // 변수명에 token·secret 류 + '=' 조합 금지 — 공개 트리 스캐너 자기검출 회피 (6/10 박제)
 
+import { SIG_WINDOW_S, sigV2Only, verifySig } from "./save_common";
+
 const SCHEMA_VER = 1;
 const TEXT_CAP = 36000;
 const INDICES_CAP = 64;
 const DEFAULT_TTL_S = 86400;
 const TTL_CAP_S = 7 * 86400;
-const SIG_WINDOW_S = 300;          // 재전송 방어 창
 const DEFAULT_INBOX_CAP = 32;      // DO 전역 단일 카운트 — v1의 isolate별 cap 결함 해소
 
 // ---------- 공통 유틸 ----------
-
-const ENC = new TextEncoder();
-
-function hex(buf: ArrayBuffer | Uint8Array): string {
-  const a = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
-  return Array.from(a).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-function timingSafeEqHex(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
-}
 
 function denyJson(status: number, msg: string): Response {
   return new Response(JSON.stringify({ error: msg }), {
@@ -60,22 +47,8 @@ function shapeReject(b: any): string | null {
 }
 
 // ---------- HMAC 서명 검증 (조건 1) ----------
-// signature = HMAC-SHA256(sign_material, ts + "." + sha256_hex(body))
-// 헤더: X-BGP-TS(epoch초) + X-BGP-SIG(hex). secret은 요청에 실리지 않음.
-
-async function verifySig(signMaterial: string, request: Request, bodyText: string,
-                         nowS: number): Promise<boolean> {
-  const ts = request.headers.get("X-BGP-TS");
-  const sig = request.headers.get("X-BGP-SIG");
-  if (!ts || !sig || !signMaterial) return false;
-  const t = parseInt(ts, 10);
-  if (!Number.isInteger(t) || Math.abs(nowS - t) > SIG_WINDOW_S) return false;
-  const bodyHash = hex(await crypto.subtle.digest("SHA-256", ENC.encode(bodyText)));
-  const key = await crypto.subtle.importKey(
-    "raw", ENC.encode(signMaterial), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const mac = hex(await crypto.subtle.sign("HMAC", key, ENC.encode(ts + "." + bodyHash)));
-  return timingSafeEqHex(mac, sig.toLowerCase());
-}
+// 단일 출처 = save_common.verifySig — 신형(ts.METHOD.path.bodyhash) 우선,
+// SAVE_SIG_V2_ONLY 미설정(기본) 동안 구형(ts.bodyhash)도 수용 (L-4 전환 플래그).
 
 // ---------- Durable Object — 단일 inbox (조건 2·3·4) ----------
 // storage 키: "enabled"(bool, 기본 부재=닫힘) / "intent:<id>"(intent)
@@ -166,6 +139,7 @@ interface SaveV2Env {
   SAVE_PATH_TOKEN?: string;
   SAVE_SIGN_SECRET?: string;
   SAVE_INBOX_CAP?: string;
+  SAVE_SIG_V2_ONLY?: string;       // "1"/"true" = 신형 서명 전용 (기본 false = 구형 수용)
   INBOX: DurableObjectNamespace;
 }
 
@@ -190,7 +164,7 @@ export function makeSaveV2Handler() {
 
       const nowS = Math.floor(Date.now() / 1000);
       const bodyText = await request.text();
-      if (!(await verifySig(signMaterial, request, bodyText, nowS))) {
+      if (!(await verifySig(signMaterial, request, bodyText, nowS, sigV2Only(env.SAVE_SIG_V2_ONLY)))) {
         return denyJson(401, "bad signature"); // 무서명·창 밖·변조 일괄
       }
 

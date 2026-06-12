@@ -20,15 +20,16 @@
   유일한 write = reports/openbinggu_v012_*.json (dry-run preview).
 
 CLI:
-  python openbinggu_review_queue_bridge.py --selftest        # fixtures 전수 + report
+  python openbinggu_review_queue_bridge.py --selftest        # synthetic fixtures(temp 합성) 전수 + report
   python openbinggu_review_queue_bridge.py <staging_plan.json>
 """
 import json
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent.parent
-FIXTURE_DIR = BASE / "tests" / "fixtures" / "openbinggu_v012_review_queue"
 QUEUE_REPORT = BASE / "reports" / "openbinggu_v012_review_queue.json"
 SELFTEST_REPORT = BASE / "reports" / "openbinggu_v012_selftest.json"
 
@@ -142,11 +143,68 @@ def _evidence_preserved(result, plan):
     return True
 
 
+def _plan_item(verdict, pack_id, evidence=None, nodes=None, reasons=None,
+               risk="low", tags=None):
+    return {
+        "verdict": verdict, "source_pack_id": pack_id,
+        "reason_codes": list(reasons or []),
+        "candidate_refs": {"nodes": list(nodes or []), "edges": []},
+        "evidence_refs": list(evidence or []),
+        "risk_level": risk, "cross_pack_tags": list(tags or []),
+    }
+
+
+def synthesize_fixtures():
+    """selftest fixture(staging_plan+expected)를 temp 디렉토리에 합성 생성(synthetic, 개인 데이터 0)."""
+    tmp = Path(tempfile.mkdtemp(prefix="obg_v012_fixtures_"))
+    fixtures = {
+        "plan_mixed.json": {
+            "source_staging_plan_id": "plan_mixed",
+            "items": [
+                _plan_item("SAFE_STAGING", "pk_safe_01"),
+                _plan_item("REVIEW_REQUIRED", "pk_rr_01", evidence=["ev_rr_01"],
+                           nodes=["n_rr_01"], reasons=["risk_high"], risk="high"),
+                _plan_item("REVIEW_ONLY", "pk_ro_01", evidence=["ev_ro_01", "ev_ro_02"],
+                           nodes=["n_ro_01"], reasons=["cross_pack_fuzzy"], tags=["topic_overlap"]),
+                _plan_item("STOP", "pk_stop_01", evidence=["ev_stop_01"], reasons=["secret_like"]),
+            ],
+            "expected": {"queue": 2, "blocked": 1, "excluded": 1, "evidence_preserved": True},
+        },
+        "plan_all_safe.json": {
+            "source_staging_plan_id": "plan_all_safe",
+            "items": [
+                _plan_item("SAFE_STAGING", "pk_safe_11"),
+                _plan_item("SAFE_STAGING", "pk_safe_12"),
+            ],
+            "expected": {"queue": 0, "blocked": 0, "excluded": 2, "evidence_preserved": True},
+        },
+        "plan_review_pair.json": {
+            "source_staging_plan_id": "plan_review_pair",
+            "items": [
+                _plan_item("REVIEW_REQUIRED", "pk_rr_21", evidence=["ev_rr_21"],
+                           nodes=["n_rr_21"], reasons=["risk_unknown"], risk="unknown"),
+                _plan_item("REVIEW_ONLY", "pk_ro_22"),
+            ],
+            "expected": {"queue": 2, "blocked": 0, "excluded": 0, "evidence_preserved": True},
+        },
+        "plan_empty.json": {
+            "source_staging_plan_id": "plan_empty", "items": [],
+            "expected": {"queue": 0, "blocked": 0, "excluded": 0, "evidence_preserved": True},
+        },
+        "plan_unknown_verdict_ignored.json": {
+            "source_staging_plan_id": "plan_unknown",
+            "items": [_plan_item("WEIRD_VERDICT", "pk_weird_31")],
+            "expected": {"queue": 0, "blocked": 0, "excluded": 0, "evidence_preserved": True},
+        },
+    }
+    for name, obj in fixtures.items():
+        (tmp / name).write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+    return tmp
+
+
 def run_selftest():
-    if not FIXTURE_DIR.is_dir():
-        print(f"[FAIL] fixture 디렉토리 없음: {FIXTURE_DIR}")
-        sys.exit(1)
-    fixtures = sorted(FIXTURE_DIR.glob("*.json"))
+    fixture_dir = synthesize_fixtures()
+    fixtures = sorted(fixture_dir.glob("*.json"))
     cases, all_queue = [], []
     n_match = n_mismatch = 0
 
@@ -178,6 +236,8 @@ def run_selftest():
                       "actual": actual, "checks": checks, "pass": ok})
         all_queue.extend(res.get("review_queue", []))
 
+    shutil.rmtree(fixture_dir, ignore_errors=True)  # non-retention: temp fixture 즉시 정리
+
     all_pass = (n_mismatch == 0 and n_match > 0)
 
     queue_report = {
@@ -192,7 +252,7 @@ def run_selftest():
     selftest = {
         "bridge": "openbinggu_review_queue_bridge.py", "version": "v0.12",
         "mode": "dry-run / selftest", "blocked_by_v09": True,
-        "fixture_dir": str(FIXTURE_DIR), "n_cases": len(cases),
+        "fixture_mode": "synthetic_temp", "n_cases": len(cases),
         "n_match": n_match, "n_mismatch": n_mismatch,
         "gate": "GO" if all_pass else "STOP",
         "cases": cases,

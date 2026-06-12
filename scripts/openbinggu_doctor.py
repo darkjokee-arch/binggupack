@@ -42,9 +42,13 @@ _CHECKS = [
     ("c2_guard_selftest", "openbinggu_c2_guard_selftest.py"),  # C-2 단일통제 가드 synthetic selftest(21/21, write 0)
     ("staging_write_selftest", "openbinggu_staging_write_selftest.py"),  # Step3 staging write synthetic(11/11, temp DB, 운영 write 0)
     ("phase4_reviewer_confirmed", "openbinggu_phase4_reviewer_confirmed_selftest.py"),  # v0.5 preview 불변 강제(confirmed_created=0/applied=0/promoted=0/upload=0)
+    ("runtime_access_engine", "openbinggu_runtime_access_engine.py"),  # deny-by-default 강제 엔진(21케이스, write 0)
+    ("mcp_server_handlers", "openbinggu_mcp_server_handlers.py"),  # MCP 도구 핸들러 gate 결선(synthetic, underlying mock)
+    ("reviewer_auth_session", "openbinggu_reviewer_auth_session_selftest.py"),  # reviewer 인증/세션(in-memory, FS write 0)
 ]
 
-_GATE_RE = re.compile(r"GATE:\s*([A-Za-z\-]+)")
+# 하위 selftest 의 "GATE: GO" / "RESULT: n/n  GATE=GO" 양식 모두 수용
+_GATE_RE = re.compile(r"GATE[:=]\s*([A-Za-z\-]+)")
 
 
 def _run_selftest(script):
@@ -119,8 +123,9 @@ def _real_tree_scan(tree_root):
     sys.path.insert(0, _HERE)
     from openbinggu_public_tree_scan import scan_public_tree  # noqa: E402
     # .gitignore 계열 기본 제외(공개 대상 아님 전제)
+    # 주의: .env/credentials*/private_key* 는 scanner 의 "검출 대상"이므로 제외 금지(검출 무력화 방지)
     ignore = ["*.sqlite", "*.db", "*_graph.yaml", "reports/", "reviews/", "captures/",
-              "tmp/", "__pycache__/", "*.bak_*", ".env", "credentials*", "private_key*"]
+              "tmp/", "__pycache__/", "*.bak_*"]
     return scan_public_tree(tree_root, ignore_globs=ignore)
 
 
@@ -157,9 +162,9 @@ def run_doctor(tree_root=None):
         tr = _real_tree_scan(tree_root)
         tr_ok = (tr["verdict"] == "CLEAN")
         all_ok = all_ok and tr_ok
-        print("  [%s] %-24s verdict=%s hits=%d by_reason=%s (raw 미출력)"
+        print("  [%s] %-24s verdict=%s hits=%d by_reason=%s content_skipped=%s (raw 미출력)"
               % ("PASS" if tr_ok else "FAIL", "real_tree_scan",
-                 tr["verdict"], tr["hits"], tr["by_reason"]))
+                 tr["verdict"], tr["hits"], tr["by_reason"], tr.get("content_skipped")))
 
     # operating store 불변 확인
     store_after = _store_snapshot()

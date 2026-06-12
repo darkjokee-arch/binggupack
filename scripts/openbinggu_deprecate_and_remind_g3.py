@@ -18,7 +18,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from openbinggu_staging_write_selftest import StagingDB, OPERATING_PATHS, _hash  # 무수정 재사용
+from openbinggu_staging_write_selftest import StagingDB, OPERATING_PATHS, _hash, _now_iso  # 무수정 재사용
 from openbinggu_proposal_batch_approval_g2b import open_staging  # edge_proposals 테이블 보장
 
 G3_SCHEMA = """
@@ -42,7 +42,7 @@ def open_g3(path):
 
 # ---------------- 기각 도장 (deprecated) ----------------
 
-def deprecate_item(db, kind, item_id, reason, ctx, snap_dir, counter_evidence_ref=None):
+def deprecate_item(db, kind, item_id, reason, ctx, snap_dir, counter_evidence_ref=None, ts=None):
     """node/edge 1건 deprecated — 보존(물리 잔존) + state 변경 + 사유 기록. 사람만."""
     before = db.store_checksum()
 
@@ -65,15 +65,15 @@ def deprecate_item(db, kind, item_id, reason, ctx, snap_dir, counter_evidence_re
     if row[0] == "tombstoned":
         return block("tombstoned_item")
 
-    snap = os.path.join(snap_dir, "snap_g3_" + _hash(before))
-    shutil.copy2(db.path, snap)
-    db.con.execute("BEGIN")
-    db.con.execute("UPDATE %s SET state='deprecated' WHERE %s=?" % (table, col), (item_id,))
-    db.con.execute("INSERT INTO deprecations(item_id,kind,reason,counter_evidence_ref,ts) VALUES(?,?,?,?,?)",
-                   (item_id, kind, reason[:200], counter_evidence_ref, "2026-06-11"))
-    db.con.execute("COMMIT")
-    db.audit_append(ctx.get("actor", "human"), "deprecate", item_id, "ALLOW", reason[:80],
-                    before, db.store_checksum())
+    with db.write_lock():
+        snap = db.snapshot(snap_dir, "snap_g3_" + _hash(before))
+        db.con.execute("BEGIN")
+        db.con.execute("UPDATE %s SET state='deprecated' WHERE %s=?" % (table, col), (item_id,))
+        db.con.execute("INSERT INTO deprecations(item_id,kind,reason,counter_evidence_ref,ts) VALUES(?,?,?,?,?)",
+                       (item_id, kind, reason[:200], counter_evidence_ref, _now_iso(ts)))
+        db.con.execute("COMMIT")
+        db.audit_append(ctx.get("actor", "human"), "deprecate", item_id, "ALLOW", reason[:80],
+                        before, db.store_checksum(), ts=ts)
     return {"applied": True, "reason": None, "snapshot": snap}
 
 
@@ -86,7 +86,7 @@ def active_view(db):
 
 # ---------------- 판단 검증 리마인드 (자동 승격 0 — 목록 생성까지만) ----------------
 
-def set_review_due(db, node_id, due_date, ctx):
+def set_review_due(db, node_id, due_date, ctx, ts=None):
     """판단 노드에 검증예정일 등록. 사람만 · 노드 active 실재 · pending 중복 차단."""
     before = db.store_checksum()
 
@@ -104,11 +104,12 @@ def set_review_due(db, node_id, due_date, ctx):
     if db.con.execute("SELECT 1 FROM judgment_reviews WHERE node_id=? AND status='pending'",
                       (node_id,)).fetchone():
         return block("pending_review_exists")
-    db.con.execute("INSERT INTO judgment_reviews(node_id,due_date,status,ts) VALUES(?,?,'pending',?)",
-                   (node_id, due_date, "2026-06-11"))
-    db.con.commit()
-    db.audit_append(ctx.get("actor", "human"), "review_due", node_id, "ALLOW", due_date,
-                    before, db.store_checksum())
+    with db.write_lock():
+        db.con.execute("INSERT INTO judgment_reviews(node_id,due_date,status,ts) VALUES(?,?,'pending',?)",
+                       (node_id, due_date, _now_iso(ts)))
+        db.con.commit()
+        db.audit_append(ctx.get("actor", "human"), "review_due", node_id, "ALLOW", due_date,
+                        before, db.store_checksum(), ts=ts)
     return {"applied": True, "reason": None}
 
 
@@ -124,7 +125,7 @@ def list_due_reminders(db, today):
     return {"count": len(rows), "items": [r[0] for r in rows], "markdown": "\n".join(lines)}
 
 
-def resolve_review(db, node_id, outcome, reason, ctx):
+def resolve_review(db, node_id, outcome, reason, ctx, ts=None):
     """사람이 결과 입력. 기록만 — 노드 자체(state·candidate) 무변. 강등 원하면 별도 deprecate(사람 행동)."""
     before = db.store_checksum()
 
@@ -138,14 +139,15 @@ def resolve_review(db, node_id, outcome, reason, ctx):
         return block("outcome_invalid")
     if not (reason or "").strip():
         return block("resolve_reason_required")
-    cur = db.con.execute(
-        "UPDATE judgment_reviews SET status='resolved', outcome=?, resolved_reason=? "
-        "WHERE node_id=? AND status='pending'", (outcome, reason[:200], node_id))
-    db.con.commit()
-    if cur.rowcount == 0:
-        return block("no_pending_review")
-    db.audit_append(ctx.get("actor", "human"), "review_resolve", node_id, "ALLOW", outcome,
-                    before, db.store_checksum())
+    with db.write_lock():
+        cur = db.con.execute(
+            "UPDATE judgment_reviews SET status='resolved', outcome=?, resolved_reason=? "
+            "WHERE node_id=? AND status='pending'", (outcome, reason[:200], node_id))
+        db.con.commit()
+        if cur.rowcount == 0:
+            return block("no_pending_review")
+        db.audit_append(ctx.get("actor", "human"), "review_resolve", node_id, "ALLOW", outcome,
+                        before, db.store_checksum(), ts=ts)
     return {"applied": True, "reason": None}
 
 
@@ -164,9 +166,9 @@ def run():
     db = open_g3(os.path.join(tmp, "s.sqlite"))
     for nid, s in [("n1", "이 입찰은 보류한다."), ("n2", "마진 확보로 참여한다."), ("n3", "절차가 진행 중이다.")]:
         db.con.execute("INSERT INTO nodes(node_id,node_type,sentence,candidate,promotion_allowed,state,pack_id,content_hash,created_at) "
-                       "VALUES(?,?,?,1,0,'active','g3test',?, '2026-06-11')", (nid, "judgment", s, _hash(nid)))
+                       "VALUES(?,?,?,1,0,'active','g3test',?,?)", (nid, "judgment", s, _hash(nid), _now_iso()))
     db.con.execute("INSERT INTO edges(edge_id,relation,source,target,candidate,state,evidence_refs,pack_id,content_hash,created_at) "
-                   "VALUES('e1','refines','n2','n1',1,'active','[\"EVC-1\"]','g3test','h','2026-06-11')")
+                   "VALUES('e1','refines','n2','n1',1,'active','[\"EVC-1\"]','g3test','h',?)", (_now_iso(),))
     db.con.commit()
 
     # 1. 정상 deprecate — 보존 + 기본 view 제외

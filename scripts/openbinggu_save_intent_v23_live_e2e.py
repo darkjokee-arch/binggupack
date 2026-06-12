@@ -13,8 +13,6 @@ CF 1010 회피 = custom UA 기본 탑재.
 
 전부 통과 = GATE=GO exit 0 / 실패 = BLOCK exit 1.
 """
-import hashlib
-import hmac as hmac_mod
 import json
 import os
 import sys
@@ -30,6 +28,7 @@ _UA = "binggupack-canary/1.0"  # CF 1010 회피 (박제 feedback_cloudflare_1010
 
 sys.path.insert(0, HERE)
 import tempfile  # noqa: E402
+from binggupack_sign_util import signed_headers as sig  # noqa: E402 — HMAC 단일 출처 (L-8)
 from openbinggu_save_intent_outbox_runner import intent_hash, process_outbox  # noqa: E402
 from openbinggu_deprecate_and_remind_g3 import open_g3  # noqa: E402
 
@@ -57,13 +56,6 @@ def load_keys():
             elif line.startswith("WORKER_URL="):
                 url = line.split("=", 1)[1].strip()
     return pk, sm, url
-
-
-def sig(sm, body, ts=None):
-    ts = str(ts if ts is not None else int(time.time()))
-    bh = hashlib.sha256(body).hexdigest()
-    mac = hmac_mod.new(sm.encode(), (ts + "." + bh).encode(), hashlib.sha256).hexdigest()
-    return {"X-BGP-TS": ts, "X-BGP-SIG": mac}
 
 
 def http(method, url, body=None, headers=None):
@@ -106,30 +98,33 @@ def main():
     body = json.dumps(it).encode()
 
     try:
-        st, _ = http("POST", base + "/admin/enable", eb, sig(sm, eb))
+        st, _ = http("POST", base + "/admin/enable", eb, sig(sm, eb, base + "/admin/enable"))
         rec("E0", "라이브 inbox enable 200", st == 200)
 
         # 조건 1
-        st, _ = http("POST", host + "/save2/wrongkey000/intent", body, sig(sm, body))
+        st, _ = http("POST", host + "/save2/wrongkey000/intent", body,
+                     sig(sm, body, host + "/save2/wrongkey000/intent"))
         rec("C1-1", "오토큰 404", st == 404)
-        st, _ = http("POST", base + "/intent", body, dict(sig(sm, body), Origin="https://evil.example"))
+        st, _ = http("POST", base + "/intent", body,
+                     dict(sig(sm, body, base + "/intent"), Origin="https://evil.example"))
         rec("C1-2", "Origin 403", st == 403)
         st, _ = http("POST", base + "/intent", body)
         rec("C1-3", "무서명 401", st == 401)
-        st, _ = http("POST", base + "/intent", body, sig(sm, body, ts=now - 301))
+        st, _ = http("POST", base + "/intent", body,
+                     sig(sm, body, base + "/intent", ts=now - 301))
         rec("C1-4", "재전송 창 밖 401", st == 401)
 
         # 조건 2 — 정상 + 변조 적재
-        st, rb = http("POST", base + "/intent", body, sig(sm, body))
+        st, rb = http("POST", base + "/intent", body, sig(sm, body, base + "/intent"))
         n0 = db.con.execute("SELECT count(*) FROM nodes").fetchone()[0]
         rec("C2-1", "worker 적재 후 로컬 DB 노드 0",
             st == 200 and json.loads(rb).get("intent_id") == it["intent_id"] and n0 == 0)
         tam = dict(it, text=CONVO + " 변조됨.", intent_id="f" * 16)
         tb = json.dumps(tam).encode()
-        st_t, _ = http("POST", base + "/intent", tb, sig(sm, tb))
+        st_t, _ = http("POST", base + "/intent", tb, sig(sm, tb, base + "/intent"))
 
         time.sleep(3)
-        st, rb = http("POST", base + "/pull", eb, sig(sm, eb))
+        st, rb = http("POST", base + "/pull", eb, sig(sm, eb, base + "/pull"))
         arr = json.loads(rb).get("intents", []) if st == 200 else []
         for a in arr:
             with open(os.path.join(outbox, a["intent_id"] + ".json"), "w", encoding="utf-8") as f:
@@ -158,9 +153,9 @@ def main():
 
         # 조건 4 — TTL 라이브 소각 + 자동 재시도 0 + 스냅샷
         sh = json.dumps(mk("ttl 소각 — 보류한다.", [1], ttl=1)).encode()
-        http("POST", base + "/intent", sh, sig(sm, sh))
+        http("POST", base + "/intent", sh, sig(sm, sh, base + "/intent"))
         time.sleep(4)
-        st, rb = http("POST", base + "/pull", eb, sig(sm, eb))
+        st, rb = http("POST", base + "/pull", eb, sig(sm, eb, base + "/pull"))
         live_burned = st == 200 and json.loads(rb).get("intents") == []
         nb = db.con.execute("SELECT count(*) FROM nodes").fetchone()[0]
         r2 = process_outbox(db, outbox, ctx, snap, now)
@@ -170,8 +165,8 @@ def main():
         rec("C4-2", "러너 자동 재시도 0", r3["applied"] == 0)
         rec("C4-3", "적용 시 스냅샷 생성", len(os.listdir(snap)) >= 1)
     finally:
-        st, rb = http("POST", base + "/admin/disable", eb, sig(sm, eb))
-        st2, rb2 = http("POST", base + "/intent", body, sig(sm, body))
+        st, rb = http("POST", base + "/admin/disable", eb, sig(sm, eb, base + "/admin/disable"))
+        st2, rb2 = http("POST", base + "/intent", body, sig(sm, body, base + "/intent"))
         rec("C4-4", "종료 시 inbox disable(재잠금 503)",
             st2 == 503 and "inbox_disabled" in rb2)
 
