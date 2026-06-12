@@ -117,8 +117,8 @@ python scripts/openbinggu_upload_preflight.py <pack_dir> [<temp_staging_db>]
 | 로컬 후보 관리(저장→기각→수정→수용→4값 검증) | ✅ v1.0.0 — real 1사이클 13/13 + clean clone 17/17 검증 |
 | `binggu` CLI (내 장부 진입점) | ✅ v1.0.0 |
 | 그래프 문법 스펙(5종 노드·동사 엣지·증빙 의무) + 검증기 강제 | ✅ v1.1.0 — [spec](docs/BINGGUPACK_GRAPH_GRAMMAR_SPEC.md), 엣지 증빙 런타임 강제 |
-| hosted 조회 (Claude/ChatGPT 채팅에서 장부 read-only) | ✅ 동작 검증됨 — v1.1.0부터 **전 팩·원문 검색**(`evidence_search`에 pack_id 불필요). 각자 자기 워커를 배포(`hosted/`), 공용 서버 없음 |
-| hosted 저장(save-intent) | 🔜 planned — 설계 완료(`docs/BINGGUPACK_HOSTED_SAVE_INTENT_DESIGN.md`), 로컬 outbox 러너까지 구현. live 노출은 인증·canary·audit·rollback 게이트 통과 후 별도 결정 |
+| hosted 조회 (Claude/ChatGPT 채팅에서 장부 read-only) | ✅ 동작 검증됨 — v1.1.0부터 **전 팩·원문 검색**(`evidence_search`에 pack_id 불필요). `pack_list` 제목 = manifest `topics` 주제 라벨, 노드 응답에 `doc_status`(소스 문서가 deprecated면 "대체됨" 표시). 각자 자기 워커를 배포(`hosted/`), 공용 서버 없음 |
+| hosted 저장(save-intent) | ✅ 동작 검증됨 — 폰(MCP 커넥터) 미리보기→`SAVE n`→PC 러너 pull→로컬 장부 저장 전 구간 실증. 이중 인증(적재=경로키·Origin / 인출=HMAC)·inbox 평소 잠금·non-retention. 설계: `docs/BINGGUPACK_HOSTED_SAVE_INTENT_DESIGN.md` |
 | OpenCrab private 업로드 | 🔜 planned — preflight(G1~G7)까지 구현·검증, 실 전송은 별도 결정 |
 | 팀/공유/마켓플레이스/과금 | ❌ 범위 밖 (정책 미정) |
 
