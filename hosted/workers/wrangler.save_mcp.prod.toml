@@ -1,0 +1,15 @@
+# A-2 — save-intent MCP 어댑터 운영 worker (라이브 canary + 폰 커넥터 라인).
+# owner 승인 문구("a-2 배포 고", 2026-06-12) 하에만 deploy.
+# read 라인·v2 라인과 name 완전 분리 — 오배포·삭제 모두 격리.
+# 기본 = inbox 잠김(fail-closed). Workers Logs/observability 켜지 말 것.
+name = "binggupack-save-intent-mcp"
+main = "src/index.save_mcp.ts"
+compatibility_date = "2025-05-01"
+
+[[durable_objects.bindings]]
+name = "INBOX"
+class_name = "IntentInbox"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["IntentInbox"]
