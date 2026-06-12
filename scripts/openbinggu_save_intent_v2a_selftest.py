@@ -163,6 +163,21 @@ def main():
         st, rb = http("POST", mcp_url, json.dumps(bad).encode())
         rec("M6", "confirm 불일치 isError", '"isError": true' in rb or '"isError":true' in rb)
 
+        # 11번↑ 선제 거부 (폰·PC 후보 상한 10 통일 — 4cli 20260612_1420)
+        over = mcp(41, "tools/call", {"name": "save_intent",
+                                      "arguments": {"text": text, "indices": [15], "confirm": "SAVE 15"}})
+        st, rb = http("POST", mcp_url, json.dumps(over).encode())
+        rec("M6b", "indices 15 → isError(index_above_candidate_max)",
+            ("isError" in rb) and "index_above_candidate_max" in rb)
+        # 미리보기는 항상 10건 (max 조절 무시)
+        pc = mcp(42, "tools/call", {"name": "conversation_capture_preview",
+                                    "arguments": {"text": "보류한다. 진행한다. 마진 확보. 마진 낮음. "
+                                                  "납기 촉박. 자격 충족. 지역 제한. 면허 일치. "
+                                                  "실적 부족. 가격 적정. 추가 문장. 또 추가."}})
+        st, rb = http("POST", mcp_url, json.dumps(pc).encode())
+        sc = json.loads(rb).get("result", {}).get("structuredContent", {}) if st == 200 else {}
+        rec("M6c", "미리보기 최대 10건 고정", len(sc.get("candidates", [])) <= 10)
+
         st, _ = http("POST", mcp_url, json.dumps(call).encode(), {"Origin": "https://evil.example"})
         rec("M7", "브라우저 Origin 403 (적재)", st == 403)
         st, _ = http("POST", BASE + "/mcp2/wrongkey000", json.dumps(mcp(5, "ping")).encode())

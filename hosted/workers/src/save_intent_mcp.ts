@@ -16,6 +16,9 @@ const INDICES_CAP = 64;
 const DEFAULT_TTL_S = 86400;
 const DEFAULT_INBOX_CAP = 32;
 const SIG_WINDOW_S = 300;
+// 4cli 20260612_1420 both_reject→단순화: 폰 미리보기·PC 러너 후보 상한 단일 고정.
+// PC 러너 capture_preview 기본(DEFAULT_MAX=10)과 반드시 동일해야 번호 일치(임의 max 금지).
+const CANDIDATE_MAX = 10;
 const PROTOCOL_VERSION = "2025-06-18";
 const SUPPORTED_PROTOCOL_VERSIONS = ["2025-03-26", "2025-06-18", "2025-11-25"];
 const SERVER_INFO = { name: "binggupack-save-intent", version: "2.0" };
@@ -46,6 +49,8 @@ function argsReject(a: any): string | null {
   if (!Array.isArray(a.indices) || a.indices.length === 0) return "indices_empty";
   if (a.indices.length > INDICES_CAP) return "indices_too_many";
   if (!a.indices.every((i: any) => Number.isInteger(i) && i >= 1)) return "indices_invalid";
+  // 후보 상한(10) 초과 번호 선제 거부 — 폰·PC 번호 체계 동일성 강제 (11번↑은 존재 불가)
+  if (!a.indices.every((i: any) => i <= CANDIDATE_MAX)) return "index_above_candidate_max";
   if (typeof a.confirm !== "string") return "confirm_invalid";
   if (a.confirm !== "SAVE " + a.indices.join(",")) return "confirm_phrase_mismatch";
   return null;
@@ -53,14 +58,14 @@ function argsReject(a: any): string | null {
 
 const PREVIEW_TOOL = {
   name: "conversation_capture_preview",
-  description: "사용자가 전달한 대화 텍스트에서 핵심 문장 후보를 미리보기(5종 도장·헌법 판정). " +
+  description: "사용자가 전달한 대화 텍스트에서 핵심 문장 후보를 미리보기(최대 10건·5종 도장·헌법 판정). " +
     "저장 0 — PII/secret 문장은 후보 제외. read-only. " +
-    "save_intent 호출 전 이 도구로 후보 번호를 먼저 받아라 — 번호는 PC 러너와 동일 체계다(임의 번호 금지).",
+    "save_intent 호출 전 이 도구로 후보 번호(1~10)를 먼저 받아라 — 번호는 PC 러너와 동일 체계다. " +
+    "후보 개수는 10건 고정(조절 불가) — 11번 이상은 존재하지 않는다.",
   inputSchema: {
     type: "object",
     properties: {
       text: { type: "string", description: "캡처 후보를 뽑을 대화 발췌 (사용자가 명시적으로 전달)" },
-      max_candidates: { type: "integer", description: "기본 10, 최대 20" },
     },
     required: ["text"],
   },
@@ -150,7 +155,8 @@ async function handleMcp(rpc: any, env: SaveMcpEnv, stub: DurableObjectStub): Pr
         return rpcResult(id, { content: [{ type: "text", text: JSON.stringify({ error: "text_invalid" }) }],
                                isError: true });
       }
-      const out = capturePreview(args.text, args.max_candidates);
+      // max 고정 — 폰이 임의 개수를 보내도 무시(PC 러너 기본 10과 동일성 강제)
+      const out = capturePreview(args.text, CANDIDATE_MAX);
       return rpcResult(id, { content: [{ type: "text", text: out.preview_markdown }],
                              structuredContent: out, isError: false });
     }
