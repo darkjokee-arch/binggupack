@@ -6,6 +6,7 @@
 // 최종 저장 권한 = 로컬 러너 게이트(여기는 휘발 적재만). read 라인(62팩) 무접촉·별도 worker.
 // live 노출 = A-2 owner GO 전 금지. 변수명 token/secret '=' 조합 회피 (6/10 박제).
 import { IntentInbox } from "./save_intent_v2";
+import { capturePreview } from "./capture_preview";
 
 export { IntentInbox };
 
@@ -49,6 +50,21 @@ function argsReject(a: any): string | null {
   if (a.confirm !== "SAVE " + a.indices.join(",")) return "confirm_phrase_mismatch";
   return null;
 }
+
+const PREVIEW_TOOL = {
+  name: "conversation_capture_preview",
+  description: "사용자가 전달한 대화 텍스트에서 핵심 문장 후보를 미리보기(5종 도장·헌법 판정). " +
+    "저장 0 — PII/secret 문장은 후보 제외. read-only. " +
+    "save_intent 호출 전 이 도구로 후보 번호를 먼저 받아라 — 번호는 PC 러너와 동일 체계다(임의 번호 금지).",
+  inputSchema: {
+    type: "object",
+    properties: {
+      text: { type: "string", description: "캡처 후보를 뽑을 대화 발췌 (사용자가 명시적으로 전달)" },
+      max_candidates: { type: "integer", description: "기본 10, 최대 20" },
+    },
+    required: ["text"],
+  },
+};
 
 const SAVE_TOOL = {
   name: "save_intent",
@@ -122,13 +138,26 @@ async function handleMcp(rpc: any, env: SaveMcpEnv, stub: DurableObjectStub): Pr
     });
   }
   if (method === "ping") return rpcResult(id, {});
-  if (method === "tools/list") return rpcResult(id, { tools: [SAVE_TOOL] });
+  if (method === "tools/list") return rpcResult(id, { tools: [PREVIEW_TOOL, SAVE_TOOL] });
   if (method === "tools/call") {
     const params = rpc.params ?? {};
-    if ((params.name ?? "") !== "save_intent") {
-      return rpcError(id, -32602, "unknown tool: " + (params.name ?? ""));
-    }
+    const toolName = params.name ?? "";
     const args = params.arguments ?? {};
+
+    // 미리보기 (read-only, 저장 0) — save_intent 번호와 동일 체계
+    if (toolName === "conversation_capture_preview") {
+      if (typeof args.text !== "string" || !args.text.trim()) {
+        return rpcResult(id, { content: [{ type: "text", text: JSON.stringify({ error: "text_invalid" }) }],
+                               isError: true });
+      }
+      const out = capturePreview(args.text, args.max_candidates);
+      return rpcResult(id, { content: [{ type: "text", text: out.preview_markdown }],
+                             structuredContent: out, isError: false });
+    }
+
+    if (toolName !== "save_intent") {
+      return rpcError(id, -32602, "unknown tool: " + toolName);
+    }
     const reason = argsReject(args);
     if (reason !== null) {
       return rpcResult(id, { content: [{ type: "text", text: JSON.stringify({ error: reason }) }],
@@ -196,4 +225,4 @@ export function makeSaveMcpHandler() {
   };
 }
 
-export const __testSaveMcp = { argsReject, intentHash, SAVE_TOOL, SCHEMA_VER };
+export const __testSaveMcp = { argsReject, intentHash, SAVE_TOOL, PREVIEW_TOOL, SCHEMA_VER };

@@ -123,9 +123,21 @@ def main():
         st, rb = http("POST", mcp_url, json.dumps(mcp(2, "tools/list")).encode())
         j = json.loads(rb) if st == 200 else {}
         tools = j.get("result", {}).get("tools", [])
-        rec("M2", "tools/list = save_intent + inputSchema object",
-            len(tools) == 1 and tools[0]["name"] == "save_intent"
-            and tools[0]["inputSchema"]["type"] == "object")
+        names = sorted(t["name"] for t in tools)
+        rec("M2", "tools/list = preview + save_intent (2개)",
+            names == ["conversation_capture_preview", "save_intent"])
+
+        # 미리보기 도구 — save_intent 번호와 동일 체계 (read-only, 저장 0)
+        prev_text = ("이 입찰은 마진이 낮아 보류한다. 낙찰하한율은 기초금액 대비 최저 투찰 비율이다. "
+                     "백필 작업이 진행 중이다.")
+        pcall = mcp(20, "tools/call", {"name": "conversation_capture_preview",
+                                       "arguments": {"text": prev_text}})
+        st, rb = http("POST", mcp_url, json.dumps(pcall).encode())
+        j = json.loads(rb) if st == 200 else {}
+        sc = j.get("result", {}).get("structuredContent", {})
+        rec("M2b", "preview 도구 → candidates + nothing_saved",
+            j.get("result", {}).get("isError") is False
+            and isinstance(sc.get("candidates"), list) and sc.get("nothing_saved") is True)
 
         call = mcp(3, "tools/call", {"name": "save_intent",
                                      "arguments": {"text": text, "indices": indices, "confirm": confirm}})
