@@ -1,0 +1,14 @@
+# V2-A — save-intent MCP 어댑터 worker. 로컬 wrangler dev 한정.
+# deploy 금지 (A-2 owner GO 전). name 분리 — read 라인·v2 라인과 무관.
+# 실행: scripts/openbinggu_save_intent_v2a_selftest.py
+name = "binggupack-save-intent-mcp-local"
+main = "src/index.save_mcp.ts"
+compatibility_date = "2025-05-01"
+
+[[durable_objects.bindings]]
+name = "INBOX"
+class_name = "IntentInbox"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["IntentInbox"]
