@@ -145,6 +145,7 @@ function consume(pack: Pack): any {
       domain: p.domain ?? "",
       evidence_refs: [...(n.evidence_refs ?? [])],
       trust: "candidate_unverified",
+      ...(p.doc_status && p.doc_status !== "active" ? { doc_status: p.doc_status } : {}),
     };
   });
 
@@ -181,6 +182,7 @@ function consume(pack: Pack): any {
   return {
     pack_id: manifest.pack_id ?? "",
     scope: manifest.scope ?? "",
+    topics: Array.isArray(manifest.topics) ? manifest.topics : [],
     visibility, status,
     confirmed_allowed: confirmedAllowed,
     pack_promotion_allowed_default: Boolean(packPromotionDefault),
@@ -252,7 +254,8 @@ function toolPackList(store: PackStore, args: Record<string, any>): any {
   const limit = Math.max(1, Math.min(toInt(args.limit ?? 20), 70)); // v2.1: MAX_PACKS 70 정합
   const packs = store.ids().slice(0, limit).map((pid) => {
     const v = store.get(pid);
-    return { pack_id: pid, title: v.scope ?? "", counts: v.counts,
+    const title = (v.topics && v.topics.length ? v.topics.join("·") : v.scope) ?? "";
+    return { pack_id: pid, title, counts: v.counts,
              candidate_note: "all items candidate (not confirmed)" };
   });
   return { packs, total: store.ids().length };
@@ -335,7 +338,8 @@ function toolNodeEdgeLookup(store: PackStore, args: Record<string, any>): any {
       evidence_refs: e.evidence_refs, candidate: e.candidate,
     }));
   return { node: { id: node.id, claim: node.claim, candidate: node.candidate,
-                   evidence_refs: node.evidence_refs, trust: node.trust },
+                   evidence_refs: node.evidence_refs, trust: node.trust,
+                   ...(node.doc_status ? { doc_status: node.doc_status } : {}) },
            edges };
 }
 
