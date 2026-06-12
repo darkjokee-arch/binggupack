@@ -4,7 +4,7 @@
 AI와의 대화·메모에서 건질 문장(판단/상태/개념)을 후보로 떠서, 사람이 직접 confirm 문구를
 타이핑해야만 저장·기각·수정·수용되는 **로컬 우선(local-first) 후보 관리 시스템**입니다.
 
-- 최신 공개판: **v1.1.0** (그래프 문법 스펙 + 전 팩 원문 검색. v1.0.0 = 개인용 정식 동결, v1.0.1 = save preview-id 강제)
+- 최신 공개판: **v1.2.0** (hosted save-intent 폰 저장 + pack browsing 개선. v1.1.0 = 그래프 문법 스펙·전 팩 원문 검색, v1.0.0 = 개인용 정식 동결)
 - 자동으로 되는 것: **없음.** 모든 변경은 사람의 정확한 confirm 문구가 게이트입니다.
 - 절대 안 하는 것: 원문 전문 저장(발췌만) · 자동 확정(confirmed 0) · 자동 업로드.
 
@@ -117,8 +117,8 @@ python scripts/openbinggu_upload_preflight.py <pack_dir> [<temp_staging_db>]
 | 로컬 후보 관리(저장→기각→수정→수용→4값 검증) | ✅ v1.0.0 — real 1사이클 13/13 + clean clone 17/17 검증 |
 | `binggu` CLI (내 장부 진입점) | ✅ v1.0.0 |
 | 그래프 문법 스펙(5종 노드·동사 엣지·증빙 의무) + 검증기 강제 | ✅ v1.1.0 — [spec](docs/BINGGUPACK_GRAPH_GRAMMAR_SPEC.md), 엣지 증빙 런타임 강제 |
-| hosted 조회 (Claude/ChatGPT 채팅에서 장부 read-only) | ✅ 동작 검증됨 — v1.1.0부터 **전 팩·원문 검색**(`evidence_search`에 pack_id 불필요). `pack_list` 제목 = manifest `topics` 주제 라벨, 노드 응답에 `doc_status`(소스 문서가 deprecated면 "대체됨" 표시). 각자 자기 워커를 배포(`hosted/`), 공용 서버 없음 |
-| hosted 저장(save-intent) | ✅ 동작 검증됨 — 폰(MCP 커넥터) 미리보기→`SAVE n`→PC 러너 pull→로컬 장부 저장 전 구간 실증. 이중 인증(적재=경로키·Origin / 인출=HMAC)·inbox 평소 잠금·non-retention. 설계: `docs/BINGGUPACK_HOSTED_SAVE_INTENT_DESIGN.md` |
+| hosted 조회 (Claude/ChatGPT 채팅에서 장부 read-only) | ✅ v1.1.0부터 **전 팩·원문 검색**(`evidence_search`에 pack_id 불필요), v1.2.0부터 `pack_list` 제목 = manifest `topics` 주제 라벨 + 노드 응답 `doc_status`(소스 문서가 deprecated면 "대체됨" 표시). 각자 자기 워커를 배포(`hosted/`), 공용 서버 없음 |
+| hosted 저장(save-intent) | ✅ v1.2.0 — 폰(MCP 커넥터) 미리보기→`SAVE n`→PC 러너 pull→로컬 장부 저장 전 구간 실증. 이중 인증(적재=경로키·Origin / 인출=HMAC)·inbox 평소 잠금·non-retention. 설계: `docs/BINGGUPACK_HOSTED_SAVE_INTENT_DESIGN.md` |
 | OpenCrab private 업로드 | 🔜 planned — preflight(G1~G7)까지 구현·검증, 실 전송은 별도 결정 |
 | 팀/공유/마켓플레이스/과금 | ❌ 범위 밖 (정책 미정) |
 
@@ -139,6 +139,6 @@ This project is licensed under the **MIT License** — see the [LICENSE](LICENSE
 
 ## Status / 상태
 
-- 개인용(트랙1): **v1.1.0 — 후보 관리 전 구간 완성(v1.0.0) + 그래프 문법 스펙·전 팩 원문 검색(v1.1.0)**. `binggu` CLI로 개인 장부 실사용 가능.
+- 개인용(트랙1): **v1.2.0 — 후보 관리 전 구간 완성(v1.0.0) + 그래프 문법 스펙·전 팩 원문 검색(v1.1.0) + 폰 저장·browsing 개선(v1.2.0)**. `binggu` CLI로 개인 장부 실사용 가능.
 - 팀 유료(트랙2): DEFER. 불특정 다수 marketplace: BLOCK.
-- 실제 GitHub: **Public 공개(최신 `v1.1.0` Latest).**
+- 실제 GitHub: **Public 공개(최신 `v1.2.0` Latest).**
