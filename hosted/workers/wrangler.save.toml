@@ -1,0 +1,7 @@
+# D3 — save-intent 적재 worker. 로컬 wrangler dev 한정.
+# deploy 영구 금지 (D5 owner 명시 GO 전) — name도 라이브 워커와 분리(오배포해도 라이브 무영향).
+# 실행: npx wrangler dev --config wrangler.save.toml --port 8799 (--var 로 SAVE_PATH_TOKEN 랜덤 키 주입 — 게이트 스크립트가 자동 수행)
+# 게이트: scripts/openbinggu_save_intent_d3_canary.py (canary non-retention 실측)
+name = "binggupack-save-intent-local"
+main = "src/index.save.ts"
+compatibility_date = "2025-05-01"
