@@ -179,3 +179,59 @@ preview → 사람이 SAVE n → 기존 게이트(save_selected) commit
 - shadow 로깅도 원문 발췌가 로컬 파일에 남음 → 보존 TTL/암호화 여부 owner 결정(현 ledger 와 동일 정책 제안).
 
 **다음(별도 GO):** seed/임계 초안 → shadow 모듈 PoC(읽기 전용, 저장 0) → eval 골든셋 → 비교 리포트.
+
+---
+
+## 9. R2 4cli 착수 게이트 (2026-06-13 확정 — 이 조건 전부 충족 전 shadow PoC 착수 금지)
+
+> 4cli R2 판정 = **REFINE**(영구 BLOCK 0). 전략 논점(할 가치/본업 우선)은 owner 지시로 제외, 안전조건만.
+
+**핵심 불변 (B 요약):** *원문이 LLM·로그·예외·디스크 어디에도 남지 않고, 실패가 항상 rule fallback 으로 닫히는 구조.*
+
+| # | 조건 | 출처 |
+|---|---|---|
+| 1 | L1 PII/secret 정규식을 **embedding/LLM 입력 직전 재적용 어서션** — hit 이면 호출 skip→rule + leak_guard 카운터 | A·C |
+| 2 | shadow log **전문 저장 금지** — text_sha8·len·rule_label·sem_label·conf·reason_codes·latency·model_digest·band 만 | A·B |
+| 3 | L3 `reason_codes` **enum 고정**, 위반/JSON 깨짐 → 무조건 rule 강등 + enum_violation 카운터·알람 | A·B·C |
+| 4 | **shadow log 역추적 방어** — 짧은 원문은 해시 brute 복원 가능 → `text_sha8` 에 **salt+HMAC**(해시도 평문 아님) | C |
+| 5 | **Ollama 자원경합 통제** — §10 실측 기반: L3 기본 OFF·max concurrency=1·rate cap·timeout→rule | A·B·C·D |
+| 6 | **비결정성 게이트** — temp=0 + seed 고정 + N회 일치율 게이트(없으면 drift regression 자체가 거짓) | C |
+| 7 | **L1 런타임 우회 방지** — 파일 byte-diff 0 뿐 아니라 **호출스택 단위 동등성 어서션**(모든 경로에서 L1 선실행 보장) | C |
+| 8 | **재현성 스냅샷** — model_digest + prompt_hash + enum_version + threshold/band config + classifier_build_hash | B |
+| 9 | **메트릭 분리** — shadow 지연/에러가 운영 관측 지표를 오염시키지 않게 메트릭 파이프라인 논리 분리 | D |
+| 10 | LLM/embedding 호출 = **leak_guard wrapper 단일 경유 강제**(밖 직접호출 금지) | B |
+| 11 | golden = 6라벨 클래스 균형 + **애매 band 중심**(rule fallback_judgment 문장) + 판단 편향 금지 + PII 함정 | A·B·C |
+| 12 | leak=0 = golden PII 함정 L1 제외 100% ∧ shadow.jsonl 원문/PII 0 ∧ LLM 입력 PII 카운터 0 | A·B |
+| 13 | default 승격 = 코드 **hard-disable**, (골든회귀 ∧ drift 0 ∧ leak 0 ∧ opt-in 데이터) 전 영구 잠금 | A·C |
+| 14 | shadow.jsonl retention·chmod/ACL·rotation·secret scanner 통과 | B |
+| 15 | 검증 = leak scan + byte-diff + 호출스택 동등성 + golden regression + drift check **단일 selftest** | B·C |
+| 16 | PoC 범위 = 저장 0 · ledger write 0 · preview 출력 영향 0 · shadow report only | A |
+
+---
+
+## 10. Ollama 자원경합 실측 (2026-06-13, 코드 0·관찰만)
+
+**환경:** RTX 4070 SUPER **12GB(단일 GPU)** · Ollama 11434 = **127.0.0.1 only**(외부 0) · 클라이언트 = `pajae_rag_server.py`(박제 RAG, bge 공유) · `safety-app` Ollama 미사용(grep 0)·bid-engine established 클라이언트 0.
+
+| 항목 | 실측 | 함의 |
+|---|---|---|
+| qwen2.5:14b VRAM | **9.7GB** (GPU 상주) | bge 동시 GPU 상주 불가(여유 851MB) |
+| bge-m3 배치 | **CPU 추론**(GPU 여유 부족 → ollama 자동 분리) | **qwen 안 밀어냄 = 역할 분리(qwen=GPU, bge=CPU)** |
+| bge embed warm | p50 **148ms** · p95 201ms (cold 2.8s=로드) | CPU치고 충분히 빠름 |
+| bge 동시 3 | 각 ~160ms · **wall 171ms ≈ 병렬**(순차 380ms 대비) | queue 직렬화 경미 — L2 shadow 경합 낮음 |
+| qwen JSON generate | **810ms**(GPU·JSON 유효·temp0 seed42) | 짧은 분류엔 빠르나 GPU 9.7GB 점유 |
+| qwen keep-alive | 만료 시 **언로드**(GPU 회수) → 다음 호출 cold 재로드 | L3 드물게 부르면 매번 cold 비용 |
+
+**자원경합 위험 판단:**
+- **L2(bge)** = CPU 추론·동시 거의 병렬 → **GPU 경합 0, 위험 낮음**. pajae_rag 와 bge 큐만 공유(경미).
+- **L3(qwen)** = GPU 9.7GB 점유가 경합의 원천. 자주 부르면 다른 GPU 작업과 충돌, idle 시 언로드.
+- 본업: safety-app 미사용 확인 / bid-engine LLM 클라이언트 미관측(GPU 사용 여부는 별도 확인 권장).
+
+**권장 운영 분리안 (실측 기반):**
+1. **L3(qwen) 기본 OFF, L2(bge) shadow 우선** — 경합 원천이 qwen GPU 점유이므로. embedding-only shadow 면 GPU 거의 무접촉. ✅ 1순위
+2. **max concurrency=1 + rate cap** — pajae_rag bge 큐와 공유하므로 폭주 차단. ✅
+3. **timeout(L2 300ms·L3 4s) + 실패→rule fallback**. ✅
+4. **본업 시간대 pause**(bid-engine GPU 사용 확인 후 우선순위 결정).
+5. **별도 인스턴스/포트는 실익 낮음** — GPU 1장이라 인스턴스 분리해도 같은 GPU 경합. **rate/concurrency 제어 + L3 OFF 가 정답**(포트 분리보다 효과적). 단 `OLLAMA_NUM_PARALLEL` 직렬화는 활용 가능.
+
+**결론:** shadow PoC 를 **L2(embedding)-only 로 시작**하면 자원경합 위험은 낮다(bge CPU·병렬·GPU 무접촉). L3(qwen)은 기본 OFF 로 두고, 켤 때만 GPU 점유·concurrency=1·rate cap 적용. §9 게이트의 #5 가 본 실측으로 구체화됨.
