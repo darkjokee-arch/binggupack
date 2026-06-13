@@ -3,6 +3,10 @@
 > **설계만 — 코드 0.** 구현은 owner 별도 GO 후. 기존 정규식은 **건드리지 않는다**(§7 확약).
 > 원칙: 자동 저장 아님 · semantic 은 후보 추천만 · secret/PII hard block 은 정규식이 항상 최우선 ·
 > 원문 전문 저장 금지 · 최종 저장은 preview 후 `SAVE n` 게이트만.
+>
+> **계층 분리 (정본 비침해 — 핵심, §12):** canonical 노드 라벨 = 기존 5종(문서·증거·개념·상태·판단) **불변**.
+> semantic 은 그 **위에 얹는 보조 `semantic_subtype` 태그**(교훈·결정·선호·설계결정·버그패턴·사실/메모·기타)일 뿐,
+> canonical label_kind 를 **override 하지 않는다**. ledger schema·edge graph·save_selected·정규식 전부 불변.
 
 ---
 
@@ -17,10 +21,11 @@
 | 헌법 판정 | `a0_node_dryrun.classify_node` | A0 verdict |
 
 **한계:** `_RULES` 5개에 명확히 매칭 안 되면 `fallback_judgment`. 즉
-- 애매한 교훈/운영결정/사용자 선호/설계결정/버그패턴이 전부 "판단"으로 뭉개짐(라벨 해상도 낮음).
+- canonical 5종 안에서 라벨 해상도는 낮지 않으나, **"왜 저장하는가"의 성격**(교훈인지 결정인지 선호인지)은 전혀 안 잡힘.
 - "이 문장이 **저장할 가치가 있나**(should_capture)" 판단 자체가 없음 — preview 는 의미문장이면 다 후보로.
 
-→ semantic 레이어로 **라벨 해상도 + should_capture 추천**을 더한다. **단 추천만** — 저장 결정은 사람 게이트.
+→ semantic 레이어로 **보조 subtype 추천 + should_capture 추천**을 더한다. **단 추천만** —
+canonical label_kind(5종)는 그대로 두고 그 **위에 `semantic_subtype` 을 덧붙일 뿐**, 저장 결정은 사람 게이트(§12).
 
 ---
 
@@ -37,13 +42,13 @@
   │   score 명확(≥hi) → 라벨 확정 추천          ─┐
   │   score 낮음(≤lo) → should_capture=false 추천 ─┤→ L3 건너뜀
   ▼   score 애매(lo<s<hi) ────────────────────────┘
-[L3 local LLM layer] (애매 band 만 호출) → JSON{label_kind, confidence, reason_codes, should_capture}
-  │
+[L3 local LLM layer] (애매 band 만 호출) → JSON{semantic_subtype, confidence, reason_codes, should_capture}
+  │   (semantic_subtype 만 산출 — canonical label_kind 은 건드리지 않음)
   ▼
-[추천 병합] rule baseline(label_kind_map) + semantic 추천을 **나란히** preview 에 표시
-  │   (불일치 시 양쪽 다 보여줌 — 사람이 판단)
+[표시] canonical label_kind(기존 정규식 그대로) + semantic_subtype(보조 추천)을 **나란히** preview/shadow 에 표시
+  │   (semantic 은 label_kind 를 override 하지 않음 — 보조 태그·검색 힌트일 뿐)
   ▼
-preview → 사람이 SAVE n → 기존 게이트(save_selected) commit
+preview → 사람이 SAVE n → 기존 게이트(save_selected) commit (schema/edge 불변)
 ```
 
 **불변 규칙**
@@ -108,8 +113,8 @@ preview → 사람이 SAVE n → 기존 게이트(save_selected) commit
 ## 5. selftest / eval fixture 설계
 
 ### 5-1. 골든셋 (`tests/fixtures/semantic/golden.jsonl`)
-각 항목 `{text, expect_label, expect_should_capture, is_pii_secret, note}`:
-- 6 라벨 양성: 판단·교훈·운영결정·사용자선호·설계결정·버그패턴 (각 ≥15문장, 명확/애매 혼합)
+각 항목 `{text, expect_semantic_subtype, expect_should_capture, is_pii_secret, note}`:
+- semantic_subtype 양성: 교훈·결정·선호·설계결정·버그패턴·사실/메모 등(각 ≥15문장, 명확/애매 혼합) — **canonical label_kind 가 아니라 보조 subtype 라벨**.
 - 음성(저장 가치 낮음): 잡담·단순상태중계·코드 diff 라인·인사 (should_capture=false)
 - **함정**: PII/secret 포함하되 의미상 "저장하고 싶어 보이는" 문장(예: "이 API key 꼭 기억: sk-...") → **L1 이 무조건 제외**해야(leak=0 검증의 핵심)
 
@@ -150,7 +155,7 @@ preview → 사람이 SAVE n → 기존 게이트(save_selected) commit
 
 ### 신규(추가만)
 - `scripts/binggu_semantic_classify.py` — 4 레이어 오케스트레이션 + Ollama 클라이언트 + fail-soft + selftest
-- `scripts/binggu_semantic_seeds.py` (또는 json) — 6 라벨 seed 문장 + 임계
+- `scripts/binggu_semantic_seeds.py` (또는 json) — semantic_subtype seed 문장 + 임계(canonical 5종용 아님)
 - `tests/fixtures/semantic/golden.jsonl` — eval 골든셋
 - `scripts/binggu_semantic_eval.py` — eval(temp 전용, shadow 비교)
 - `docs/BINGGUPACK_SEMANTIC_CLASSIFIER_*.md` — 본 설계 + 결과
@@ -173,7 +178,7 @@ preview → 사람이 SAVE n → 기존 게이트(save_selected) commit
 
 ## 8. 미해결/owner 결정 대기
 
-- seed 문장 6 라벨 초안 = owner 검수 필요(빙구 실제 어휘 반영).
+- seed 문장 semantic_subtype 초안 = owner 검수 필요(공개 제품 → 범용·중립·도메인 분산. 특정 사용자 어휘 편중 금지).
 - L2 hi/lo 임계, L3 band 폭 = shadow 데이터로 보정(초기값은 보수적으로 L3 호출률 낮게).
 - ~~bge-m3 pull 용량/RAM~~ → **실측 완료(2026-06-13): Ollama 11434 가동, `bge-m3:latest`(1.2GB)·`qwen2.5:14b-instruct-q4_K_M`(9.0GB)·`qwen2.5:32b`(19.9GB) 전부 보유 → 신규 pull/런타임 0.** L3 는 14b 기본, 정확도 필요 시 32b 선택지.
 - shadow 로깅도 원문 발췌가 로컬 파일에 남음 → 보존 TTL/암호화 여부 owner 결정(현 ledger 와 동일 정책 제안).
@@ -200,7 +205,7 @@ preview → 사람이 SAVE n → 기존 게이트(save_selected) commit
 | 8 | **재현성 스냅샷** — model_digest + prompt_hash + enum_version + threshold/band config + classifier_build_hash | B |
 | 9 | **메트릭 분리** — shadow 지연/에러가 운영 관측 지표를 오염시키지 않게 메트릭 파이프라인 논리 분리 | D |
 | 10 | LLM/embedding 호출 = **leak_guard wrapper 단일 경유 강제**(밖 직접호출 금지) | B |
-| 11 | golden = 6라벨 클래스 균형 + **애매 band 중심**(rule fallback_judgment 문장) + 판단 편향 금지 + PII 함정 | A·B·C |
+| 11 | golden = semantic_subtype 클래스 균형 + **애매 band 중심** + 특정 subtype 편향 금지 + PII 함정 (canonical label_kind 침해 0) | A·B·C |
 | 12 | leak=0 = golden PII 함정 L1 제외 100% ∧ shadow.jsonl 원문/PII 0 ∧ LLM 입력 PII 카운터 0 | A·B |
 | 13 | default 승격 = 코드 **hard-disable**, (골든회귀 ∧ drift 0 ∧ leak 0 ∧ opt-in 데이터) 전 영구 잠금 | A·C |
 | 14 | shadow.jsonl retention·chmod/ACL·rotation·secret scanner 통과 | B |
@@ -268,8 +273,8 @@ preview → 사람이 SAVE n → 기존 게이트(save_selected) commit
 > bge embedding 은 deterministic(temperature 무관) → R2 #6 비결정성 게이트는 L2 에서는 model_digest 고정만으로 충족, temp0/seed/N회 일치율은 L3 도입 시 적용.
 
 ### 11-4. 최소 산출물
-- `scripts/binggu_semantic_shadow.py` — leak_guard wrapper → bge embed(CPU) → 6라벨 seed cos 유사도 → band 판정 → shadow logger + selftest
-- seed 6라벨 (판단·교훈·운영결정·사용자선호·설계결정·버그패턴) — **owner 검수 후 작성**(본 단계에서는 미작성)
+- `scripts/binggu_semantic_shadow.py` — leak_guard wrapper → bge embed(CPU) → semantic_subtype seed cos 유사도 → band 판정 → shadow logger + selftest
+- semantic_subtype seed (교훈·결정·선호·설계결정·버그패턴·사실/메모 등) — **owner 검수 후 작성**(범용·중립·도메인 분산. canonical 5종 침해 0)
 - golden fixture (`tests/fixtures/semantic/golden.jsonl`)
 - 단일 selftest (leak scan + 정규식 byte-diff/호출스택 동등성 + golden + 저장0)
 - `~/.binggupack/semantic/shadow.jsonl` — **원문 없이** `hmac_id·len·rule_label·sem_label·sem_conf·latency_ms·model_digest·band` 만(ACL)
@@ -279,3 +284,45 @@ preview → 사람이 SAVE n → 기존 게이트(save_selected) commit
 - preview 표시 변경 금지 · ledger write 금지 · 자동 저장 금지 · **L3(qwen) 호출 금지**
 
 **상태:** 범위 정의 완료. 구현·seed 작성은 **별도 GO** 후. 정규식 무변경·저장0·preview0 유지.
+
+---
+
+## 12. 계층 분리 — canonical 스키마 비침해 + semantic_subtype (2026-06-13 정정·정본)
+
+> **배경:** "새 5라벨로 교체" 제안은 **폐기**. BingguPack 은 공개 GitHub 제품(개발자·비개발자 모두 사용)이고,
+> 정본 스키마를 바꾸면 기존 장부·그래프가 깨진다. semantic 은 정본을 **침해하지 않는 보조 층**이어야 한다.
+
+### 12-1. 두 개의 층 (서로 다른 축)
+| 층 | 무엇 | 누가 정하나 | 변경 |
+|---|---|---|---|
+| **canonical label_kind** (정본) | 문장의 **형식 종류** — 문서·증거·개념·상태·판단 (5종) | 기존 정규식 `classify_label_kind` | **불변** |
+| **semantic_subtype** (보조) | **왜 저장하나/내용 성격** — 교훈·결정·선호·설계결정·버그패턴·사실/메모·기타 | semantic(bge/L3) **추천** | preview/shadow/eval 표시만 |
+
+- 예: canonical label_kind=**판단** 인 문장이 semantic_subtype=**교훈** 또는 **결정** 일 수 있다(같은 문장, 다른 축).
+- semantic_subtype 은 canonical label_kind 를 **대체·override 하지 않는다**. 나란히 붙는 **보조 태그·검색 힌트**.
+
+### 12-2. 정본 비침해 조항 (hard)
+- 기존 5종 노드(문서·증거·개념·상태·판단) **불변** — 추가·삭제·의미변경 0.
+- typed edge + evidence 그래프 구조 **불변** — semantic 은 edge 를 만들지/바꾸지 않는다.
+- `save_selected` · `preview` · graph validation · `label_kind`/edge schema **불변**.
+- semantic_subtype 은 **ledger schema 에 들어가지 않는다**(shadow 단계는 별도 `shadow.jsonl`, 저장 0).
+- 정규식 classifier 무변경(§7·§11-5 재확인).
+
+### 12-3. semantic_subtype 후보 (공개 제품·범용)
+교훈 · 결정 · 선호 · 설계결정 · 버그패턴 · 사실/메모 · 기타 (owner 검수로 확정).
+- "설계결정·버그패턴 = 개발자 전용" 단정 **금지** — 바이브코딩 환경에선 비개발자도 설계·버그를 다룬다.
+- 다만 **개발 도메인에만 쏠린 seed 는 금지**. 일반 문제해결까지 확장:
+  - **설계결정** = 앱 구조 · 가게 동선 · 공부 루틴 · 문서 구조 · 업무 프로세스 설계
+  - **버그패턴** = 코드 버그 + 반복 실수 · 절차 누락 · 데이터 입력 오류 · 커뮤니케이션 오류
+
+### 12-4. seed 재작성 방향 (다음 GO — 본 구조 반영 후)
+- seed 의 `label` 은 **canonical label_kind 가 아니라 `semantic_subtype`** 을 가리킨다(필드명도 `semantic_subtype` 권장).
+- **범용·중립·도메인 분산** — 특정 사용자(예: 입찰/특정 업무) 어휘·말투 편중 금지. 개발/비개발 도메인 섞기.
+- 한 subtype 안에서도 도메인 쏠림 금지(예: 판단계 문장이 전부 한 분야면 안 됨).
+
+### 12-5. 사용자별 custom seed / profile 방향
+- 기본 제공 seed = **씨앗**(누구나 통하는 범용). 정본의 일부, 함부로 안 바꿈.
+- 각 사용자는 `~/.binggupack/semantic/my_seeds.jsonl` 에 **자기 예시를 덧붙임**(override 아니라 append) → 자기 일(요리·코딩·디자인·연구)에 맞게 정확도 ↑.
+- 기본 seed 는 무변경, custom 은 개인 로컬에만. 공개 repo 에는 범용 seed 만 포함.
+
+**상태:** 구조 정정 반영 완료. seed 재작성(범용·semantic_subtype·도메인 분산)은 **별도 GO** 후. canonical 5종·edge·게이트·정규식 전부 불변.
