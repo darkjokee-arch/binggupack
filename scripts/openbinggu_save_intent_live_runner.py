@@ -83,6 +83,23 @@ def make_live_pull(base, token, sk):
     return f
 
 
+def make_live_inject(base, token, text, indices, save_confirm):
+    """save_mcp MCP 경로(/mcp2/<token>)로 save_intent tools/call — synthetic 적재. Origin 헤더 없음(폰 방식)."""
+    def f():
+        ep = base + "/mcp2/" + token
+        payload = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                   "params": {"name": "save_intent",
+                              "arguments": {"text": text, "indices": indices, "confirm": save_confirm}}}
+        body = json.dumps(payload).encode("utf-8")
+        h = {"User-Agent": UA, "Content-Type": "application/json"}  # Origin 없음
+        req = urllib.request.Request(ep, data=body, headers=h, method="POST")
+        with urllib.request.urlopen(req, timeout=15) as r:
+            data = json.loads(r.read())
+        result = data.get("result", {}) or {}
+        return {"isError": bool(result.get("isError")), "id_h8": _h8(text + "|" + ",".join(map(str, indices)) + "|" + save_confirm)}
+    return f
+
+
 def _load_save_env(wp, variant):
     f = os.path.join(wp, ".dev.vars." + variant)
     d = {}
@@ -95,20 +112,25 @@ def _load_save_env(wp, variant):
 
 
 # ---------------- core run (게이트·백업·finally disable) ----------------
-def run(*, ledger_path, outbox_dir, snap_dir, pull_fn, admin_fn, now, real=False, confirm=None):
-    """enable → pull → process_outbox → finally disable. real=True 일 때만 백업 + confirm 게이트."""
+def run(*, ledger_path, outbox_dir, snap_dir, pull_fn, admin_fn, now,
+        real=False, confirm=None, inject_fn=None):
+    """enable → (inject) → pull → process_outbox → finally disable. 단일 try/finally 로 disable 보장.
+    real=True 일 때만 백업 + confirm 게이트."""
     if real and confirm != REAL_CONFIRM:
         return {"ok": False, "reason": "confirm_required", "ledger_write": 0,
-                "enabled": False, "disabled": False, "backup": False, "real": True}
+                "enabled": False, "disabled": False, "backup": False, "real": True, "injected": None}
     backup = _backup_ledger(ledger_path) if real else None
     enabled = False
     disabled = False
     err = None
     pull_count = 0
     res = None
+    injected = None
     admin_fn(True)
     enabled = True
     try:
+        if inject_fn is not None:
+            injected = inject_fn()          # synthetic save_intent 적재 (실패해도 finally disable)
         pull_count = pull_fn(outbox_dir)
         db = open_g3(ledger_path)
         try:
@@ -123,7 +145,7 @@ def run(*, ledger_path, outbox_dir, snap_dir, pull_fn, admin_fn, now, real=False
         finally:
             disabled = True
     return {"ok": err is None, "err": err, "reason": None, "enabled": enabled, "disabled": disabled,
-            "pull_count": pull_count, "applied": (res or {}).get("applied"),
+            "injected": injected, "pull_count": pull_count, "applied": (res or {}).get("applied"),
             "rejected": (res or {}).get("rejected"), "backup": bool(backup), "real": real}
 
 
@@ -205,6 +227,47 @@ def _selftest():
     ck(bak_exists, "T9c rollback 백업 파일 생성")
     shutil.rmtree(tmp, ignore_errors=True)
 
+    # ---- inject 흐름 (enable→inject→pull→process→finally disable) · mock 만(real network/ledger 0) ----
+    def _inj_ok():
+        return {"isError": False, "id_h8": "synthh8x"}
+
+    def _inj_raise():
+        raise RuntimeError("inject_fail")
+
+    # TI1 정상 순서
+    tmp, ob, snap, ledger, calls, admin, pf = fresh(pull="ok")
+    r = run(ledger_path=ledger, outbox_dir=ob, snap_dir=snap, pull_fn=pf, admin_fn=admin,
+            now=NOW, inject_fn=_inj_ok)
+    ck(r["ok"] and r["injected"] and r["applied"] == 1 and calls == [True, False],
+       "TI1 enable→inject→pull→process→disable 정상 순서")
+    ck(set((r["injected"] or {}).keys()) <= {"isError", "id_h8"},
+       "TI6 inject 반환에 text/secret 미포함(id_h8/isError 만)")
+    shutil.rmtree(tmp, ignore_errors=True)
+
+    # TI2 inject 실패 → disable 보장 + write 0
+    tmp, ob, snap, ledger, calls, admin, pf = fresh(pull="ok")
+    r = run(ledger_path=ledger, outbox_dir=ob, snap_dir=snap, pull_fn=pf, admin_fn=admin,
+            now=NOW, inject_fn=_inj_raise)
+    ck((not r["ok"]) and calls == [True, False] and (r["applied"] in (None, 0)),
+       "TI2 inject 실패에도 disable 보장 + write 0")
+    shutil.rmtree(tmp, ignore_errors=True)
+
+    # TI3 inject 후 pull 실패 → disable 보장
+    tmp, ob, snap, ledger, calls, admin, pf = fresh(pull="raise")
+    r = run(ledger_path=ledger, outbox_dir=ob, snap_dir=snap, pull_fn=pf, admin_fn=admin,
+            now=NOW, inject_fn=_inj_ok)
+    ck((not r["ok"]) and calls == [True, False], "TI3 inject 후 pull 실패에도 disable 보장")
+    shutil.rmtree(tmp, ignore_errors=True)
+
+    # TI4 process reject(malformed) → write 0 + disable
+    tmp, ob, snap, ledger, calls, admin, pf = fresh(pull="bad")
+    r = run(ledger_path=ledger, outbox_dir=ob, snap_dir=snap, pull_fn=pf, admin_fn=admin,
+            now=NOW, inject_fn=_inj_ok)
+    db = open_g3(ledger); n = db.con.execute("select count(*) from nodes").fetchone()[0]; db.close()
+    ck(r["applied"] == 0 and n == 0 and calls == [True, False],
+       "TI4 process reject → write 0 + disable 보장")
+    shutil.rmtree(tmp, ignore_errors=True)
+
     print("\nGATE=%s" % ("GO" if ok else "NO-GO"))
     return 0 if ok else 1
 
@@ -216,6 +279,12 @@ def main():
     ap.add_argument("--confirm", default=None)
     ap.add_argument("--variant", choices=["save_mcp", "save_v2"], default="save_mcp")
     ap.add_argument("--workers-port", dest="wp", default=None)
+    ap.add_argument("--inject-synthetic", dest="inject_synthetic", action="store_true",
+                    help="enable 후 동일 흐름 내에서 synthetic save_intent 1건 적재(save_mcp)")
+    ap.add_argument("--synthetic-text", dest="synthetic_text", default=None)
+    ap.add_argument("--indices", default="1", help="쉼표 구분 1-base 인덱스")
+    ap.add_argument("--save-confirm", dest="save_confirm", default=None,
+                    help="'SAVE ' + indices 정확 일치")
     a = ap.parse_args()
 
     if a.selftest:
@@ -235,9 +304,13 @@ def main():
     os.makedirs(snap, exist_ok=True)
     admin_fn = make_live_admin(base, token, sk)
     pull_fn = make_live_pull(base, token, sk)
+    inject_fn = None
+    if a.inject_synthetic:
+        idxs = [int(x) for x in str(a.indices).split(",") if x.strip()]
+        inject_fn = make_live_inject(base, token, a.synthetic_text, idxs, a.save_confirm)
     res = run(ledger_path=a.real_ledger, outbox_dir=outbox, snap_dir=snap,
               pull_fn=pull_fn, admin_fn=admin_fn, now=int(time.time()),
-              real=True, confirm=a.confirm)
+              real=True, confirm=a.confirm, inject_fn=inject_fn)
     shutil.rmtree(outbox, ignore_errors=True)
     # secret/URL/원문 미출력 — count/flag/reason 만
     print(json.dumps({k: res.get(k) for k in
