@@ -1,0 +1,27 @@
+{
+  "_comment": "BingguPack 자동 후보 수집 hook 등록 예시. 본인 ~/.claude/settings.json 의 hooks 안에 MERGE 하세요(통째 덮어쓰기 금지). command 경로는 본인이 clone 한 binggupack 절대경로로 교체. 설치/활성화: docs/BINGGUPACK_CAPTURE_HOOK_SETUP.md",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python /ABSOLUTE/PATH/TO/binggupack/hooks/binggu_capture_hook.py",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python /ABSOLUTE/PATH/TO/binggupack/hooks/binggu_capture_hook.py",
+            "async": true
+          }
+        ]
+      }
+    ]
+  }
+}
