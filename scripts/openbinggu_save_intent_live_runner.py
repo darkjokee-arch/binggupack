@@ -113,9 +113,10 @@ def _load_save_env(wp, variant):
 
 # ---------------- core run (게이트·백업·finally disable) ----------------
 def run(*, ledger_path, outbox_dir, snap_dir, pull_fn, admin_fn, now,
-        real=False, confirm=None, inject_fn=None):
-    """enable → (inject) → pull → process_outbox → finally disable. 단일 try/finally 로 disable 보장.
-    real=True 일 때만 백업 + confirm 게이트."""
+        real=False, confirm=None, inject_fn=None, poll_secs=0):
+    """enable → (inject) → pull(+폴링) → process_outbox → finally disable. 단일 try/finally 로 disable 보장.
+    poll_secs>0 이면 inbox 에 intent 도착할 때까지 최대 poll_secs 초 폴링(1초 간격, 도착 즉시 종료 = enable 창 최소화).
+    폴링은 inbox 도착 감지(drain)일 뿐 — 저장/실패 재시도가 아니다. real=True 일 때만 백업 + confirm 게이트."""
     if real and confirm != REAL_CONFIRM:
         return {"ok": False, "reason": "confirm_required", "ledger_write": 0, "enabled": False,
                 "disabled": False, "disable_err": None, "backup": False, "real": True, "injected": None}
@@ -133,6 +134,12 @@ def run(*, ledger_path, outbox_dir, snap_dir, pull_fn, admin_fn, now,
         if inject_fn is not None:
             injected = inject_fn()          # synthetic save_intent 적재
         pull_count = pull_fn(outbox_dir)
+        if poll_secs and poll_secs > 0 and pull_count == 0:
+            # 폰 SAVE 도착 대기 — intent 도착 즉시 종료(enable 창 최소화)
+            t_end = time.time() + poll_secs
+            while pull_count == 0 and time.time() < t_end:
+                time.sleep(1)
+                pull_count = pull_fn(outbox_dir)
         db = open_g3(ledger_path)
         try:
             res = process_outbox(db, outbox_dir, {"actor": "human"}, snap_dir, now)
@@ -185,7 +192,10 @@ def _selftest():
         def pull_raise(o):
             raise RuntimeError("pull_fail")
 
-        pf = {"ok": pull_ok, "bad": pull_bad, "raise": pull_raise}[pull]
+        def pull_zero(o):
+            return 0  # inbox 빈 상태(폴링 대상)
+
+        pf = {"ok": pull_ok, "bad": pull_bad, "raise": pull_raise, "zero": pull_zero}[pull]
         return tmp, ob, snap, ledger, calls, admin, pf
 
     # T1 기본 temp 정상 1건
@@ -301,6 +311,14 @@ def _selftest():
     ck(isinstance(r, dict) and (not r["ok"]) and r["disable_err"] and (not r["disabled"])
        and tf2 == [True, False],
        "TF2 enable·disable 모두 예외 → 비치명 보고(disable_err)")
+    shutil.rmtree(tmp, ignore_errors=True)
+
+    # TP1 폴링: intent 미도착(빈 inbox) → poll_secs 타임아웃 후 0건 + disable 보장
+    tmp, ob, snap, ledger, calls, admin, pf = fresh(pull="zero")
+    r = run(ledger_path=ledger, outbox_dir=ob, snap_dir=snap, pull_fn=pf, admin_fn=admin,
+            now=NOW, poll_secs=1)
+    ck(r["pull_count"] == 0 and calls == [True, False] and (r["applied"] in (None, 0)),
+       "TP1 폴링 타임아웃(intent 미도착) → 0건 + enable/disable 정리")
     shutil.rmtree(tmp, ignore_errors=True)
 
     print("\nGATE=%s" % ("GO" if ok else "NO-GO"))

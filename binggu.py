@@ -171,6 +171,59 @@ def cmd_capture(a):
     return 1
 
 
+def cmd_hosted(a):
+    """hosted pull — 폰/커넥터 SAVE n 한 intent 를 한 번에 pull → candidate 저장 → inbox disable.
+    자동 저장 아님: --confirm 없으면 실행 0. 실 장부 write 는 사람이 confirm 문구 타이핑해야만."""
+    if getattr(a, "hosted_cmd", None) != "pull":
+        return 1
+    if not getattr(a, "confirm", None):
+        print("hosted pull = 실 장부 저장입니다(자동 저장 아님 · candidate-only).")
+        print('  실행:  python binggu.py hosted pull --confirm "LIVE SAVE REHEARSAL" [--wait 60]')
+        print("  순서:  enable → (폰/커넥터에서 SAVE n) → pull → candidate 저장 → inbox disable(보장)")
+        print("  경로:  --workers-port <p> 또는 BINGGU_WORKERS_PORT 환경변수")
+        return 0
+    from openbinggu_save_intent_live_runner import (  # noqa: E402
+        run as live_run, make_live_admin, make_live_pull, _load_save_env)
+    import shutil
+    import tempfile
+    import time as _t
+    wp = getattr(a, "wp", None) or os.environ.get("BINGGU_WORKERS_PORT") \
+        or os.path.abspath(os.path.join(BASE, "..", "workers_port"))
+    ledger, snap_dir = _ledger_paths(a.ledger)
+    if not os.path.exists(ledger):
+        print("장부 없음: %s (먼저 python binggu.py init)" % ledger)
+        return 2
+    try:
+        b, t, sk = _load_save_env(wp, a.variant)
+    except Exception:
+        print("workers_port 키 파일을 찾지 못했습니다 — --workers-port 또는 BINGGU_WORKERS_PORT 확인")
+        return 2
+    db, _ = _open(ledger)
+    before = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
+    db.close()
+    outbox = tempfile.mkdtemp(prefix="bgp_hosted_")
+    try:
+        res = live_run(ledger_path=ledger, outbox_dir=outbox, snap_dir=snap_dir,
+                       pull_fn=make_live_pull(b, t, sk), admin_fn=make_live_admin(b, t, sk),
+                       now=int(_t.time()), real=True, confirm=a.confirm,
+                       inject_fn=None, poll_secs=int(getattr(a, "wait", 0) or 0))
+    finally:
+        shutil.rmtree(outbox, ignore_errors=True)
+    db, _ = _open(ledger)
+    after = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
+    chain = db.verify_chain()
+    db.close()
+    print("hosted pull 결과:")
+    print("  ok=%s enabled=%s disabled=%s pulled=%s applied=%s rejected=%s"
+          % (res["ok"], res["enabled"], res["disabled"], res["pull_count"],
+             res["applied"], res.get("rejected")))
+    print("  candidate(active) %d -> %d (+%d) · audit chain %s"
+          % (before, after, after - before, "INTACT" if chain else "BROKEN"))
+    if not res["disabled"]:
+        print("  ⚠ disable 미확인 — disable_err=%s (inbox 상태 점검 필요)" % res.get("disable_err"))
+    return 0 if res["ok"] else 1
+
+
 def cmd_status(a):
     db, _ = _open(a.ledger)
     n = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
@@ -385,6 +438,8 @@ def selftest():
     ck("11_운영_store_불변", op_before == op_after)
     shutil.rmtree(tmp, ignore_errors=True)
     ck("12_temp_정리", not os.path.exists(tmp))
+    # hosted pull 안내 모드 — --confirm 없으면 실행 0(live worker 미접촉)
+    ck("13_hosted_pull_안내모드(실행0)", cmd_hosted(args(hosted_cmd="pull", confirm=None)) == 0)
 
     ok = all(checks)
     print("-" * 74)
@@ -427,11 +482,19 @@ def main():
     csub = cp.add_subparsers(dest="capture_cmd", required=True)
     for cs in ("status", "pause", "resume", "preview", "uninstall"):
         csub.add_parser(cs)
+    hp = sub.add_parser("hosted")
+    hsub = hp.add_subparsers(dest="hosted_cmd", required=True)
+    pp = hsub.add_parser("pull")
+    pp.add_argument("--confirm", default=None)
+    pp.add_argument("--wait", type=int, default=0)
+    pp.add_argument("--variant", choices=["save_mcp", "save_v2"], default="save_mcp")
+    pp.add_argument("--workers-port", dest="wp", default=None)
     a = p.parse_args()
     fn = {"init": cmd_init, "status": cmd_status, "preview": cmd_preview, "save": cmd_save,
           "list": cmd_list, "deprecate": cmd_deprecate, "replace": cmd_replace,
           "accept": cmd_accept, "unaccept": cmd_unaccept, "due": cmd_due,
-          "resolve": cmd_resolve, "reminders": cmd_reminders, "capture": cmd_capture}[a.cmd]
+          "resolve": cmd_resolve, "reminders": cmd_reminders, "capture": cmd_capture,
+          "hosted": cmd_hosted}[a.cmd]
     sys.exit(fn(a))
 
 
