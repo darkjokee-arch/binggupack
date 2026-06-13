@@ -117,20 +117,21 @@ def run(*, ledger_path, outbox_dir, snap_dir, pull_fn, admin_fn, now,
     """enable → (inject) → pull → process_outbox → finally disable. 단일 try/finally 로 disable 보장.
     real=True 일 때만 백업 + confirm 게이트."""
     if real and confirm != REAL_CONFIRM:
-        return {"ok": False, "reason": "confirm_required", "ledger_write": 0,
-                "enabled": False, "disabled": False, "backup": False, "real": True, "injected": None}
+        return {"ok": False, "reason": "confirm_required", "ledger_write": 0, "enabled": False,
+                "disabled": False, "disable_err": None, "backup": False, "real": True, "injected": None}
     backup = _backup_ledger(ledger_path) if real else None
     enabled = False
     disabled = False
+    disable_err = None
     err = None
     pull_count = 0
     res = None
     injected = None
-    admin_fn(True)
-    enabled = True
     try:
+        admin_fn(True)                      # enable — try 안: 실패해도 finally 로 정리
+        enabled = True
         if inject_fn is not None:
-            injected = inject_fn()          # synthetic save_intent 적재 (실패해도 finally disable)
+            injected = inject_fn()          # synthetic save_intent 적재
         pull_count = pull_fn(outbox_dir)
         db = open_g3(ledger_path)
         try:
@@ -140,13 +141,17 @@ def run(*, ledger_path, outbox_dir, snap_dir, pull_fn, admin_fn, now,
     except Exception as e:
         err = type(e).__name__
     finally:
+        # disable 시도 — enable 성공 여부와 무관하게 일관 실행.
+        # enable 이 401/예외로 실패한 경우 inbox 는 미개방이므로 disable 실패는 비치명(보고만).
         try:
             admin_fn(False)
-        finally:
             disabled = True
+        except Exception as de:
+            disable_err = type(de).__name__
     return {"ok": err is None, "err": err, "reason": None, "enabled": enabled, "disabled": disabled,
-            "injected": injected, "pull_count": pull_count, "applied": (res or {}).get("applied"),
-            "rejected": (res or {}).get("rejected"), "backup": bool(backup), "real": real}
+            "disable_err": disable_err, "injected": injected, "pull_count": pull_count,
+            "applied": (res or {}).get("applied"), "rejected": (res or {}).get("rejected"),
+            "backup": bool(backup), "real": real}
 
 
 # ---------------- 셀프테스트 (temp 전용 · 라이브/실 ledger 미접촉 · mock) ----------------
@@ -266,6 +271,36 @@ def _selftest():
     db = open_g3(ledger); n = db.con.execute("select count(*) from nodes").fetchone()[0]; db.close()
     ck(r["applied"] == 0 and n == 0 and calls == [True, False],
        "TI4 process reject → write 0 + disable 보장")
+    shutil.rmtree(tmp, ignore_errors=True)
+
+    # ---- enable 실패(401 등) → finally 경로로 정리 보고 ----
+    # TF1 enable 예외 → finally disable 시도(정상) · enabled=False · disabled=True
+    tf = []
+    def admin_enable_fail(en):
+        tf.append(en)
+        if en:
+            raise RuntimeError("enable_401")
+
+    tmp, ob, snap, ledger, _calls, _admin, pf = fresh(pull="ok")
+    r = run(ledger_path=ledger, outbox_dir=ob, snap_dir=snap, pull_fn=pf, admin_fn=admin_enable_fail,
+            now=NOW, inject_fn=_inj_ok)
+    ck((not r["ok"]) and (not r["enabled"]) and r["disabled"] and tf == [True, False]
+       and r["applied"] in (None, 0),
+       "TF1 enable 예외 → finally disable 시도(정리 보고) · write 0")
+    shutil.rmtree(tmp, ignore_errors=True)
+
+    # TF2 enable·disable 둘 다 예외 → 비치명 반환(crash 0) · disable_err 보고 · disabled=False
+    tf2 = []
+    def admin_both_fail(en):
+        tf2.append(en)
+        raise RuntimeError("admin_fail")
+
+    tmp, ob, snap, ledger, _calls, _admin, pf = fresh(pull="ok")
+    r = run(ledger_path=ledger, outbox_dir=ob, snap_dir=snap, pull_fn=pf, admin_fn=admin_both_fail,
+            now=NOW, inject_fn=_inj_ok)
+    ck(isinstance(r, dict) and (not r["ok"]) and r["disable_err"] and (not r["disabled"])
+       and tf2 == [True, False],
+       "TF2 enable·disable 모두 예외 → 비치명 보고(disable_err)")
     shutil.rmtree(tmp, ignore_errors=True)
 
     print("\nGATE=%s" % ("GO" if ok else "NO-GO"))
