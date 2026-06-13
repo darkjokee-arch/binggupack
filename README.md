@@ -4,7 +4,7 @@
 AI와의 대화·메모에서 건질 문장(판단/상태/개념)을 후보로 떠서, 사람이 직접 confirm 문구를
 타이핑해야만 저장·기각·수정·수용되는 **로컬 우선(local-first) 후보 관리 시스템**입니다.
 
-- 최신 공개판: **v1.3.0** (자동 캡처 판정 + preview read-only MCP tool. v1.2.0 = hosted save-intent 폰 저장 + pack browsing 개선, v1.1.0 = 그래프 문법 스펙·전 팩 원문 검색, v1.0.0 = 개인용 정식 동결)
+- 최신 공개판: **v1.3.1** (capture→save 커밋 어댑터 — 미리보기 후보를 사람 confirm으로 기존 저장 게이트에 위임, 자동저장 불가 유지. v1.3.0 = 자동 캡처 판정 + preview read-only MCP tool, v1.2.0 = hosted save-intent 폰 저장 + pack browsing 개선, v1.1.0 = 그래프 문법 스펙·전 팩 원문 검색, v1.0.0 = 개인용 정식 동결)
 - 자동으로 되는 것: **없음.** 모든 변경은 사람의 정확한 confirm 문구가 게이트입니다.
 - 절대 안 하는 것: 원문 전문 저장(발췌만) · 자동 확정(confirmed 0) · 자동 업로드.
 
@@ -129,6 +129,7 @@ python scripts/openbinggu_upload_preflight.py <pack_dir> [<temp_staging_db>]
 | hosted 조회 (Claude/ChatGPT 채팅에서 장부 read-only) | ✅ v1.1.0부터 **전 팩·원문 검색**(`evidence_search`에 pack_id 불필요), v1.2.0부터 `pack_list` 제목 = manifest `topics` 주제 라벨 + 노드 응답 `doc_status`(소스 문서가 deprecated면 "대체됨" 표시). 각자 자기 워커를 배포(`hosted/`), 공용 서버 없음 |
 | hosted 저장(save-intent) | ✅ v1.2.0 — 폰(MCP 커넥터) 미리보기→`SAVE n`→PC 러너 pull→로컬 장부 저장 전 구간 실증. 이중 인증(적재=경로키·Origin / 인출=HMAC)·inbox 평소 잠금·non-retention. 설계: `docs/BINGGUPACK_HOSTED_SAVE_INTENT_DESIGN.md` |
 | 자동 캡처 판정 + preview (read-only) | ✅ v1.3.0 — `capture_classify`(발화→판정)·`capture_preview`(발화 리스트→후보 미리보기) 두 **read-only** MCP tool. **로컬/수동 호출**(`scripts/binggu_capture_cli.py`), 캡처 트리거≠preview 트리거. **ledger write·active 저장·OpenCrab·hook 등록 없음**(전부 메모리, HOLD). 설계: `docs/BINGGUPACK_USER_ONTOLOGY_EVENT_SCHEMA_DESIGN.md`, `docs/BINGGUPACK_CAPTURE_MCP_EXPOSURE_DESIGN.md` |
+| capture→save 커밋 어댑터 | ✅ v1.3.1 — `commit_selected`(미리보기 후보를 사람 confirm 문구로 기존 `save_selected` 3중 게이트에 위임). **어댑터가 게이트를 생성하지 않고 confirm을 인자로 전달만** → actor=auto·confirm 누락/불일치·preview 미확인 전부 BLOCK, 자동저장 구조적 불가 유지. `scripts/binggu_capture_to_save.py`(13/13 selftest). hook 실등록·ledger 자동 write 없음(HOLD) |
 | OpenCrab private 업로드 | 🔜 planned — preflight(G1~G7)까지 구현·검증, 실 전송은 별도 결정 |
 | 팀/공유/마켓플레이스/과금 | ❌ 범위 밖 (정책 미정) |
 
@@ -149,6 +150,6 @@ This project is licensed under the **MIT License** — see the [LICENSE](LICENSE
 
 ## Status / 상태
 
-- 개인용(트랙1): **v1.3.0 — 후보 관리 전 구간 완성(v1.0.0) + 그래프 문법 스펙·전 팩 원문 검색(v1.1.0) + 폰 저장·browsing 개선(v1.2.0) + 자동 캡처 판정·preview read-only tool(v1.3.0)**. `binggu` CLI로 개인 장부 실사용 가능.
+- 개인용(트랙1): **v1.3.1 — 후보 관리 전 구간 완성(v1.0.0) + 그래프 문법 스펙·전 팩 원문 검색(v1.1.0) + 폰 저장·browsing 개선(v1.2.0) + 자동 캡처 판정·preview read-only tool(v1.3.0) + capture→save 커밋 어댑터(v1.3.1)**. `binggu` CLI로 개인 장부 실사용 가능.
 - 팀 유료(트랙2): DEFER. 불특정 다수 marketplace: BLOCK.
-- 실제 GitHub: **Public 공개(현재 Latest `v1.2.0`, v1.3.0 release 준비 중 — 커밋/푸시 전).**
+- 실제 GitHub: **Public 공개(현재 Latest `v1.3.1`).**
