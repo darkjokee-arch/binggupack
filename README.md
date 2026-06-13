@@ -4,14 +4,63 @@
 
 AI와의 대화에서 건질 판단·상태·개념을 후보로 **자동 수집**하고, 사람이 직접 confirm 문구를 타이핑해야만 저장되는 **로컬 우선(local-first)** 지식장부입니다. 자동 수집은 켜지지만, **자동 저장은 없습니다.**
 
-- **Latest: v1.4.4** — <https://github.com/darkjokee-arch/binggupack/releases/tag/v1.4.4>
+- **Latest: v1.4.6** — <https://github.com/darkjokee-arch/binggupack/releases/tag/v1.4.6>
 - **Python 3.10+ · 외부 런타임 의존성 0 · Windows/macOS/Linux**
+
+---
+
+## 왜? / Why
+
+AI와 대화하다 보면 정작 남기고 싶은 것들 — **내 판단, 배운 점, 정한 방침** — 이 수십 개의 대화창에 흩어져 사라집니다. 검색도 안 되고, 다음 세션의 AI는 그걸 모릅니다.
+
+그렇다고 전부 자동 저장하면 잡음과 민감정보가 쌓이고, 내가 통제권을 잃습니다.
+
+**BingguPack의 답: 넓게 줍고, 좁게 저장한다 (collect broad, commit narrow).**
+
+- **넓게** — 어느 도구(Claude·ChatGPT·폰·웹)에서 일하든 건질 문장을 *후보*로 자동 수집.
+- **좁게** — 실제 저장은 사람이 `SAVE n` 을 직접 타이핑한 것만. **자동 저장은 없습니다.**
+- **로컬** — 모든 것은 내 PC의 단일 `ledger.sqlite`. 외부 서버·업로드 없음.
+
+결과: AI 대화에서 진짜 알맹이만, 내 손으로 고른 것만, 검색 가능한 개인 기억장부로 쌓입니다.
+
+---
+
+## 구조 / Architecture
+
+```
+  수집(넓게)                          확정(좁게, 사람만)
+┌─────────────────────┐          ┌──────────────────────────────┐
+│  Claude · ChatGPT    │          │                              │
+│  폰 · 웹 (MCP 커넥터)  │          │   ┌─ preview (저장 0)         │
+└──────────┬──────────┘          │   │   후보 미리보기            │
+           │ 자동 후보 수집        │   ▼                          │
+           ▼                      │  [ SAVE n 게이트 ]  ◀── 사람이 │
+┌─────────────────────┐          │   │  confirm 문구 직접 타이핑   │
+│  capture hook        │          │   ▼                          │
+│  (global/privacy)    │──────────┼─▶ ledger.sqlite (로컬 장부)   │
+└─────────────────────┘          │      candidate-only · 발췌만   │
+           │                      └──────────────────────────────┘
+  폰/웹 경로 │ save_intent                    ▲
+           ▼                                 │ hosted pull --select
+┌─────────────────────┐    hosted inbox      │ (고른 번호만 · 사람 confirm)
+│ hosted worker inbox  │──(1회 회수·저장0)──▶ │
+│ (평소 잠김·non-reten) │    local staging ────┘
+└─────────────────────┘
+
+  ✗ 자동 저장 없음   ✗ 상주 데몬 없음   ✗ 자동 pull 없음
+  ─────────────────────────────────────────────────────────
+  OpenCrab 업로드 · export · marketplace · 팀/공유  →  [HOLD · 미구현]
+```
+
+- **두 경로 모두 끝은 `SAVE n` 게이트** — 사람이 confirm 문구를 타이핑하기 전엔 ledger에 아무것도 안 들어갑니다.
+- 폰/웹은 worker inbox에 *예약*만(휘발). PC가 `hosted inbox`로 1회 회수→로컬 staging 보존(저장 0), `hosted pull --select`로 고른 것만 확정.
+- OpenCrab 전송·export·marketplace는 전부 **HOLD**(별도 결정 전 미구현).
 
 ---
 
 ## 핵심 개념 (4)
 
-1. **자동 후보 수집 (AGI memory)** — `binggu init --agi-memory`가 만든 profile에서 **사장님 작업 전역**으로 candidate capture(시크릿/PII 발화는 자동 제외). 현재 workspace만 원하면 `binggu init`(privacy 모드). clone 직후엔 동작하지 않습니다.
+1. **자동 후보 수집 (AGI memory)** — `binggu init --agi-memory`가 만든 profile에서 **당신의 작업 전역**으로 candidate capture(시크릿/PII 발화는 자동 제외). 현재 workspace만 원하면 `binggu init`(privacy 모드). clone 직후엔 동작하지 않습니다.
 2. **미리보기** — "빙구팩 저장해" 또는 `binggu capture preview`로 수집된 후보를 확인합니다.
 3. **사람 승인 저장** — `SAVE n` confirm 없이는 저장 0. 의도·자동·번호 없는 저장은 전부 BLOCK.
 4. **증거 기반 그래프** — 5종 노드 + 동사형(typed verb) 엣지 + 원문 증빙(evidence).
@@ -39,6 +88,53 @@ python binggu.py capture uninstall   # 완전 제거(rollback) — 장부 ledger
 ```
 
 > **AGI memory** = `init --agi-memory`(또는 `--global`)로 **작업 전역** 후보수집이 기본 경험. 현재 workspace만 원하면 플래그 없이 `init`(privacy 모드). 저장은 어느 쪽이든 `SAVE n` 게이트만(자동 저장 0·시크릿/PII 자동 제외).
+
+---
+
+## 예시 출력 / Example output
+
+실제 터미널 출력입니다(이미지 아님). 전부 **저장 0**인 read-only/안내 출력.
+
+**후보 미리보기** — `conversation_capture_preview` 또는 `binggu preview "<텍스트>"`:
+
+```text
+# 캡처 미리보기 — 후보 2건 (전부 candidate, 미저장)
+
+| # | 도장 | 문장                        | 분류근거          | 헌법판정 |
+|---|------|----------------------------|------------------|---------|
+| 1 | 판단 | 이 입찰은 마진이 낮아 보류한다. | judgment_verdict | PASS    |
+| 2 | 상태 | 백필 작업이 진행 중이다.       | state_now        | PASS    |
+
+미리보기일 뿐 아무것도 저장되지 않았습니다(nothing_saved=true). 등재는 로컬 승인 게이트에서만.
+preview_id: ec2bf9ac
+저장은 번호를 직접 골라서:  python binggu.py save "<같은 텍스트>" --preview-id ec2bf9ac --pick 1 --confirm "SAVE 1"
+```
+
+**hosted inbox** — 폰/웹이 보낸 후보를 PC로 1회 회수 후 read-only 요약(저장 0):
+
+```text
+hosted inbox: 대기 intent 2건 (read-only · 저장 0)
+  [1] 이 기능은 위험이 커서 기본 비활성으로 잠가 둔다. | sha 2268387d | 0.0d전 | 후보 1
+  [2] 마감 직전에 화면이 바뀌면 자동화가 깨지니 미리 점검한다. | sha 2f7bd1d0 | 0.0d전 | 후보 1
+
+저장은 고른 번호만:  python binggu.py hosted pull --select <번호들> --confirm "LIVE SAVE <번호들>"
+(전량 자동 적용 없음 · 고른 항목만 사람 confirm 게이트로 ledger 에 들어갑니다.)
+```
+
+**hosted pull** — confirm 없이 실행하면 안내만(저장 0):
+
+```text
+hosted pull = inbox 에서 본 번호만 골라 ledger 에 저장합니다(전량 자동 적용 없음).
+  먼저:  python binggu.py hosted inbox            (대기 intent 번호 확인)
+  저장:  python binggu.py hosted pull --select 1,3 --confirm "LIVE SAVE 1,3"
+```
+
+**list** — 저장된 후보 조회(read-only):
+
+```text
+조회 전용입니다 — 아무것도 변경되지 않았습니다. 표시는 저장된 발췌(≤80자)의 60자 cap, 원문 전문은 저장되어 있지 않습니다.
+변경 작업의 confirm 문구에는 # 와 id 를 함께 적습니다 (예: DEPRECATE 3 a1b2c3d4).
+```
 
 ---
 
@@ -122,7 +218,7 @@ pack은 언제나 candidate이며 받는 쪽 운영 그래프에 자동 반영�
 
 ```bash
 python scripts/openbinggu_doctor.py --selftest        # 15/15
-python binggu.py --selftest                           # 21/21 (장부 + capture 통합)
+python binggu.py --selftest                           # 26/26 (장부 + capture + hosted 통합)
 python scripts/binggu_capture_persist.py              # 16/16 (영속 candidate 버퍼)
 python scripts/binggu_capture_profile.py              # 9/9  (profile · settings hook · pause/resume/uninstall)
 python hooks/binggu_capture_hook.py --selftest        # 8/8  (UserPromptSubmit/Stop)
@@ -140,12 +236,46 @@ python scripts/openbinggu_public_tree_scan.py --tree .   # CLEAN
 - [docs/BINGGUPACK_GRAPH_GRAMMAR_SPEC.md](docs/BINGGUPACK_GRAPH_GRAMMAR_SPEC.md) — 그래프 문법
 - [hosted/workers/README.md](hosted/workers/README.md) — hosted 조회·save-intent 배포
 - [docs/BINGGUPACK_SAVE_INTENT_LIVE_E2E_RESULT.md](docs/BINGGUPACK_SAVE_INTENT_LIVE_E2E_RESULT.md) — save-intent 라이브 E2E(폰→러너→candidate) 결과·신형 v2 서명
+- [docs/BINGGUPACK_SEMANTIC_CLASSIFIER_DESIGN.md](docs/BINGGUPACK_SEMANTIC_CLASSIFIER_DESIGN.md) — semantic capture classifier **설계(HOLD·미구현)**. 기존 정규식 위에 얹는 보조 subtype 층으로만 설계됨(canonical 5종 스키마 불변)
 
 ---
 
-## 범위 밖 / Out of scope
+## 프로젝트 구조 / Project structure
 
-자동 확정(confirmed) · 자동 업로드 · 팀/공유/마켓플레이스/과금 · OpenCrab 실 전송. (전부 별도 결정/미구현)
+```
+binggupack/
+├── binggu.py            # 사용자 진입점 CLI (init·capture·preview·save·list·hosted·…)
+├── scripts/             # 검증·게이트·러너 모듈 (doctor·save_selected·hosted inbox·outbox runner 등)
+├── hooks/               # capture hook (UserPromptSubmit/Stop) — settings.json 에 등록
+├── hosted/workers/      # 폰/웹 save-intent + read-only 조회 Cloudflare Worker (각자 배포·공용 서버 없음)
+├── docs/                # 설계·문법·튜토리얼·E2E 결과 문서
+├── tests/fixtures/      # selftest·eval 용 synthetic fixture (실 데이터 없음)
+├── examples/            # 예시 pack·입력
+├── mcp.example.json     # MCP 연결 예시(Claude/ChatGPT 커넥터)
+├── INSTALL.md · README.md · LICENSE
+```
+
+각 모듈은 자체 `--selftest`를 갖고, `scripts/openbinggu_doctor.py`가 전체를 묶어 `GATE=GO`로 검증합니다.
+
+---
+
+## 보안 & 비목표 / Security & Non-goals
+
+**보안 (전부 selftest로 증명):**
+
+- **자동 저장 없음** — 저장은 preview → `SAVE n` 사람 confirm만.
+- **SAVE n human gate** — `actor=auto`·confirm 누락/불일치·preview 미확인은 전부 BLOCK.
+- **candidate-only** — 모든 노드는 후보 상태(`promotion_allowed=0`), 자동 확정(`confirmed`) 전이 0.
+- **secret/PII hard block** — 시크릿/PII 발화는 정규식이 후보 단계에서 무조건 제외(semantic이 못 뒤집음).
+- **inbox disabled by default** — 폰/웹 save-intent inbox는 평소 잠김(fail-closed), `SAVE n`이 사람 승인 신호.
+- **신형 서명 전용** — `SAVE_SIG_V2_ONLY=1`, 구형 HMAC 차단.
+- **원문 전문 저장 없음** — 80자 이내 발췌만. shadow/로그에도 원문 미보관.
+
+**비목표 (HOLD · 미구현 — 별도 결정 전 동작 안 함):**
+
+- OpenCrab 실 전송 · export · marketplace · 팀/공유/과금
+- 자동 확정(confirmed) · 자동 업로드 · 상주 데몬 · 주기적 자동 pull
+- **semantic capture classifier** — 설계 단계(HOLD). 동작하지 않으며, 구현 시에도 기존 정규식/그래프 스키마는 불변.
 
 ---
 
