@@ -235,3 +235,47 @@ preview → 사람이 SAVE n → 기존 게이트(save_selected) commit
 5. **별도 인스턴스/포트는 실익 낮음** — GPU 1장이라 인스턴스 분리해도 같은 GPU 경합. **rate/concurrency 제어 + L3 OFF 가 정답**(포트 분리보다 효과적). 단 `OLLAMA_NUM_PARALLEL` 직렬화는 활용 가능.
 
 **결론:** shadow PoC 를 **L2(embedding)-only 로 시작**하면 자원경합 위험은 낮다(bge CPU·병렬·GPU 무접촉). L3(qwen)은 기본 OFF 로 두고, 켤 때만 GPU 점유·concurrency=1·rate cap 적용. §9 게이트의 #5 가 본 실측으로 구체화됨.
+
+---
+
+## 11. L2-only shadow PoC 최소범위 (착수 후보 — 다음 GO 대상, 본 문서는 범위 정의만·코드 0)
+
+§10 실측에서 L2(bge embedding)-only 가 자원경합 위험이 낮음이 확인됨. 첫 PoC 는 **L3(qwen) 없이 L2 만**으로 좁혀, R2 16게이트의 절반을 L3 도입 시로 연기한다.
+
+### 11-1. 목적
+- **rule classifier 동작 변화 0** — 기존 분류·preview·저장 경로 그대로.
+- rule 이 `fallback_judgment` 로 뭉개는 문장의 **의미 라벨 후보를 shadow 로만 기록**(어느 seed 라벨에 가까운지 + 유사도).
+- **preview / ledger / save 영향 0** — 추천을 사람에게 표시조차 안 함(로깅 전용).
+
+### 11-2. L2-only 에서 필수인 R2 게이트
+| 게이트 | 내용 |
+|---|---|
+| L1 hard gate 선적용 | bge 호출 **직전** 정규식(`scan_residual_pii`·`SECRET_PATTERNS`·`_PREVIEW_PII_EXTRA`) 재적용 — hit 이면 호출 skip→rule + leak_guard 카운터 |
+| salt+HMAC shadow id | shadow 레코드 식별자 = `HMAC(salt, text)` — 원문/평문 해시 역추적 차단 |
+| concurrency=1 + rate cap | bge 호출 직렬화(pajae_rag 큐 공유 보호) + 호출 간 최소 간격 |
+| model name/digest 고정 | `bge-m3` + ollama digest 매 레코드 기록, digest 변경 시 골든 재평가 트리거 |
+| 호출스택 동등성 | 파일 byte-diff 0 뿐 아니라 런타임에서 L1 이 모든 경로 선실행됨을 selftest 로 어서션 |
+| golden / leak=0 / default 잠금 / 저장0 | golden(클래스 균형·애매 band 중심·PII 함정) · leak=0(PII 함정 L1 제외 100% ∧ shadow.jsonl 원문 0) · default 승격 코드 hard-disable · 저장/ledger/preview 0 |
+
+### 11-3. L3 로 연기되는 것 (이번 PoC 범위 밖)
+- qwen / local LLM 호출 일체
+- `reason_codes` enum + enum 위반 rule 강등
+- JSON schema 강제 / 파싱 실패 처리
+- `prompt_hash` 재현성 스냅샷(프롬프트가 없으므로)
+- LLM 로그·프롬프트 평문 잔류 통제(qwen 미사용이라 해당 없음)
+- L3 GPU 점유·keep-alive·cold 재로드 관리
+
+> bge embedding 은 deterministic(temperature 무관) → R2 #6 비결정성 게이트는 L2 에서는 model_digest 고정만으로 충족, temp0/seed/N회 일치율은 L3 도입 시 적용.
+
+### 11-4. 최소 산출물
+- `scripts/binggu_semantic_shadow.py` — leak_guard wrapper → bge embed(CPU) → 6라벨 seed cos 유사도 → band 판정 → shadow logger + selftest
+- seed 6라벨 (판단·교훈·운영결정·사용자선호·설계결정·버그패턴) — **owner 검수 후 작성**(본 단계에서는 미작성)
+- golden fixture (`tests/fixtures/semantic/golden.jsonl`)
+- 단일 selftest (leak scan + 정규식 byte-diff/호출스택 동등성 + golden + 저장0)
+- `~/.binggupack/semantic/shadow.jsonl` — **원문 없이** `hmac_id·len·rule_label·sem_label·sem_conf·latency_ms·model_digest·band` 만(ACL)
+
+### 11-5. 금지 (불변)
+- 기존 정규식 classifier(`classify_label_kind`·`SECRET_PATTERNS`·`scan_residual_pii`·`_PREVIEW_PII_EXTRA`·`classify_node`) **변경 금지**
+- preview 표시 변경 금지 · ledger write 금지 · 자동 저장 금지 · **L3(qwen) 호출 금지**
+
+**상태:** 범위 정의 완료. 구현·seed 작성은 **별도 GO** 후. 정규식 무변경·저장0·preview0 유지.
