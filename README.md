@@ -66,6 +66,12 @@ binggu.py capture status | pause | resume | preview | uninstall
 binggu.py preview "<대화/메모 텍스트>"                         # 후보 + preview_id (저장 0)
 binggu.py save "<텍스트>" --preview-id <id> --pick 1,2 --confirm "SAVE 1,2"
 
+# hosted (폰/커넥터 저장 — 폰에서 SAVE n 한 intent를 PC에서 한 번에)
+binggu.py hosted pull                                         # 안내만 (confirm 없으면 실행 0)
+binggu.py hosted pull --confirm "LIVE SAVE REHEARSAL" [--wait 60]
+#   → enable → (폰/커넥터에서 SAVE n) → pull → candidate 저장 → inbox disable(보장)
+#   경로: --workers-port <p> 또는 BINGGU_WORKERS_PORT
+
 # 후보 관리 (목록의 # 와 id8 을 함께 적어야 통과 — 목록 바뀌면 자동 차단)
 binggu.py list [--status pending|deprecated|resolved] [--kind 판단|상태|개념|문서|증거]
 binggu.py deprecate <n> <id8> --reason "..." --confirm "DEPRECATE <n> <id8>"

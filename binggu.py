@@ -177,9 +177,11 @@ def cmd_hosted(a):
     if getattr(a, "hosted_cmd", None) != "pull":
         return 1
     if not getattr(a, "confirm", None):
-        print("hosted pull = 실 장부 저장입니다(자동 저장 아님 · candidate-only).")
+        print("hosted pull = 폰/커넥터에서 SAVE n 한 intent 만 PC로 내려받아 장부에 candidate 로 저장합니다.")
+        print("  · 자동 저장 아님 · candidate-only · 사람이 confirm 문구를 직접 타이핑해야만 실행됩니다.")
         print('  실행:  python binggu.py hosted pull --confirm "LIVE SAVE REHEARSAL" [--wait 60]')
-        print("  순서:  enable → (폰/커넥터에서 SAVE n) → pull → candidate 저장 → inbox disable(보장)")
+        print("  순서:  enable(잠금 해제) → 폰/커넥터에서 SAVE n → pull → 저장 → inbox disable(다시 잠금·보장)")
+        print("  --wait: 폰 SAVE 도착까지 최대 대기 초(도착 즉시 종료 = 잠금 창 최소화). 미지정 시 즉시 1회 pull")
         print("  경로:  --workers-port <p> 또는 BINGGU_WORKERS_PORT 환경변수")
         return 0
     from openbinggu_save_intent_live_runner import (  # noqa: E402

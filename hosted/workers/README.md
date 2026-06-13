@@ -59,6 +59,7 @@ npx wrangler secret put SAVE_SIGN_SECRET --config wrangler.save_mcp.prod.toml   
 - **`.dev.vars*`는 .gitignore 등록 — 평문 커밋 절대 금지.** 워커 URL도 계정 식별자라 공개 트리 비노출.
 - 러너 측 검증/인출 스크립트는 이 사본에서 키를 읽는다(키 출력 0): `scripts/openbinggu_save_intent_v23_live_e2e.py`(E2E) · `scripts/openbinggu_save_intent_live_runner.py`(단일 흐름 enable→inject→pull→process→finally disable, 실 저장은 `--real-ledger --confirm "LIVE SAVE REHEARSAL"` 명시). 라이브 E2E 결과: `docs/BINGGUPACK_SAVE_INTENT_LIVE_E2E_RESULT.md`.
 - 폰 미리보기와 PC 러너의 후보 번호 체계는 **10건 고정으로 동일**(`CANDIDATE_MAX=10`) — 11번 이상 인덱스는 worker가 선제 거부.
+- **운영 1명령(권장)**: `python binggu.py hosted pull --confirm "LIVE SAVE REHEARSAL" [--wait 60]` — enable(잠금 해제) → 폰/커넥터에서 `SAVE n` → pull → candidate 저장 → inbox disable(다시 잠금·보장)을 한 번에. `--confirm` 없으면 안내만(live worker 미접촉). 경로는 `--workers-port` 또는 `BINGGU_WORKERS_PORT`.
 
 ### inbox 평소 잠금 · non-retention 운영 수칙
 - **inbox는 평소 잠금이 기본**(DO storage `enabled` 부재 = 닫힘): 적재 시도는 503 `inbox_disabled`. 저장 작업 직전에만 `admin/enable`(HMAC) → 작업 후 즉시 `admin/disable` 복귀.
