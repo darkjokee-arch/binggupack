@@ -52,12 +52,12 @@ npx wrangler secret put SAVE_SIGN_SECRET --config wrangler.save_mcp.prod.toml   
 - HMAC 전용 라인을 쓰려면 `--config wrangler.save_v2.prod.toml`로 동일 절차(secret 2종 동일).
 - 라우트(이중 인증 도메인):
   - 적재(폰, MCP): `POST /mcp2/<SAVE_PATH_TOKEN>` — JSON-RPC + Origin 가드
-  - 인출·관리(PC): `POST /save2/<SAVE_PATH_TOKEN>/{pull,admin/enable,admin/disable}` — HMAC 서명(`X-BGP-TS` + `X-BGP-SIG`, 재전송 창 ±300초)
+  - 인출·관리(PC): `POST /save2/<SAVE_PATH_TOKEN>/{pull,admin/enable,admin/disable}` — HMAC 서명(`X-BGP-TS` + `X-BGP-SIG`, 재전송 창 ±300초). **신형 v2 = `ts.METHOD.path.bodyhash`** 바인딩, 검증 단일 출처 `save_common.verifySig`(신형 우선 + `SAVE_SIG_V2_ONLY` 미설정 동안 구형 하위호환)
 
 ### PC 러너 페어링 개요
 - 키 사본은 배포 머신 로컬 파일 1개로만 보관: `.dev.vars.save_mcp` (v2 라인은 `.dev.vars.save_v2`) — `SAVE_PATH_TOKEN`/`SAVE_SIGN_SECRET`/`WORKER_URL` 한 줄씩.
 - **`.dev.vars*`는 .gitignore 등록 — 평문 커밋 절대 금지.** 워커 URL도 계정 식별자라 공개 트리 비노출.
-- 러너 측 검증/인출 스크립트는 이 사본에서 키를 읽는다(키 출력 0): `scripts/openbinggu_save_intent_v23_live_e2e.py`(E2E).
+- 러너 측 검증/인출 스크립트는 이 사본에서 키를 읽는다(키 출력 0): `scripts/openbinggu_save_intent_v23_live_e2e.py`(E2E) · `scripts/openbinggu_save_intent_live_runner.py`(단일 흐름 enable→inject→pull→process→finally disable, 실 저장은 `--real-ledger --confirm "LIVE SAVE REHEARSAL"` 명시). 라이브 E2E 결과: `docs/BINGGUPACK_SAVE_INTENT_LIVE_E2E_RESULT.md`.
 - 폰 미리보기와 PC 러너의 후보 번호 체계는 **10건 고정으로 동일**(`CANDIDATE_MAX=10`) — 11번 이상 인덱스는 worker가 선제 거부.
 
 ### inbox 평소 잠금 · non-retention 운영 수칙
