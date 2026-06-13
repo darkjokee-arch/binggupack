@@ -45,9 +45,20 @@ from openbinggu_candidate_deprecate_ux import deprecate_from_list  # noqa: E402
 from openbinggu_candidate_replace_ux import replace_from_list  # noqa: E402
 from openbinggu_owner_accept_ux import (  # noqa: E402
     open_accept, accept_from_list, unaccept_from_list, accepted_view)
+from binggu_capture_profile import (  # noqa: E402
+    init_profile, pause as cap_pause, resume as cap_resume,
+    uninstall as cap_uninstall, status as cap_status)
+from binggu_capture_persist import PersistentCaptureBuffer  # noqa: E402
+from binggu_capture_to_save import build_save_commands  # noqa: E402
 
 DEFAULT_LEDGER = os.path.join(os.path.expanduser("~"), ".binggupack", "ledger.sqlite")
+DEFAULT_SETTINGS = os.path.join(os.path.expanduser("~"), ".claude", "settings.json")
 OUTCOMES = ("성공", "실패", "불확실", "판정불가")
+
+
+def _hook_command():
+    """settings.json 에 등록할 capture hook 실행 명령(repo hooks 절대경로)."""
+    return 'python "%s"' % os.path.join(BASE, "hooks", "binggu_capture_hook.py")
 
 
 def _ledger_paths(ledger):
@@ -85,14 +96,79 @@ def cmd_init(a):
     ledger, snap_dir = _ledger_paths(a.ledger)
     if os.path.exists(ledger):
         print("이미 장부가 있습니다: %s (그대로 사용하면 됩니다)" % ledger)
-        return 0
-    os.makedirs(os.path.dirname(ledger), exist_ok=True)
-    os.makedirs(snap_dir, exist_ok=True)
-    db = open_accept(ledger)
-    db.close()
-    print("장부 생성 완료: %s" % ledger)
+    else:
+        os.makedirs(os.path.dirname(ledger), exist_ok=True)
+        os.makedirs(snap_dir, exist_ok=True)
+        db = open_accept(ledger)
+        db.close()
+        print("장부 생성 완료: %s" % ledger)
+    # AGI memory capture profile — 이 profile 이 있어야 자동 후보 수집이 동작(기본 ON).
+    # clone 직후(init 전)에는 profile 이 없어 어떤 세션에서도 수집되지 않는다.
+    if getattr(a, "no_capture", False):
+        print("(capture profile 생략: --no-capture)")
+    else:
+        home = os.path.dirname(os.path.abspath(ledger))
+        settings = getattr(a, "capture_settings", None) or DEFAULT_SETTINGS
+        cwd = getattr(a, "capture_cwd", None) or os.getcwd()
+        r = init_profile(home, cwd, hook_command=_hook_command(),
+                         settings_path=settings, global_scope=getattr(a, "global_scope", False))
+        scope_desc = "전역(--global, 모든 세션)" if r["global"] else ("현재 위치 %s" % cwd)
+        print("AGI memory capture ON — scope: %s" % scope_desc)
+        if r["hook_events"]:
+            print("hook 등록(settings.json 백업됨): %s" % ", ".join(r["hook_events"]))
+        else:
+            print("hook 이미 등록됨 — 그대로 사용")
+        print("자동 후보 수집만 켜집니다. 저장은 preview 후 SAVE n 게이트로만(자동 저장 없음).")
+        print("상태:  python binggu.py capture status   ·   끄기:  capture pause   ·   제거:  capture uninstall")
     print("다음:  python binggu.py preview \"오늘 정리하고 싶은 문장들\"")
     return 0
+
+
+def cmd_capture(a):
+    home = os.path.dirname(os.path.abspath(a.ledger))
+    settings = getattr(a, "settings", None) or DEFAULT_SETTINGS
+    cwd = getattr(a, "capture_cwd", None) or os.getcwd()
+    sub = a.capture_cmd
+    if sub == "status":
+        st = cap_status(home, cwd, settings)
+        print("capture: %s%s" % ("ON" if st["enabled"] else "OFF",
+                                  " (paused)" if st["paused"] else ""))
+        print("scope: %s · 현재 위치 수집 대상: %s"
+              % ("전역" if st["global"] else "지정 위치", "예" if st["in_current_scope"] else "아니오"))
+        print("버퍼 후보: %d건 · hook 등록: %s"
+              % (st["buffer_count"], {True: "예", False: "아니오", None: "미확인"}[st["hook_registered"]]))
+        return 0
+    if sub == "pause":
+        cap_pause(home)
+        print("capture 일시중지(pause). 재개:  python binggu.py capture resume")
+        return 0
+    if sub == "resume":
+        cap_resume(home)
+        print("capture 재개(resume).")
+        return 0
+    if sub == "preview":
+        pv = PersistentCaptureBuffer(home=home).render_preview()
+        if pv["count"] == 0:
+            print("수집된 후보가 없습니다.")
+            return 0
+        print("자동 수집된 후보 %d건:" % pv["count"])
+        for it in pv["items"]:
+            print("  " + it["label"])
+        ledger_opt = a.ledger if a.ledger != DEFAULT_LEDGER else None
+        cmds = build_save_commands(pv, ledger=ledger_opt)
+        print("\n저장하려면 후보별로 직접 실행하세요(사람 confirm 게이트로만 저장):")
+        for c in cmds["commands"]:
+            print("  [%d] %s" % (c["idx"], c["save_command"]))
+        print("\n자동 저장은 없습니다 — 위 명령을 실행해야 기존 게이트로 저장됩니다.")
+        return 0
+    if sub == "uninstall":
+        res = cap_uninstall(home, settings_path=settings)
+        print("capture 제거 완료. 삭제 파일: %s · hook 제거: %s"
+              % (", ".join(res["removed_files"]) or "없음",
+                 ", ".join(res["hook_removed_events"]) or "없음"))
+        print("(장부 ledger.sqlite 는 그대로 보존됩니다.)")
+        return 0
+    return 1
 
 
 def cmd_status(a):
@@ -235,12 +311,29 @@ def selftest():
     def args(**kw):
         a = A()
         a.ledger = ledger
+        a.no_capture = True  # 기본: 장부 사이클만(실 settings.json 미접촉)
         for k, v in kw.items():
             setattr(a, k, v)
         return a
 
     ck("1_init", cmd_init(args()) == 0 and os.path.exists(ledger))
     ck("1b_init_멱등", cmd_init(args()) == 0)
+    # capture profile (AGI memory) — temp settings 전용, 실 ~/.claude/settings.json 미접촉
+    cap_settings = os.path.join(tmp, "settings.json")
+    cap_cwd = os.path.realpath(tmp)
+    cap_home = os.path.dirname(ledger)
+    ck("1c_capture_init", cmd_init(args(no_capture=False, capture_settings=cap_settings,
+                                        capture_cwd=cap_cwd)) == 0)
+    _cst = cap_status(cap_home, cap_cwd, cap_settings)
+    ck("1d_capture_ON+hook+scope", _cst["enabled"] and _cst["hook_registered"]
+       and _cst["in_current_scope"] and not _cst["global"])
+    ck("1e_pause→OFF", cmd_capture(args(capture_cmd="pause", settings=cap_settings, capture_cwd=cap_cwd)) == 0
+       and not cap_status(cap_home, cap_cwd, cap_settings)["enabled"])
+    ck("1f_resume→ON", cmd_capture(args(capture_cmd="resume", settings=cap_settings, capture_cwd=cap_cwd)) == 0
+       and cap_status(cap_home, cap_cwd, cap_settings)["enabled"])
+    ck("1g_preview(저장0)", cmd_capture(args(capture_cmd="preview", settings=cap_settings, capture_cwd=cap_cwd)) == 0)
+    ck("1h_uninstall", cmd_capture(args(capture_cmd="uninstall", settings=cap_settings, capture_cwd=cap_cwd)) == 0
+       and not cap_status(cap_home, cap_cwd, cap_settings)["enabled"])
     TEXT = ("이 입찰은 마진이 낮아 보류한다. 백필 작업이 진행 중이다. "
             "낙찰하한율은 기초금액 대비 최저 투찰 비율을 말한다.")
     ck("2_preview(저장0)", cmd_preview(args(text=TEXT)) == 0)
@@ -306,7 +399,10 @@ def main():
     p = argparse.ArgumentParser(prog="binggu", description="BingguPack 개인 장부 CLI")
     p.add_argument("--ledger", default=DEFAULT_LEDGER)
     sub = p.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("init")
+    ip = sub.add_parser("init")
+    ip.add_argument("--agi-memory", action="store_true", dest="agi_memory")  # 명시 별칭(동작 동일)
+    ip.add_argument("--global", action="store_true", dest="global_scope")     # 전역 수집(미지정 시 현재 위치만)
+    ip.add_argument("--no-capture", action="store_true", dest="no_capture")   # 장부만, capture profile 생략
     sub.add_parser("status")
     sp = sub.add_parser("preview"); sp.add_argument("text")
     sp = sub.add_parser("save"); sp.add_argument("text")
@@ -327,11 +423,15 @@ def main():
     sp.add_argument("--outcome", required=True, choices=OUTCOMES)
     sp.add_argument("--reason", required=True)
     sp = sub.add_parser("reminders"); sp.add_argument("--today", default=None)
+    cp = sub.add_parser("capture"); cp.add_argument("--settings", default=None)
+    csub = cp.add_subparsers(dest="capture_cmd", required=True)
+    for cs in ("status", "pause", "resume", "preview", "uninstall"):
+        csub.add_parser(cs)
     a = p.parse_args()
     fn = {"init": cmd_init, "status": cmd_status, "preview": cmd_preview, "save": cmd_save,
           "list": cmd_list, "deprecate": cmd_deprecate, "replace": cmd_replace,
           "accept": cmd_accept, "unaccept": cmd_unaccept, "due": cmd_due,
-          "resolve": cmd_resolve, "reminders": cmd_reminders}[a.cmd]
+          "resolve": cmd_resolve, "reminders": cmd_reminders, "capture": cmd_capture}[a.cmd]
     sys.exit(fn(a))
 
 

@@ -23,7 +23,31 @@ BingguPack의 **자동 후보 수집 hook**을 Claude Code에 연결하는 방�
 
 ---
 
-## 2. 설치 (hook 등록)
+## 1.5. 가장 쉬운 길 — `binggu init` (권장)
+
+수동 단계(2·3) 대신 `binggu init` 한 번이면 capture profile 생성 + settings.json hook 등록 + 현재 위치 scope 활성화를 자동으로 합니다(AGI memory mode).
+
+```bash
+python binggu.py init                 # 장부 + capture profile (현재 repo/workspace scope, 기본 ON)
+python binggu.py init --global        # 전역 수집(모든 세션). 미지정 시 현재 위치만
+python binggu.py init --no-capture    # 장부만(capture 생략)
+```
+
+- **clone 직후(init 전)에는 아무 것도 수집하지 않습니다.** init 을 실행한 사람의 profile 안에서만 동작합니다.
+- settings.json 은 백업 후 idempotent 하게 편집됩니다(기존 hook 보존, binggu hook 만 추가).
+
+제어:
+```bash
+python binggu.py capture status       # ON/OFF · scope · 버퍼 건수 · hook 등록 여부
+python binggu.py capture pause        # 일시중지
+python binggu.py capture resume       # 재개
+python binggu.py capture preview      # 수집 후보 목록 + 저장 명령 안내(저장 0)
+python binggu.py capture uninstall    # 완전 제거(rollback) — 장부 ledger.sqlite 는 보존
+```
+
+아래 2·3은 `binggu init` 을 쓰지 않고 직접 설정할 때의 수동 경로입니다.
+
+## 2. 설치 (hook 등록 — 수동)
 
 1. 이 repo를 clone 한 절대경로를 확인합니다 (예: `/home/you/binggupack` 또는 `C:/Users/you/binggupack`).
 2. 본인 `~/.claude/settings.json`의 `hooks`에 아래를 **MERGE** 합니다 — 통째 덮어쓰기 금지, 기존 hook 배열에 항목만 추가하세요. 예시: `hooks/settings.snippet.json`.

@@ -36,12 +36,25 @@ python scripts/openbinggu_doctor.py --selftest          # 15/15 PASS GATE=GO 기
 python scripts/openbinggu_doctor.py --tree examples/toy_project   # CLEAN 기대
 ```
 
-## 자동 후보 수집 hook (opt-in) / candidate-capture hook
+## AGI memory capture (opt-in) / 자동 후보 수집
 ```bash
-python scripts/binggu_capture_persist.py            # 14/14 GATE=GO (영속 candidate 버퍼)
-python hooks/binggu_capture_hook.py --selftest      # 8/8 GATE=GO (UserPromptSubmit/Stop 진입점)
+python binggu.py init                 # 장부 + capture profile 생성 (현재 repo/workspace scope, 기본 ON)
+python binggu.py init --global        # 전역 수집(모든 세션). 미지정 시 현재 위치만
+python binggu.py init --no-capture    # 장부만(capture 생략)
+python binggu.py capture status       # ON/OFF · scope · 버퍼 건수 · hook 등록 여부
+python binggu.py capture pause        # 일시중지
+python binggu.py capture resume       # 재개
+python binggu.py capture preview      # 수집 후보 목록 + 저장 명령 안내 (저장 0)
+python binggu.py capture uninstall    # 완전 제거(rollback) — 장부는 보존
 ```
-> **자동 저장이 아니라 자동 후보 수집입니다.** 기본 OFF(`~/.binggupack/capture_enabled` 플래그) + scope 게이트(repo 화이트리스트·타 프로젝트 deny, fail-closed) — 둘 다 통과해야 candidate 발췌만 쌓입니다. ledger/active/confirmed write 0. 저장은 preview → `SAVE n` 게이트만. 설치/활성화/롤백: `docs/BINGGUPACK_CAPTURE_HOOK_SETUP.md`.
+검증:
+```bash
+python scripts/binggu_capture_persist.py         # 16/16 (영속 버퍼·scope·TTL·pause·global)
+python scripts/binggu_capture_profile.py         # 9/9  (profile·settings hook·pause/resume/uninstall)
+python hooks/binggu_capture_hook.py --selftest   # 8/8  (UserPromptSubmit/Stop 진입점)
+python binggu.py --selftest                      # 21/21 (장부 + capture 통합)
+```
+> **자동 저장이 아니라 자동 후보 수집입니다.** `binggu init`이 만든 profile 안에서만 동작 — clone 직후엔 수집 0. 기본 OFF 플래그 + scope 2중 게이트(현재 위치만, `--global` 없으면 타 세션 제외). ledger/active/confirmed write 0. 저장은 preview → `SAVE n` 게이트만. scope·hook·롤백 상세: `docs/BINGGUPACK_CAPTURE_HOOK_SETUP.md`.
 
 ## Reviewer/confirmed preview selftest / 리뷰·확정 preview 검증 (preview only)
 ```bash

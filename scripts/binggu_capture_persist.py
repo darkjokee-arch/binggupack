@@ -44,31 +44,40 @@ class CaptureScope:
     def __init__(self, home=None):
         self.home = binggu_home(home)
         self.flag = self.home / "capture_enabled"
+        self.paused_flag = self.home / "capture_paused"
         self.scope_file = self.home / "capture_scope.json"
 
     def enabled(self):
-        """기본 OFF: 플래그 파일 존재해야만 True."""
-        return self.flag.exists()
+        """기본 OFF: capture_enabled 플래그 존재 AND capture_paused 없음."""
+        return self.flag.exists() and not self.paused_flag.exists()
+
+    def paused(self):
+        return self.paused_flag.exists()
 
     def _scope(self):
+        empty = {"global": False, "allowed_cwd_prefixes": [], "denied_cwd_substrings": []}
         if not self.scope_file.exists():
-            return {"allowed_cwd_prefixes": [], "denied_cwd_substrings": []}
+            return empty
         try:
             d = json.loads(self.scope_file.read_text(encoding="utf-8"))
             return {
+                "global": bool(d.get("global", False)),
                 "allowed_cwd_prefixes": list(d.get("allowed_cwd_prefixes", [])),
                 "denied_cwd_substrings": list(d.get("denied_cwd_substrings", [])),
             }
         except Exception:
-            return {"allowed_cwd_prefixes": [], "denied_cwd_substrings": []}
+            return empty
 
     def in_scope(self, cwd):
-        """deny 우선 → allow 화이트리스트. allow 비면 fail-closed(False)."""
+        """deny 우선 → global(전역) → allow 화이트리스트. allow 비면 fail-closed(False).
+        global=true 라도 denied_cwd_substrings 는 항상 우선 차단."""
         sc = self._scope()
         cwd_n = _norm(cwd)
         for d in sc["denied_cwd_substrings"]:
             if _norm(d) in cwd_n:
                 return False
+        if sc["global"]:
+            return True
         allow = sc["allowed_cwd_prefixes"]
         if not allow:
             return False
@@ -309,6 +318,20 @@ def _selftest():
         # T13 운영 ledger.sqlite 미접촉
         check(ledger.read_bytes() == b"LEDGER-SENTINEL" and ledger.stat().st_mtime_ns == ledger_mtime0,
               "T13 운영 ledger.sqlite 미접촉(내용·mtime 불변)")
+
+        # T14 pause: capture_paused 플래그 → enabled여도 should_capture False
+        (home / "capture_paused").write_text("1", encoding="utf-8")
+        check(scope.paused() and not scope.should_capture(repo_cwd),
+              "T14 pause 플래그 → should_capture False")
+        (home / "capture_paused").unlink()
+        check(scope.should_capture(repo_cwd), "T14b resume → should_capture True")
+
+        # T15 global scope: 타 cwd 허용 · deny 는 여전히 우선 차단
+        scope.scope_file.write_text(json.dumps({
+            "global": True, "allowed_cwd_prefixes": [], "denied_cwd_substrings": ["bid-engine"],
+        }, ensure_ascii=False), encoding="utf-8")
+        check(scope.in_scope("D:/anywhere/else") and not scope.in_scope(other_cwd),
+              "T15 global scope → 타 cwd 허용 · deny(bid-engine) 차단 유지")
 
         gate = "GO" if ok else "NO-GO"
         print(f"\nGATE={gate}")
