@@ -25,11 +25,12 @@ BingguPack의 **자동 후보 수집 hook**을 Claude Code에 연결하는 방�
 
 ## 1.5. 가장 쉬운 길 — `binggu init` (권장)
 
-수동 단계(2·3) 대신 `binggu init` 한 번이면 capture profile 생성 + settings.json hook 등록 + 현재 위치 scope 활성화를 자동으로 합니다(AGI memory mode).
+수동 단계(2·3) 대신 `binggu init --agi-memory` 한 번이면 capture profile 생성 + settings.json hook 등록 + **전역 후보수집(AGI memory mode)** 활성화를 자동으로 합니다. 현재 위치만 원하면 `binggu init`(privacy 모드).
 
 ```bash
-python binggu.py init                 # 장부 + capture profile (현재 repo/workspace scope, 기본 ON)
-python binggu.py init --global        # 전역 수집(모든 세션). 미지정 시 현재 위치만
+python binggu.py init --agi-memory    # 전역 후보수집(AGI memory mode, 기본 ON)
+python binggu.py init                 # 현재 위치만(privacy 모드)
+python binggu.py init --global        # --agi-memory 와 동일(작업 전역)
 python binggu.py init --no-capture    # 장부만(capture 생략)
 ```
 
@@ -86,18 +87,27 @@ touch ~/.binggupack/capture_enabled            # macOS/Linux
 
 ### 3-2. scope 지정 (`~/.binggupack/capture_scope.json`)
 
+**AGI memory(전역)** 는 `init --agi-memory` 가 아래 전역 형태로 자동 설정합니다(작업 전역 후보수집 = 기본 경험). privacy 형태는 특정 위치만 수집하고 싶을 때 수동 지정.
+
+전역 (AGI memory · 권장):
+```json
+{ "global": true, "denied_cwd_substrings": [".ssh", ".gnupg", "credentials"] }
+```
+
+privacy (특정 위치만):
 ```json
 {
-  "allowed_cwd_prefixes": ["/ABSOLUTE/PATH/TO/binggupack"],
-  "denied_cwd_substrings": ["bid-engine", "safety-app"]
+  "global": false,
+  "allowed_cwd_prefixes": ["/ABSOLUTE/PATH/TO/your-workspace"],
+  "denied_cwd_substrings": [".ssh", "credentials"]
 }
 ```
 
 규칙:
-- **deny 우선** — `denied_cwd_substrings` 중 하나라도 현재 작업 디렉토리 경로에 포함되면 수집 안 함(허용 prefix 내부라도).
-- **fail-closed** — `allowed_cwd_prefixes`가 비어 있으면(또는 일치 안 하면) 수집 안 함.
-- 즉 `capture_enabled` 플래그 **AND** scope 일치, 둘 다 통과해야 candidate가 쌓입니다.
-- 예시는 BingguPack 작업 디렉토리만 허용하고, `bid-engine`·`safety-app` 같은 다른 프로젝트 세션은 명시적으로 제외합니다.
+- **global: true** 면 `allowed_cwd_prefixes`를 무시하고 **작업 전역 수집**(deny substring만 차단). AGI memory 기본.
+- **deny 우선** — `denied_cwd_substrings` 중 하나라도 현재 작업 디렉토리 경로에 포함되면 수집 안 함(시크릿 디렉토리 등).
+- privacy 형태(`global:false`)는 **fail-closed** — `allowed_cwd_prefixes`가 비어 있으면 수집 안 함.
+- 어느 형태든 `capture_enabled` 플래그 **AND** scope 통과, 둘 다 만족해야 candidate가 쌓입니다. **시크릿/PII 발화는 분류 단계에서 자동 후보 제외**(scope와 별개).
 
 > 경로는 본인 환경에 맞게 교체하세요. 대소문자 무시 + 슬래시 정규화로 비교합니다.
 

@@ -110,9 +110,11 @@ def cmd_init(a):
         home = os.path.dirname(os.path.abspath(ledger))
         settings = getattr(a, "capture_settings", None) or DEFAULT_SETTINGS
         cwd = getattr(a, "capture_cwd", None) or os.getcwd()
+        # AGI memory mode = 전역 후보수집이 기본 경험(--agi-memory 또는 --global). 플래그 없는 init = 현재 위치만(privacy).
+        global_scope = bool(getattr(a, "global_scope", False) or getattr(a, "agi_memory", False))
         r = init_profile(home, cwd, hook_command=_hook_command(),
-                         settings_path=settings, global_scope=getattr(a, "global_scope", False))
-        scope_desc = "전역(--global, 모든 세션)" if r["global"] else ("현재 위치 %s" % cwd)
+                         settings_path=settings, global_scope=global_scope)
+        scope_desc = "전역(AGI memory — 모든 작업 세션)" if r["global"] else ("현재 위치만 %s (privacy)" % cwd)
         print("AGI memory capture ON — scope: %s" % scope_desc)
         if r["hook_events"]:
             print("hook 등록(settings.json 백업됨): %s" % ", ".join(r["hook_events"]))
@@ -382,6 +384,11 @@ def selftest():
     _cst = cap_status(cap_home, cap_cwd, cap_settings)
     ck("1d_capture_ON+hook+scope", _cst["enabled"] and _cst["hook_registered"]
        and _cst["in_current_scope"] and not _cst["global"])
+    # --agi-memory = 전역(AGI memory mode) — 임의 cwd 도 수집 대상
+    ck("1d2_agi_memory→전역",
+       cmd_init(args(no_capture=False, capture_settings=cap_settings, capture_cwd=cap_cwd, agi_memory=True)) == 0
+       and cap_status(cap_home, "D:/anywhere/else", cap_settings)["global"]
+       and cap_status(cap_home, "D:/anywhere/else", cap_settings)["in_current_scope"])
     ck("1e_pause→OFF", cmd_capture(args(capture_cmd="pause", settings=cap_settings, capture_cwd=cap_cwd)) == 0
        and not cap_status(cap_home, cap_cwd, cap_settings)["enabled"])
     ck("1f_resume→ON", cmd_capture(args(capture_cmd="resume", settings=cap_settings, capture_cwd=cap_cwd)) == 0

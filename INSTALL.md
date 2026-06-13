@@ -38,8 +38,9 @@ python scripts/openbinggu_doctor.py --tree examples/toy_project   # CLEAN 기대
 
 ## AGI memory capture (opt-in) / 자동 후보 수집
 ```bash
-python binggu.py init                 # 장부 + capture profile 생성 (현재 repo/workspace scope, 기본 ON)
-python binggu.py init --global        # 전역 수집(모든 세션). 미지정 시 현재 위치만
+python binggu.py init --agi-memory    # 장부 + capture profile (전역 후보수집 = AGI memory mode, 기본 ON)
+python binggu.py init                 # 현재 위치만(privacy 모드)
+python binggu.py init --global        # --agi-memory 와 동일(작업 전역)
 python binggu.py init --no-capture    # 장부만(capture 생략)
 python binggu.py capture status       # ON/OFF · scope · 버퍼 건수 · hook 등록 여부
 python binggu.py capture pause        # 일시중지
@@ -54,7 +55,7 @@ python scripts/binggu_capture_profile.py         # 9/9  (profile·settings hook�
 python hooks/binggu_capture_hook.py --selftest   # 8/8  (UserPromptSubmit/Stop 진입점)
 python binggu.py --selftest                      # 21/21 (장부 + capture 통합)
 ```
-> **자동 저장이 아니라 자동 후보 수집입니다.** `binggu init`이 만든 profile 안에서만 동작 — clone 직후엔 수집 0. 기본 OFF 플래그 + scope 2중 게이트(현재 위치만, `--global` 없으면 타 세션 제외). ledger/active/confirmed write 0. 저장은 preview → `SAVE n` 게이트만. scope·hook·롤백 상세: `docs/BINGGUPACK_CAPTURE_HOOK_SETUP.md`.
+> **자동 저장이 아니라 자동 후보 수집입니다.** `binggu init`이 만든 profile 안에서만 동작 — clone 직후엔 수집 0. **AGI memory(`--agi-memory`/`--global`)는 작업 전역**이 기본 경험, privacy(`init`)는 현재 위치만. 어느 scope든 시크릿/PII 발화는 자동 후보 제외 + 시크릿 디렉토리 deny. ledger/active/confirmed write 0. 저장은 preview → `SAVE n` 게이트만. scope·hook·롤백 상세: `docs/BINGGUPACK_CAPTURE_HOOK_SETUP.md`.
 
 ## Reviewer/confirmed preview selftest / 리뷰·확정 preview 검증 (preview only)
 ```bash

@@ -11,7 +11,7 @@ AI와의 대화에서 건질 판단·상태·개념을 후보로 **자동 수집
 
 ## 핵심 개념 (4)
 
-1. **자동 후보 수집** — `binggu init`이 만든 profile의 **현재 workspace scope** 안에서 candidate capture가 기본 ON (scope-gated). clone 직후엔 동작하지 않습니다.
+1. **자동 후보 수집 (AGI memory)** — `binggu init --agi-memory`가 만든 profile에서 **사장님 작업 전역**으로 candidate capture(시크릿/PII 발화는 자동 제외). 현재 workspace만 원하면 `binggu init`(privacy 모드). clone 직후엔 동작하지 않습니다.
 2. **미리보기** — "빙구팩 저장해" 또는 `binggu capture preview`로 수집된 후보를 확인합니다.
 3. **사람 승인 저장** — `SAVE n` confirm 없이는 저장 0. 의도·자동·번호 없는 저장은 전부 BLOCK.
 4. **증거 기반 그래프** — 5종 노드 + 동사형(typed verb) 엣지 + 원문 증빙(evidence).
@@ -25,7 +25,7 @@ git clone https://github.com/darkjokee-arch/binggupack
 cd binggupack
 python scripts/openbinggu_doctor.py --selftest      # 15/15 GATE=GO
 
-python binggu.py init --agi-memory                  # 장부 + capture profile (현재 workspace scope, 기본 ON)
+python binggu.py init --agi-memory                  # 장부 + capture profile (전역 후보수집 = AGI memory, 기본 ON)
 python binggu.py capture status                     # ON/OFF · scope · 버퍼 건수 · hook 등록
 ```
 
@@ -38,15 +38,15 @@ python binggu.py capture preview     # 수집된 후보 목록 + 저장 명령 �
 python binggu.py capture uninstall   # 완전 제거(rollback) — 장부 ledger.sqlite 는 보존
 ```
 
-> 전역 수집(모든 세션)은 `python binggu.py init --global` 로 **명시**해야만 켜집니다. 기본은 현재 workspace 만.
+> **AGI memory** = `init --agi-memory`(또는 `--global`)로 **작업 전역** 후보수집이 기본 경험. 현재 workspace만 원하면 플래그 없이 `init`(privacy 모드). 저장은 어느 쪽이든 `SAVE n` 게이트만(자동 저장 0·시크릿/PII 자동 제외).
 
 ---
 
 ## 안전 원칙 / Safety
 
 - **clone 직후에는 아무것도 수집하지 않습니다** — `binggu init`을 실행한 사람의 profile 안에서만 동작.
-- scope 기본 = **현재 workspace**. 전역 수집은 `--global` 없으면 안 됩니다.
-- **자동 저장 없음** — 저장은 preview → `SAVE n` confirm만. `actor=auto`·confirm 누락/불일치·preview 미확인은 전부 BLOCK.
+- **AGI memory = 작업 전역 후보수집이 기본 경험**(`init --agi-memory`/`--global`). 현재 workspace로 좁히려면 플래그 없이 `init`(privacy 모드). 어느 scope든 **시크릿/PII 발화는 자동 후보 제외** + 시크릿 디렉토리는 deny.
+- **자동 저장 없음** — 캡처 범위가 넓어도 저장은 preview → `SAVE n` confirm만. `actor=auto`·confirm 누락/불일치·preview 미확인은 전부 BLOCK.
 - **ledger/active/confirmed/OpenCrab 자동 write 0.**
 - **원문 전문 저장 없음** — 80자 이내 발췌만.
 - pause / resume / uninstall 로 언제든 중단·완전 원복. 모든 변경 전 스냅샷 + checksum rollback + append-only audit chain.
