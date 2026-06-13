@@ -4,7 +4,7 @@
 
 > **무엇인가** — local-first · evidence-backed context packs · candidate capture/preview · human-confirmed SAVE gate · ontology graph validation. **자동 ledger/confirmed write 없음** — 저장은 preview → `SAVE n`(정확한 confirm) 게이트로만 진행됩니다.
 >
-> **현재 라인 = v1.3.x.** 공개 Latest = **v1.3.1**(capture→save 커밋 어댑터). main = +영속 candidate 버퍼 + 자동 후보 수집 **hook support(opt-in, 기본 OFF)**. 이전: v1.0.0(개인용 정식 동결·`binggu` CLI) → v1.1.0(그래프 문법 스펙·전 팩 원문 검색) → v1.2.0(hosted save-intent 폰 저장·pack browsing) → v1.3.x(자동 캡처 판정·preview·capture→save 어댑터·hook support).
+> **현재 라인 = v1.4.0 (AGI memory capture).** `binggu init`이 현재 workspace scope에 자동 후보 수집을 기본 ON으로 만드는 capture profile + 영속 candidate 버퍼 + opt-in/scope-gated hook support. **자동 저장은 없음**(저장 = preview → `SAVE n`). 이전 라인: v1.0.0(개인 장부·`binggu` CLI) → v1.1.0(그래프 문법 스펙·전 팩 원문 검색) → v1.2.0(hosted save-intent 폰 저장) → v1.3.x(자동 캡처 판정·preview·capture→save 어댑터).
 >
 > OpenCrab 업로드는 **planned**(preflight G1~G7까지 구현·검증, 실 전송은 별도 결정 — 노출 0). "100% 완성판"이 아니며 모든 사용자 환경 동작을 보장하지 않습니다. 전체 로드맵·범위는 `README.md`, 따라하기는 `docs/BINGGUPACK_TUTORIAL.md` 참조.
 

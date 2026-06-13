@@ -67,7 +67,7 @@ python scripts/openbinggu_batch_pack_loader.py --pack-dir <pack 디렉터리> --
 - write는 기본 OFF — `--enable-write` 없으면 거부됩니다.
 - apply 직전 PII/secret 재스캔에서 검출되면 거부됩니다(kind만 출력).
 
-## 5. 승격 전 preview (v0.4.0-rc1, read-only)
+## 5. 승격 전 preview (read-only)
 
 pack을 운영형 그래프로 승격하면 무슨 일이 일어날지 **미리 보기만** 합니다(write 0):
 
@@ -91,7 +91,7 @@ $env:OPENBINGGU_OPERATING_DB = "<자기 DB 경로>"
 python scripts/openbinggu_promotion_preview.py --pack-dir <dir> --domain D10
 ```
 
-## 6. 후보 관리 UX 따라하기 (v0.9.0-rc1, temp-only)
+## 6. 후보 관리 UX 따라하기 (temp-only)
 
 저장된 후보(candidate)를 **보기 → 기각 → 수정 → 수용 → 철회 → 피드백 resolve**로 관리하는 전체 사이클을 temp DB에서 안전하게 체험할 수 있습니다(내 데이터 0, 실행 후 원복):
 

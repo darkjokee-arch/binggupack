@@ -1,5 +1,5 @@
 {
-  "_comment": "OpenBinggu local MCP server 등록 예시(후보). 실제 등록/공개는 owner 결정 후. read/dry-run 도구만 노출.",
+  "_comment": "BingguPack local MCP server 등록 예시(후보). 서버/스크립트 prefix openbinggu_ 는 레거시 내부 코드네임. 실제 등록/공개는 owner 결정 후. read/dry-run 도구만 노출.",
   "mcpServers": {
     "openbinggu": {
       "command": "python",

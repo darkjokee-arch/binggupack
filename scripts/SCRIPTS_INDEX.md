@@ -1,4 +1,4 @@
-# scripts/ 인덱스 (2026-06-12 전수 실측)
+# scripts/ 인덱스 (2026-06-13 v1.4.0 — AGI memory capture 스크립트 반영)
 
 > **신규 기여자 길잡이 (5줄)**
 > 1. 시작점은 `openbinggu_doctor.py --selftest` — 공개 전 필수 검사 단일 진입점(기존 selftest들을 subprocess로 호출만).
@@ -7,12 +7,21 @@
 > 4. 분류: **현행**=현재 라인에서 import되거나 게이트로 사용 / **1회성**=owner GO 1회 실연·canary(재실행은 별도 GO) / **레거시**=참조 0 실측, 이전 버전 라인 / **archived**=`_archived_oneoff_20260612/` 이동 대상.
 > 5. raw 경로·secret·PII는 어떤 스크립트도 출력하지 않는다(id/hash/count/reason_code만) — 새 스크립트도 이 규약을 따를 것.
 
-총 68개 (.py). 분류 근거 = 각 파일 머리 docstring + import 참조 관계 실측(`grep "import <모듈>"` 교차).
+총 77개 (.py — scripts/ 직속 73 + archived 이동분 4 표기). 분류 근거 = 각 파일 머리 docstring + import 참조 관계 실측(`grep "import <모듈>"` 교차).
 
 | 파일명 | 분류 | 한 줄 역할 | selftest |
 | :--- | :--- | :--- | :--- |
+| binggu_capture_buffer.py | 현행 | 메모리 candidate 버퍼 + preview 렌더(분류 호출, 영속 0) | 자체 |
+| binggu_capture_classifier.py | 현행 | 발화→capture 판정(captured/preview_trigger/ignored·pinned·confidence) | 자체 |
+| binggu_capture_cli.py | 현행 | capture 수동 호출 CLI(로컬, write 0) | --selftest |
+| binggu_capture_persist.py | 현행 | 영속 candidate 버퍼 — 기본 OFF 플래그·scope 2중 게이트(global/deny)·TTL·rollback | 자체 |
+| binggu_capture_profile.py | 현행 | AGI memory profile — init/status/pause/resume/uninstall + settings.json hook 등록(백업·idempotent) | 자체 |
+| binggu_capture_session.py | 현행 | 세션 capture entrypoint(on_user_prompt/on_session_end, 메모리) | 자체 |
+| binggu_capture_to_save.py | 현행 | capture→저장 게이트 어댑터 — commit_selected(save_selected 위임)·build_save_commands | --selftest |
+| binggupack_constants_parity_selftest.py | 현행 | py↔ts 매직넘버 동기 검증(후보 상한 10·INPUT_CAP 20000 등 양쪽 regex 추출 대조) | 자체 |
 | binggupack_http_mcp_skeleton.py | 현행 | hosted MCP 로컬 한정 PoC — 127.0.0.1 read-only 5 tool, JSON-only stateless | 별도(↓selftest 파일) |
 | binggupack_http_mcp_skeleton_selftest.py | 현행 | skeleton 실 HTTP E2E 21케이스(initialize/tools/Origin 가드/누출 0) | 자체 |
+| binggupack_sign_util.py | 현행 | save-intent HMAC 서명 단일 출처(method+path 바인딩, hosted save_common.ts 와 바이트 동일) | ✗(유틸 모듈) |
 | localbinggu_incoming_loader.py | 현행 | incoming jsonl 읽어 schema/evidence/promotion 불변식 검증(read-only loader) | ✗(CLI 검증기, watcher가 재사용) |
 | localbinggu_match_policy.py | 현행 | read-only match policy — Tier 0~3 분류, cross-domain fuzzy 오탐 차단 | ✗(__main__=draft 평가 출력) |
 | localbinggu_review_resolver.py | 현행 | review decision → reviewed plan + audit 생성(production write 금지) | fixture 모드(--fixture-dir) |
@@ -81,5 +90,5 @@
 | watcher_pack_builder_m0.py | 현행 | M0 산출→temp pack 조립 + pack_validate 계약 검증(pack 빌더 정본) | --selftest |
 
 ## 집계
-- 총 68 = 현행 57 · 1회성 5 · 레거시 2 · archived(1회성, J그룹 이동) 4
+- 총 77 = 현행 66 · 1회성 5 · 레거시 2 · archived(1회성, J그룹 이동) 4 (scripts/ 직속 실측 73 = 77 − archived 이동 4)
 - archived 4종 파일 이동은 J그룹 담당 — 본 문서는 표기만. 이동 완료 후 위치 = `scripts/_archived_oneoff_20260612/`
