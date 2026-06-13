@@ -47,12 +47,18 @@ def _list_tools():
             continue  # 방어: read/dry-run 외 노출 금지
         props = {p: {"type": "string", "description": f"{p} (작업 폴더 내 경로)"}
                  for p in spec["path_params"]}
+        req = list(spec["path_params"])
+        # path 외 일반 params(예: capture 도구의 utterance/utterances) 지원
+        extra = spec.get("input_schema")
+        if extra:
+            props.update(extra.get("properties", {}))
+            req += [r for r in extra.get("required", []) if r not in req]
         out.append({"name": name, "mode": spec["mode"],
                     "description": _TOOL_DESC.get(name, name),
                     "path_params": list(spec["path_params"]),
                     "inputSchema": {"type": "object",
                                     "properties": props,
-                                    "required": list(spec["path_params"])}})
+                                    "required": req}})
     return out
 
 

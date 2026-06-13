@@ -18,6 +18,8 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from openbinggu_mcp_path_gate_adapter import guarded_tool_call  # noqa: E402
+from binggu_capture_classifier import classify  # noqa: E402
+from binggu_capture_buffer import CaptureBuffer  # noqa: E402
 
 
 # ---- underlying 도구(dry-run mock, FS write 0) ----
@@ -42,6 +44,25 @@ def _u_selftest(params=None):
     return {"action": "selftest", "mode": "read", "gate": "see scripts"}
 
 
+def _u_capture_classify(params=None):
+    # 발화 1건 판정(메모리 순수함수, write 0). 발화 원문은 반환 안 함(state/signals만).
+    params = params or {}
+    v = classify(params.get("utterance", ""), params.get("prev_turn"))
+    return {"action": "capture_classify", "mode": "read",
+            "state": v["state"], "confidence": v["confidence"], "pinned": v["pinned"],
+            "signals": v["signals"]}
+
+
+def _u_capture_preview(params=None):
+    # 발화 리스트 무상태 재구성 → preview 리스트(메모리만, write 0). active 전이 0.
+    params = params or {}
+    buf = CaptureBuffer()
+    for u in (params.get("utterances") or []):
+        if isinstance(u, str):
+            buf.feed(u)
+    return {"action": "capture_preview", "mode": "read", **buf.render_preview()}
+
+
 # ---- 노출 도구 테이블(read/dry-run 만). 위험 도구는 의도적으로 부재 ----
 TOOLS = {
     "pack_build":           {"path_params": ["input_dir"], "underlying": _u_pack_build,          "mode": "dry-run"},
@@ -49,6 +70,15 @@ TOOLS = {
     "consumer_smoke":       {"path_params": ["pack_path"],  "underlying": _u_consumer_smoke,      "mode": "read"},
     "publish_guard_dryrun": {"path_params": ["pack_path"],  "underlying": _u_publish_guard_dryrun, "mode": "dry-run"},
     "selftest":             {"path_params": [],             "underlying": _u_selftest,            "mode": "read"},
+    # 캡처 엔진(메모리 순수, write 0). path 입력 없음 → input_schema 로 일반 params 노출.
+    "capture_classify":     {"path_params": [], "underlying": _u_capture_classify, "mode": "read",
+                             "input_schema": {"properties": {"utterance": {"type": "string"},
+                                                             "prev_turn": {"type": "string"}},
+                                              "required": ["utterance"]}},
+    "capture_preview":      {"path_params": [], "underlying": _u_capture_preview, "mode": "read",
+                             "input_schema": {"properties": {"utterances": {"type": "array",
+                                                                            "items": {"type": "string"}}},
+                                              "required": ["utterances"]}},
 }
 
 # 노출 금지(핸들러 부재로 자동 차단되지만, 명시 거부 목록으로 의도 박제)
@@ -112,6 +142,8 @@ def _selftest():
         ("forbidden_write",      "opencrab_write",       {"pack_path": "examples/toy_project/p.json"}, False, "tool_not_exposed:forbidden"),
         ("forbidden_push",       "github_push",          {},                                           False, "tool_not_exposed:forbidden"),
         ("unknown_tool",         "do_something",         {},                                           False, "tool_not_exposed:unknown"),
+        ("capture_classify_ok",  "capture_classify",     {"utterance": "B안으로 결정"},                 True,  "read no-path"),
+        ("capture_preview_ok",   "capture_preview",      {"utterances": ["이거 저장해", "ㅋㅋ"]},        True,  "read no-path"),
     ]
 
     import json as _json
