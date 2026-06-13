@@ -9,6 +9,15 @@
 - intent의 `text`는 전달 통로일 뿐 — DB에는 로컬 게이트가 ≤80자 발췌만 저장(원문 전문 저장 0).
 - candidate-only · promotion 0 · confirmed 자동 생성 0 · 자동 적용 0.
 
+### 0-1. collect broad, commit narrow (owner 확정 2026-06-13)
+
+- **mobile/web collects** — 폰/웹은 넓게 모으기만(candidate). **PC review/confirm commits** — ledger 저장은 PC 에서 사람이 검토·확정.
+- **no daemon · no autopull · no autosave** — 상주 데몬 0 · 주기적 자동 pull 0 · 백그라운드 자동 write 0.
+- 2-동사 흐름(둘 다 사람이 직접 실행):
+  - `binggu hosted inbox [--since Nd]` — worker 1회 회수(non-retention=drain 이라 불가피) → **로컬 staging 보존(저장 0)** → read-only 요약(80자 발췌·sha8·count·PII/secret flag·expired flag). 번호는 `--since` 와 무관하게 **전체 기준 고정**(본 번호 == pull 번호).
+  - `binggu hosted pull --select 1,3 --confirm "LIVE SAVE 1,3"` — staging 의 고른 항목만 `process_outbox` 위임 commit. 미선택은 staging 잔류. confirm = `"LIVE SAVE " + ",".join(select)` 정확 일치(전량 자동 적용 차단).
+- 구현: `scripts/binggu_hosted_inbox.py`(selftest 15/15) · `binggu.py hosted {inbox,pull}`(selftest 26/26). worker/게이트 무변경 — 회수 계층만 임시→영속 staging 으로 분리.
+
 ## 1. save-intent 스키마 (JSON, schema_ver=1)
 
 | 필드 | 타입 | 규칙 |

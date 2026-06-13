@@ -173,59 +173,83 @@ def cmd_capture(a):
     return 1
 
 
+def _parse_days(s):
+    """'7d' / '7' → 7.0 (일수). None → None."""
+    if s is None:
+        return None
+    return float(str(s).strip().lower().rstrip("d"))
+
+
 def cmd_hosted(a):
-    """hosted pull — 폰/커넥터 SAVE n 한 intent 를 한 번에 pull → candidate 저장 → inbox disable.
-    자동 저장 아님: --confirm 없으면 실행 0. 실 장부 write 는 사람이 confirm 문구 타이핑해야만."""
-    if getattr(a, "hosted_cmd", None) != "pull":
-        return 1
-    if not getattr(a, "confirm", None):
-        print("hosted pull = 폰/커넥터에서 SAVE n 한 intent 만 PC로 내려받아 장부에 candidate 로 저장합니다.")
-        print("  · 자동 저장 아님 · candidate-only · 사람이 confirm 문구를 직접 타이핑해야만 실행됩니다.")
-        print('  실행:  python binggu.py hosted pull --confirm "LIVE SAVE REHEARSAL" [--wait 60]')
-        print("  순서:  enable(잠금 해제) → 폰/커넥터에서 SAVE n → pull → 저장 → inbox disable(다시 잠금·보장)")
-        print("  --wait: 폰 SAVE 도착까지 최대 대기 초(도착 즉시 종료 = 잠금 창 최소화). 미지정 시 즉시 1회 pull")
-        print("  경로:  --workers-port <p> 또는 BINGGU_WORKERS_PORT 환경변수")
-        return 0
-    from openbinggu_save_intent_live_runner import (  # noqa: E402
-        run as live_run, make_live_admin, make_live_pull, _load_save_env)
-    import shutil
-    import tempfile
+    """hosted — collect broad, commit narrow. mobile/web 가 모으고 PC 가 검토·확정한다.
+      inbox: worker 1회 회수(저장0) + 대기 intent read-only 요약(80자 발췌·sha8·count·PII/secret flag).
+      pull --select: inbox 에서 본 번호만 ledger 로 commit. 전량 자동 적용 없음 · 사람 confirm 게이트.
+    no daemon · no autopull · no autosave — 두 명령 모두 사람이 직접 실행해야만 동작."""
+    sub = getattr(a, "hosted_cmd", None)
     import time as _t
-    wp = getattr(a, "wp", None) or os.environ.get("BINGGU_WORKERS_PORT") \
-        or os.path.abspath(os.path.join(BASE, "..", "workers_port"))
-    ledger, snap_dir = _ledger_paths(a.ledger)
-    if not os.path.exists(ledger):
-        print("장부 없음: %s (먼저 python binggu.py init)" % ledger)
-        return 2
-    try:
-        b, t, sk = _load_save_env(wp, a.variant)
-    except Exception:
-        print("workers_port 키 파일을 찾지 못했습니다 — --workers-port 또는 BINGGU_WORKERS_PORT 확인")
-        return 2
-    db, _ = _open(ledger)
-    before = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
-    db.close()
-    outbox = tempfile.mkdtemp(prefix="bgp_hosted_")
-    try:
-        res = live_run(ledger_path=ledger, outbox_dir=outbox, snap_dir=snap_dir,
-                       pull_fn=make_live_pull(b, t, sk), admin_fn=make_live_admin(b, t, sk),
-                       now=int(_t.time()), real=True, confirm=a.confirm,
-                       inject_fn=None, poll_secs=int(getattr(a, "wait", 0) or 0))
-    finally:
-        shutil.rmtree(outbox, ignore_errors=True)
-    db, _ = _open(ledger)
-    after = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
-    chain = db.verify_chain()
-    db.close()
-    print("hosted pull 결과:")
-    print("  ok=%s enabled=%s disabled=%s pulled=%s applied=%s rejected=%s"
-          % (res["ok"], res["enabled"], res["disabled"], res["pull_count"],
-             res["applied"], res.get("rejected")))
-    print("  candidate(active) %d -> %d (+%d) · audit chain %s"
-          % (before, after, after - before, "INTACT" if chain else "BROKEN"))
-    if not res["disabled"]:
-        print("  ⚠ disable 미확인 — disable_err=%s (inbox 상태 점검 필요)" % res.get("disable_err"))
-    return 0 if res["ok"] else 1
+    from binggu_hosted_inbox import (  # noqa: E402
+        staging_dir_for, fetch_to_staging, summarize, render_summary_md, commit_selected)
+    home = os.path.dirname(os.path.abspath(a.ledger))
+    staging = staging_dir_for(home)
+
+    if sub == "inbox":
+        no_fetch = bool(getattr(a, "no_fetch", False))
+        if not no_fetch:
+            from openbinggu_save_intent_live_runner import (  # noqa: E402
+                make_live_admin, make_live_pull, _load_save_env)
+            wp = getattr(a, "wp", None) or os.environ.get("BINGGU_WORKERS_PORT") \
+                or os.path.abspath(os.path.join(BASE, "..", "workers_port"))
+            try:
+                b, t, sk = _load_save_env(wp, a.variant)
+            except Exception:
+                print("workers_port 키 없음 — worker 회수 생략, staging 만 표시"
+                      "(--workers-port/BINGGU_WORKERS_PORT 확인)")
+                no_fetch = True
+            if not no_fetch:
+                fr = fetch_to_staging(staging, make_live_pull(b, t, sk), make_live_admin(b, t, sk),
+                                      poll_secs=int(getattr(a, "wait", 0) or 0))
+                tail = "" if fr["disabled"] else (" ⚠disable_err=%s" % fr["disable_err"])
+                print("회수: fetched=%s enabled=%s disabled=%s%s"
+                      % (fr["fetched"], fr["enabled"], fr["disabled"], tail))
+        summ = summarize(staging, int(_t.time()), since_days=_parse_days(getattr(a, "since", None)))
+        if summ.get("total", summ["count"]) > summ["count"]:
+            print("(--since 로 %d건 중 %d건만 표시 · 번호는 전체 기준 고정)"
+                  % (summ["total"], summ["count"]))
+        print(render_summary_md(summ))
+        return 0
+
+    if sub == "pull":
+        sel = getattr(a, "select", None)
+        if not sel:
+            print("hosted pull = inbox 에서 본 번호만 골라 ledger 에 저장합니다(전량 자동 적용 없음).")
+            print("  먼저:  python binggu.py hosted inbox            (대기 intent 번호 확인)")
+            print('  저장:  python binggu.py hosted pull --select 1,3 --confirm "LIVE SAVE 1,3"')
+            return 0
+        idx = [int(x) for x in sel.split(",") if x.strip()]
+        if not getattr(a, "confirm", None):
+            print('confirm 필요:  --confirm "LIVE SAVE %s"' % ",".join(str(i) for i in idx))
+            return 1
+        ledger, snap_dir = _ledger_paths(a.ledger)
+        if not os.path.exists(ledger):
+            print("장부 없음: %s (먼저 python binggu.py init)" % ledger)
+            return 2
+        db, _ = _open(ledger)
+        before = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
+        res = commit_selected(db, staging, idx, a.confirm, snap_dir, int(_t.time()))
+        after = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
+        chain = db.verify_chain()
+        db.close()
+        if not res["ok"] and res.get("reason"):
+            extra = (" (기대 confirm: %s)" % res["expected"]) if res.get("expected") else ""
+            extra += (" (없는 번호: %s)" % res["bad_idx"]) if res.get("bad_idx") else ""
+            print("BLOCK: %s%s" % (res["reason"], extra))
+            return 1
+        print("hosted pull 결과: 선택 %d · applied=%s rejected=%s expired=%s"
+              % (res["selected"], res["applied"], res["rejected"], res["expired"]))
+        print("  candidate(active) %d -> %d (+%d) · audit chain %s"
+              % (before, after, after - before, "INTACT" if chain else "BROKEN"))
+        return 0 if res["applied"] > 0 else 1
+    return 1
 
 
 def cmd_status(a):
@@ -443,12 +467,50 @@ def selftest():
                      for r in db.con.execute("SELECT * FROM " + t))
     db.close()
     ck("10_candidate-only+chain+raw0", bad == 0 and chain and TEXT not in blob)
+
+    # ---- hosted: collect broad, commit narrow (worker 미접촉 · 별도 temp · staging 직접) ----
+    import time as _time
+    import json as _json
+    from binggu_hosted_inbox import staging_dir_for as _sdir
+    from openbinggu_save_intent_outbox_runner import intent_hash as _ih, SCHEMA_VER as _SV
+    h_tmp = tempfile.mkdtemp(prefix="bgp_cli_hosted_")
+    h_home = os.path.join(h_tmp, ".binggupack")
+    h_staging = _sdir(h_home)
+    os.makedirs(h_staging)
+    h_ledger = os.path.join(h_home, "ledger.sqlite")
+    os.makedirs(os.path.join(h_home, "snapshots"))
+    open_accept(h_ledger).close()
+
+    def _mk(text, idxs):
+        c = "SAVE " + ",".join(str(i) for i in idxs)
+        it = {"schema_ver": _SV, "text": text, "indices": idxs, "confirm": c,
+              "intent_id": _ih(text, idxs, c), "created_ts": int(_time.time()) - 10,
+              "ttl_s": 86400, "source": "hosted"}
+        with open(os.path.join(h_staging, it["intent_id"] + ".json"), "w", encoding="utf-8") as f:
+            _json.dump(it, f, ensure_ascii=False)
+
+    _mk("이 입찰은 마진이 낮아 보류한다.", [1])
+    _mk("백필 작업이 진행 중이다.", [1])
+    ck("13_hosted_inbox_요약(저장0·worker미접촉)",
+       cmd_hosted(args(ledger=h_ledger, hosted_cmd="inbox", no_fetch=True, since=None)) == 0)
+    ck("14_hosted_pull_select없음_안내(실행0)",
+       cmd_hosted(args(ledger=h_ledger, hosted_cmd="pull", select=None, confirm=None)) == 0)
+    n_stg_before = len([f for f in os.listdir(h_staging) if f.endswith(".json")])
+    rc15 = cmd_hosted(args(ledger=h_ledger, hosted_cmd="pull", select="1", confirm="LIVE SAVE 1"))
+    db_h = open_accept(h_ledger)
+    n_act_h = db_h.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
+    db_h.close()
+    n_stg_after = len([f for f in os.listdir(h_staging) if f.endswith(".json")])
+    ck("15_hosted_pull_commit_narrow(선택1건만·나머지잔류)",
+       rc15 == 0 and n_act_h == 1 and n_stg_after == n_stg_before - 1)
+    ck("16_hosted_pull_confirm불일치_BLOCK(전량자동 차단)",
+       cmd_hosted(args(ledger=h_ledger, hosted_cmd="pull", select="1", confirm="LIVE SAVE 9")) == 1)
+    shutil.rmtree(h_tmp, ignore_errors=True)
+
     op_after = {p: (os.path.getmtime(p) if os.path.exists(p) else None) for p in OPERATING_PATHS}
     ck("11_운영_store_불변", op_before == op_after)
     shutil.rmtree(tmp, ignore_errors=True)
     ck("12_temp_정리", not os.path.exists(tmp))
-    # hosted pull 안내 모드 — --confirm 없으면 실행 0(live worker 미접촉)
-    ck("13_hosted_pull_안내모드(실행0)", cmd_hosted(args(hosted_cmd="pull", confirm=None)) == 0)
 
     ok = all(checks)
     print("-" * 74)
@@ -493,11 +555,15 @@ def main():
         csub.add_parser(cs)
     hp = sub.add_parser("hosted")
     hsub = hp.add_subparsers(dest="hosted_cmd", required=True)
-    pp = hsub.add_parser("pull")
-    pp.add_argument("--confirm", default=None)
-    pp.add_argument("--wait", type=int, default=0)
-    pp.add_argument("--variant", choices=["save_mcp", "save_v2"], default="save_mcp")
-    pp.add_argument("--workers-port", dest="wp", default=None)
+    ibp = hsub.add_parser("inbox")          # 회수(저장0) + read-only 요약
+    ibp.add_argument("--since", default=None)            # '7d' 또는 '7' (표시 필터·번호 고정)
+    ibp.add_argument("--no-fetch", dest="no_fetch", action="store_true")  # worker 미접촉, staging 만
+    ibp.add_argument("--wait", type=int, default=0)
+    ibp.add_argument("--variant", choices=["save_mcp", "save_v2"], default="save_mcp")
+    ibp.add_argument("--workers-port", dest="wp", default=None)
+    pp = hsub.add_parser("pull")            # 선택 항목만 ledger commit (전량 자동 없음)
+    pp.add_argument("--select", default=None)            # 'inbox' 에서 본 번호들 (예: 1,3)
+    pp.add_argument("--confirm", default=None)           # "LIVE SAVE <select>" 정확 일치
     a = p.parse_args()
     fn = {"init": cmd_init, "status": cmd_status, "preview": cmd_preview, "save": cmd_save,
           "list": cmd_list, "deprecate": cmd_deprecate, "replace": cmd_replace,

@@ -66,11 +66,12 @@ binggu.py capture status | pause | resume | preview | uninstall
 binggu.py preview "<대화/메모 텍스트>"                         # 후보 + preview_id (저장 0)
 binggu.py save "<텍스트>" --preview-id <id> --pick 1,2 --confirm "SAVE 1,2"
 
-# hosted (폰/커넥터 저장 — 폰에서 SAVE n 한 intent를 PC에서 한 번에)
-binggu.py hosted pull                                         # 안내만 (confirm 없으면 실행 0)
-binggu.py hosted pull --confirm "LIVE SAVE REHEARSAL" [--wait 60]
-#   → enable → (폰/커넥터에서 SAVE n) → pull → candidate 저장 → inbox disable(보장)
-#   경로: --workers-port <p> 또는 BINGGU_WORKERS_PORT
+# hosted (collect broad, commit narrow — 폰/웹이 모으고 PC가 검토·확정)
+binggu.py hosted inbox [--since 7d] [--wait 60]               # 회수(저장 0) + 대기 intent read-only 요약
+binggu.py hosted pull --select 1,3 --confirm "LIVE SAVE 1,3"  # inbox 에서 본 번호만 ledger 저장
+#   inbox: worker 1회 회수 → 로컬 staging 보존(저장 0) → 80자 발췌·sha8·count·PII/secret flag 요약
+#   pull : 고른 번호만 사람 confirm 게이트로 commit · 나머지는 staging 잔류(전량 자동 적용 없음)
+#   경로: --workers-port <p> 또는 BINGGU_WORKERS_PORT · staging 만 보기: hosted inbox --no-fetch
 
 # 후보 관리 (목록의 # 와 id8 을 함께 적어야 통과 — 목록 바뀌면 자동 차단)
 binggu.py list [--status pending|deprecated|resolved] [--kind 판단|상태|개념|문서|증거]
@@ -94,6 +95,11 @@ binggu.py reminders
 - hosted **조회(read-only)** 와 **save-intent(폰→PC 저장 요청)** 는 각자 **자기 워커를 배포**하는 별도 구성입니다(`hosted/`). 공용 서버는 없습니다.
 - **저장 흐름**: 폰/커넥터에서 미리보기 → `SAVE n` 발화 → save_intent가 worker inbox에 휘발 적재 → **PC 러너가 HMAC pull → 로컬 게이트 → candidate 저장**. worker는 통로일 뿐 장부 write 0, 최종 권한은 PC 러너의 사람 confirm 게이트.
 - save-intent **inbox 는 평소 잠김(fail-closed)**, `SAVE n` 이 사람 승인 신호입니다(자동 저장 아님·candidate-only).
+- **수집·확정 원칙 (collect broad, commit narrow):**
+  - **mobile/web collects** — 폰/웹은 넓게 모으기만(candidate). 어디서든 SAVE n 으로 inbox 에 적재.
+  - **PC review/confirm commits** — 실제 ledger 저장은 PC 에서 사람이 `hosted inbox` 로 보고 `hosted pull --select` 로 고른 것만.
+  - **no daemon, no autopull, no autosave** — 상주 데몬 0 · 주기적 자동 pull 0 · 백그라운드 자동 write 0. 두 명령 모두 사람이 직접 실행해야만 동작한다.
+  - worker 는 non-retention(pull=drain) 이라 `inbox` 가 1회 회수해 **로컬 staging 으로 보존(저장 0)** 하고, 번호는 `--since` 필터와 무관하게 **전체 기준 고정**(본 번호 == pull 번호).
 - MCP 연결 예시는 `mcp.example.json`, hosted 배포는 [hosted/workers/README.md](hosted/workers/README.md), 라이브 E2E 결과는 [docs/BINGGUPACK_SAVE_INTENT_LIVE_E2E_RESULT.md](docs/BINGGUPACK_SAVE_INTENT_LIVE_E2E_RESULT.md).
 
 ---
