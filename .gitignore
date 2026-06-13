@@ -1,3 +1,7 @@
+# wrangler 빌드 캐시 (배포 부산물 — 추적 금지)
+.wrangler/
+**/.wrangler/
+
 # secrets / credentials
 .env
 *.env
