@@ -30,9 +30,9 @@ PC 러너(HMAC)            : inbox pull(drain) → 로컬 게이트(process_outb
 
 서명 검증을 구형(`ts.bodyhash`)에서 **신형 v2(`ts.METHOD.path.bodyhash`)**로 정합.
 
-- 서버 검증 단일 출처 = `save_common.verifySig` — **신형 v2 우선 검증, `SAVE_SIG_V2_ONLY` 미설정(기본) 동안 구형 하위호환 수용**
+- 서버 검증 단일 출처 = `save_common.verifySig` — **신형 v2 우선 검증. 현재 `SAVE_SIG_V2_ONLY=1` 적용 → 구형(legacy) 서명 거부(신형 v2 전용)**
 - repo 정본이 이미 신형 → 배포 소스(workers_port)를 repo와 동기화(save_common + save_intent_mcp/v2 + capture_preview) 후 save_mcp worker만 재배포
-- 배포 후 smoke: 신형 admin/disable **200**(구형 서명 시절의 401 해소) · 구형 legacy disable **200**(하위호환 유지) · tools/list(conversation_capture_preview, save_intent) 유지 · capture_preview read-only(nothing_saved) · save_intent **inbox_disabled**
+- 배포 후 smoke: 신형 admin/disable **200**(구형 서명 시절의 401 해소) · tools/list(conversation_capture_preview, save_intent) 유지 · capture_preview read-only(nothing_saved) · save_intent **inbox_disabled**. (배포 직후엔 하위호환이었고, 이후 `SAVE_SIG_V2_ONLY=1` 전환으로 **구형 legacy disable = 401** 실측)
 
 ## 실 저장 E2E (1회 완주)
 
@@ -43,9 +43,9 @@ PC 러너(HMAC)            : inbox pull(drain) → 로컬 게이트(process_outb
 - **audit chain INTACT** · **inbox disabled 복귀** · rollback 불필요
 - 리허설용 합성 candidate는 검증 후 **`deprecate`(보존형 제외)로 정리 완료** — 물리 삭제 아님(스냅샷 보존, deprecated 목록 잔존)
 
-## Future hardening (아직 미전환)
+## Hardening 적용 (SAVE_SIG_V2_ONLY=1)
 
-- **`SAVE_SIG_V2_ONLY=1`** — 설정 시 구형 서명 거부(신형 전용). 현재는 미설정(구형 하위호환 유지). 구형 서명 클라이언트가 모두 신형으로 넘어간 뒤 전환 예정. 전환 = 별도 결정
+- **`SAVE_SIG_V2_ONLY=1` 적용됨** — save_mcp worker가 **신형 v2 서명 전용**. 구형(legacy) 서명은 거부됩니다(legacy admin/disable **401** 실측, 신형 disable 200). 운영 경로(live_runner / `binggu hosted pull`)는 전부 신형 v2라 영향 없음.
 
 ## 안전 요약
 

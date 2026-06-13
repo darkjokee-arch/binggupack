@@ -4,7 +4,7 @@
 
 AI와의 대화에서 건질 판단·상태·개념을 후보로 **자동 수집**하고, 사람이 직접 confirm 문구를 타이핑해야만 저장되는 **로컬 우선(local-first)** 지식장부입니다. 자동 수집은 켜지지만, **자동 저장은 없습니다.**
 
-- **Latest: v1.4.0** — <https://github.com/darkjokee-arch/binggupack/releases/tag/v1.4.0>
+- **Latest: v1.4.4** — <https://github.com/darkjokee-arch/binggupack/releases/tag/v1.4.4>
 - **Python 3.10+ · 외부 런타임 의존성 0 · Windows/macOS/Linux**
 
 ---
