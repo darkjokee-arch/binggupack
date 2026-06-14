@@ -50,15 +50,18 @@ from binggu_capture_profile import (  # noqa: E402
     uninstall as cap_uninstall, status as cap_status)
 from binggu_capture_persist import PersistentCaptureBuffer  # noqa: E402
 from binggu_capture_to_save import build_save_commands  # noqa: E402
+import binggu_platform as _plat  # noqa: E402
 
-DEFAULT_LEDGER = os.path.join(os.path.expanduser("~"), ".binggupack", "ledger.sqlite")
-DEFAULT_SETTINGS = os.path.join(os.path.expanduser("~"), ".claude", "settings.json")
+# cross-platform: BINGGU_HOME 우선(opt-in) · 없으면 OS별 홈/.binggupack (Windows 동작 보존).
+DEFAULT_LEDGER = _plat.default_ledger()
+DEFAULT_SETTINGS = _plat.default_settings()
 OUTCOMES = ("성공", "실패", "불확실", "판정불가")
 
 
 def _hook_command():
-    """settings.json 에 등록할 capture hook 실행 명령(repo hooks 절대경로)."""
-    return 'python "%s"' % os.path.join(BASE, "hooks", "binggu_capture_hook.py")
+    """settings.json 에 등록할 capture hook 실행 명령(repo hooks 절대경로).
+    런처는 OS별: Windows=py, WSL/macOS/Linux=python3."""
+    return '%s "%s"' % (_plat.python_cmd(), os.path.join(BASE, "hooks", "binggu_capture_hook.py"))
 
 
 def _ledger_paths(ledger):
@@ -261,6 +264,9 @@ def cmd_status(a):
     chain = db.verify_chain()
     db.close()
     print("장부: %s" % os.path.abspath(a.ledger))
+    print("플랫폼: %s · python: %s · 공유장부(BINGGU_HOME): %s"
+          % (_plat.detect_os(), _plat.python_cmd(),
+             "예(opt-in)" if _plat.shared_opt_in() else "아니오(OS별 로컬)"))
     print("active 후보 %d · 기각 %d · 검증 예정 %d · 수용 %d · audit chain %s"
           % (n, d, p, acc, "INTACT" if chain else "BROKEN!"))
     return 0

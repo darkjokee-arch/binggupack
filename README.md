@@ -6,7 +6,7 @@ AI와의 대화에서 건질 판단·상태·개념을 후보로 **자동 수집
 
 - **Latest release: v1.5.0** — <https://github.com/darkjokee-arch/binggupack/releases/tag/v1.5.0>
 - **Mainline: v1.5.0** — PC-mediated read publish pipeline P1~P8 구현(로컬) + evidence graph 문법/pack repair. OpenCrab Cloud ingest는 **HOLD**(Desktop validation PASS / local ingest NOT_FOUND / cloud ingest UNKNOWN).
-- **Python 3.10+ · 외부 런타임 의존성 0 · Windows/macOS/Linux**
+- **Python 3.10+ · 외부 런타임 의존성 0 · Windows / WSL / macOS / Linux** — 같은 정책으로 동작. OS별 사용법·장부 공유는 [docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md](docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md). 런처: Windows `py` · WSL/macOS `python3`.
 
 ---
 
@@ -81,6 +81,8 @@ python scripts/openbinggu_doctor.py --selftest      # 15/15 GATE=GO
 python binggu.py init --agi-memory                  # 장부 + capture profile (전역 후보수집 = AGI memory, 기본 ON)
 python binggu.py capture status                     # ON/OFF · scope · 버퍼 건수 · hook 등록
 ```
+
+> **python 런처는 OS별로**: Windows `py …` · WSL/macOS `python3 …`. 아래 예시의 `python`을 그대로 바꿔 쓰면 됩니다. 기본 장부는 OS별 로컬 홈(`%USERPROFILE%\.binggupack` / `~/.binggupack`)이고, OS 간 같은 장부 공유는 `BINGGU_HOME` 명시(opt-in)입니다 — [cross-platform 가이드](docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md).
 
 capture 제어:
 
@@ -190,6 +192,20 @@ binggu.py reminders
 
 ---
 
+## Cross-platform (Windows / WSL / macOS)
+
+같은 정책으로 Windows · WSL · macOS에서 동작합니다.
+
+- **기본은 OS별 로컬 홈** — Windows `%USERPROFILE%\.binggupack`, WSL/macOS `~/.binggupack`. Windows 기존 동작은 그대로 보존됩니다.
+- **같은 장부 공유는 자동 추측 금지** — 공유하려면 양쪽에서 `BINGGU_HOME`을 같은 위치로 명시(opt-in)합니다. 설정 시 ledger/capture/publish 경로가 모두 그 아래를 씁니다.
+- **OS 간 동시 실행 금지(fail-closed)** — 공유 장부라도 동시 쓰기는 `<ledger>.lock`(O_EXCL) + `busy_timeout`으로 즉시 차단합니다. 자동 마이그레이션은 하지 않습니다.
+- **python 런처** — Windows `py`, WSL/macOS `python3`. `binggu.py status`가 현재 플랫폼·런처·공유 여부를 표시합니다.
+- **OpenCrab Desktop / Claude hook 은 OS별 세션 기준**이고, **OpenCrab Cloud / ingest 는 계속 HOLD**입니다.
+
+자세히: [docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md](docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md).
+
+---
+
 ## MCP / hosted (선택)
 
 - hosted **조회(read-only)** 와 **save-intent(폰→PC 저장 요청)** 는 각자 **자기 워커를 배포**하는 별도 구성입니다(`hosted/`). 공용 서버는 없습니다.
@@ -260,6 +276,7 @@ pack이 `real_active`로 빌드돼도 받는 쪽 운영 그래프에 자동 반�
 
 ```bash
 python scripts/openbinggu_doctor.py --selftest        # 15/15
+python scripts/binggu_platform_selftest.py            # 36/36 (cross-platform 경로·lock 정책)
 python binggu.py --selftest                           # 26/26 (장부 + capture + hosted 통합)
 python scripts/binggu_capture_persist.py              # 16/16 (영속 candidate 버퍼)
 python scripts/binggu_capture_profile.py              # 9/9  (profile · settings hook · pause/resume/uninstall)

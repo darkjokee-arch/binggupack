@@ -20,8 +20,10 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import binggu_cloud_pack_export as EXP
 import binggu_publish_p2_pipeline as P2
+import binggu_platform as _plat
 
-DEFAULT_LEDGER = os.path.join(os.path.expanduser("~"), ".binggupack", "ledger.sqlite")
+# cross-platform: BINGGU_HOME 우선 · 없으면 OS별 홈/.binggupack (Windows 동작 보존).
+DEFAULT_LEDGER = _plat.default_ledger()
 
 
 def extract_real_ledger(ledger_path):

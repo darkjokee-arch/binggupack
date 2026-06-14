@@ -10,24 +10,28 @@
 
 ## Requirements / 요구사항
 - Python 3.10+ (표준 라이브러리 위주)
-- OS: Windows / macOS / Linux
+- OS: Windows / WSL / macOS / Linux — 같은 정책으로 동작
+- python 런처: **Windows `py`** · **WSL/macOS/Linux `python3`** (아래 예시의 `python`을 OS에 맞게 바꿔 쓰면 됩니다)
+- 장부 위치: 기본은 OS별 로컬 홈(Windows `%USERPROFILE%\.binggupack`, WSL/macOS `~/.binggupack`). OS 간 같은 장부 공유는 `BINGGU_HOME` 명시(opt-in) — [docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md](docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md)
 
 ## Install / 설치
 
-macOS/Linux (bash):
+macOS / WSL / Linux (bash):
 ```bash
 git clone https://github.com/darkjokee-arch/binggupack.git
 cd binggupack
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate   # 선택
+python3 scripts/binggu_platform_selftest.py   # cross-platform 경로·lock 정책 36/36 GATE=GO
 ```
 
 Windows (PowerShell):
 ```powershell
 git clone https://github.com/darkjokee-arch/binggupack.git
 cd binggupack
-python -m venv .venv
+py -m venv .venv
 .\.venv\Scripts\Activate.ps1   # 선택
+py scripts\binggu_platform_selftest.py   # cross-platform 경로·lock 정책 36/36 GATE=GO
 ```
 
 ## Verify / 동작 확인 (권장 진입점)

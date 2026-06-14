@@ -19,8 +19,10 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from openbinggu_deprecate_and_remind_g3 import open_g3
+import binggu_platform as _plat
 
-DEFAULT_LEDGER = os.path.join(os.path.expanduser("~"), ".binggupack", "ledger.sqlite")
+# cross-platform: BINGGU_HOME 우선 · 없으면 OS별 홈/.binggupack (Windows 동작 보존).
+DEFAULT_LEDGER = _plat.default_ledger()
 
 
 # ── evidence ↔ node 1:1 정합 검증 (승격 전후 자동) ──────────────

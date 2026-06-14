@@ -32,8 +32,10 @@ from watcher_batch_m1 import scan_residual_pii                         # noqa: E
 from openbinggu_incoming_to_staging import SECRET_PATTERNS            # noqa: E402
 import openbinggu_conversation_capture_preview as _cap               # _PREVIEW_PII_EXTRA  # noqa: E402
 from openbinggu_label_kind_map import classify_label_kind            # canonical 도장  # noqa: E402
+import binggu_platform as _plat                                       # noqa: E402
 
-HOME = os.path.join(os.path.expanduser("~"), ".binggupack")
+# cross-platform: BINGGU_HOME 우선 · 없으면 OS별 홈/.binggupack (Windows 동작 보존).
+HOME = _plat.binggu_home()
 SEM_DIR = os.path.join(HOME, "semantic")
 SEED_PATH = os.path.join(HERE, "..", "tests", "fixtures", "semantic", "seed_candidates.jsonl")
 OLLAMA = "http://127.0.0.1:11434"

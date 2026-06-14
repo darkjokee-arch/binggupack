@@ -13,6 +13,10 @@ import hashlib
 import os
 import re
 import sqlite3
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import binggu_platform as _plat  # noqa: E402
 
 # ── 상태머신 (불법 전이 ABORT) ────────────────────────────────
 ALLOWED_TRANSITIONS = {
@@ -27,10 +31,9 @@ ALLOWED_TRANSITIONS = {
 }
 TERMINAL = {"deployed", "failed", "aborted"}
 
-# 운영 장부 경로 — P1은 절대 접촉 금지(temp 전용)
-_OPERATIONAL_LEDGER = os.path.normcase(
-    os.path.join(os.path.expanduser("~"), ".binggupack", "ledger.sqlite")
-)
+# 운영 장부 경로 — P1은 절대 접촉 금지(temp 전용).
+# cross-platform: BINGGU_HOME 공유 장부도 거부 대상에 포함(helper 경유).
+_OPERATIONAL_LEDGER = os.path.normcase(os.path.abspath(_plat.default_ledger()))
 
 
 class QueueError(Exception):
@@ -51,6 +54,7 @@ def _assert_temp_path(db_path: str) -> None:
 def open_queue(db_path: str) -> sqlite3.Connection:
     _assert_temp_path(db_path)
     conn = sqlite3.connect(db_path)
+    _plat.apply_ledger_pragmas(conn)  # WAL + busy_timeout (동시 접근 fail-closed 일관)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS publish_queue (
