@@ -104,10 +104,21 @@ def main():
 
     # ── 14. 실 ledger 라벨 정정 (현 상태 candidate 4) ──
     out14 = os.path.join(tmp, "out14"); db14 = os.path.join(tmp, "q14.sqlite")
-    r_real = P4.build_real_pack(out_dir=out14, db_path=db14, state="candidate")
-    check("14.실 ledger candidate → real_candidate DRYRUN_OK",
-          r_real["status"] == "DRYRUN_OK" and r_real.get("data_class") == "real_candidate"
-          and r_real.get("release_ready") is False)
+    # 상태 독립 — candidate>0이면 real_candidate, active>0이면 real_active, 0이면 NO_REAL
+    _cn = P4.extract_by_state(os.path.join(home, ".binggupack", "ledger.sqlite"))
+    if _cn["candidate_rows"]:
+        r_real = P4.build_real_pack(out_dir=out14, db_path=db14, state="candidate")
+        check("14.실 ledger candidate → real_candidate DRYRUN_OK",
+              r_real["status"] == "DRYRUN_OK" and r_real.get("data_class") == "real_candidate"
+              and r_real.get("release_ready") is False)
+    elif _cn["active_rows"]:
+        r_real = P4.build_real_pack(out_dir=out14, db_path=db14, state="active")
+        check("14.실 ledger active → real_active DRYRUN_OK",
+              r_real["status"] == "DRYRUN_OK" and r_real.get("data_class") == "real_active")
+    else:
+        r_real = P4.build_real_pack(out_dir=out14, db_path=db14, state="candidate")
+        check("14.실 ledger 비어있음 → NO_REAL_LEDGER_DATA",
+              r_real["status"] == "BLOCK" and r_real["reason"] == "NO_REAL_LEDGER_DATA")
 
     # ── 15. 실 ledger 무접촉 mtime ──
     if real_mtime is not None:

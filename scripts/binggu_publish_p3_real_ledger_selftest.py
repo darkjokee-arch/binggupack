@@ -67,10 +67,15 @@ def main():
     check("4.candidate는 실데이터 취급 금지(active 0)",
           r3["ledger_stats"]["active_nodes"] == 0 and r3["ledger_stats"]["candidate_nodes"] == 2)
 
-    # 5. fixture 없이 run → 실 ledger(현 상태) 실측 반영
+    # 5. fixture 없이 run → 실 ledger(현 상태) 정합 (상태 독립 — active 0이면 BLOCK, >0이면 진입)
     r_real = P3.run_p3()  # 기본 = 실 ledger
-    check("5.실 ledger 현 상태 BLOCK(NO_REAL_LEDGER_DATA)",
-          r_real["status"] == "BLOCK" and r_real["reason"] == "NO_REAL_LEDGER_DATA")
+    _an = r_real.get("ledger_stats", {}).get("active_nodes", 0)
+    if _an == 0:
+        check("5.실 ledger active 0 → NO_REAL_LEDGER_DATA",
+              r_real["status"] == "BLOCK" and r_real["reason"] == "NO_REAL_LEDGER_DATA")
+    else:
+        check("5.실 ledger active>0 → build 재검증 진입(NO_REAL 아님)",
+              r_real.get("reason") != "NO_REAL_LEDGER_DATA")
 
     # 6. active node 있는 합성 ledger → build 재검증 단계 진입(BLOCK NO_REAL 아님)
     led_active = os.path.join(tmp, "active.sqlite")
