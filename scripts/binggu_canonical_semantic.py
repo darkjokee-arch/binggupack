@@ -15,6 +15,7 @@ seed: tests/fixtures/semantic/seed_canonical_5.jsonl (5종×12, leave-one-out 93
 
 CLI: python binggu_canonical_semantic.py --selftest
 """
+import hashlib
 import json
 import os
 import sys
@@ -26,6 +27,12 @@ KINDS = ["문서", "증거", "개념", "상태", "판단"]
 SEED_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
                          "tests", "fixtures", "semantic", "seed_canonical_5.jsonl")
 FLAG = os.path.join(os.path.expanduser("~"), ".binggupack", "semantic_label_enabled")
+CACHE_DIR = os.path.join(os.path.expanduser("~"), ".binggupack", "cache")
+
+
+def _seed_sha(seed_path):
+    with open(seed_path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()[:16]
 
 
 def enabled():
@@ -34,11 +41,42 @@ def enabled():
 
 
 class CanonicalSemantic:
-    def __init__(self, seed_path=SEED_PATH, embed_fn=None):
+    def __init__(self, seed_path=SEED_PATH, embed_fn=None, use_cache=True):
         self.embed_fn = embed_fn or S._embed
+        self.seed_path = seed_path
         self.rows = [json.loads(l) for l in open(seed_path, encoding="utf-8") if l.strip()]
         self.digest = S.model_digest()
-        self.centroids = self._centroids()
+        self.centroids = self._load_or_build(use_cache)
+
+    def _cache_file(self):
+        # key = seed 내용 + band 임계 + model_digest → 하나라도 바뀌면 miss(stale 방지)
+        raw = "%s|%s|%s|%s" % (_seed_sha(self.seed_path), S.BAND_HI, S.BAND_LO, self.digest)
+        key = hashlib.sha256(raw.encode()).hexdigest()[:16]
+        return os.path.join(CACHE_DIR, "canonical_centroids_%s.json" % key)
+
+    def _load_or_build(self, use_cache):
+        # 실 embed(_embed)일 때만 디스크 캐싱(centroid 벡터=원문 아님). 주입 embed는 항상 재빌드.
+        real = self.embed_fn is S._embed
+        cf = self._cache_file()
+        if use_cache and real:
+            try:
+                with open(cf, encoding="utf-8") as f:
+                    c = json.load(f)
+                if set(c.keys()) == set(KINDS):
+                    return c
+            except Exception:
+                pass
+        cent = self._centroids()
+        if use_cache and real and set(cent.keys()) == set(KINDS):
+            try:
+                os.makedirs(CACHE_DIR, exist_ok=True)
+                tmp = cf + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(cent, f)
+                os.replace(tmp, cf)            # atomic
+            except Exception:
+                pass
+        return cent
 
     def _centroids(self):
         acc = {k: [] for k in KINDS}

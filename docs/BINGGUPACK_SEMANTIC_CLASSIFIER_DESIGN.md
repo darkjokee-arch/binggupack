@@ -377,6 +377,7 @@ preview → 사람이 SAVE n → 기존 게이트(save_selected) commit (schema/
 - 신규 `scripts/binggu_canonical_semantic.py` — `binggu_semantic_shadow`의 검증된 헬퍼(_embed/leak_guard/_l2/_dot/BAND) 재사용. seed `tests/fixtures/semantic/seed_canonical_5.jsonl`(5종×12, **LOO 93%** = subtype 6종 92%와 동급).
 - `suggest_label_kind(text)`: band=hi 확정 / ambiguous 확인권장(둘 다 제안) / lo·차단·embed실패 = None.
 - `openbinggu_conversation_capture_preview` 배선: 종결어 규칙이 기본, `suggest_label_kind`가 None 아니면 도장 덮어쓰고 rule_id=`semantic_<band>_<conf>`.
+- **중심점 디스크 캐싱**: 첫 1회 임베딩 계산(~16s) 후 `~/.binggupack/cache/canonical_centroids_<key>.json` 저장, 이후 로드 0.009s(**1899배**). key=`seed_sha+BAND+model_digest`(하나라도 변경 시 miss→재계산, stale 방지)·atomic write(tmp→replace). centroid=임베딩 벡터(원문 아님, 영구금지18 무관). 실 embed일 때만 캐싱(주입 embed는 재빌드).
 
 ### 14-4. 영구금지 26 개정 조건 6 (owner GO)
 ①기본 꺼짐(`~/.binggupack/semantic_label_enabled` opt-in) ②PII/secret leak_guard 선차단 ③band hi/ambiguous만 제안·lo/실패 fallback ④사람 preview confirm 게이트 ⑤원문 저장 0(임베딩만) ⑥결정론. should_capture·confirm은 cos 금지 잔존.
