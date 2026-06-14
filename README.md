@@ -4,9 +4,9 @@
 
 AI와의 대화에서 건질 판단·상태·개념을 후보로 **자동 수집**하고, 사람이 직접 confirm 문구를 타이핑해야만 저장되는 **로컬 우선(local-first)** 지식장부입니다. 자동 수집은 켜지지만, **자동 저장은 없습니다.**
 
-- **Latest release: v1.5.0** — <https://github.com/darkjokee-arch/binggupack/releases/tag/v1.5.0>
-- **Mainline: v1.5.1 후보** — v1.5.0(PC-mediated read publish pipeline P1~P8 + evidence graph 문법/pack repair) 위에 **Windows/WSL/macOS cross-platform 지원**(`BINGGU_HOME` opt-in 공유)을 더한 후보입니다. 최신 발행 태그는 여전히 v1.5.0이며, v1.5.1은 아직 미발행입니다. OpenCrab Cloud ingest는 **HOLD**(Desktop validation PASS / local ingest NOT_FOUND / cloud ingest UNKNOWN).
-- **Python 3.10+ · 외부 런타임 의존성 0 · Windows / WSL / macOS / Linux** — 같은 정책으로 동작. OS별 사용법·장부 공유는 [docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md](docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md). 런처: Windows `py` · WSL/macOS `python3`.
+- **Latest release: v1.5.2** — <https://github.com/darkjokee-arch/binggupack/releases/tag/v1.5.2>
+- **v1.5.2 핵심** — Windows·WSL·macOS **3-OS real-device 검증 완료**(GitHub Actions matrix: `ubuntu`/`macos`/`windows`). selftest 5종 + **실제 CLI end-to-end 라이프사이클**(init→preview→save→list→deprecate)을 매 push마다 3-OS에서 자동 검증. cross-platform selftest 결함 3종 수정(장부 부재 가드·OS별 절대경로 의미론). 라인: v1.5.0(PC-mediated read publish pipeline P1~P8 + evidence graph) → v1.5.1(Windows/WSL/macOS cross-platform 지원 + `BINGGU_HOME` opt-in 공유) → **v1.5.2(3-OS real verified + e2e CI + CI Node24)**. OpenCrab Cloud ingest는 **HOLD**.
+- **Python 3.10+ · 외부 런타임 의존성 0 · Windows / WSL / macOS / Linux** — 같은 정책으로 동작이 **3-OS CI로 실증**. OS별 사용법·장부 공유는 [docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md](docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md). 런처: Windows `py` · WSL/macOS `python3`.
 
 ---
 
