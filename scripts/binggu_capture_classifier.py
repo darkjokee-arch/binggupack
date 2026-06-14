@@ -26,6 +26,14 @@ SIGNAL_PATTERNS = {
     "반복기준": [r"항상", r"무조건", r"매번", r"늘\s", r"언제나"],
     "장기의도": [r"나중에.*(팔|만들|할)", r"목표는", r"로드맵", r"팔\s*거야", r"유료"],
     "우선순위": [r"우선\s*(처리|순위)", r"먼저\s*해", r"먼저\s*처리"],
+    # 교훈규범(recall 보강): 학습/재발방지/선제습관 마커가 명확한 순수 교훈문.
+    # veto(2.5)가 앞이므로 운영 지시는 여기 닿기 전 차단됨 → 일반 규범문만 흡수.
+    # "해야 한다" 단독은 일회성 지시("지금 이거 해야 한다")까지 잡아 오탐 → 제거.
+    # 선제습관은 "먼저/미리 + 동사 + 규범어미" 결합으로만(평서 습관문에 한정).
+    "교훈규범": [r"다음\s*부터", r"이제\s*부터", r"앞으로[는]?\s",
+                 r"재발\s*방지", r"놓치지\s*않", r"잊지\s*않", r"또\s*안\s*밟", r"안\s*밟", r"또\s*밟",
+                 r"먼저\s*[가-힣]{0,6}(본다|봐야|확인|점검|챙긴다|챙긴|손댄다|손대|해야|둔다|들인다)",
+                 r"미리\s*[가-힣]{0,6}(본다|봐야|확인|점검|챙긴다|해\s*둔다|둔다)"],
 }
 
 # 추측 마커 (단독이면 ignored, 판단신호 동반이면 weak)
@@ -156,6 +164,17 @@ def _selftest():
         ("배포는 항상 두 번 확인해라", None, dict(state="captured_candidate"), "일반화 규칙(항상)=ops veto 면제"),
         ("백업은 항상 먼저 해 둔다", None, dict(state="captured_candidate"), "반복기준 규칙"),
         ("이 방식은 위험이 커서 기본 비활성으로 잠근다", None, dict(state="captured_candidate"), "리스크 판단/설계결정"),
+        # --- recall 보강: 순수 교훈문 통과 (교훈규범 signal) ---
+        ("비슷한 실수는 기록해야 안 밟는다", None, dict(state="captured_candidate"), "재발방지 교훈(안 밟)"),
+        ("이런 경우는 먼저 확인해야 한다", None, dict(state="captured_candidate"), "선제확인 습관"),
+        ("다음부터는 로그를 먼저 본다", None, dict(state="captured_candidate"), "시점학습(다음부터)"),
+        ("재발 방지를 위해 체크리스트를 둔다", None, dict(state="captured_candidate"), "재발방지"),
+        ("앞으로는 마감 하루 전에 손댄다", None, dict(state="captured_candidate"), "선제습관(앞으로)"),
+        # --- recall 오탐 측정: 일회성 지시/상황은 여전히 차단 (해야 한다 단독 오탐 제거 검증) ---
+        ("지금 이거 해야 한다", None, dict(state="ignored"), "일회성 지시(해야 한다 단독=오탐 제거됨)"),
+        ("이 버그 지금 고쳐야 한다", None, dict(state="ignored"), "일회성 지시"),
+        ("지금 서버가 죽었다", None, dict(state="ignored"), "일회성 상황 설명"),
+        ("방금 빌드가 깨졌다", None, dict(state="ignored"), "일회성 상황 설명"),
     ]
     passed = 0
     for i, (utt, prev, expect, note) in enumerate(cases, 1):
