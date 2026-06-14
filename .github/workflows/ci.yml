@@ -8,12 +8,16 @@ permissions:
   contents: read
 
 env:
-  PYTHONUTF8: "1"  # windows 러너 cp1252 콘솔에서 한국어 출력 UnicodeEncodeError 방지
+  PYTHONUTF8: "1"  # windows 러너 cp1252 콘솔 한국어 출력 UnicodeEncodeError 방지 (posix는 무해)
 
 jobs:
   selftest:
-    # windows-latest: path_safety_gate 등 일부 게이트가 Windows 경로 의미론(드라이브 문자) 기반
-    runs-on: windows-latest
+    # cross-platform 정책(scripts/binggu_platform.py) 실기기 검증 — 실제 ubuntu/macos/windows 러너에서 GATE=GO
+    strategy:
+      fail-fast: false  # 한 OS가 깨져도 나머지 OS 결과를 끝까지 본다
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,8 +27,17 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Cross-platform policy selftest (36/36, GATE=GO)
+        run: python scripts/binggu_platform_selftest.py
+
+      - name: binggu core selftest (26/26, GATE=GO)
+        run: python binggu.py --selftest
+
       - name: Doctor selftest (15 checks, GATE=GO required)
         run: python scripts/openbinggu_doctor.py --selftest
+
+      - name: Publish pipeline regression (P1~cloud_pack, REGRESSION=GO required)
+        run: python scripts/binggu_publish_run_all_selftests.py
 
       - name: Public tree secret/PII scan (verdict=CLEAN required)
         run: python scripts/openbinggu_public_tree_scan.py --tree .

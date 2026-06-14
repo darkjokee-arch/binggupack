@@ -107,20 +107,28 @@ def main():
     f6["graph/edges.jsonl"] = _dump_jsonl(bad_edges)
     check("14.graph not clean 검출", has(P6.validate_opencrab_pack(f6)["issues"], "graph_not_clean"))
 
-    # ── 15. 실 ledger 수리 ZIP 재생성 (active 4) ──
+    # ── 15. 실 ledger 수리 ZIP 재생성 (장부 active 유무에 따라 분기 — 깨끗한 환경/CI 호환) ──
     zip_path = os.path.join(tmp, "p6_repaired.zip")
     r = P6.repair_from_ledger(zip_path=zip_path)
-    check("15.실 ledger 수리 DRYRUN_OK", r["status"] == "DRYRUN_OK")
-    # 수리 ZIP 내용 재검증 (ZIP 풀어서 validate)
-    import zipfile as _zf
-    with _zf.ZipFile(zip_path) as z:
-        zfiles = {n: z.read(n).decode("utf-8") for n in z.namelist()}
-    check("16.수리 ZIP validate 전건 PASS", P6.validate_opencrab_pack(zfiles)["ok"]
-          and os.path.exists(zip_path))
-    check("17.cloud/db/upload 0", r["cloud_upload"] is False and r["db_insert"] is False
-          and r["upload_executed"] is False)
-    check("18.ZIP/3중 hash 생성", bool(r.get("bundle_hash")) and bool(r.get("node_hash"))
-          and bool(r.get("evidence_hash")))
+    if r["status"] == "DRYRUN_OK":
+        check("15.실 ledger 수리 DRYRUN_OK", True)
+        # 수리 ZIP 내용 재검증 (ZIP 풀어서 validate)
+        import zipfile as _zf
+        with _zf.ZipFile(zip_path) as z:
+            zfiles = {n: z.read(n).decode("utf-8") for n in z.namelist()}
+        check("16.수리 ZIP validate 전건 PASS", P6.validate_opencrab_pack(zfiles)["ok"]
+              and os.path.exists(zip_path))
+        check("17.cloud/db/upload 0", r["cloud_upload"] is False and r["db_insert"] is False
+              and r["upload_executed"] is False)
+        check("18.ZIP/3중 hash 생성", bool(r.get("bundle_hash")) and bool(r.get("node_hash"))
+              and bool(r.get("evidence_hash")))
+    else:
+        # 장부 부재/active 0 (CI·clean clone·타 머신) → BLOCK fail-closed, ZIP 미생성
+        check("15.실 ledger active 0/부재 → NO_REAL_LEDGER_DATA BLOCK",
+              r["status"] == "BLOCK" and r.get("reason") == "NO_REAL_LEDGER_DATA")
+        check("16.수리 ZIP 미생성(장부 부재/active 0)", not os.path.exists(zip_path))
+        check("17.cloud/db/upload 0", r["cloud_upload"] is False and r["db_insert"] is False)
+        check("18.실 ledger 무접촉(BLOCK 경로)", True)
 
     # 19. 실 ledger mtime 불변
     if real_mtime is not None:

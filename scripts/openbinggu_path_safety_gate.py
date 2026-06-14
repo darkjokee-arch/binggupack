@@ -109,6 +109,10 @@ def _selftest():
     allow_root = os.path.normpath(os.path.join(os.environ.get("TEMP", "/tmp"),
                                                "openbinggu_path_safety_allow_root"))
 
+    # 트리 밖 절대경로: OS별로 실제 "절대경로"인 입력 사용 (Windows=드라이브문자 / POSIX=/-시작)
+    # — Windows 경로는 linux에서 os.path.isabs=False 라 root 하위로 join돼 의미가 사라짐(반대도 동일)
+    _outside_abs = "C:/Windows/System32/config/SAM" if os.name == "nt" else "/etc/passwd"
+
     cases = [
         # (name, input_path, symlink_detected, expected_verdict, expected_reason)
         ("toy_internal_ok",        "examples/toy_project/Makefile",          False, "ALLOW", None),
@@ -124,7 +128,7 @@ def _selftest():
         ("unc_bad",                "\\\\fileserver\\share\\secret",          False, "BLOCK", "unc"),
         ("short_8_3_bad",          "examples/PROGRA~1/app.py",               False, "BLOCK", "short_8_3"),
         ("ads_bad",                "examples/toy_project/notes.txt:hidden",  False, "BLOCK", "ads"),
-        ("outside_abs_bad",        "C:/Windows/System32/config/SAM",         False, "BLOCK", "outside_root"),
+        ("outside_abs_bad",        _outside_abs,                             False, "BLOCK", "outside_root"),
         ("empty_unknown_bad",      "   ",                                    False, "BLOCK", "empty_unknown"),
     ]
 

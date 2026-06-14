@@ -45,6 +45,8 @@ def _rows_to_build(rows):
 
 def extract_by_state(ledger_path):
     """ledger read-only. candidate / active(confirmed) 분리 추출. (P3는 active만 — P4는 둘 다 구분)"""
+    if not os.path.exists(ledger_path):
+        return {"total": 0, "candidate_rows": [], "active_rows": []}
     conn = sqlite3.connect("file:%s?mode=ro" % ledger_path, uri=True)
     cur = conn.cursor()
     cur.execute("SELECT node_id,node_type,sentence,candidate,state,content_hash FROM nodes")

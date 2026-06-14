@@ -74,6 +74,9 @@ def _selftest():
         state["calls"] += 1
         return "TOOL_RAN:" + label
 
+    # 트리 밖 절대경로: OS별로 실제 절대경로인 입력 사용 (Windows=드라이브문자 / POSIX=/-시작)
+    _outside_abs = "C:/Windows/System32/config/SAM" if os.name == "nt" else "/etc/passwd"
+
     cases = [
         # (name, path_inputs, expect_executed, expect_reason_or_None)
         ("toy_internal_ok",      ["examples/toy_project/Makefile"],             True,  None),
@@ -85,7 +88,7 @@ def _selftest():
         ("opencrab_store_block", ["data/localcrab_index.sqlite"],               False, "deny_opencrab_store"),
         ("mixed_one_bad_block",  ["examples/toy_project/ok.py", "../escape"],   False, "parent_escape"),
         ("unc_block",            ["\\\\fs\\share\\x"],                          False, "unc"),
-        ("outside_abs_block",    ["C:/Windows/System32/config/SAM"],            False, "outside_root"),
+        ("outside_abs_block",    [_outside_abs],                                False, "outside_root"),
     ]
 
     print("=" * 72)
