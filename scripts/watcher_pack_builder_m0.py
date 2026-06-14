@@ -36,6 +36,8 @@ import watcher_op_m0 as m0               # M0 산출 재사용 (process_one, _st
 import openbinggu_pack_validate as pv    # pack 계약 validator (read-only)
 import watcher_edge_mvp21 as edgemod     # MVP2.1 evidence_supports edge producer (1차 안전가드)
 import openbinggu_scope_envelope_dryrun as sed   # source pointer 판정 + fail-closed publish guard (판정 only)
+import binggu_rationale_suggest as r2             # 2층 근거 추천 (read-only · report only · 신규 predicate 0)
+from openbinggu_verb_edge_schema import VERB_EDGES  # 신규 predicate 0 검증용
 
 PACK_RULES = [
     "단어 키워드 노드 금지 — 모든 노드는 핵심 문장",
@@ -63,8 +65,25 @@ def _write_jsonl(path, rows):
                     encoding="utf-8")
 
 
-def build_pack(diff_text, run):
-    """M0 실행 → temp pack 묶기 → validator + 자체검증. 반환 (report_dict, pack_dir)."""
+def _build_rationale_layer2(nodes):
+    """2층 근거 추천을 report 에만 부착(read-only). pack 파일/edges.jsonl 미변경.
+    빌더 node(label_kind + evidence_refs + sentence)를 suggest_rationale 입력으로 매핑.
+    supports_judgment 만(validate_verb_edge 위임) · evidence 없으면 edge 보류 · semantic_subtype 미승격."""
+    cands = [{
+        "text": (n.get("properties", {}).get("sentence") or n.get("label", "")),
+        "label_kind": n.get("properties", {}).get("label_kind"),   # canonical(정본 그대로)
+        "semantic_subtype": None,                                  # 빌더 node엔 subtype 없음(보조·승격 0)
+        "evidence_refs": n.get("evidence_refs") or [],
+    } for n in nodes]
+    rec = r2.suggest_rationale(cands)
+    return {"rationale": rec["rationale"], "suggested_edges": rec["suggested_edges"],
+            "note": rec["note"] + " · pack edges.jsonl 미기록(report preview only)",
+            "edges_written_to_pack": 0}
+
+
+def build_pack(diff_text, run, with_rationale=False):
+    """M0 실행 → temp pack 묶기 → validator + 자체검증. 반환 (report_dict, pack_dir).
+    with_rationale=True 면 2층 추천을 report['rationale_layer2'] 에만 부착(pack 파일 불변)."""
     store_before = m0._store_snapshot()
 
     # M0 산출 (temp; Step3 review-only read-only 호출 포함, write 0)
@@ -180,6 +199,8 @@ def build_pack(diff_text, run):
         "edges_generated": 0, "review_queue_appended": 0,
         "reingest_pack_draft_modified": 0, "v09_or_armed_changed": 0,
     }
+    if with_rationale:
+        report["rationale_layer2"] = _build_rationale_layer2(nodes)   # report only · pack 파일 불변
     return report, pack_dir
 
 
@@ -197,10 +218,10 @@ def _per_run_gate(report):
     }
 
 
-def run_single(path):
+def run_single(path, with_rationale=False):
     diff_text = Path(path).read_text(encoding="utf-8")
     run = "single_" + _sha8(diff_text)
-    report, pack_dir = build_pack(diff_text, run)
+    report, pack_dir = build_pack(diff_text, run, with_rationale=with_rationale)
     checks = _per_run_gate(report)
     report["per_run_checks"] = checks
     report["gate"] = "GO" if all(checks.values()) else "STOP"
@@ -245,6 +266,28 @@ def run_source_pointer_link_check():
     return ok, results
 
 
+def run_rationale_link_check():
+    """2층 추천을 합성 node로 검증 — supports_judgment 만·evidence 필수·신규 predicate 0·edge 보류.
+    pack 파일/edges.jsonl 미기록(report only). 반환 (ok, checks)."""
+    syn = [
+        {"properties": {"label_kind": "증거", "sentence": "로그에 오타가 3번 찍혔다"}, "evidence_refs": ["EVC-1"]},
+        {"properties": {"label_kind": "판단", "sentence": "보내기 전 한 번 더 확인하자"}, "evidence_refs": ["EVC-2"]},
+        {"properties": {"label_kind": "증거", "sentence": "증빙 없는 관찰"}, "evidence_refs": []},   # edge 보류
+        {"properties": {"label_kind": "문서", "sentence": "이 설계서는 절차를 규정한다"}, "evidence_refs": ["EVC-3"]},  # src 불가
+    ]
+    r = _build_rationale_layer2(syn)
+    edges = r["suggested_edges"]
+    checks = {
+        "rationale_all_nodes": len(r["rationale"]) == 4,
+        "edge_evidence_src_only": len(edges) == 1,                 # 증거(EVC-1)→판단만
+        "edge_supports_judgment_only": all(e["relation"] == "supports_judgment" for e in edges),
+        "no_new_predicate": all(e["relation"] in VERB_EDGES for e in edges),
+        "edge_candidate_caveat": all("candidate" in e["caveat"] for e in edges),
+        "edges_not_written_to_pack": r["edges_written_to_pack"] == 0,
+    }
+    return all(checks.values()), checks
+
+
 def run_selftest():
     if not FIXTURE_DIR.is_dir():
         print("[FAIL] fixture 디렉토리 없음:", FIXTURE_DIR)
@@ -270,6 +313,17 @@ def run_selftest():
 
     by = {c["run"]: c for c in cases}
     sp_link_ok, sp_link_results = run_source_pointer_link_check()
+    r2_link_ok, r2_link_checks = run_rationale_link_check()
+
+    # 2층 OFF/ON: report 키만 차이, pack 파일 byte 동일(실제 저장 경로 미변경)
+    nm = ["manifest.json", "nodes.jsonl", "edges.jsonl", "evidence_index.jsonl", "evidence_chunk.jsonl"]
+    r2_off, pd_off = build_pack((FIXTURE_DIR / "normal.diff").read_text(encoding="utf-8"), "normal")
+    b_off = {n: (pd_off / n).read_bytes() for n in nm}
+    r2_on, pd_on = build_pack((FIXTURE_DIR / "normal.diff").read_text(encoding="utf-8"), "normal", with_rationale=True)
+    b_on = {n: (pd_on / n).read_bytes() for n in nm}
+    r2_off_no_key = "rationale_layer2" not in r2_off
+    r2_on_has_key = "rationale_layer2" in r2_on
+    r2_pack_files_same = (b_off == b_on)
     checks = {
         "normal_pack_has_nodes": "normal" in by and by["normal"]["n_nodes"] > 0,
         "empty_pack_zero_nodes": "empty" in by and by["empty"]["n_nodes"] == 0,
@@ -290,6 +344,11 @@ def run_selftest():
         "operating_store_unchanged": all(c["self_checks"]["operating_store_unchanged"] for c in cases),
         "source_pointer_scan_present": all("source_pointer_scan" in c["manifest"] for c in cases),
         "source_pointer_link_ok": sp_link_ok,
+        # --- 2층 rationale/edge 연결 (read-only · report only) ---
+        "rationale_off_no_key": r2_off_no_key,            # 기본 OFF → report 무변화
+        "rationale_on_has_key": r2_on_has_key,            # ON → rationale_layer2 부착
+        "rationale_pack_files_unchanged": r2_pack_files_same,  # pack 파일 byte 동일(저장 경로 미변경)
+        "rationale_link_ok": r2_link_ok,                  # supports만·evidence 필수·신규 predicate 0
         "writes_temp_only": all(
             all(("/tmp/watcher_op_pack/" in w.replace("\\", "/") or "/reports/" in w.replace("\\", "/"))
                 for w in c["write_locations"]) for c in cases),
@@ -341,10 +400,12 @@ def run_selftest():
 
 def main():
     args = sys.argv[1:]
+    with_rationale = "--rationale" in args          # explicit opt-in (기본 OFF)
+    args = [a for a in args if a != "--rationale"]
     if not args or args[0] == "--selftest":
         run_selftest()
     else:
-        run_single(args[0])
+        run_single(args[0], with_rationale=with_rationale)
 
 
 if __name__ == "__main__":
