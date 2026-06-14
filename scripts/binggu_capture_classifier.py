@@ -40,6 +40,19 @@ VETO_PATTERNS = {
     "인사": [r"고마워", r"수고", r"고맙"],
 }
 
+# 운영 명령/보고/메타 노이즈 (should_capture hard veto) — Claude에게 주는 작업 지시·진행 확인·운영 보고.
+# 사용자의 일반 판단/규칙/사실이 아니므로 후보 풀에서 제외. cos 단독 금지 → 명시 규칙으로 거른다.
+# traj_20260614 should_capture 교훈 흡수: cos band 로는 못 가르던 지시문/잡담을 규칙 신호로 분리.
+OPS_VERBS = (r"(커밋|commit|푸시|push|풀\s*리퀘|pull|머지|merge|배포|deploy|롤백|rollback|"
+             r"재시작|restart|재배포|리부트|빌드|build|설치|install|실행|구동|기동|테스트|test|"
+             r"돌려|적용|착수|반영|동기화|sync|업로드|업데이트|패치|디버그|스캔)")
+OPS_IMPERATIVE = [OPS_VERBS + r".{0,6}(해라|하라|하세요|해\s*줘|해\s*봐|하자|진행|시작|할까요|할까|돌려|하지\s*마)"]
+OPS_REPORT = [OPS_VERBS + r".{0,8}(완료|했[다어]\b|함\b|끝났|성공|실패|마쳤|마무리)"]
+META_CONFIRM = [r"할까요\s*\??$", r"할까\s*\??$", r"괜찮(아|을까|나)\s*\??$",
+                r"확인했[어나]\s*\??$", r"맞(나|아|지)\s*\??$", r"될까\s*\??$", r"해도\s*(돼|될까|되나)\s*\??$"]
+# 반복기준(영구 규칙) 동반 시 운영 veto 면제 — "배포는 항상 두 번 확인해라" 같은 규칙은 후보로 통과.
+GENERALIZE_EXEMPT = [r"항상", r"무조건", r"매번", r"늘\s", r"언제나"]
+
 
 def _hits(text, patterns):
     return [name for name, pats in patterns.items() if any(re.search(p, text) for p in pats)]
@@ -72,6 +85,19 @@ def classify(utterance, prev_turn=None):
         out["state"] = "captured_candidate"
         out["pinned"] = True
         reasons.append("explicit_save")
+        return out
+
+    # 2.5) 운영 명령/보고/메타 = should_capture hard veto (signal 보다 우선).
+    #      명령형 종결("…해라/하지마/돌려봐"), 운영 보고("…완료/했다"), 진행 확인("…할까요?")을
+    #      명시 규칙으로 거른다. 반복기준 동반(항상/무조건…)이면 영구 규칙으로 보고 면제.
+    generalized = bool(_any(text, GENERALIZE_EXEMPT))
+    if _any(text, META_CONFIRM):
+        vetoes.append("meta_confirm")
+        reasons.append("ops/meta noise veto")
+        return out
+    if not generalized and (_any(text, OPS_IMPERATIVE) or _any(text, OPS_REPORT)):
+        vetoes.append("ops_imperative" if _any(text, OPS_IMPERATIVE) else "ops_report")
+        reasons.append("ops noise veto")
         return out
 
     # 3) 판단 신호 / 추측마커 / veto 검출
@@ -118,6 +144,18 @@ def _selftest():
         ("상태 보여줘", None, dict(state="ignored"), "단순조회"),
         ("테스트 돌려봐", None, dict(state="ignored"), "단순 작업지시"),
         ("테스트는 항상 돌려", None, dict(state="captured_candidate"), "반복기준"),
+        # --- should_capture 노이즈 차단 (traj_20260614 should_capture 해결) ---
+        ("commit 진행해라", None, dict(state="ignored"), "운영 명령 지시"),
+        ("push 하지마", None, dict(state="ignored"), "운영 금지 지시(선긋기 signal 보다 ops veto 우선)"),
+        ("착수할까요?", None, dict(state="ignored"), "진행 확인 메타"),
+        ("배포해줘", None, dict(state="ignored"), "운영 명령"),
+        ("커밋 완료했다", None, dict(state="ignored"), "운영 보고(1회성 사실)"),
+        ("확인했어?", None, dict(state="ignored"), "메타 확인질문"),
+        ("재시작해", None, dict(state="ignored"), "운영 명령 단독"),
+        # --- 실제 캡처해야 하는 규칙/판단/사실은 통과 ---
+        ("배포는 항상 두 번 확인해라", None, dict(state="captured_candidate"), "일반화 규칙(항상)=ops veto 면제"),
+        ("백업은 항상 먼저 해 둔다", None, dict(state="captured_candidate"), "반복기준 규칙"),
+        ("이 방식은 위험이 커서 기본 비활성으로 잠근다", None, dict(state="captured_candidate"), "리스크 판단/설계결정"),
     ]
     passed = 0
     for i, (utt, prev, expect, note) in enumerate(cases, 1):
