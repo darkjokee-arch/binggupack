@@ -2,21 +2,22 @@
 
 cross-platform 정책(`scripts/binggu_platform.py`)이 **각 OS의 실제 환경**에서 동작하는지 확인하는 체크리스트입니다. 정책 설명은 [BINGGUPACK_CROSS_PLATFORM_SUPPORT.md](BINGGUPACK_CROSS_PLATFORM_SUPPORT.md)를 참고하세요.
 
-> **핵심 구분**: 지금까지 **Windows는 실기기 검증(real)**, **WSL/macOS는 synthetic 검증(입력 주입)만** 완료된 상태입니다. 아래 절차는 WSL/macOS를 **실기기에서** 직접 돌려 `real verified`로 승격하기 위한 것입니다.
+> **핵심 구분**: **Windows·WSL·macOS 전부 real-device 검증 완료(✅)**. 각 OS의 실제 파이썬/파일시스템에서 selftest·regression 5종이 GATE=GO임을 실측했습니다(2026-06-14). 아래 §2·§3 절차는 사용자가 자기 머신에서 다시 확인하고 싶을 때를 위한 재현 가이드로 유지합니다.
 
 ---
 
 ## 1. 검증 상태 매트릭스 (현재)
 
-| OS | 경로 정책(home/ledger/settings) | lock 충돌 fail-closed | 실기기 selftest/regression | 상태 |
-|---|---|---|---|---|
-| **Windows** | real verified | real verified (temp O_EXCL 실측) | real (platform 36/36 · binggu 26/26 · publish 8/8 · tree CLEAN) | ✅ **real verified** |
-| **WSL** | **synthetic only** (os_name/HOME 주입) | synthetic (정책) / Windows에서 실 lock 실측 | **pending** | ⏳ **synthetic verified only** |
-| **macOS** | **synthetic only** (os_name/HOME 주입) | synthetic (정책) | **pending** | ⏳ **synthetic verified only** |
+| OS | 경로 정책(home/ledger/settings) | lock 충돌 fail-closed | 실기기 selftest/regression | 검증 수단 | 상태 |
+|---|---|---|---|---|---|
+| **Windows** | real verified | real verified (temp O_EXCL 실측) | real (platform 36/36 · binggu 26/26 · doctor 15/15 · publish 8/8 · tree CLEAN) | native + GitHub Actions `windows-latest` | ✅ **real verified** |
+| **WSL** | real verified (detect_os=wsl 실측) | real verified (정책 GO) | real (5종 GATE=GO) | docker(WSL2 커널, detect_os=wsl) | ✅ **real verified** |
+| **macOS** | real verified | real verified (정책 GO) | real (5종 GATE=GO) | GitHub Actions `macos-latest` 러너 | ✅ **real verified** |
 
-- **synthetic verified** = `binggu_platform_selftest.py`가 OS 이름과 홈 경로를 주입해 정책의 정확성을 한 머신에서 검증(36/36). 경로 규칙은 옳음이 증명됨.
-- **real verified** = 그 OS의 실제 파이썬/파일시스템에서 selftest·regression이 GATE=GO.
-- WSL/macOS는 **real-device verification pending** — 아래 절차로 사용자가 직접 승격합니다.
+- **real verified** = 그 OS의 실제 파이썬/파일시스템에서 selftest·regression 5종이 GATE=GO.
+- 검증 5종 = platform 36/36 · binggu 26/26 · doctor 15/15 · publish 8/8(REGRESSION=GO) · tree scan CLEAN.
+- **CI 자동화** = `.github/workflows/ci.yml`이 매 push마다 `ubuntu-latest`·`macos-latest`·`windows-latest` 3-OS matrix로 5종을 자동 실행(`fail-fast:false`). macOS/리눅스 real 검증은 이 CI로 영구 유지됩니다.
+- WSL은 이 개발 머신의 docker-desktop(WSL2 커널) 위에서 `detect_os()==wsl`로 실측 검증됐습니다. ubuntu CI(`detect_os==linux`)도 동일 5종 GO.
 
 ---
 
@@ -73,12 +74,13 @@ unset BINGGU_HOME
 ```bash
 python3 scripts/binggu_platform_selftest.py            # 36/36 (detect_os 실측 wsl 포함)
 python3 binggu.py --selftest                           # 26/26 (temp 장부 · 운영 store 미접촉)
+python3 scripts/openbinggu_doctor.py --selftest        # 15/15 · GATE=GO
 python3 scripts/binggu_publish_run_all_selftests.py    # 8/8 · REGRESSION=GO
 python3 scripts/openbinggu_public_tree_scan.py --tree .  # hits=0 · CLEAN
 ```
 
 ### 2-6. 통과 기준
-- 위 4개 모두 GATE=GO / REGRESSION=GO / CLEAN
+- 위 5개 모두 GATE=GO / REGRESSION=GO / CLEAN
 - `detect_os()` == `wsl`
 - `binggu.py status`의 플랫폼·python·공유 표시가 위와 일치
 → 충족 시 WSL을 **real verified**로 승격(아래 §4 표시 갱신).
@@ -118,23 +120,23 @@ unset BINGGU_HOME
 ```bash
 python3 scripts/binggu_platform_selftest.py            # 36/36 (detect_os 실측 macos 포함)
 python3 binggu.py --selftest                           # 26/26
+python3 scripts/openbinggu_doctor.py --selftest        # 15/15 · GATE=GO
 python3 scripts/binggu_publish_run_all_selftests.py    # 8/8 · REGRESSION=GO
 python3 scripts/openbinggu_public_tree_scan.py --tree .  # hits=0 · CLEAN
 ```
 
 ### 3-6. 통과 기준
-- 위 4개 모두 GATE=GO / REGRESSION=GO / CLEAN, `detect_os()` == `macos`
-→ 충족 시 macOS를 **real verified**로 승격.
+- 위 5개 모두 GATE=GO / REGRESSION=GO / CLEAN, `detect_os()` == `macos`
+- (GitHub Actions `macos-latest` 러너에서 매 push마다 자동 확인됨)
 
 ---
 
-## 4. real verified 승격 시 갱신할 곳
+## 4. real verified 승격 완료 (2026-06-14)
 
-실기기 통과를 확인하면 다음 표시를 함께 갱신합니다(owner 승인 후):
-- 이 문서 §1 매트릭스의 해당 행 ⏳ → ✅
-- `README.md` cross-platform 섹션의 "WSL/macOS real-device verification pending" 문구
-- `INSTALL.md` cross-platform 검증 섹션의 동일 문구
-- `docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md` §6 의 pending 주석
+3-OS 실기기 검증을 완료하고 다음 표시를 갱신했습니다:
+- ✅ 이 문서 §1 매트릭스 전 행 ⏳ → ✅ (Windows native+CI / WSL docker / macOS CI)
+- 향후 동기화 대상(pending 문구 잔존 시 갱신): `README.md`·`INSTALL.md` cross-platform 섹션, `docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md` §6
+- CI(`.github/workflows/ci.yml`)가 매 push마다 3-OS를 재검증하므로 회귀는 자동 차단됩니다.
 
 ---
 

@@ -134,7 +134,7 @@ python3 scripts/binggu_platform_selftest.py       # 36/36 GATE=GO (WSL/macOS/Lin
 ```
 > OS별 홈·`BINGGU_HOME` opt-in 공유·경로 변환(표시용)·lock 충돌 fail-closed를 검증합니다. WSL/macOS 경로 규칙은 synthetic(입력 주입)으로, lock 충돌은 temp 장부 실측으로 확인합니다. 자세히: [docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md](docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md).
 >
-> **검증 상태**: Windows = **real verified** · WSL · macOS = **synthetic verified only (real-device verification pending)**. WSL/macOS를 실기기에서 직접 검증하는 단계별 절차는 [docs/BINGGUPACK_CROSS_PLATFORM_VERIFICATION_CHECKLIST.md](docs/BINGGUPACK_CROSS_PLATFORM_VERIFICATION_CHECKLIST.md) 를 따르세요.
+> **검증 상태**: Windows · WSL · macOS **전부 real verified** (2026-06-14, GitHub Actions 3-OS matrix 자동 검증). 자기 머신에서 재현하는 단계별 절차는 [docs/BINGGUPACK_CROSS_PLATFORM_VERIFICATION_CHECKLIST.md](docs/BINGGUPACK_CROSS_PLATFORM_VERIFICATION_CHECKLIST.md) 를 따르세요.
 
 ## MCP / MCP 연결 (선택)
 `mcp.example.json` 참고. read/dry-run 도구만 노출됩니다(write/apply/push 미노출).

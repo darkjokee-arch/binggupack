@@ -132,8 +132,8 @@ python3 scripts/openbinggu_public_tree_scan.py --tree .
 
 | OS | 상태 |
 |---|---|
-| Windows | ✅ **real verified** (실기기 selftest/regression GATE=GO) |
-| WSL | ⏳ **synthetic verified only** — real-device verification **pending** |
-| macOS | ⏳ **synthetic verified only** — real-device verification **pending** |
+| Windows | ✅ **real verified** (native + GitHub Actions `windows-latest`, selftest 5종 GATE=GO) |
+| WSL | ✅ **real verified** (docker WSL2 커널, `detect_os==wsl` 실측) |
+| macOS | ✅ **real verified** (GitHub Actions `macos-latest` 러너) |
 
-WSL/macOS를 실기기에서 직접 검증해 승격하는 단계별 절차는 **[BINGGUPACK_CROSS_PLATFORM_VERIFICATION_CHECKLIST.md](BINGGUPACK_CROSS_PLATFORM_VERIFICATION_CHECKLIST.md)** 를 따르세요.
+3-OS 전부 2026-06-14 real-device 검증 완료. 매 push마다 CI(`.github/workflows/ci.yml`)가 `ubuntu`/`macos`/`windows` matrix로 selftest 5종을 자동 재검증합니다. 자기 머신 재현 절차는 **[BINGGUPACK_CROSS_PLATFORM_VERIFICATION_CHECKLIST.md](BINGGUPACK_CROSS_PLATFORM_VERIFICATION_CHECKLIST.md)** 를 참고하세요.
