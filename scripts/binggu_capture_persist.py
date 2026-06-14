@@ -200,8 +200,8 @@ class PersistentCaptureBuffer:
             return
         try:
             if semantic is None:
-                from binggu_semantic_shadow import SemanticShadow
-                semantic = SemanticShadow()
+                from binggu_semantic_shadow import get_cached_shadow
+                semantic = get_cached_shadow()  # 프로세스 내 캐시(centroid 재계산 1회)
             for it in items:
                 sug = semantic.subtype_suggestion(it["text"])
                 if sug:
@@ -409,6 +409,35 @@ def _selftest():
         check(pv2["count"] == before and all("웃기네" not in it["text"] for it in pv2["items"]),
               "T19 ignored 발화 → preview ON 에도 미표시(should_capture 결정 불변)")
         scope2.sem_preview_flag.unlink()
+
+        # T20 캐시 hit: preview ON 2회 → SemanticShadow 1회만 생성(centroid 재계산 병목 제거)
+        import binggu_semantic_shadow as bss
+        bss._SHADOW_CACHE.clear()
+        build_count = {"n": 0}
+        _orig_shadow = bss.SemanticShadow
+
+        class _CountShadow(_orig_shadow):
+            def __init__(self, *a, **k):
+                build_count["n"] += 1
+                k.setdefault("embed_fn", mock_embed)  # Ollama 미접촉
+                super().__init__(*a, **k)
+
+        bss.SemanticShadow = _CountShadow
+        db_mtime_c = buf3.db_path.stat().st_mtime_ns
+        ledger_mtime_c = ledger.stat().st_mtime_ns
+        try:
+            scope2.sem_preview_flag.write_text("1", encoding="utf-8")
+            pv_c1 = buf3.render_preview()   # semantic=None → get_cached_shadow → 생성 1
+            pv_c2 = buf3.render_preview()   # 캐시 hit → 생성 0
+            scope2.sem_preview_flag.unlink()
+        finally:
+            bss.SemanticShadow = _orig_shadow
+            bss._SHADOW_CACHE.clear()
+        check(build_count["n"] == 1, "T20 캐시 hit: preview ON 2회 → SemanticShadow 1회만 생성")
+        check(all("semantic" in it for it in pv_c2["items"]) and len(pv_c2["items"]) >= 1,
+              "T20b 캐시 경로도 captured 후보에 subtype 보조 라벨 정상")
+        check(buf3.db_path.stat().st_mtime_ns == db_mtime_c and ledger.stat().st_mtime_ns == ledger_mtime_c,
+              "T20c 캐시 preview → buffer DB·ledger write 0(read-only)")
 
         gate = "GO" if ok else "NO-GO"
         print(f"\nGATE={gate}")

@@ -190,6 +190,27 @@ class SemanticShadow:
         return {"sem_subtype": best, "sem_conf": round(bs, 4), "band": band}
 
 
+# ---------------- preview 캐시 (프로세스 내 메모리만 · 파일/DB write 0 · stale 방지) ----------------
+_SHADOW_CACHE = {}  # key -> SemanticShadow. 단일 엔트리 유지(model/seed 변경 시 옛 것 폐기)
+
+
+def get_cached_shadow(seed_path=SEED_PATH, embed_fn=None):
+    """preview용 SemanticShadow를 프로세스 내 1회만 생성(centroid ~60 embed 병목 제거).
+    cache key = seed 내용 + 임계(BAND_HI/LO) + 현재 model_digest → 이 중 하나라도 바뀌면 miss(stale 방지).
+    파일/DB write 0. embed_fn 주입 시(테스트 mock) 캐시 우회 — 결정성/격리 보장."""
+    if embed_fn is not None:
+        return SemanticShadow(seed_path, embed_fn)
+    with open(seed_path, "rb") as f:
+        seed_hash = hashlib.sha256(f.read()).hexdigest()[:16]
+    key = "%s|%s|%s|%s" % (seed_hash, BAND_HI, BAND_LO, model_digest())
+    inst = _SHADOW_CACHE.get(key)
+    if inst is None:
+        inst = SemanticShadow(seed_path)
+        _SHADOW_CACHE.clear()            # model/seed 변경 → 옛 인스턴스 폐기(stale 차단)
+        _SHADOW_CACHE[key] = inst
+    return inst
+
+
 # ---------------- #2·#16 shadow logger (원문 0 · 별도 파일 · ledger 미접촉) ----------------
 SHADOW_LOG = os.path.join(SEM_DIR, "shadow.jsonl")
 _ALLOWED = {"hmac_id", "text_len", "rule_label", "sem_subtype", "sem_conf",
