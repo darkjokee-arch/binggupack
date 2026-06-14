@@ -47,6 +47,7 @@ class CaptureScope:
         self.paused_flag = self.home / "capture_paused"
         self.scope_file = self.home / "capture_scope.json"
         self.sem_preview_flag = self.home / "semantic_preview_enabled"  # opt-in 기본 OFF
+        self.rationale_preview_flag = self.home / "rationale_preview_enabled"  # 2층 opt-in 기본 OFF
 
     def enabled(self):
         """기본 OFF: capture_enabled 플래그 존재 AND capture_paused 없음."""
@@ -91,6 +92,11 @@ class CaptureScope:
         """opt-in 기본 OFF: semantic_preview_enabled 플래그 있을 때만 shadow subtype 보조 라벨 표시.
         capture 결정과 무관 — 표시 전용 게이트."""
         return self.sem_preview_flag.exists()
+
+    def rationale_preview(self):
+        """opt-in 기본 OFF: rationale_preview_enabled 플래그 있을 때만 2층 근거/엣지 추천 표시.
+        추천만 — capture 결정·저장과 무관(read-only)."""
+        return self.rationale_preview_flag.exists()
 
 
 class PersistentCaptureBuffer:
@@ -190,7 +196,33 @@ class PersistentCaptureBuffer:
             })
         if self.scope.semantic_preview():
             self._attach_semantic(items, semantic)
-        return {"count": len(items), "items": items, "note": "owner 승인 전 candidate (active 아님)"}
+        result = {"count": len(items), "items": items, "note": "owner 승인 전 candidate (active 아님)"}
+        if self.scope.rationale_preview():
+            self._attach_rationale(items, result)
+        return result
+
+    def _attach_rationale(self, items, result):
+        """opt-in ON 시 2층 근거/엣지 추천을 read-only 부착. 추천만 — 저장·DB·ledger 미접촉.
+        capture 단계 후보엔 evidence 미첨부라 edge는 보통 보류(rationale만). 실패 시 무변화(graceful)."""
+        if not items:
+            return
+        try:
+            from binggu_rationale_suggest import suggest_rationale
+            from openbinggu_label_kind_map import classify_label_kind
+            cands = [{
+                "text": it["text"],
+                "label_kind": classify_label_kind(it["text"])[0],   # canonical(정규식·정본)
+                "semantic_subtype": (it.get("semantic") or {}).get("subtype"),  # 1층 보조(있으면)
+                "confidence": it.get("confidence"),
+                "evidence_refs": [],   # capture 후보엔 원문증빙 없음(pack 빌드 단계에서 첨부)
+            } for it in items]
+            rec = suggest_rationale(cands)
+            for it, ra in zip(items, rec["rationale"]):
+                it["rationale"] = {"why": ra["rationale"], "caveat": ra["caveat"]}
+            result["suggested_edges"] = rec["suggested_edges"]   # 보통 [](evidence 보류)
+            result["rationale_note"] = rec["note"]
+        except Exception:
+            return
 
     def _attach_semantic(self, items, semantic=None):
         """opt-in ON 시 captured 후보에만 shadow subtype 보조 라벨 부착 (read-only).
@@ -438,6 +470,32 @@ def _selftest():
               "T20b 캐시 경로도 captured 후보에 subtype 보조 라벨 정상")
         check(buf3.db_path.stat().st_mtime_ns == db_mtime_c and ledger.stat().st_mtime_ns == ledger_mtime_c,
               "T20c 캐시 preview → buffer DB·ledger write 0(read-only)")
+
+        # T21~T23 2층 rationale preview opt-in (read-only)
+        # T21 기본 OFF → rationale 필드 없음(무변화)
+        check(not scope2.rationale_preview(), "T21 rationale preview 기본 OFF")
+        pv_r_off = buf3.render_preview(semantic=sem)
+        check(pv_r_off.get("count", 0) >= 1 and all("rationale" not in it for it in pv_r_off["items"])
+              and "suggested_edges" not in pv_r_off,
+              "T21b OFF → rationale/suggested_edges 없음(무변화)")
+
+        # T22 ON → captured 후보에만 rationale, evidence 미첨부라 edge 보류
+        scope2.rationale_preview_flag.write_text("1", encoding="utf-8")
+        db_mtime_r = buf3.db_path.stat().st_mtime_ns
+        ledger_mtime_r = ledger.stat().st_mtime_ns
+        pv_r_on = buf3.render_preview(semantic=sem)
+        check(all("rationale" in it and "why" in it["rationale"] and "candidate" in it["rationale"]["caveat"]
+                  for it in pv_r_on["items"]),
+              "T22 ON → captured 후보에 rationale(why+candidate caveat)")
+        check(pv_r_on.get("suggested_edges") == [],
+              "T22b capture 단계 evidence 미첨부 → edge 보류(rationale만)")
+        check(all(it["state"] == "captured_candidate" for it in pv_r_on["items"]),
+              "T22c rationale이 capture state 미변경")
+
+        # T23 read-only: buffer DB·ledger write 0
+        check(buf3.db_path.stat().st_mtime_ns == db_mtime_r and ledger.stat().st_mtime_ns == ledger_mtime_r,
+              "T23 rationale preview ON → buffer DB·ledger write 0")
+        scope2.rationale_preview_flag.unlink()
 
         gate = "GO" if ok else "NO-GO"
         print(f"\nGATE={gate}")
