@@ -5,7 +5,7 @@
 AI와의 대화에서 건질 판단·상태·개념을 후보로 **자동 수집**하고, 사람이 직접 confirm 문구를 타이핑해야만 저장되는 **로컬 우선(local-first)** 지식장부입니다. 자동 수집은 켜지지만, **자동 저장은 없습니다.**
 
 - **Latest release: v1.5.0** — <https://github.com/darkjokee-arch/binggupack/releases/tag/v1.5.0>
-- **Mainline: v1.5.0** — PC-mediated read publish pipeline P1~P8 구현(로컬) + evidence graph 문법/pack repair. OpenCrab Cloud ingest는 **HOLD**(Desktop validation PASS / local ingest NOT_FOUND / cloud ingest UNKNOWN).
+- **Mainline: v1.5.1 후보** — v1.5.0(PC-mediated read publish pipeline P1~P8 + evidence graph 문법/pack repair) 위에 **Windows/WSL/macOS cross-platform 지원**(`BINGGU_HOME` opt-in 공유)을 더한 후보입니다. 최신 발행 태그는 여전히 v1.5.0이며, v1.5.1은 아직 미발행입니다. OpenCrab Cloud ingest는 **HOLD**(Desktop validation PASS / local ingest NOT_FOUND / cloud ingest UNKNOWN).
 - **Python 3.10+ · 외부 런타임 의존성 0 · Windows / WSL / macOS / Linux** — 같은 정책으로 동작. OS별 사용법·장부 공유는 [docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md](docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md). 런처: Windows `py` · WSL/macOS `python3`.
 
 ---

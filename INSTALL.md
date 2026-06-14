@@ -4,7 +4,7 @@
 
 > **무엇인가** — local-first · evidence-backed context packs · candidate capture/preview · human-confirmed SAVE gate · ontology graph validation. **자동 ledger/confirmed write 없음** — 저장은 preview → `SAVE n`(정확한 confirm) 게이트로만 진행됩니다.
 >
-> **Latest release = v1.5.0.** `binggu init`이 현재 workspace scope에 자동 후보 수집을 기본 ON으로 만드는 capture profile(scope-gated) + 영속 candidate 버퍼 + opt-in hook support + `binggu hosted pull`(폰 SAVE n→PC 한 번에). **자동 저장은 없음**(저장 = preview → `SAVE n`). 라이브 save-intent는 **신형 v2 서명 전용**(`SAVE_SIG_V2_ONLY=1`, 구형 차단). 라인: v1.0.0(개인 장부) → v1.1.0(그래프 문법) → v1.2.0(hosted save-intent) → v1.3.x(자동 캡처·preview·어댑터) → v1.4.0(AGI memory capture)~v1.4.6(hosted pull·온보딩) → **v1.5.0: PC-mediated read publish pipeline P1~P8 구현(로컬) + evidence graph 문법/pack repair. OpenCrab Cloud ingest는 HOLD.**
+> **Latest release = v1.5.0.** `binggu init`이 현재 workspace scope에 자동 후보 수집을 기본 ON으로 만드는 capture profile(scope-gated) + 영속 candidate 버퍼 + opt-in hook support + `binggu hosted pull`(폰 SAVE n→PC 한 번에). **자동 저장은 없음**(저장 = preview → `SAVE n`). 라이브 save-intent는 **신형 v2 서명 전용**(`SAVE_SIG_V2_ONLY=1`, 구형 차단). 라인: v1.0.0(개인 장부) → v1.1.0(그래프 문법) → v1.2.0(hosted save-intent) → v1.3.x(자동 캡처·preview·어댑터) → v1.4.0(AGI memory capture)~v1.4.6(hosted pull·온보딩) → **v1.5.0: PC-mediated read publish pipeline P1~P8 구현(로컬) + evidence graph 문법/pack repair → v1.5.1(후보, 미발행): Windows/WSL/macOS cross-platform 지원(`BINGGU_HOME` opt-in 공유). 최신 발행 태그는 v1.5.0이며 OpenCrab Cloud ingest는 HOLD.**
 >
 > OpenCrab 업로드는 **planned**(preflight G1~G7까지 구현·검증, 실 전송은 별도 결정 — 노출 0). "100% 완성판"이 아니며 모든 사용자 환경 동작을 보장하지 않습니다. 전체 로드맵·범위는 `README.md`, 따라하기는 `docs/BINGGUPACK_TUTORIAL.md` 참조.
 
@@ -57,7 +57,7 @@ python binggu.py capture uninstall    # 완전 제거(rollback) — 장부는 �
 python scripts/binggu_capture_persist.py         # 16/16 (영속 버퍼·scope·TTL·pause·global)
 python scripts/binggu_capture_profile.py         # 9/9  (profile·settings hook·pause/resume/uninstall)
 python hooks/binggu_capture_hook.py --selftest   # 8/8  (UserPromptSubmit/Stop 진입점)
-python binggu.py --selftest                      # 21/21 (장부 + capture 통합)
+python binggu.py --selftest                      # 26/26 (장부 + capture + hosted 통합)
 ```
 > **자동 저장이 아니라 자동 후보 수집입니다.** `binggu init`이 만든 profile 안에서만 동작 — clone 직후엔 수집 0. **AGI memory(`--agi-memory`/`--global`)는 작업 전역**이 기본 경험, privacy(`init`)는 현재 위치만. 어느 scope든 시크릿/PII 발화는 자동 후보 제외 + 시크릿 디렉토리 deny. ledger/active/confirmed write 0. 저장은 preview → `SAVE n` 게이트만. scope·hook·롤백 상세: `docs/BINGGUPACK_CAPTURE_HOOK_SETUP.md`.
 
@@ -120,6 +120,19 @@ python scripts/openbinggu_v1_candidate_cycle_real_once.py --dry-run-temp # 17/17
 5. **피드백 resolve** — 판단 노드의 검증예정일 도래 시 4값(`성공/실패/불확실/판정불가`) + 사유 필수. 기록만이며 노드 상태는 무변.
 
 > `actor=auto`는 전부 BLOCK — 사람 발화 유래 confirm만 허용. 통합 흐름 실연: `docs/OPENBINGGU_V1_CANDIDATE_CYCLE_RESULT.md`.
+
+## PC-mediated read publish pipeline selftest / 퍼블리시 파이프라인 검증 (P1~P8)
+```bash
+py scripts/binggu_publish_run_all_selftests.py    # 8/8 PASS · REGRESSION=GO (P1~P6 + cloud_pack export + tree scan)
+```
+> 회귀 검증만 수행합니다 — **Cloud upload / DB insert / OpenCrab ingest 0**. P3는 실 ledger를 read-only(mode=ro)로만 읽고, active 데이터 없으면 `NO_REAL_LEDGER_DATA`로 BLOCK합니다.
+
+## Cross-platform selftest / 크로스플랫폼 정책 검증 (Windows/WSL/macOS)
+```bash
+py scripts\binggu_platform_selftest.py            # 36/36 GATE=GO (Windows)
+python3 scripts/binggu_platform_selftest.py       # 36/36 GATE=GO (WSL/macOS/Linux)
+```
+> OS별 홈·`BINGGU_HOME` opt-in 공유·경로 변환(표시용)·lock 충돌 fail-closed를 검증합니다. WSL/macOS 경로 규칙은 synthetic(입력 주입)으로, lock 충돌은 temp 장부 실측으로 확인합니다. 자세히: [docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md](docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md).
 
 ## MCP / MCP 연결 (선택)
 `mcp.example.json` 참고. read/dry-run 도구만 노출됩니다(write/apply/push 미노출).
