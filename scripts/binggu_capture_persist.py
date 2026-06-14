@@ -46,6 +46,7 @@ class CaptureScope:
         self.flag = self.home / "capture_enabled"
         self.paused_flag = self.home / "capture_paused"
         self.scope_file = self.home / "capture_scope.json"
+        self.sem_preview_flag = self.home / "semantic_preview_enabled"  # opt-in 기본 OFF
 
     def enabled(self):
         """기본 OFF: capture_enabled 플래그 존재 AND capture_paused 없음."""
@@ -85,6 +86,11 @@ class CaptureScope:
 
     def should_capture(self, cwd):
         return self.enabled() and self.in_scope(cwd)
+
+    def semantic_preview(self):
+        """opt-in 기본 OFF: semantic_preview_enabled 플래그 있을 때만 shadow subtype 보조 라벨 표시.
+        capture 결정과 무관 — 표시 전용 게이트."""
+        return self.sem_preview_flag.exists()
 
 
 class PersistentCaptureBuffer:
@@ -159,7 +165,8 @@ class PersistentCaptureBuffer:
             if own:
                 c.close()
 
-    def render_preview(self, now=None):
+    def render_preview(self, now=None, semantic=None):
+        """captured 후보 목록. semantic 인자는 테스트 주입용(미지정 시 opt-in ON에서 lazy 생성)."""
         now = time.time() if now is None else now
         c = self._conn()
         try:
@@ -181,7 +188,29 @@ class PersistentCaptureBuffer:
                 "idx": i, "text": text, "pinned": bool(pinned), "confidence": conf,
                 "label": f"{i}. {text}{tag}", "state": "captured_candidate",
             })
+        if self.scope.semantic_preview():
+            self._attach_semantic(items, semantic)
         return {"count": len(items), "items": items, "note": "owner 승인 전 candidate (active 아님)"}
+
+    def _attach_semantic(self, items, semantic=None):
+        """opt-in ON 시 captured 후보에만 shadow subtype 보조 라벨 부착 (read-only).
+        방어선: cos = subtype 추천/설명 전용 — capture 결정·state·DB·ledger 일체 미접촉.
+        shadow/Ollama 실패 시 무변화(graceful) — 기존 출력 보존."""
+        if not items:
+            return
+        try:
+            if semantic is None:
+                from binggu_semantic_shadow import SemanticShadow
+                semantic = SemanticShadow()
+            for it in items:
+                sug = semantic.subtype_suggestion(it["text"])
+                if sug:
+                    it["semantic"] = {  # canonical 아님 — shadow 보조 필드
+                        "subtype": sug["sem_subtype"], "score": sug["sem_conf"], "band": sug["band"],
+                        "note": f"추천 subtype(보조·cos): {sug['sem_subtype']} ({sug['band']}, {sug['sem_conf']})",
+                    }
+        except Exception:
+            return
 
     @property
     def size(self):
@@ -332,6 +361,54 @@ def _selftest():
         }, ensure_ascii=False), encoding="utf-8")
         check(scope.in_scope("D:/anywhere/else") and not scope.in_scope(other_cwd),
               "T15 global scope → 타 cwd 허용 · deny(bid-engine) 차단 유지")
+
+        # T16~T19 semantic shadow preview opt-in 실배선 (read-only 보조 라벨)
+        import hashlib
+        import math
+        from binggu_semantic_shadow import SemanticShadow
+
+        def mock_embed(text, timeout=10):  # 결정적 mock — Ollama 미접촉
+            h = hashlib.sha256(text.encode("utf-8")).digest()
+            v = [h[i % len(h)] / 255.0 for i in range(64)]
+            n = math.sqrt(sum(x * x for x in v)) or 1.0
+            return [x / n for x in v]
+
+        buf3 = PersistentCaptureBuffer(home=home)
+        buf3.feed("B안으로 결정한다", repo_cwd)  # captured 후보 1건 확보
+        scope2 = CaptureScope(home=home)
+        sem = SemanticShadow(embed_fn=mock_embed)
+
+        # T16 opt-in 기본 OFF → semantic 필드 없음(완전 무변화)
+        check(not scope2.semantic_preview(), "T16 semantic preview 기본 OFF")
+        pv_off = buf3.render_preview(semantic=sem)
+        check(pv_off["count"] >= 1 and all("semantic" not in it for it in pv_off["items"]),
+              "T16b OFF → 보조 필드 없음(기존 출력 무변화)")
+
+        # T17 opt-in ON → captured 후보에만 subtype 보조 라벨
+        scope2.sem_preview_flag.write_text("1", encoding="utf-8")
+        ledger_mtime_b = ledger.stat().st_mtime_ns
+        db_mtime_b = buf3.db_path.stat().st_mtime_ns
+        pv_on = buf3.render_preview(semantic=sem)
+        valid_sub = {"교훈", "결정", "선호", "설계결정", "버그패턴", "사실"}
+        check(pv_on["count"] >= 1 and all("semantic" in it and it["semantic"]["subtype"] in valid_sub
+              for it in pv_on["items"]),
+              "T17 ON → captured 후보에 subtype 보조 라벨")
+        check(all(it["state"] == "captured_candidate" for it in pv_on["items"]),
+              "T17b 보조 라벨이 capture state 미변경(여전히 candidate)")
+
+        # T18 semantic preview = read-only: ledger·buffer DB write 0
+        check(ledger.read_bytes() == b"LEDGER-SENTINEL" and ledger.stat().st_mtime_ns == ledger_mtime_b,
+              "T18 ON preview → 운영 ledger 미접촉(write 0)")
+        check(buf3.db_path.stat().st_mtime_ns == db_mtime_b,
+              "T18b ON preview → buffer DB 미변경(read-only)")
+
+        # T19 ignored 발화는 buffer 미저장 → preview(ON)에도 미표시
+        before = buf3.render_preview(semantic=sem)["count"]
+        buf3.feed("ㅋㅋ 웃기네", repo_cwd)  # ignored
+        pv2 = buf3.render_preview(semantic=sem)
+        check(pv2["count"] == before and all("웃기네" not in it["text"] for it in pv2["items"]),
+              "T19 ignored 발화 → preview ON 에도 미표시(should_capture 결정 불변)")
+        scope2.sem_preview_flag.unlink()
 
         gate = "GO" if ok else "NO-GO"
         print(f"\nGATE={gate}")

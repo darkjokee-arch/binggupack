@@ -171,6 +171,24 @@ class SemanticShadow:
                 "rule_label": rule_label, "latency_ms": int((time.time() - t0) * 1000),
                 "model_digest": self.digest}
 
+    def subtype_suggestion(self, text):
+        """preview 전용 read-only subtype 추천. capture 결정 미개입 · 파일/로그/salt/hmac write 0.
+        반환: None(L1 차단 or embed 실패) 또는 {sem_subtype, sem_conf, band}.
+        cos = subtype 추천/설명 전용 — should_capture 판단에 절대 쓰지 않음(규칙 게이트 책임)."""
+        ok, _ = leak_guard(text)
+        if not ok:
+            return None
+        e = self.embed_fn(text)
+        if e is None:
+            return None
+        best, bs = None, -2.0
+        for st, c in self.centroids.items():
+            s = _dot(e, c)
+            if s > bs:
+                bs, best = s, st
+        band = "hi" if bs >= BAND_HI else ("lo" if bs < BAND_LO else "ambiguous")
+        return {"sem_subtype": best, "sem_conf": round(bs, 4), "band": band}
+
 
 # ---------------- #2·#16 shadow logger (원문 0 · 별도 파일 · ledger 미접촉) ----------------
 SHADOW_LOG = os.path.join(SEM_DIR, "shadow.jsonl")
