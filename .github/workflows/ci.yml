@@ -39,5 +39,8 @@ jobs:
       - name: Publish pipeline regression (P1~cloud_pack, REGRESSION=GO required)
         run: python scripts/binggu_publish_run_all_selftests.py
 
+      - name: End-to-end lifecycle (real CLI init->preview->save->list->deprecate, 10/10)
+        run: python scripts/binggu_e2e_lifecycle_selftest.py
+
       - name: Public tree secret/PII scan (verdict=CLEAN required)
         run: python scripts/openbinggu_public_tree_scan.py --tree .
