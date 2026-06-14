@@ -4,8 +4,8 @@
 
 AI와의 대화에서 건질 판단·상태·개념을 후보로 **자동 수집**하고, 사람이 직접 confirm 문구를 타이핑해야만 저장되는 **로컬 우선(local-first)** 지식장부입니다. 자동 수집은 켜지지만, **자동 저장은 없습니다.**
 
-- **Latest: v1.4.6** — <https://github.com/darkjokee-arch/binggupack/releases/tag/v1.4.6>
-- **Mainline:** PC-mediated read publish pipeline P1~P8 implemented locally; OpenCrab Cloud ingest remains **HOLD**.
+- **Latest release: v1.4.6** — <https://github.com/darkjokee-arch/binggupack/releases/tag/v1.4.6> (released tag)
+- **Mainline: `v1.4.6+27` (e80abef)** — v1.4.6 릴리스 **이후** 미릴리스 진행분. PC-mediated read publish pipeline P1~P8 구현 완료(로컬), OpenCrab Cloud ingest는 **HOLD**. (즉 v1.4.6 태그 = 현재 코드 전체가 아니라 마지막 릴리스 시점입니다.)
 - **Python 3.10+ · 외부 런타임 의존성 0 · Windows/macOS/Linux**
 
 ---
@@ -231,8 +231,10 @@ py scripts/binggu_publish_run_all_selftests.py
 현재 OpenCrab 상태:
 
 - Desktop ZIP validation: **PASS**
-- 기준 ZIP: `C:\Users\PC\.binggupack\_opencrab_repaired\binggupack_opencrab_pack_v1.zip`
-- Cloud ingest / owned pack 반영: **HOLD / UNKNOWN**
+- local ingest: **NOT_FOUND** (opencrab_data 전수 조회 — BingguPack pack 흔적 0)
+- Cloud ingest / owned pack 반영: **UNKNOWN** (AI 접근 경로 없음 — Desktop 화면 전용)
+- Cloud 건: **HOLD** (업로드/재인제스트/owned 확인/MCP·CLI 업로드 전부 보류)
+- 기준 ZIP: `C:\Users\PC\.binggupack\_opencrab_repaired\binggupack_opencrab_pack_v1.zip` (doc1/node9/edge8, bundle_hash 5f9158cd…)
 - AI/MCP/CLI 자동 Cloud 업로드: 금지
 
 자세한 운영 문서는 [docs/BINGGUPACK_CROSSDEVICE_PUBLISH_PIPELINE_DESIGN.md](docs/BINGGUPACK_CROSSDEVICE_PUBLISH_PIPELINE_DESIGN.md)를 봅니다.

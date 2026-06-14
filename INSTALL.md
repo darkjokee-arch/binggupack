@@ -4,7 +4,7 @@
 
 > **무엇인가** — local-first · evidence-backed context packs · candidate capture/preview · human-confirmed SAVE gate · ontology graph validation. **자동 ledger/confirmed write 없음** — 저장은 preview → `SAVE n`(정확한 confirm) 게이트로만 진행됩니다.
 >
-> **현재 라인 = v1.4.4.** `binggu init`이 현재 workspace scope에 자동 후보 수집을 기본 ON으로 만드는 capture profile(scope-gated) + 영속 candidate 버퍼 + opt-in hook support + `binggu hosted pull`(폰 SAVE n→PC 한 번에). **자동 저장은 없음**(저장 = preview → `SAVE n`). 라이브 save-intent는 **신형 v2 서명 전용**(`SAVE_SIG_V2_ONLY=1`, 구형 차단). 라인: v1.0.0(개인 장부) → v1.1.0(그래프 문법) → v1.2.0(hosted save-intent) → v1.3.x(자동 캡처·preview·어댑터) → v1.4.0(AGI memory capture)~v1.4.4(hosted pull·온보딩).
+> **Latest release = v1.4.6 · mainline = v1.4.6+27 (e80abef).** `binggu init`이 현재 workspace scope에 자동 후보 수집을 기본 ON으로 만드는 capture profile(scope-gated) + 영속 candidate 버퍼 + opt-in hook support + `binggu hosted pull`(폰 SAVE n→PC 한 번에). **자동 저장은 없음**(저장 = preview → `SAVE n`). 라이브 save-intent는 **신형 v2 서명 전용**(`SAVE_SIG_V2_ONLY=1`, 구형 차단). 라인: v1.0.0(개인 장부) → v1.1.0(그래프 문법) → v1.2.0(hosted save-intent) → v1.3.x(자동 캡처·preview·어댑터) → v1.4.0(AGI memory capture)~v1.4.6(hosted pull·온보딩) → **mainline +27(e80abef): PC-mediated read publish pipeline P1~P8 구현(로컬), OpenCrab Cloud ingest는 HOLD.** (v1.4.6 = 마지막 릴리스 태그이며 현재 코드 전체가 아님.)
 >
 > OpenCrab 업로드는 **planned**(preflight G1~G7까지 구현·검증, 실 전송은 별도 결정 — 노출 0). "100% 완성판"이 아니며 모든 사용자 환경 동작을 보장하지 않습니다. 전체 로드맵·범위는 `README.md`, 따라하기는 `docs/BINGGUPACK_TUTORIAL.md` 참조.
 
