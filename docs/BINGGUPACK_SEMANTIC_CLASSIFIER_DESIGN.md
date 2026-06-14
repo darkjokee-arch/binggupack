@@ -326,3 +326,39 @@ preview → 사람이 SAVE n → 기존 게이트(save_selected) commit (schema/
 - 기본 seed 는 무변경, custom 은 개인 로컬에만. 공개 repo 에는 범용 seed 만 포함.
 
 **상태:** 구조 정정 반영 완료. seed 재작성(범용·semantic_subtype·도메인 분산)은 **별도 GO** 후. canonical 5종·edge·게이트·정규식 전부 불변.
+
+---
+
+## 13. 구현 정정 (2026-06-14, owner — 1층 완료 마감 동기화)
+
+> §0~12 는 **원안(설계 의도) 보존**. 실제 구현이 원안과 달라진 지점을 이 절에서 정정한다. 다음 세션은 이 절을 1층의 진실로 본다. (코드 무변경, 문서 동기화만)
+
+### 13-1. should_capture = cos 아님, **규칙 게이트** (원안 §1 L2 정정)
+- **원안**: L2 cos score 로 should_capture 추천(score ≤ lo → false).
+- **실측 정정**: cos 는 "**어느 subtype 인가**"는 잘 맞히나(seed 밖 새 문장 92% 일반화), "**저장할 가치가 있나(노이즈/지시문 vs 진짜)**"는 **못 가른다**(잡담·"commit 진행해라"가 진짜 문장과 같은 band). 별개 문제.
+- **확정 방향**: should_capture 결정 = **규칙 게이트**(`binggu_capture_classifier.classify`) 전담.
+  - noise veto(`OPS_IMPERATIVE`/`OPS_REPORT`/`META_CONFIRM`, 반복기준 `GENERALIZE_EXEMPT` 면제) — 운영 명령/보고/메타 차단, signal 보다 우선.
+  - 교훈규범 signal(다음부터·재발방지·놓치지않·안밟·먼저+동사+규범어미) — 순수 교훈문 recall. `해야 한다` 단독은 일회성 오탐 → 결합 한정.
+- **cos 는 subtype 추천/설명 전용** — capture 결정·state 에 절대 미개입(owner 명시 "cos 단독 금지" 정합).
+
+### 13-2. L3 (local LLM) = **연기/OFF** (원안 §1 L3 정정)
+- **원안**: 애매 band 는 qwen(L3) 호출 → should_capture/subtype 산출.
+- **정정**: should_capture 가 13-1 규칙으로 풀려 **1층에 L3 불필요**. 자원 경합(RTX4070S·qwen 9.7GB GPU 상주)·자동적재 위험으로 **OFF**. 마커 없는 일반 당위문 recall 한계는 **다음 단계 L3 보조 신호**로만 안전(별도 GO).
+
+### 13-3. semantic_subtype = **6종 확정** (원안 §12-3 정정)
+- **원안**: 교훈·결정·선호·설계결정·버그패턴·사실/메모·기타 (7~8종, owner 검수).
+- **확정**: **6종** = 교훈·결정·선호·설계결정·버그패턴·사실. ("메모·기타" 제외, seed 균형 6종×). 계층 분리(§12) 불변 — canonical 5종 위 보조 태그.
+
+### 13-4. preview 운영 (원안에 없던 추가)
+- **opt-in 배선**: `render_preview` 가 ON(`~/.binggupack/semantic_preview_enabled`, 기본 OFF)일 때만 captured 후보에 subtype 보조 라벨. ignored 는 buffer 미저장이라 대상 아님. OFF = 완전 무변화.
+- **캐싱**: `get_cached_shadow()` 모듈 메모리 캐시(파일/DB write 0), key=seed sha+임계+model_digest(변경 시 miss·stale 차단). 둘째 preview 14644ms→3ms.
+- **shadow read-only**: `subtype_suggestion()` — 파일/로그/salt/hmac write 0.
+
+### 13-5. 자동 candidate 적재 = **OFF 기본** (owner 2026-06-14)
+- `capture_enabled` flag 로 hook 자동 적재가 6/13~ 켜져 있던 것을 owner 가 **flag 비활성**(등록 보존). 저장은 **사용자가 후보 확인 후 `SAVE n` 명시할 때만** 진입. 재활성 = owner 승인. (루틴: feedback_binggupack_session_start_routine)
+
+### 13-6. 노드/엣지 구조 불변 재확인 (검토 결과)
+- 노드 = canonical 5종(존재론) **그대로**, 엣지 = 동사 6종 **그대로**. semantic_subtype 은 노드를 5→6종으로 재분류하지 **않는다**(보조 태그·다른 축=성격). 2층 rationale 도 신규 predicate 0·기존 supports_judgment 재사용 → **쪼개는 방식 동일 방향**.
+- ⚠️ 2층 주의: subtype 을 엣지/노드 정체성으로 **승격 금지**(존재론 vs 성격 두 축 경쟁 방지).
+
+**구현 검증(2026-06-14, 로컬 커밋 446bb6c→36cd5b8→1ae2995→831dd15, push 0):** classifier 29/29 · shadow 12/12 · capture_persist GO · tree CLEAN. 공개 라인 v1.2.0 미변경. **1층(노드 코어 + 운영 preview) 완료 마감.** 다음 = 2층 edge/rationale PoC.
