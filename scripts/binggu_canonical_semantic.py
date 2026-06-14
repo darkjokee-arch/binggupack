@@ -207,10 +207,11 @@ def run_selftest():
     rec("8.save/write 함수 부재", not any(n.startswith("save") or n.startswith("write") or "persist" in n
                                        for n in dir(sys.modules[__name__])))
 
-    # 9. seed 60줄 5종×12
+    # 9. seed 5종 전부 12+ (문서는 경계 술어 보강으로 16)
     import collections
     dist = collections.Counter(r["canonical_kind"] for r in cs.rows)
-    rec("9.seed 5종×12=60", len(cs.rows) == 60 and all(dist[k] == 12 for k in KINDS))
+    rec("9.seed 5종 각 12+ (문서 16 경계보강)",
+        set(dist) == set(KINDS) and all(dist[k] >= 12 for k in KINDS) and dist["문서"] == 16)
 
     print("=" * 72)
     print("binggu_canonical_semantic — selftest (도장 semantic 제안, opt-in)")
