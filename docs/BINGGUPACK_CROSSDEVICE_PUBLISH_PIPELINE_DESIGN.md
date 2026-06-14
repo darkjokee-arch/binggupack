@@ -113,3 +113,43 @@ queued → building → candidate_ready → approved → deploying → deployed
 - ② watcher_pack_builder_m0 연결 + ③ pack_validate/leak scan/영구금지 22~27 hard fail 실연결.
 - ⑤ 배포: 배포 직전 manifest full hash 재계산 ABORT · **직전 pack 보존+복원 검증(rollback)** · 배포 후 **Cloudflare live selftest**(로컬 GO≠live GO) · 실패 시 이전 worker/pack rollback.
 - 트랙 분리: "PC-mediated read 공유"(현 트랙) vs "양방향 sync"(Cloud 원본화, HOLD 조건부 재검토) — 별도 트랙.
+
+## 10. 구현 완료 현황 (2026-06-14, P1~P8 · 기준 09a35a4)
+
+| 단계 | 커밋 | 모듈 | 내용 |
+|---|---|---|---|
+| P1 | 7d1b875 | `binggu_publish_queue_p1.py` | publish_queue·멱등 단일잠금·상태머신(불법전이 ABORT)·hash 3중(full sha256)·APPROVE(안전토큰 금지) |
+| P2 | 2410272 | `binggu_publish_p2_pipeline.py` | 실 빌더(build_cloud_pack)·검증기 연결·영구금지 22~27 hard fail·배포 plan(deploy/rollback/live-check, executed=False)·fail-closed BLOCK |
+| P3 | 3a14ff6 | `binggu_publish_p3_real_ledger.py` | 실 ledger read-only build 재검증. active 0 → NO_REAL_LEDGER_DATA(실데이터 안 꾸밈)·candidate 실데이터 취급 금지 |
+| P4 | 24fab4d | `binggu_publish_p4_label.py` + `binggu_cloud_pack_export.py` | data_class 인자화(synthetic_fixture/real_candidate/real_active). release 자격 = real_active만 |
+| P5/P7 | 42c6ae8 | `binggu_publish_p5_promote.py` | candidate→active 승격 정식 모듈. owner 명시만·idempotent(이미 active=skip)·evidence 1:1 정합 BLOCK·백업 필수·checksum+audit ALLOW |
+| P6 | caf5181 | `binggu_publish_p6_opencrab_pack.py` | OpenCrab Desktop 기대 구조(OC12 스키마: space/canonical node_type/linkage closure/retrieval)로 pack 수리 + validator(6결함 검출) |
+| P8 | 09a35a4 | `binggu_publish_run_all_selftests.py` | 회귀 묶음 러너(8 게이트, summary-fail) |
+
+## 11. 운영 (Operations)
+
+### 회귀 실행 (한 줄)
+```
+py scripts/binggu_publish_run_all_selftests.py
+```
+- 8 게이트(P1·P2·P3·P4·P5 promote·P6·cloud_pack export·tree scan) **summary-fail** 방식.
+- 전부 실행 후 요약. `REGRESSION=GO` + exit 0 이면 통과. 하나라도 실패 시 `REGRESSION=FAIL` + exit 1.
+
+### 금지선 (영구)
+- **cloud upload / DB insert / tag·release / OpenCrab ingest / Cloud 원본화 금지.**
+- 실 ledger write = owner 명시 `SAVE n`(저장) / `PROMOTE`(승격)만. 그 외 자동 write 0.
+- 배포 실행 = owner **"이 ZIP 업로드 실행"** 문구 + OpenCrab plan/권한 확인 전까지 HOLD.
+
+### OpenCrab Cloud 상태 (보류, 2026-06-14)
+- Desktop ZIP validation = **PASS**
+- local ingest = **NOT_FOUND** (opencrab_data 전수 — BingguPack 흔적 0)
+- cloud ingest = **UNKNOWN** (AI 접근 경로 없음 — MCP cwd 블로커·CLI LOCAL MODE·Cloud=Desktop 로그인+Supabase 세션 전용)
+- **Cloud 건 = 보류** (업로드/재인제스트/owned 확인/MCP·CLI 업로드 전부 중단)
+
+### 기준 ZIP (보존)
+```
+C:\Users\PC\.binggupack\_opencrab_repaired\binggupack_opencrab_pack_v1.zip
+```
+- 구조: documents=1 · nodes=9 · edges=8 · format=opencrab-cloud-pack-v1 · release_ready
+- bundle_hash: `5f9158cd3b4a9d4bffe0eac36d3eeaf0fa1895ce43b1b867f0f754f1d9b0470a`
+- Cloud 업로드는 owner가 OpenCrab Desktop 화면에서 직접(AI/MCP 자동 업로드 금지).
