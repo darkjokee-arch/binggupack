@@ -18,6 +18,7 @@ import openbinggu_label_kind_map as lkmap
 import openbinggu_a0_node_dryrun as a0
 import openbinggu_incoming_to_staging as v011        # SECRET_PATTERNS
 from watcher_batch_m1 import scan_residual_pii       # PII kind 검출 (무수정 재사용)
+import binggu_canonical_semantic as canon            # 도장 semantic 제안 (opt-in, 영구금지26 개정)
 
 INPUT_CAP = 20000
 DEFAULT_MAX = 10
@@ -88,7 +89,13 @@ def capture_preview(text, max_candidates=DEFAULT_MAX):
         if len(candidates) >= max_candidates:
             excl("over_max_candidates")
             continue
-        kind, rule_id = lkmap.classify_label_kind(sent)
+        kind, rule_id = lkmap.classify_label_kind(sent)   # 종결어 규칙 = 기본/fallback
+        # 영구금지26 개정(owner GO 2026-06-14): opt-in 시 도장을 의미(semantic)로 제안.
+        # hi=확정 / ambiguous=확인권장 / lo·차단·실패=None→종결어 규칙 유지. 저장 0·사람 confirm 게이트.
+        sem = canon.suggest_label_kind(sent)
+        if sem is not None:
+            kind = sem["kind"]
+            rule_id = "semantic_%s_%.2f" % (sem["band"], sem["conf"])
         verdict = a0.classify_node(
             {"id": "preview:" + h, "sentence": sent, "node_type": lkmap.KO2EN[kind],
              "evidence_refs": ["preview"]}, status="candidate")

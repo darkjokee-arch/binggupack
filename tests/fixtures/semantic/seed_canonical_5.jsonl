@@ -1,0 +1,60 @@
+{"canonical_kind": "문서", "text": "이 설계서는 스테이징 스키마의 컬럼과 제약을 규정한다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "문서", "text": "README는 설치부터 첫 저장까지의 절차를 단계별로 안내한다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "문서", "text": "본 가이드는 인증서 발급 흐름을 화면별로 설명한다.", "domain": "인증", "band": "clear"}
+{"canonical_kind": "문서", "text": "운영 매뉴얼은 장애가 났을 때 복구 순서를 항목별로 기술한다.", "domain": "일반", "band": "clear"}
+{"canonical_kind": "문서", "text": "이 보고서는 분기 매출과 비용을 표로 정리한다.", "domain": "일반", "band": "clear"}
+{"canonical_kind": "문서", "text": "계약서는 납기와 위약 조건을 조항으로 명시한다.", "domain": "입찰", "band": "clear"}
+{"canonical_kind": "문서", "text": "API 문서는 각 엔드포인트의 입력과 출력을 정의한다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "문서", "text": "사양서는 부품의 치수와 허용 오차를 규정한다.", "domain": "일반", "band": "clear"}
+{"canonical_kind": "문서", "text": "정책 문서는 접근 권한의 등급을 구분해 규정한다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "문서", "text": "튜토리얼은 예제를 따라 실행하도록 구성되어 있다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "문서", "text": "회의록은 결정 사항과 담당자를 항목으로 적어 둔다.", "domain": "일반", "band": "clear"}
+{"canonical_kind": "문서", "text": "이 명세는 모듈 사이의 데이터 흐름을 도식으로 기술한다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "증거", "text": "테스트 로그에 전 항목이 통과한 것으로 기록되어 있다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "증거", "text": "캡처한 화면에 마감 시각이 오전 열한 시로 찍혀 있다.", "domain": "입찰", "band": "clear"}
+{"canonical_kind": "증거", "text": "서버 응답에 상태 코드 이백이 돌아온 기록이 남아 있다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "증거", "text": "측정 결과 평균 응답 시간이 삼십 밀리초로 나왔다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "증거", "text": "첨부된 명세에 면허 코드가 한글로 또렷이 적혀 있다.", "domain": "입찰", "band": "clear"}
+{"canonical_kind": "증거", "text": "감사 로그에 저장 시각과 작성자가 함께 남아 있다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "증거", "text": "공고문에 지역 제한이 경기도로 명시되어 있는 것을 확인했다.", "domain": "입찰", "band": "clear"}
+{"canonical_kind": "증거", "text": "조회 결과 적격 건수가 천육백여 건으로 집계됐다.", "domain": "입찰", "band": "clear"}
+{"canonical_kind": "증거", "text": "백업 파일의 해시가 원본과 똑같이 확인됐다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "증거", "text": "실행 출력에 통과 십 분의 십이라고 표시됐다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "증거", "text": "거래 내역에 입금 금액이 또렷이 기재되어 있다.", "domain": "일반", "band": "clear"}
+{"canonical_kind": "증거", "text": "현장 사진에 균열이 생긴 위치가 그대로 담겨 있다.", "domain": "공사", "band": "clear"}
+{"canonical_kind": "개념", "text": "낙찰하한율이란 기초금액 대비 최저 투찰 비율을 말한다.", "domain": "입찰", "band": "clear"}
+{"canonical_kind": "개념", "text": "페일클로즈드는 의심스러우면 일단 막는 기본값을 뜻한다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "개념", "text": "코사인 유사도란 두 벡터가 이루는 각도의 가까움을 재는 값이다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "개념", "text": "적격심사제는 가격과 자격을 함께 보는 낙찰 방식이다.", "domain": "입찰", "band": "clear"}
+{"canonical_kind": "개념", "text": "멱등성이란 같은 입력에 늘 같은 결과가 나오는 성질이다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "개념", "text": "감사 체인은 기록을 순서대로 묶어 위조를 막는 구조를 말한다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "개념", "text": "시평액이란 기업의 시공 능력을 금액으로 환산한 지표다.", "domain": "입찰", "band": "clear"}
+{"canonical_kind": "개념", "text": "캐시란 자주 쓰는 값을 가까이 두어 빨리 꺼내는 장치다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "개념", "text": "의무공동도급은 둘 이상이 의무로 함께 맡는 계약 방식이다.", "domain": "입찰", "band": "clear"}
+{"canonical_kind": "개념", "text": "임베딩이란 문장을 의미 숫자로 바꾼 표현을 뜻한다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "개념", "text": "롤백은 변경을 이전 시점으로 되돌리는 동작을 말한다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "개념", "text": "센트로이드란 같은 묶음에 속한 점들의 평균 위치를 뜻한다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "상태", "text": "현재 백필 작업이 절반쯤 진행 중이다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "상태", "text": "서버는 정상 가동 중이고 응답이 오고 있다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "상태", "text": "적격 공고가 지금 열일곱 건 남아 있다.", "domain": "입찰", "band": "clear"}
+{"canonical_kind": "상태", "text": "테스트 스위트는 지금 전부 통과한 상태이다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "상태", "text": "인증서 발급이 승인 대기 중이다.", "domain": "인증", "band": "clear"}
+{"canonical_kind": "상태", "text": "장부에는 후보가 열두 건 활성으로 들어 있다.", "domain": "일반", "band": "clear"}
+{"canonical_kind": "상태", "text": "빌드가 방금 끝나 배포 직전 상태이다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "상태", "text": "큐에 발송 대기 알림이 아흔아홉 건 쌓여 있다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "상태", "text": "원격과 로컬 브랜치가 같은 지점으로 맞춰져 있다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "상태", "text": "모델이 메모리에 올라가 호출을 받을 준비가 되어 있다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "상태", "text": "마감까지 사흘이 남은 상태이다.", "domain": "입찰", "band": "clear"}
+{"canonical_kind": "상태", "text": "데이터 적재가 멈춰 더 이상 늘지 않고 있다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "판단", "text": "이 입찰은 마진이 낮아 보류하는 게 낫다.", "domain": "입찰", "band": "clear"}
+{"canonical_kind": "판단", "text": "릴리스 전에는 빌드와 테스트를 모두 통과해야 한다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "판단", "text": "추천가는 일등 확률이 가장 높은 지점에서 잡아야 한다.", "domain": "입찰", "band": "clear"}
+{"canonical_kind": "판단", "text": "검증 없이 단정하는 것은 위험하니 직접 확인하는 편이 옳다.", "domain": "일반", "band": "clear"}
+{"canonical_kind": "판단", "text": "미보유 환경도 가상 도구로 충분히 검증할 수 있다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "판단", "text": "자동 저장은 막고 사람이 고를 때만 저장하는 편이 안전하다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "판단", "text": "이 방식은 부작용이 커서 채택하지 않는 쪽이 좋다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "판단", "text": "같은 실수를 막으려면 원인을 기록해 두는 게 중요하다.", "domain": "일반", "band": "clear"}
+{"canonical_kind": "판단", "text": "도장은 종결어가 아니라 뜻으로 분류하는 쪽이 맞다.", "domain": "개발", "band": "clear"}
+{"canonical_kind": "판단", "text": "비가역 작업은 반드시 승인 절차를 거쳐야 한다.", "domain": "일반", "band": "clear"}
+{"canonical_kind": "판단", "text": "지역 제한은 광역과 시군을 모두 따져 보아야 한다.", "domain": "입찰", "band": "clear"}
+{"canonical_kind": "판단", "text": "외부 사실은 실측으로 확인하기 전에는 저장하지 않는 게 낫다.", "domain": "일반", "band": "clear"}

@@ -361,4 +361,27 @@ preview → 사람이 SAVE n → 기존 게이트(save_selected) commit (schema/
 - 노드 = canonical 5종(존재론) **그대로**, 엣지 = 동사 6종 **그대로**. semantic_subtype 은 노드를 5→6종으로 재분류하지 **않는다**(보조 태그·다른 축=성격). 2층 rationale 도 신규 predicate 0·기존 supports_judgment 재사용 → **쪼개는 방식 동일 방향**.
 - ⚠️ 2층 주의: subtype 을 엣지/노드 정체성으로 **승격 금지**(존재론 vs 성격 두 축 경쟁 방지).
 
-**구현 검증(2026-06-14, 로컬 커밋 446bb6c→36cd5b8→1ae2995→831dd15, push 0):** classifier 29/29 · shadow 12/12 · capture_persist GO · tree CLEAN. 공개 라인 v1.2.0 미변경. **1층(노드 코어 + 운영 preview) 완료 마감.** 다음 = 2층 edge/rationale PoC.
+**구현 검증(2026-06-14, 로컬 커밋 446bb6c→36cd5b8→1ae2995→831dd15, push 0):** classifier 29/29 · shadow 12/12 · capture_persist GO · tree CLEAN. 공개 라인 v1.2.0 미변경. **1층(노드 코어 + 운영 preview) 완료 마감.**
+
+## 14. 도장(label_kind) semantic 분류 배선 (2026-06-14, owner GO — 영구금지 26 개정)
+
+### 14-1. 배경 — owner 지적
+"문장노드를 요구했는데 왜 종결어로 분류하는가?" 기존 `openbinggu_label_kind_map.classify_label_kind`는 5종 각 종결어미 정규식 1개, 매칭 실패 시 전부 `fallback_judgment`(판단) → owner 장부 12노드 전부 "판단"(사실·상태·개념도 흘림). 4cli R1 both_reject → owner 트랙1(헌법 개정) 결정.
+
+### 14-2. 핵심 — should_capture(규칙) vs label_kind(semantic) 분리
+- **should_capture(저장가치)** = 규칙 게이트 유지(§13-1) · cos 금지(영구금지 26 잔존)
+- **label_kind(어느 도장)** = semantic 제안 허용(개정). subtype(§13-3 성격 6종)과 다른 축 — canonical 5종 전용 seed/centroid.
+- 두 축 분리 = 영구금지 23(subtype→canonical 승격 hard fail) 유지(subtype을 도장으로 올리는 게 아니라 canonical 전용 분류기 신설).
+
+### 14-3. 구현
+- 신규 `scripts/binggu_canonical_semantic.py` — `binggu_semantic_shadow`의 검증된 헬퍼(_embed/leak_guard/_l2/_dot/BAND) 재사용. seed `tests/fixtures/semantic/seed_canonical_5.jsonl`(5종×12, **LOO 93%** = subtype 6종 92%와 동급).
+- `suggest_label_kind(text)`: band=hi 확정 / ambiguous 확인권장(둘 다 제안) / lo·차단·embed실패 = None.
+- `openbinggu_conversation_capture_preview` 배선: 종결어 규칙이 기본, `suggest_label_kind`가 None 아니면 도장 덮어쓰고 rule_id=`semantic_<band>_<conf>`.
+
+### 14-4. 영구금지 26 개정 조건 6 (owner GO)
+①기본 꺼짐(`~/.binggupack/semantic_label_enabled` opt-in) ②PII/secret leak_guard 선차단 ③band hi/ambiguous만 제안·lo/실패 fallback ④사람 preview confirm 게이트 ⑤원문 저장 0(임베딩만) ⑥결정론. should_capture·confirm은 cos 금지 잔존.
+
+### 14-5. 검증(2026-06-14)
+- canonical selftest 9/9 · capture_preview 회귀 11/11(OFF 무영향) · candidate_save·semantic_shadow·publish 8/8 전건 GO · tree CLEAN.
+- 실측(ON): 종결어로 fallback났던 5문장 → 판단(0.65)·상태(0.81)·증거(0.85)·개념(0.67)·문서(0.77) 정확 분류 · 헌법판정 PASS · 플래그 OFF 원복.
+- **미완(다음)**: 저장 결함(80자 절단·실패이유 비노출 = 4cli B 작업지시 Q2/Q3).
