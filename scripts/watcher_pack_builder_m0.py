@@ -81,9 +81,20 @@ def _build_rationale_layer2(nodes):
             "edges_written_to_pack": 0}
 
 
-def build_pack(diff_text, run, with_rationale=False):
+def _build_graph_preview_report(nodes, ev_chunk):
+    """3층 graph preview 를 report 에만 부착(read-only). pack 파일/edges.jsonl 미변경.
+    nodes + evidence_chunk → graph 조립 + validation. supports_judgment만·신규 predicate 0."""
+    import binggu_graph_preview as gp
+    ev_items = [{"id": c.get("item_id"), "text": c.get("text", "")} for c in ev_chunk]
+    g = gp.build_graph_preview(nodes, evidence_items=ev_items)
+    g["edges_written_to_pack"] = 0
+    return g
+
+
+def build_pack(diff_text, run, with_rationale=False, with_graph_preview=False):
     """M0 실행 → temp pack 묶기 → validator + 자체검증. 반환 (report_dict, pack_dir).
-    with_rationale=True 면 2층 추천을 report['rationale_layer2'] 에만 부착(pack 파일 불변)."""
+    with_rationale=True 면 2층 추천을, with_graph_preview=True 면 추가로 3층 graph preview 를
+    report 에만 부착(pack 파일 불변). graph_preview 는 rationale 을 함의(rationale 없이 단독 생성 0)."""
     store_before = m0._store_snapshot()
 
     # M0 산출 (temp; Step3 review-only read-only 호출 포함, write 0)
@@ -199,8 +210,10 @@ def build_pack(diff_text, run, with_rationale=False):
         "edges_generated": 0, "review_queue_appended": 0,
         "reingest_pack_draft_modified": 0, "v09_or_armed_changed": 0,
     }
-    if with_rationale:
+    if with_rationale or with_graph_preview:
         report["rationale_layer2"] = _build_rationale_layer2(nodes)   # report only · pack 파일 불변
+    if with_graph_preview:                                            # 3층: rationale 함의(rationale 없이 단독 0)
+        report["graph_preview"] = _build_graph_preview_report(nodes, ev_chunk)
     return report, pack_dir
 
 
@@ -218,10 +231,11 @@ def _per_run_gate(report):
     }
 
 
-def run_single(path, with_rationale=False):
+def run_single(path, with_rationale=False, with_graph_preview=False):
     diff_text = Path(path).read_text(encoding="utf-8")
     run = "single_" + _sha8(diff_text)
-    report, pack_dir = build_pack(diff_text, run, with_rationale=with_rationale)
+    report, pack_dir = build_pack(diff_text, run, with_rationale=with_rationale,
+                                  with_graph_preview=with_graph_preview)
     checks = _per_run_gate(report)
     report["per_run_checks"] = checks
     report["gate"] = "GO" if all(checks.values()) else "STOP"
@@ -324,6 +338,16 @@ def run_selftest():
     r2_off_no_key = "rationale_layer2" not in r2_off
     r2_on_has_key = "rationale_layer2" in r2_on
     r2_pack_files_same = (b_off == b_on)
+
+    # 3층 graph_preview: OFF 무변화 / ON report-only / pack 파일 byte 동일 / validation 존재
+    g_on, pd_g = build_pack((FIXTURE_DIR / "normal.diff").read_text(encoding="utf-8"), "normal",
+                            with_graph_preview=True)
+    b_g = {n: (pd_g / n).read_bytes() for n in nm}
+    g3_off_no_key = "graph_preview" not in r2_off
+    g3_on_has_key = "graph_preview" in g_on and "validation" in g_on["graph_preview"]
+    g3_pack_files_same = (b_off == b_g)
+    g3_edges_not_written = g_on.get("graph_preview", {}).get("edges_written_to_pack") == 0
+    g3_rationale_implied = "rationale_layer2" in g_on    # graph는 rationale 함의
     checks = {
         "normal_pack_has_nodes": "normal" in by and by["normal"]["n_nodes"] > 0,
         "empty_pack_zero_nodes": "empty" in by and by["empty"]["n_nodes"] == 0,
@@ -349,6 +373,12 @@ def run_selftest():
         "rationale_on_has_key": r2_on_has_key,            # ON → rationale_layer2 부착
         "rationale_pack_files_unchanged": r2_pack_files_same,  # pack 파일 byte 동일(저장 경로 미변경)
         "rationale_link_ok": r2_link_ok,                  # supports만·evidence 필수·신규 predicate 0
+        # --- 3층 graph preview (read-only · report only) ---
+        "graph_off_no_key": g3_off_no_key,                # 기본 OFF → graph_preview 없음
+        "graph_on_has_validation": g3_on_has_key,         # ON → graph_preview + validation
+        "graph_pack_files_unchanged": g3_pack_files_same,  # pack 파일 byte 동일
+        "graph_edges_not_written": g3_edges_not_written,  # edges.jsonl 미기록(0)
+        "graph_rationale_implied": g3_rationale_implied,  # graph는 rationale 함의
         "writes_temp_only": all(
             all(("/tmp/watcher_op_pack/" in w.replace("\\", "/") or "/reports/" in w.replace("\\", "/"))
                 for w in c["write_locations"]) for c in cases),
@@ -400,12 +430,13 @@ def run_selftest():
 
 def main():
     args = sys.argv[1:]
-    with_rationale = "--rationale" in args          # explicit opt-in (기본 OFF)
-    args = [a for a in args if a != "--rationale"]
+    with_graph = "--graph-preview" in args          # 3층 explicit opt-in (rationale 함의)
+    with_rationale = ("--rationale" in args) or with_graph   # graph는 rationale 없이 단독 생성 0
+    args = [a for a in args if a not in ("--rationale", "--graph-preview")]
     if not args or args[0] == "--selftest":
         run_selftest()
     else:
-        run_single(args[0], with_rationale=with_rationale)
+        run_single(args[0], with_rationale=with_rationale, with_graph_preview=with_graph)
 
 
 if __name__ == "__main__":

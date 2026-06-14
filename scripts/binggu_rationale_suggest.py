@@ -51,7 +51,7 @@ def suggest_rationale(candidates):
     ignored 문장은 호출측(preview)이 미포함(buffer 미저장) — 본 함수는 받은 후보만 처리."""
     nodes, items = {}, []
     for i, c in enumerate(candidates):
-        nid = "cand_%d" % i
+        nid = c.get("id") or ("cand_%d" % i)   # 실제 node id 우선(3층 graph화용), 없으면 임시
         nodes[nid] = {"id": nid, "properties": {"label_kind": c.get("label_kind"), "candidate": True}}
         items.append((nid, c))
 
@@ -83,6 +83,7 @@ def suggest_rationale(candidates):
             seen.add(ev_key)
             edges.append({
                 "source": c["text"][:40], "target": t["text"][:40],
+                "source_id": nid, "target_id": tnid,   # 3층 graph화용 id(없으면 임시 cand_i)
                 "relation": SUPPORTS, "verb": "근거가_된다",
                 "evidence_refs": list(c["evidence_refs"]),
                 "status": "candidate", "promotion_allowed": False, "caveat": CAVEAT_EDGE,
@@ -158,6 +159,15 @@ def _selftest():
     ck(all("candidate" in it["caveat"] for it in r["rationale"]) and
        all("candidate" in e["caveat"] for e in r["suggested_edges"]),
        "rationale/edge 전부 candidate·unverified caveat 명시")
+
+    # 10) id 보존 — 입력 candidate id → edge source_id/target_id (3층 graph화용)
+    rid = suggest_rationale([
+        {"id": "node:ev1", "text": "증거문", "label_kind": "증거", "evidence_refs": ["EVC-7"]},
+        {"id": "node:j1", "text": "판단문", "label_kind": "판단"},
+    ])
+    ck(len(rid["suggested_edges"]) == 1 and rid["suggested_edges"][0]["source_id"] == "node:ev1"
+       and rid["suggested_edges"][0]["target_id"] == "node:j1",
+       "id 보존 → edge source_id/target_id (3층 graph화용)")
 
     print("\nGATE=%s" % ("GO" if ok else "NO-GO"))
     return 0 if ok else 1
