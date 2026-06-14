@@ -202,6 +202,8 @@ binggu.py reminders
 - **python 런처** — Windows `py`, WSL/macOS `python3`. `binggu.py status`가 현재 플랫폼·런처·공유 여부를 표시합니다.
 - **OpenCrab Desktop / Claude hook 은 OS별 세션 기준**이고, **OpenCrab Cloud / ingest 는 계속 HOLD**입니다.
 
+> **검증 상태**: Windows = **real verified**. WSL · macOS = **synthetic verified only (real-device verification pending)** — 정책은 synthetic으로 증명됐고, 실기기 검증 절차는 [verification checklist](docs/BINGGUPACK_CROSS_PLATFORM_VERIFICATION_CHECKLIST.md)에 있습니다.
+
 자세히: [docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md](docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md).
 
 ---

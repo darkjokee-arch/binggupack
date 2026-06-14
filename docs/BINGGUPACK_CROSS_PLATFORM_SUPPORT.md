@@ -127,3 +127,13 @@ python3 scripts/openbinggu_public_tree_scan.py --tree .
 
 > macOS path policy covered by synthetic tests.
 > WSL path policy covered by synthetic tests (이 개발 머신에는 WSL python3 미설치 — 실 실행 검증은 WSL에 python3 설치 후 위 명령으로 가능).
+
+### 검증 상태 (real vs synthetic)
+
+| OS | 상태 |
+|---|---|
+| Windows | ✅ **real verified** (실기기 selftest/regression GATE=GO) |
+| WSL | ⏳ **synthetic verified only** — real-device verification **pending** |
+| macOS | ⏳ **synthetic verified only** — real-device verification **pending** |
+
+WSL/macOS를 실기기에서 직접 검증해 승격하는 단계별 절차는 **[BINGGUPACK_CROSS_PLATFORM_VERIFICATION_CHECKLIST.md](BINGGUPACK_CROSS_PLATFORM_VERIFICATION_CHECKLIST.md)** 를 따르세요.
