@@ -5,6 +5,7 @@
 AI와의 대화에서 건질 판단·상태·개념을 후보로 **자동 수집**하고, 사람이 직접 confirm 문구를 타이핑해야만 저장되는 **로컬 우선(local-first)** 지식장부입니다. 자동 수집은 켜지지만, **자동 저장은 없습니다.**
 
 - **Latest: v1.4.6** — <https://github.com/darkjokee-arch/binggupack/releases/tag/v1.4.6>
+- **Mainline:** PC-mediated read publish pipeline P1~P8 implemented locally; OpenCrab Cloud ingest remains **HOLD**.
 - **Python 3.10+ · 외부 런타임 의존성 0 · Windows/macOS/Linux**
 
 ---
@@ -49,21 +50,24 @@ AI와 대화하다 보면 정작 남기고 싶은 것들 — **내 판단, 배�
 
   ✗ 자동 저장 없음   ✗ 상주 데몬 없음   ✗ 자동 pull 없음
   ─────────────────────────────────────────────────────────
-  OpenCrab 업로드 · export · marketplace · 팀/공유  →  [HOLD · 미구현]
+  PC-mediated read publish  →  local queue/build/validate/ZIP repair [구현]
+  OpenCrab Cloud ingest · Cloud 원본화 · marketplace  →  [HOLD]
 ```
 
 - **두 경로 모두 끝은 `SAVE n` 게이트** — 사람이 confirm 문구를 타이핑하기 전엔 ledger에 아무것도 안 들어갑니다.
 - 폰/웹은 worker inbox에 *예약*만(휘발). PC가 `hosted inbox`로 1회 회수→로컬 staging 보존(저장 0), `hosted pull --select`로 고른 것만 확정.
-- OpenCrab 전송·export·marketplace는 전부 **HOLD**(별도 결정 전 미구현).
+- **PC-mediated read 공유**는 로컬 장부를 원본으로 두고, PC가 owner 승인분만 read-only pack으로 빌드·검증합니다.
+- OpenCrab Desktop용 ZIP 생성·검증은 구현됐지만, Cloud ingest/owned pack 반영은 **HOLD**입니다.
 
 ---
 
-## 핵심 개념 (4)
+## 핵심 개념 (5)
 
 1. **자동 후보 수집 (AGI memory)** — `binggu init --agi-memory`가 만든 profile에서 **당신의 작업 전역**으로 candidate capture(시크릿/PII 발화는 자동 제외). 현재 workspace만 원하면 `binggu init`(privacy 모드). clone 직후엔 동작하지 않습니다.
 2. **미리보기** — "빙구팩 저장해" 또는 `binggu capture preview`로 수집된 후보를 확인합니다.
 3. **사람 승인 저장** — `SAVE n` confirm 없이는 저장 0. 의도·자동·번호 없는 저장은 전부 BLOCK.
-4. **증거 기반 그래프** — 5종 노드 + 동사형(typed verb) 엣지 + 원문 증빙(evidence).
+4. **증거 기반 그래프** — 5종 canonical 노드 + semantic_subtype 보조층 + 동사형(typed verb) 엣지 + 모든 엣지의 원문 증빙(evidence).
+5. **PC-mediated read 공유** — 원본은 PC 로컬 ledger, 다른 기기는 PC가 검증해 만든 read-only pack을 읽습니다. Cloud를 원본 store로 쓰는 양방향 sync는 HOLD입니다.
 
 ---
 
@@ -200,17 +204,53 @@ binggu.py reminders
 
 ---
 
+## PC-mediated read 공유 / Publish pipeline
+
+PC-mediated read 공유는 **로컬 PC ledger를 단일 원본**으로 두고, owner가 확정한 항목만 read-only pack으로 빌드해 다른 기기에서 읽게 하는 트랙입니다. "실시간 양방향 공유"가 아니라 **PC가 매개하는 읽기 공유**입니다.
+
+현재 구현 완료 범위(P1~P8):
+
+| 단계 | 역할 |
+|---|---|
+| P1 | publish queue, 멱등 잠금, 상태머신, hash 3중 검증 |
+| P2 | 빌더·검증기 연결, 영구금지 22~27 hard fail, deploy plan만 생성 |
+| P3 | 실 ledger read-only 게이트. active 데이터 없으면 `NO_REAL_LEDGER_DATA` |
+| P4 | `data_class` 분리: `synthetic_fixture` / `real_candidate` / `real_active` |
+| P5/P7 | candidate→active promote 정식 모듈. owner 명시, 백업, audit, evidence 1:1 정합 |
+| P6 | OpenCrab Desktop이 읽는 OC12 구조로 ZIP repair + validator |
+| P8 | P1~P6 + cloud_pack + tree scan 회귀 묶음 러너 |
+
+운영 명령:
+
+```bash
+py scripts/binggu_publish_run_all_selftests.py
+```
+
+통과 기준은 `REGRESSION=GO` + exit code 0 입니다. 이 명령은 회귀 검증만 수행하며, Cloud upload/DB insert/OpenCrab ingest를 하지 않습니다.
+
+현재 OpenCrab 상태:
+
+- Desktop ZIP validation: **PASS**
+- 기준 ZIP: `C:\Users\PC\.binggupack\_opencrab_repaired\binggupack_opencrab_pack_v1.zip`
+- Cloud ingest / owned pack 반영: **HOLD / UNKNOWN**
+- AI/MCP/CLI 자동 Cloud 업로드: 금지
+
+자세한 운영 문서는 [docs/BINGGUPACK_CROSSDEVICE_PUBLISH_PIPELINE_DESIGN.md](docs/BINGGUPACK_CROSSDEVICE_PUBLISH_PIPELINE_DESIGN.md)를 봅니다.
+
+---
+
 ## 증거 기반 그래프 문법 / Graph grammar
 
 모든 pack은 [docs/BINGGUPACK_GRAPH_GRAMMAR_SPEC.md](docs/BINGGUPACK_GRAPH_GRAMMAR_SPEC.md)를 따르고 검증기가 fail-closed로 강제합니다.
 
-- **노드 5종**(문서/증거/개념/상태/판단), 전부 핵심 문장형 — 단어 노드 금지
-- **엣지는 동사형만**(predicate registry) — "이 증거가 이 판단의 근거" 등
-- **전 엣지 원문 증빙 의무** — 출처+행+발췌 해시. 파서/폴더 유래는 증거가 아니라 출처표시(provenance)
-- **검증 미달 = 보류(quarantine)** — 사유+복귀 조건과 보존, 매 빌드 재심사. 즉시 차단은 PII/시크릿뿐
-- payload는 짧은 라벨만, 전체 문장은 evidence chunk — 절단은 빌드 실패
+- **5종 canonical 노드**: 문서(Document) / 증거(Evidence) / 개념(Concept) / 상태(State) / 판단(Claim). 노드는 핵심 문장 중심이며 단어 노드는 금지합니다.
+- **semantic_subtype은 보조층**: 교훈 / 결정 / 선호 / 설계결정 / 버그패턴 / 사실 같은 성격 태그입니다. canonical node type으로 승격하면 hard fail입니다.
+- **동사형 typed edge**: 엣지는 "A가 B의 근거가 된다"처럼 동사 의미를 가진 relation만 허용합니다. node-to-node 근거 edge는 `supports_judgment`를 기본 화이트리스트로 검증합니다.
+- **모든 엣지 원문 증빙 의무**: edge마다 evidence id, source, excerpt/hash/span 연결이 있어야 합니다. provenance(파서·폴더·frontmatter 유래)는 증거가 아닙니다.
+- **후보와 확정 분리**: candidate/real_candidate는 release-ready가 아니며, owner promote 후 `real_active`만 release 자격을 얻습니다.
+- **검증 미달 = fail-closed**: 증거 누락, hash 불일치, synthetic 위장, semantic_subtype 승격, 미등록 verb는 pack build/validation 단계에서 BLOCK합니다.
 
-pack은 언제나 candidate이며 받는 쪽 운영 그래프에 자동 반영되지 않습니다.
+pack이 `real_active`로 빌드돼도 받는 쪽 운영 그래프에 자동 반영되지 않습니다. Cloud ingest/owned pack 반영은 별도 owner 작업입니다.
 
 ---
 
@@ -222,6 +262,7 @@ python binggu.py --selftest                           # 26/26 (장부 + capture 
 python scripts/binggu_capture_persist.py              # 16/16 (영속 candidate 버퍼)
 python scripts/binggu_capture_profile.py              # 9/9  (profile · settings hook · pause/resume/uninstall)
 python hooks/binggu_capture_hook.py --selftest        # 8/8  (UserPromptSubmit/Stop)
+py scripts/binggu_publish_run_all_selftests.py         # 8/8  (publish P1~P8 회귀 묶음)
 python scripts/openbinggu_public_tree_scan.py --tree .   # CLEAN
 ```
 
@@ -234,9 +275,10 @@ python scripts/openbinggu_public_tree_scan.py --tree .   # CLEAN
 - [INSTALL.md](INSTALL.md) — 설치·검증·capture 활성화
 - [docs/BINGGUPACK_CAPTURE_HOOK_SETUP.md](docs/BINGGUPACK_CAPTURE_HOOK_SETUP.md) — AGI memory capture 설치/scope/롤백
 - [docs/BINGGUPACK_GRAPH_GRAMMAR_SPEC.md](docs/BINGGUPACK_GRAPH_GRAMMAR_SPEC.md) — 그래프 문법
+- [docs/BINGGUPACK_CROSSDEVICE_PUBLISH_PIPELINE_DESIGN.md](docs/BINGGUPACK_CROSSDEVICE_PUBLISH_PIPELINE_DESIGN.md) — PC-mediated read 공유 publish 파이프라인(P1~P8)
 - [hosted/workers/README.md](hosted/workers/README.md) — hosted 조회·save-intent 배포
 - [docs/BINGGUPACK_SAVE_INTENT_LIVE_E2E_RESULT.md](docs/BINGGUPACK_SAVE_INTENT_LIVE_E2E_RESULT.md) — save-intent 라이브 E2E(폰→러너→candidate) 결과·신형 v2 서명
-- [docs/BINGGUPACK_SEMANTIC_CLASSIFIER_DESIGN.md](docs/BINGGUPACK_SEMANTIC_CLASSIFIER_DESIGN.md) — semantic capture classifier **설계(HOLD·미구현)**. 기존 정규식 위에 얹는 보조 subtype 층으로만 설계됨(canonical 5종 스키마 불변)
+- [docs/BINGGUPACK_SEMANTIC_CLASSIFIER_DESIGN.md](docs/BINGGUPACK_SEMANTIC_CLASSIFIER_DESIGN.md) — semantic_subtype 보조층 설계. canonical 5종 스키마는 불변이며, cos/확률은 subtype 추천 전용입니다.
 
 ---
 
@@ -265,17 +307,17 @@ binggupack/
 
 - **자동 저장 없음** — 저장은 preview → `SAVE n` 사람 confirm만.
 - **SAVE n human gate** — `actor=auto`·confirm 누락/불일치·preview 미확인은 전부 BLOCK.
-- **candidate-only** — 모든 노드는 후보 상태(`promotion_allowed=0`), 자동 확정(`confirmed`) 전이 0.
+- **candidate → active human gate** — 노드는 candidate로 들어오고, owner가 명시한 항목만 promote로 active가 됩니다. 자동 확정(`confirmed`) 전이 0.
 - **secret/PII hard block** — 시크릿/PII 발화는 정규식이 후보 단계에서 무조건 제외(semantic이 못 뒤집음).
 - **inbox disabled by default** — 폰/웹 save-intent inbox는 평소 잠김(fail-closed), `SAVE n`이 사람 승인 신호.
 - **신형 서명 전용** — `SAVE_SIG_V2_ONLY=1`, 구형 HMAC 차단.
 - **원문 전문 저장 없음** — 80자 이내 발췌만. shadow/로그에도 원문 미보관.
 
-**비목표 (HOLD · 미구현 — 별도 결정 전 동작 안 함):**
+**비목표 (HOLD — 별도 결정 전 동작 안 함):**
 
-- OpenCrab 실 전송 · export · marketplace · 팀/공유/과금
+- OpenCrab Cloud 실 업로드/ingest · Cloud 원본화 · marketplace · 팀/공유/과금
 - 자동 확정(confirmed) · 자동 업로드 · 상주 데몬 · 주기적 자동 pull
-- **semantic capture classifier** — 설계 단계(HOLD). 동작하지 않으며, 구현 시에도 기존 정규식/그래프 스키마는 불변.
+- cos/확률 지표로 capture/save/approve를 결정하는 자동화. semantic_subtype은 표시·추천 보조층일 뿐입니다.
 
 ---
 
