@@ -70,7 +70,13 @@ def synthetic_approved():
 
 
 # ---------------- Cloud Pack v1 산출물 빌드 ----------------
-def build_cloud_pack(out_dir, nodes, evidence, graph_preview, graph_confirm):
+ALLOWED_DATA_CLASS = {"synthetic_fixture", "real_candidate", "real_active"}
+
+
+def build_cloud_pack(out_dir, nodes, evidence, graph_preview, graph_confirm,
+                     data_class="synthetic_fixture"):
+    if data_class not in ALLOWED_DATA_CLASS:
+        raise ValueError("data_class 비허용값: %r (allowed=%s)" % (data_class, sorted(ALLOWED_DATA_CLASS)))
     os.makedirs(out_dir, exist_ok=True)
     for sub in ("cloud", "graph", "evidence", "quality", "reports", "benchmark", "ingest", "neo4j"):
         os.makedirs(os.path.join(out_dir, sub), exist_ok=True)
@@ -164,13 +170,17 @@ def build_cloud_pack(out_dir, nodes, evidence, graph_preview, graph_confirm):
 
     gate_pass = (reval["hit_rate"] >= 0.8 and reval["relevant_hit_rate"] >= 0.6
                  and reval["average_term_coverage"] >= 0.25 and reval["known_match_failures"] == 0)
-    # synthetic fixture 는 게이트를 통과해도 release 자격 없음 — 억지 true 금지(owner). 측정값은 정직 기록.
-    is_synthetic = True
-    release_ready = (len(required_failures) == 0) and gate_pass and (not is_synthetic)
+    # release 자격 = real_active 만(사람 확정분). synthetic/real_candidate 는 게이트 통과해도 release 자격 없음.
+    # 억지 true 금지(owner). 측정값은 정직 기록. candidate/active/synthetic 명확 분리.
+    is_synthetic = (data_class == "synthetic_fixture")
+    is_release_eligible = (data_class == "real_active")
+    release_ready = (len(required_failures) == 0) and gate_pass and is_release_eligible
     release_status = "ready" if release_ready else "degraded"
     degraded_reasons = list(required_failures)
     if is_synthetic:
         degraded_reasons.append("synthetic_fixture: 실데이터 아님 — release 자격 없음(빌더 검증용 dry-run)")
+    elif data_class == "real_candidate":
+        degraded_reasons.append("real_candidate: 사람 확정(active) 전 후보 — release 자격 없음")
     if not gate_pass:
         if reval["hit_rate"] < 0.8:
             degraded_reasons.append("hit_rate %.3f < 0.8" % reval["hit_rate"])
@@ -187,7 +197,7 @@ def build_cloud_pack(out_dir, nodes, evidence, graph_preview, graph_confirm):
               "nodes": len(graph_nodes), "edges": len(graph_edges), "edges_skipped": len(edge_skipped)}
 
     manifest = {"format_version": PACK_FORMAT, "pack_title": PACK_TITLE, "purpose": PACK_PURPOSE,
-                "pack_type": "candidate", "data_class": "synthetic_fixture", "unverified": True,
+                "pack_type": "candidate", "data_class": data_class, "unverified": True,
                 "promotion_allowed_default": False, "cloud_upload": False, "db_insert": False,
                 "counts": counts, "release_ready": release_ready, "release_status": release_status,
                 "files": ["manifest.json", "cloud/documents.jsonl", "cloud/chunks.jsonl",
@@ -207,7 +217,8 @@ def build_cloud_pack(out_dir, nodes, evidence, graph_preview, graph_confirm):
                                    "average_term_coverage": 0.25, "known_match_failures": 0},
                     "measured": reval, "gate_pass": gate_pass, "release_ready": release_ready,
                     "release_status": release_status, "degraded_reasons": degraded_reasons}
-    pack_contract = {"format": PACK_FORMAT, "required_files_present": True, "synthetic": True,
+    pack_contract = {"format": PACK_FORMAT, "required_files_present": True, "synthetic": is_synthetic,
+                     "data_class": data_class,
                      "cloud_upload": False, "db_insert": False, "operating_db_touched": False}
     graphrag = {"nodes": counts["nodes"], "edges": counts["edges"], "verb_edges": SUPPORTS,
                 "new_predicates": 0, "node_to_node_verb_edges": sum(1 for e in graph_edges if e.get("edge_kind") == "verb")}

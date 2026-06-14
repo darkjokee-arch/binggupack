@@ -140,7 +140,9 @@ def validate_gate(build_result):
 # ── 배포 plan / rollback plan / live-check (실행 0) ──────────
 def build_deploy_plan(manifest, bundle_full_hash):
     """배포 절차 준비만 — executed=False 강제. 실 cloud 0."""
-    synthetic = manifest.get("data_class") == "synthetic_fixture"
+    release_ready = manifest.get("release_ready") is True
+    blocked = None if release_ready else (
+        "release_ready=false — 실배포 자격 없음(data_class=%s)" % manifest.get("data_class"))
     return {
         "deploy_plan": {
             "tool": "wrangler",
@@ -154,7 +156,7 @@ def build_deploy_plan(manifest, bundle_full_hash):
             "executed": False,
             "cloud_upload": False,
             "db_insert": False,
-            "blocked_reason": "synthetic_fixture — 실배포 자격 없음(dry-run plan only)" if synthetic else None,
+            "blocked_reason": blocked,
         },
         "rollback_plan": {
             "action": "wrangler rollback <prev_version_id>",
