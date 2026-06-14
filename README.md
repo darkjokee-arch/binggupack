@@ -4,8 +4,8 @@
 
 AI와의 대화에서 건질 판단·상태·개념을 후보로 **자동 수집**하고, 사람이 직접 confirm 문구를 타이핑해야만 저장되는 **로컬 우선(local-first)** 지식장부입니다. 자동 수집은 켜지지만, **자동 저장은 없습니다.**
 
-- **Latest release: v1.4.6** — <https://github.com/darkjokee-arch/binggupack/releases/tag/v1.4.6> (released tag)
-- **Mainline: `v1.4.6+27` (e80abef)** — v1.4.6 릴리스 **이후** 미릴리스 진행분. PC-mediated read publish pipeline P1~P8 구현 완료(로컬), OpenCrab Cloud ingest는 **HOLD**. (즉 v1.4.6 태그 = 현재 코드 전체가 아니라 마지막 릴리스 시점입니다.)
+- **Latest release: v1.5.0** — <https://github.com/darkjokee-arch/binggupack/releases/tag/v1.5.0>
+- **Mainline: v1.5.0** — PC-mediated read publish pipeline P1~P8 구현(로컬) + evidence graph 문법/pack repair. OpenCrab Cloud ingest는 **HOLD**(Desktop validation PASS / local ingest NOT_FOUND / cloud ingest UNKNOWN).
 - **Python 3.10+ · 외부 런타임 의존성 0 · Windows/macOS/Linux**
 
 ---
