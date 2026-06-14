@@ -91,10 +91,13 @@ def _build_graph_preview_report(nodes, ev_chunk):
     return g
 
 
-def build_pack(diff_text, run, with_rationale=False, with_graph_preview=False):
+def build_pack(diff_text, run, with_rationale=False, with_graph_preview=False,
+               with_graph_confirm=False, confirm_approve=None, confirm_reject=None, confirm_defer=None):
     """M0 실행 → temp pack 묶기 → validator + 자체검증. 반환 (report_dict, pack_dir).
-    with_rationale=True 면 2층 추천을, with_graph_preview=True 면 추가로 3층 graph preview 를
-    report 에만 부착(pack 파일 불변). graph_preview 는 rationale 을 함의(rationale 없이 단독 생성 0)."""
+    with_rationale=2층 / with_graph_preview=3층 / with_graph_confirm=5층 사람 승인 — 전부 report 에만 부착
+    (pack 파일 불변). 함의: confirm⊃graph_preview⊃rationale. 자동 approve 0 · pack/export 미실행."""
+    if with_graph_confirm:
+        with_graph_preview = True   # 5층은 3·4층(graph_preview) 함의
     store_before = m0._store_snapshot()
 
     # M0 산출 (temp; Step3 review-only read-only 호출 포함, write 0)
@@ -214,6 +217,10 @@ def build_pack(diff_text, run, with_rationale=False, with_graph_preview=False):
         report["rationale_layer2"] = _build_rationale_layer2(nodes)   # report only · pack 파일 불변
     if with_graph_preview:                                            # 3층: rationale 함의(rationale 없이 단독 0)
         report["graph_preview"] = _build_graph_preview_report(nodes, ev_chunk)
+    if with_graph_confirm:                                            # 5층: 사람 승인(report only · 자동 approve 0)
+        import binggu_graph_confirm as gc
+        report["graph_confirm"] = gc.build_graph_confirm(
+            report["graph_preview"], approve=confirm_approve, reject=confirm_reject, defer=confirm_defer)
     return report, pack_dir
 
 
@@ -231,11 +238,14 @@ def _per_run_gate(report):
     }
 
 
-def run_single(path, with_rationale=False, with_graph_preview=False):
+def run_single(path, with_rationale=False, with_graph_preview=False, with_graph_confirm=False,
+               confirm_approve=None, confirm_reject=None, confirm_defer=None):
     diff_text = Path(path).read_text(encoding="utf-8")
     run = "single_" + _sha8(diff_text)
     report, pack_dir = build_pack(diff_text, run, with_rationale=with_rationale,
-                                  with_graph_preview=with_graph_preview)
+                                  with_graph_preview=with_graph_preview,
+                                  with_graph_confirm=with_graph_confirm, confirm_approve=confirm_approve,
+                                  confirm_reject=confirm_reject, confirm_defer=confirm_defer)
     checks = _per_run_gate(report)
     report["per_run_checks"] = checks
     report["gate"] = "GO" if all(checks.values()) else "STOP"
@@ -348,6 +358,17 @@ def run_selftest():
     g3_pack_files_same = (b_off == b_g)
     g3_edges_not_written = g_on.get("graph_preview", {}).get("edges_written_to_pack") == 0
     g3_rationale_implied = "rationale_layer2" in g_on    # graph는 rationale 함의
+
+    # 5층 graph_confirm: OFF 무변화 / ON report-only / 자동 approve 0 / pack 파일 byte 동일
+    cf_on, pd_cf = build_pack((FIXTURE_DIR / "normal.diff").read_text(encoding="utf-8"), "normal",
+                              with_graph_confirm=True)
+    b_cf = {n: (pd_cf / n).read_bytes() for n in nm}
+    gc_off_no_key = "graph_confirm" not in r2_off
+    gc_on_has_key = "graph_confirm" in cf_on and "summary" in cf_on["graph_confirm"]
+    gc_auto_approve_zero = cf_on.get("graph_confirm", {}).get("summary", {}).get("auto_approved") == 0
+    gc_default_no_approve = cf_on["graph_confirm"]["summary"]["approved"] == 0   # 명시 선택 없으면 approved 0
+    gc_pack_files_same = (b_off == b_cf)
+    gc_graph_implied = "graph_preview" in cf_on   # confirm은 graph_preview 함의
     checks = {
         "normal_pack_has_nodes": "normal" in by and by["normal"]["n_nodes"] > 0,
         "empty_pack_zero_nodes": "empty" in by and by["empty"]["n_nodes"] == 0,
@@ -379,6 +400,13 @@ def run_selftest():
         "graph_pack_files_unchanged": g3_pack_files_same,  # pack 파일 byte 동일
         "graph_edges_not_written": g3_edges_not_written,  # edges.jsonl 미기록(0)
         "graph_rationale_implied": g3_rationale_implied,  # graph는 rationale 함의
+        # --- 5층 graph confirm (사람 승인 · report only · 자동 approve 0) ---
+        "confirm_off_no_key": gc_off_no_key,              # 기본 OFF → graph_confirm 없음
+        "confirm_on_has_summary": gc_on_has_key,          # ON → graph_confirm + summary
+        "confirm_auto_approve_zero": gc_auto_approve_zero,  # 자동 approve 0
+        "confirm_default_no_approve": gc_default_no_approve,  # 명시 선택 없으면 approved 0
+        "confirm_pack_files_unchanged": gc_pack_files_same,  # pack 파일 byte 동일
+        "confirm_graph_implied": gc_graph_implied,        # confirm은 graph_preview 함의
         "writes_temp_only": all(
             all(("/tmp/watcher_op_pack/" in w.replace("\\", "/") or "/reports/" in w.replace("\\", "/"))
                 for w in c["write_locations"]) for c in cases),
@@ -428,15 +456,41 @@ def run_selftest():
     sys.exit(0 if gate == "GO" else 1)
 
 
+def _parse_idx(raw, flag):
+    """--approve-edge 1,3 → [1,3]. 없으면 None."""
+    if flag in raw:
+        i = raw.index(flag)
+        if i + 1 < len(raw):
+            return [int(x) for x in raw[i + 1].split(",") if x.strip().isdigit()]
+    return None
+
+
 def main():
-    args = sys.argv[1:]
-    with_graph = "--graph-preview" in args          # 3층 explicit opt-in (rationale 함의)
-    with_rationale = ("--rationale" in args) or with_graph   # graph는 rationale 없이 단독 생성 0
-    args = [a for a in args if a not in ("--rationale", "--graph-preview")]
+    raw = sys.argv[1:]
+    with_confirm = "--graph-confirm-preview" in raw         # 5층 (graph_preview 함의)
+    with_graph = ("--graph-preview" in raw) or with_confirm  # 3층 (rationale 함의)
+    with_rationale = ("--rationale" in raw) or with_graph
+    approve, reject, defer = (_parse_idx(raw, "--approve-edge"), _parse_idx(raw, "--reject-edge"),
+                              _parse_idx(raw, "--defer-edge"))
+    # 플래그 + (값 가진 플래그의) 값 토큰 제거 → 남은 첫 비플래그가 diff path
+    valflags = {"--approve-edge", "--reject-edge", "--defer-edge"}
+    boolflags = {"--rationale", "--graph-preview", "--graph-confirm-preview"}
+    args, j = [], 0
+    while j < len(raw):
+        if raw[j] in valflags:
+            j += 2
+            continue
+        if raw[j] in boolflags:
+            j += 1
+            continue
+        args.append(raw[j])
+        j += 1
     if not args or args[0] == "--selftest":
         run_selftest()
     else:
-        run_single(args[0], with_rationale=with_rationale, with_graph_preview=with_graph)
+        run_single(args[0], with_rationale=with_rationale, with_graph_preview=with_graph,
+                   with_graph_confirm=with_confirm, confirm_approve=approve,
+                   confirm_reject=reject, confirm_defer=defer)
 
 
 if __name__ == "__main__":
