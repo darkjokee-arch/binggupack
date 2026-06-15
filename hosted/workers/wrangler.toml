@@ -8,3 +8,7 @@ compatibility_date = "2025-05-01"
 
 [ai]
 binding = "AI"
+
+# P3 활성(2026-06-15 owner "라이브배포 시작"): semantic 도장 ON. 실패 시 RULES→no_suggestion fallback.
+[vars]
+SEMANTIC_LABEL_ENABLED = "1"
