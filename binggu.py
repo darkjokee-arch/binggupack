@@ -131,6 +131,17 @@ def cmd_init(a):
             print("hook 이미 등록됨 — 그대로 사용")
         print("자동 후보 수집만 켜집니다. 저장은 preview 후 SAVE n 게이트로만(자동 저장 없음).")
         print("상태:  python binggu.py capture status   ·   끄기:  capture pause   ·   제거:  capture uninstall")
+    # 환경 점검(옵션1, 4cli 20260615_1900) — 무엇이 켜지고 무엇을 더 깔면 뭐가 생기는지 1회 안내.
+    # 점검만 — 자동 설치 안 함(없는 건 명령만 안내). 실패해도 init 흐름엔 영향 0.
+    try:
+        import sys as _sys
+        _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
+        import binggu_env_check as _ec
+        print()
+        print(_ec.render_report(_ec.check_env()))
+        print()
+    except Exception:
+        pass
     print("다음:  python binggu.py preview \"오늘 정리하고 싶은 문장들\"")
     return 0
 
