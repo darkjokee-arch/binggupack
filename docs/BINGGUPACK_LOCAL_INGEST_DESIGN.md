@@ -52,11 +52,19 @@ python scripts/localbinggu_ingest_executor.py <pack.zip>
 python scripts/localbinggu_ingest_executor.py <real_pack.zip> --execute
 ```
 
-## 6. OpenCrab plan 안내 (역인제스트 가능 조건)
+## 6. OpenCrab plan 안내 (역방향 인제스트 = Expert plan 전용)
 
-- **OpenCrab Cloud 역인제스트(ontology_ingest / Cloud 적재)는 Expert plan 전용** — Free/Pro plan에서는 역방향 인제스트 불가([[feedback_opencrab_cloud_plan_gate]] 정합).
-- **본 구현(로컬 CLI `opencrab ingest`, LOCAL MODE)은 plan 무관** — 실측(2026-06-15): 실 ledger ZIP(real_active, node 9/edge 8) `--execute` 적재 시 plan 게이트 없이 성공(20/20, query score 1.000).
-- 정리: 빙구팩 **로컬** 역인제스트는 plan 제약 없이 동작한다. 향후 **Cloud** 역인제스트로 확장할 때에만 Expert plan이 필요하다.
+빙구팩 → OpenCrab **역방향 인제스트**(외부 작업 도구에서 OpenCrab으로 자기 지식을 적재)는 OpenCrab **Expert plan 전용** 기능이다(OpenCrab 약관).
+
+| plan | 자기 지식 인제스트 | 외부 도구→OpenCrab 역방향 인제스트 |
+|---|---|---|
+| Free | 불가 (기본/유료 팩 조회·구매만) | 불가 |
+| Pro (월 $10) | 가능 (개인 온톨로지·격리 저장) | **불가** |
+| Expert (월 $30) | 가능 | **가능** ← 빙구팩 역인제스트가 여기 해당 |
+
+따라서 빙구팩 역인제스트를 사용하려면 OpenCrab **Expert plan**이 필요하다. Free는 자기 인제스트 자체가 불가하고, Pro는 자기 인제스트는 되지만 외부 도구로부터의 역방향 인제스트는 불가하다.
+
+> 참고: 로컬 CLI(`opencrab ingest`)는 코드 차원의 plan 게이트가 없어 기술적으로는 plan과 무관하게 실행되지만, **역방향 인제스트 권한은 OpenCrab Expert plan 약관에 귀속**된다. 본 문서는 약관 기준(Expert 필요)을 정본으로 한다.
 
 ## 7. HOLD (이번 전환 범위 밖)
 

@@ -249,8 +249,9 @@ py scripts/binggu_publish_run_all_selftests.py
 현재 OpenCrab 상태:
 
 - Desktop ZIP validation: **PASS**
-- local ingest 경로: **구현·실증됨** (`localbinggu_ingest_executor` — ZIP→`opencrab ingest`). 실 ledger 적재 검증 GO(real_active 20/20, query score 1.000). **plan 무관**(LOCAL MODE).
-- Cloud ingest / owned pack 반영: **UNKNOWN** (AI 접근 경로 없음 — Desktop 화면 전용). **Cloud 역인제스트는 Expert plan 전용**(Free/Pro 불가).
+- local ingest 경로: **구현·실증됨** (`localbinggu_ingest_executor` — ZIP→`opencrab ingest`). 실 ledger 적재 검증 GO(real_active 20/20, query score 1.000).
+- 역방향 인제스트 권한: **OpenCrab Expert plan 전용**(약관 — Free는 자기 인제스트 불가, Pro는 외부 도구→OpenCrab 역방향 인제스트 불가, Expert만 가능).
+- Cloud ingest / owned pack 반영: **UNKNOWN** (AI 접근 경로 없음 — Desktop 화면 전용).
 - Cloud 건: **HOLD** (업로드/재인제스트/owned 확인/MCP·CLI 업로드 전부 보류)
 - 기준 ZIP: `C:\Users\PC\.binggupack\_opencrab_repaired\binggupack_opencrab_pack_v1.zip` (doc1/node9/edge8, bundle_hash 5f9158cd…)
 - AI/MCP/CLI 자동 Cloud 업로드: 금지
