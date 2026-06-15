@@ -35,9 +35,35 @@ def _seed_sha(seed_path):
         return hashlib.sha256(f.read()).hexdigest()[:16]
 
 
+_OLLAMA_AVAIL = None
+
+
+def ollama_available(probe=None):
+    """Ollama 에 bge-m3 모델이 있으면 True (프로세스 1회 캐싱). 설치만 하면 자동 감지.
+    probe= 테스트 주입(True/False). 네트워크 실패/미설치 → False(조용히 fallback)."""
+    global _OLLAMA_AVAIL
+    if probe is not None:
+        return probe
+    if _OLLAMA_AVAIL is not None:
+        return _OLLAMA_AVAIL
+    try:
+        import urllib.request
+        with urllib.request.urlopen(S.OLLAMA + "/api/tags", timeout=2) as r:
+            tags = json.loads(r.read())
+        names = [m.get("name", "") for m in tags.get("models", [])]
+        _OLLAMA_AVAIL = any(S.MODEL in n for n in names)   # bge-m3 존재
+    except Exception:
+        _OLLAMA_AVAIL = False
+    return _OLLAMA_AVAIL
+
+
 def enabled():
-    """기본 OFF — 플래그 파일 있을 때만 semantic 도장 제안 활성."""
-    return os.path.exists(FLAG)
+    """semantic 도장 제안 활성 조건 — 옵션1(4cli 20260615_1900): 명시 플래그 OR Ollama bge-m3 자동 감지.
+    Ollama+bge-m3 만 깔면 자동 ON(별도 플래그 불필요). BINGGU_SEMANTIC_OFF=1 이면 강제 OFF(사용자 거부/테스트).
+    영구금지26 정합: 활성돼도 cos 는 도장 '제안'만 — should_capture/confirm/자동저장 결정엔 안 씀."""
+    if os.environ.get("BINGGU_SEMANTIC_OFF") == "1":
+        return False
+    return os.path.exists(FLAG) or ollama_available()
 
 
 class CanonicalSemantic:
@@ -188,11 +214,17 @@ def run_selftest():
     cs_fail = CanonicalSemantic(embed_fn=lambda t: None)
     rec("4.embed 실패 시 None(fallback)", cs_fail.classify_kind("정상 문장이다") is None)
 
-    # 5. enabled() 기본 OFF — 플래그 없으면 suggest None
-    if not os.path.exists(FLAG):
-        rec("5.기본 OFF(플래그 없으면 suggest None)", suggest_label_kind("이 문서는 규정한다") is None)
+    # 5. enabled() — 옵션1 자동 감지(4cli 20260615_1900): 강제 OFF + Ollama probe 주입(결정론)
+    _prev = os.environ.get("BINGGU_SEMANTIC_OFF")
+    os.environ["BINGGU_SEMANTIC_OFF"] = "1"
+    off_ok = (enabled() is False)
+    if _prev is None:
+        del os.environ["BINGGU_SEMANTIC_OFF"]
     else:
-        rec("5.기본 OFF(플래그 존재 — skip)", True)
+        os.environ["BINGGU_SEMANTIC_OFF"] = _prev
+    rec("5.BINGGU_SEMANTIC_OFF=1 이면 강제 OFF", off_ok)
+    rec("5b.Ollama+bge-m3 감지 시 자동 ON(probe=True)", ollama_available(probe=True) is True)
+    rec("5c.Ollama 없으면 자동 ON 안 함(probe=False)", ollama_available(probe=False) is False)
 
     # 6. 결정론 (2회 동일)
     a = cs.classify_kind("백필이 진행 중이다")

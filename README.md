@@ -5,7 +5,7 @@
 AI와의 대화에서 건질 판단·상태·개념을 후보로 **자동 수집**하고, 사람이 직접 confirm 문구를 타이핑해야만 저장되는 **로컬 우선(local-first)** 지식장부입니다. 자동 수집은 켜지지만, **자동 저장은 없습니다.**
 
 - **Latest release: v1.7.0** — <https://github.com/darkjokee-arch/binggupack/releases/tag/v1.7.0>
-- **v1.6.x 핵심** — **의미 기반 도장(label_kind) 분류**. 기존엔 문장 종결어미 정규식으로 5종(문서/증거/개념/상태/판단)을 가려 대부분 "판단"으로 흘렀는데, bge-m3 임베딩 + 중심점 유사도로 **뜻으로 5종 분류**. opt-in(기본 꺼짐)·PII 선차단·사람 confirm 게이트 유지(영구금지26 개정). 중심점 디스크 캐싱(첫 16s→0.009s, 1899배). **정확도(독립 테스트셋 60문장) 97%** — 증거/개념/상태/판단 100%, 문서 보강(v1.6.1). 라인: v1.5.2(3-OS real verified + e2e CI) → v1.6.0(의미 기반 도장 분류 + 캐싱) → **v1.6.1(문서 종 경계 seed 보강)** → **v1.7.0(전체문장 저장)**. OpenCrab **로컬 역인제스트 구현** (ZIP→`opencrab ingest`·dry-run 기본·`--execute` 시 실적재). OpenCrab **Cloud** 업로드/원본화는 **HOLD**.
+- **v1.6.x 핵심** — **의미 기반 도장(label_kind) 분류**. 기존엔 문장 종결어미 정규식으로 5종(문서/증거/개념/상태/판단)을 가려 대부분 "판단"으로 흘렀는데, bge-m3 임베딩 + 중심점 유사도로 **뜻으로 5종 분류**. **Ollama+bge-m3 감지 시 자동 ON**(한 번 설치하면 재설정 0·거부는 `BINGGU_SEMANTIC_OFF=1`)·PII 선차단·사람 confirm 게이트 유지(영구금지26 개정). 중심점 디스크 캐싱(첫 16s→0.009s, 1899배). **정확도(독립 테스트셋 60문장) 97%** — 증거/개념/상태/판단 100%, 문서 보강(v1.6.1). 라인: v1.5.2(3-OS real verified + e2e CI) → v1.6.0(의미 기반 도장 분류 + 캐싱) → **v1.6.1(문서 종 경계 seed 보강)** → **v1.7.0(전체문장 저장)**. OpenCrab **로컬 역인제스트 구현** (ZIP→`opencrab ingest`·dry-run 기본·`--execute` 시 실적재). OpenCrab **Cloud** 업로드/원본화는 **HOLD**.
 - **Python 3.10+ · 외부 런타임 의존성 0 · Windows / WSL / macOS / Linux** — 같은 정책으로 동작이 **3-OS CI로 실증**. OS별 사용법·장부 공유는 [docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md](docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md). 런처: Windows `py` · WSL/macOS `python3`.
 
 ---

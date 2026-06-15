@@ -4,7 +4,7 @@
 
 > **무엇인가** — local-first · evidence-backed context packs · candidate capture/preview · human-confirmed SAVE gate · ontology graph validation. **자동 ledger/confirmed write 없음** — 저장은 preview → `SAVE n`(정확한 confirm) 게이트로만 진행됩니다.
 >
-> **Latest release = v1.7.0** (사용자가 고른 문장 전체 저장 — 80자 발췌 폐기). `binggu init`이 현재 workspace scope에 자동 후보 수집을 기본 ON으로 만드는 capture profile(scope-gated) + 영속 candidate 버퍼 + opt-in hook support + `binggu hosted pull`(폰 SAVE n→PC 한 번에). **자동 저장은 없음**(저장 = preview → `SAVE n`). 라이브 save-intent는 **신형 v2 서명 전용**(`SAVE_SIG_V2_ONLY=1`, 구형 차단). 라인: v1.0.0(개인 장부) → v1.1.0(그래프 문법) → v1.2.0(hosted save-intent) → v1.3.x(자동 캡처·preview·어댑터) → v1.4.0(AGI memory capture)~v1.4.6 → v1.5.0(PC-mediated read publish pipeline + evidence graph) → v1.5.1(cross-platform + `BINGGU_HOME`) → v1.5.2(3-OS real-device 검증 + e2e CI) → v1.6.0(의미 기반 도장 분류 + 캐싱) → **v1.6.1: 의미 기반 도장(label_kind) 분류 — bge-m3 임베딩 + 중심점 유사도로 5종을 뜻으로 분류(opt-in `~/.binggupack/semantic_label_enabled`, 기본 꺼짐), 디스크 캐싱(1899배), 독립 테스트셋 정확도 97%(문서 종 경계 seed 보강). OpenCrab Cloud ingest는 HOLD.**
+> **Latest release = v1.7.0** (사용자가 고른 문장 전체 저장 — 80자 발췌 폐기). `binggu init`이 현재 workspace scope에 자동 후보 수집을 기본 ON으로 만드는 capture profile(scope-gated) + 영속 candidate 버퍼 + opt-in hook support + `binggu hosted pull`(폰 SAVE n→PC 한 번에). **자동 저장은 없음**(저장 = preview → `SAVE n`). 라이브 save-intent는 **신형 v2 서명 전용**(`SAVE_SIG_V2_ONLY=1`, 구형 차단). 라인: v1.0.0(개인 장부) → v1.1.0(그래프 문법) → v1.2.0(hosted save-intent) → v1.3.x(자동 캡처·preview·어댑터) → v1.4.0(AGI memory capture)~v1.4.6 → v1.5.0(PC-mediated read publish pipeline + evidence graph) → v1.5.1(cross-platform + `BINGGU_HOME`) → v1.5.2(3-OS real-device 검증 + e2e CI) → v1.6.0(의미 기반 도장 분류 + 캐싱) → **v1.6.1: 의미 기반 도장(label_kind) 분류 — bge-m3 임베딩 + 중심점 유사도로 5종을 뜻으로 분류(**Ollama+bge-m3 감지 시 자동 ON** — 한 번 설치하면 재설정 0, 거부는 `BINGGU_SEMANTIC_OFF=1`), 디스크 캐싱(1899배), 독립 테스트셋 정확도 97%(문서 종 경계 seed 보강). OpenCrab Cloud ingest는 HOLD.**
 >
 > OpenCrab 업로드는 **planned**(preflight G1~G7까지 구현·검증, 실 전송은 별도 결정 — 노출 0). "100% 완성판"이 아니며 모든 사용자 환경 동작을 보장하지 않습니다. 전체 로드맵·범위는 `README.md`, 따라하기는 `docs/BINGGUPACK_TUTORIAL.md` 참조.
 
@@ -137,6 +137,27 @@ python3 scripts/binggu_platform_selftest.py       # 36/36 GATE=GO (WSL/macOS/Lin
 > OS별 홈·`BINGGU_HOME` opt-in 공유·경로 변환(표시용)·lock 충돌 fail-closed를 검증합니다. WSL/macOS 경로 규칙은 synthetic(입력 주입)으로, lock 충돌은 temp 장부 실측으로 확인합니다. 자세히: [docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md](docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md).
 >
 > **검증 상태**: Windows · WSL · macOS **전부 real verified** (2026-06-14, GitHub Actions 3-OS matrix 자동 검증). 자기 머신에서 재현하는 단계별 절차는 [docs/BINGGUPACK_CROSS_PLATFORM_VERIFICATION_CHECKLIST.md](docs/BINGGUPACK_CROSS_PLATFORM_VERIFICATION_CHECKLIST.md) 를 따르세요.
+
+## 똑똑한 뜻 분류 켜기 (선택 · 한 번만 설치하면 자동)
+
+기본(추가 설치 0)은 정규식 분류로 동작합니다. **Ollama + bge-m3 를 한 번 깔면 빙구팩이 자동 감지해 "뜻 기반 도장 분류"를 자동 ON** 합니다(별도 설정 파일·플래그 불필요). 도장은 **제안**일 뿐 — 저장은 여전히 `SAVE n` 사람 게이트.
+
+설치(한 번, OS별 한 줄):
+```bash
+# Windows
+winget install Ollama.Ollama
+# macOS
+brew install ollama
+# WSL / Linux
+curl -fsSL https://ollama.com/install.sh | sh
+```
+공통(모델 받기):
+```bash
+ollama pull bge-m3
+```
+- 설치 후 빙구팩이 알아서 감지 — 재설정 0. (빙구팩이 Ollama를 **자동 설치하지는 않습니다** — 무거운 모델이라 사용자 동의 하에 직접)
+- **거부/강제 끄기**: 환경변수 `BINGGU_SEMANTIC_OFF=1` (정규식 분류로 고정)
+- 폰/claude.ai(hosted)에서는 클라우드 AI로 분류돼 Ollama 불필요(자기 worker 배포 시).
 
 ## MCP / MCP 연결 (선택)
 `mcp.example.json` 참고. read/dry-run 도구만 노출됩니다(write/apply/push 미노출).
