@@ -132,6 +132,32 @@ def workers_ai_embed_factory():
     return fe
 
 
+def endpoint_embed_factory(endpoint):
+    """wrangler dev --remote 임베드 endpoint(embed_probe.ts) 경유 — 토큰 불필요(wrangler OAuth).
+    같은 문장 재호출 캐싱(leave-one-out 64x64 호출 → 64 호출로 축소). 실패 → None."""
+    import urllib.request
+    cache = {}
+
+    def fe(text):
+        if text in cache:
+            return cache[text]
+        body = json.dumps({"text": text}).encode()
+        # custom UA 고정 — Cloudflare python 기본 UA 차단 회피(박제 cloudflare_1010_custom_ua)
+        req = urllib.request.Request(endpoint, data=body, method="POST",
+                                     headers={"Content-Type": "application/json",
+                                              "User-Agent": "binggupack-centroid-gen/1.0"})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                d = json.loads(r.read())
+            v = d.get("embedding")
+        except Exception as e:
+            print("[embed 실패]", str(e)[:80])
+            v = None
+        cache[text] = v
+        return v
+    return fe
+
+
 # ---------------- selftest (주입 fake embed — Workers AI 호출 0) ----------------
 
 def _fake_embed_factory():
@@ -240,24 +266,37 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--selftest", action="store_true")
     ap.add_argument("--workers-ai", action="store_true",
-                    help="owner 승인 후: 실 Workers AI 임베드로 centroid 생성")
+                    help="owner 승인 후: 실 Workers AI 임베드(REST 토큰)로 centroid 생성")
+    ap.add_argument("--endpoint", default=None,
+                    help="owner 승인 후: wrangler dev --remote 임베드 endpoint(토큰 불필요)로 centroid 생성")
     ap.add_argument("--out", default=DEFAULT_OUT)
     a = ap.parse_args()
-    if a.selftest or not (a.workers_ai):
+    if a.selftest or not (a.workers_ai or a.endpoint):
         run_selftest()
         return
-    # 실 Workers AI 임베드 경로 (owner IRREVERSIBLE 승인 후)
+    # 실 임베드 경로 (owner 승인 후). endpoint 우선(토큰 불필요), 없으면 REST 토큰.
     rows = load_seed()
-    fe = workers_ai_embed_factory()
+    fe = endpoint_embed_factory(a.endpoint) if a.endpoint else workers_ai_embed_factory()
     art = build_artifact(fe, rows)
     if set(art["centroids"].keys()) != set(KINDS):
         print("[중단] centroid 5종 미완성 — 임베드 실패 의심. 산출 안 함.")
         sys.exit(1)
+    art["dimension"] = len(next(iter(art["centroids"].values())))   # 실측 차원으로 갱신
+    # B'7 ②④: 실 임베드 라벨별 leave-one-out 일치율 실측(캐시로 64 호출)
+    conf, per_label = confusion_leave_one_out(fe, rows)
+    art["per_label_accuracy"] = {k: round(v, 4) for k, v in per_label.items()}
     tmp = a.out + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(art, f, ensure_ascii=False, indent=2)
     os.replace(tmp, a.out)
-    print("centroid 산출:", a.out, "| seed_hash:", art["seed_hash"], "| model:", art["model"])
+    print("centroid 산출:", a.out)
+    print("seed_hash:", art["seed_hash"], "| model:", art["model"], "| dim:", art["dimension"])
+    print("라벨별 leave-one-out 일치율(실 임베드):")
+    for tk in KINDS:
+        print("  %s: %.3f  →  %s" % (tk, per_label[tk],
+              ", ".join("%s=%d" % (pk, conf[tk][pk]) for pk in KINDS if conf[tk][pk])))
+    weak = [k for k, v in per_label.items() if v < 0.75]
+    print("약한 라벨(<0.75):", weak if weak else "없음", "| band_hi/lo:", art["band_hi"], art["band_lo"])
 
 
 if __name__ == "__main__":

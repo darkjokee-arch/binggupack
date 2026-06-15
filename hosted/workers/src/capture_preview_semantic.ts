@@ -10,6 +10,8 @@
 //
 // 영구금지: opt-in OFF 기본(env.SEMANTIC_LABEL_ENABLED !== "1" 이면 Workers AI 호출 0). cos 는 도장 제안에만.
 
+import { capturePreview } from "./capture_preview";
+
 const EXPECT_MODEL = "@cf/baai/bge-m3";
 
 export interface Centroids {
@@ -117,4 +119,28 @@ export async function suggestLabel(
   }
   return { label_kind_suggestion: ruleKind, conf: sem ? sem.conf : null,
            band: sem ? sem.band : null, source: "rules" };
+}
+
+/**
+ * 통합 진입점 (P2) — capture_preview.ts 의 capturePreview 결과에 semantic 도장 제안을 보강.
+ * 기존 capturePreview 는 무변경(배포 중 index.ts 안전). opt-in OFF / centroids 없음 → base 그대로 반환(무영향).
+ * 보강 필드는 label_kind_suggestion 등 별도 키 — 기존 label_kind/candidate 는 건드리지 않음(B'7 ⑤ 격리).
+ */
+export async function capturePreviewSemantic(
+  text: string,
+  env: any,
+  cent: Centroids | null,
+  maxCandidates?: number,
+): Promise<Record<string, any>> {
+  const base = capturePreview(text, maxCandidates);
+  if (!semanticEnabled(env) || !cent) return base; // 무영향(현 동작 보존)
+  for (const c of base.candidates) {
+    const sug = await suggestLabel(env, c.sentence, [c.label_kind, c.rule_id], cent);
+    c.label_kind_suggestion = sug.label_kind_suggestion;
+    c.semantic_conf = sug.conf;
+    c.semantic_band = sug.band;
+    c.semantic_source = sug.source;
+  }
+  base.semantic_applied = true;
+  return base;
 }

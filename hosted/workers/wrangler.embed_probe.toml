@@ -1,0 +1,8 @@
+# wrangler.embed_probe.toml — centroid 생성 전용 임시 임베드 worker (P2).
+# wrangler dev --remote 로만 사용. deploy/routes/secrets 미설정(HOLD). centroid 생성 후 폐기.
+name = "binggupack-embed-probe"
+main = "src/embed_probe.ts"
+compatibility_date = "2025-05-01"
+
+[ai]
+binding = "AI"
