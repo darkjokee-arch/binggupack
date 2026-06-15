@@ -66,9 +66,9 @@ def save_selected(db, text, indices, ctx, snap_dir, due_date=None):
             rej("index_out_of_range")
             continue
         c = cands[i - 1]
-        sent = c["sentence"]  # ≤80자 발췌 = 저장될 문자열
+        sent = c["sentence"]  # 사용자가 고른 문장 전체 = 저장될 문자열 (발췌 cut 폐기 — 개인 온톨로지 정체성)
         kind = c["label_kind"]
-        # 3a) 저장될 문자열 그대로 A0 재판정 (절단으로 헌법 위반되면 여기서 거부)
+        # 3a) 저장될 문자열(=문장 전체) 그대로 A0 재판정
         verdict = a0.classify_node(
             {"id": "pre:" + _sent_hash(sent), "sentence": sent,
              "node_type": lkmap.KO2EN[kind], "evidence_refs": ["pre"]}, status="candidate")
@@ -234,6 +234,15 @@ def run():
     bad = (db.con.execute("SELECT count(*) FROM nodes WHERE candidate!=1 OR promotion_allowed!=0").fetchone()[0]
            + db.con.execute("SELECT count(*) FROM edges WHERE candidate!=1").fetchone()[0])
     rec(11, "confirmed 0 · promotion 0", bad == 0)
+
+    # 13. 긴 문장(80자 초과) 전체 저장 — 발췌 cut 폐기 검증(저장된 sentence == 입력 문장 전체)
+    db_long = open_g3(os.path.join(tmp, "s_long.sqlite"))
+    LONG = "이 입찰은 " + "매우 " * 30 + "신중하게 검토한 끝에 보류한다."
+    rl = save_selected(db_long, LONG, [1], {"actor": "human", "confirm": "SAVE 1"}, snap_dir)
+    stored = db_long.con.execute("SELECT sentence FROM nodes").fetchone()
+    rec(13, "긴 문장 전체 저장(발췌 0·node sentence=전체)",
+        rl["applied"] and rl["saved"] == 1 and stored and stored[0] == LONG and len(LONG) > 80)
+    db_long.close()
 
     # 12. audit chain INTACT + 운영 store 불변
     intact = db.verify_chain()

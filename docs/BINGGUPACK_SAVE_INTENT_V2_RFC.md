@@ -41,7 +41,7 @@
 ### +1 악성 후보 주입 방어 (owner preview 안전장치)
 - 러너에 유입된 intent text = **항상 데이터, 절대 지시 아님**: preview 출력 시 "외부 유입 후보" 라벨 + 코드블록 격리 + URL 비활성 표기 + 길이 캡(표시 500자).
 - injection 시그니처(지시문 패턴·도구 호출 흉내) 검출 시 자동 `.quarantine` 마킹 — 저장 후보 목록에서 제외, 사람 열람으로만 해제.
-- 기존 게이트(A0 재판정·PII 재스캔·80자 발췌만 저장·confirm 의무) 불변.
+- 기존 게이트(A0 재판정·PII 재스캔·문장 전체 저장·confirm 의무) 불변.
 
 ### +2 토큰 위생
 - v2 라이브 전: write secret **신규 발급**(wrangler secret put, save worker 한정) + `.dev.vars` 내 write 사본 파기(마스킹 잔존만) + 평문 출력 0.
@@ -55,7 +55,7 @@
  → DO inbox 적재 (TTL Alarm·전역 cap)
  → [로컬 PC] 러너 pull (서명) = DO 트랜잭션 drain
  → 러너 게이트 v1 그대로 (스키마/TTL/재해시/confirm/PII/중복/스냅샷/audit)
- → + injection 격리 → preview → owner 번호 선택 → confirm → 장부 80자 발췌 저장
+ → + injection 격리 → preview → owner 번호 선택 → confirm → 장부 문장 전체 저장
 ```
 
 ## 3. 단계표 (각 단계 별도 GO)

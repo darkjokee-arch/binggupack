@@ -30,7 +30,7 @@
 
 - `POST /save2/<경로키>/pull` (HMAC) → DO atomic drain → 러너 outbox
 - `POST /save2/<경로키>/admin/{enable,disable}` (HMAC) → fail-closed 플래그
-- 러너 게이트 = v1 그대로 (스키마·TTL·재해시·confirm·PII·중복·스냅샷·audit) → preview → 번호선택 → confirm → 로컬 장부 80자 발췌.
+- 러너 게이트 = v1 그대로 (스키마·TTL·재해시·confirm·PII·중복·스냅샷·audit) → preview → 번호선택 → confirm → 로컬 장부 문장 전체 저장.
 
 ## 3. 보안 점검표 (토론 4 반박 매핑)
 

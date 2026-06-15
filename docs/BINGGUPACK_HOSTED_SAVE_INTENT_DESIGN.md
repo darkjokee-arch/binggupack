@@ -6,7 +6,7 @@
 ## 0. 원칙 (불변)
 
 - hosted worker = **전달 통로**. worker의 DB write 0 — 최종 write는 로컬 게이트(`save_selected`)만.
-- intent의 `text`는 전달 통로일 뿐 — DB에는 로컬 게이트가 ≤80자 발췌만 저장(원문 전문 저장 0).
+- intent의 `text`는 전달 통로일 뿐 — DB에는 로컬 게이트가 사용자가 고른 문장 전체를 저장(원문=대화 전문 저장 0).
 - candidate-only · promotion 0 · confirmed 자동 생성 0 · 자동 적용 0.
 
 ### 0-1. collect broad, commit narrow (owner 확정 2026-06-13)

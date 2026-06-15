@@ -3,7 +3,7 @@
 설계: 영속 candidate buffer 선행 과제 (hook 실등록은 본 모듈 GO 이후 별도 단계).
 원칙(전부 본 모듈에서 강제·셀프테스트로 증명):
   - candidate-only: state 항상 'captured_candidate' (active/confirmed/ledger write 0)
-  - 원문 전문 미저장: 발화 TEXT_CAP(발췌 상한) 초과분 truncate
+  - 원문(대화 전문) 미저장: 발화 TEXT_CAP(문장 전체 보존 상한) 초과분 truncate
   - 기본 OFF: ~/.binggupack/capture_enabled 플래그 있을 때만 동작
   - scope 게이트: repo/session 화이트리스트(fail-closed) + deny 우선 → bid-engine 등 타 세션 제외
   - TTL 자동 폐기: captured_at + ttl_days 경과분 lazy purge
@@ -20,7 +20,8 @@ from pathlib import Path
 
 from binggu_capture_classifier import classify
 
-TEXT_CAP = 80           # 원문 전문 저장 금지: candidate 발췌 상한(정본 capture_preview/save_selected ≤80자 기준)
+TEXT_CAP = 1000         # 자동수집 버퍼 발화 보존 상한 = capture_preview.MAX_NODE_SENTENCE 정합(owner GO 2026-06-15).
+                        # 문장 전체 보존(80자 발췌 폐기 — 개인 온톨로지 정체성). 1000 초과 = 대화 덩어리 → 절단(원문=대화 전문 저장 금지).
 DEFAULT_TTL_DAYS = 7    # TTL 자동 폐기 기본값
 
 
@@ -338,13 +339,21 @@ def _selftest():
         check(r["action"] == "ignored" and not r["stored"] and buf.size == 1,
               "T6 ignored 발화 → 저장 0(size 불변)")
 
-        # T7 원문 전문 미저장: TEXT_CAP 초과 truncate
-        longtext = "B안으로 결정한다 " + ("가" * 400)
+        # T7 원문(대화 덩어리) 전문 미저장: TEXT_CAP(=문장 전체 상한) 초과만 truncate.
+        #     짧은 발화는 온전히 보존(문장 전체 정체성) — 1000 초과 덩어리만 절단.
+        midtext = "B안으로 결정한다 " + ("가" * 300)  # ~308자 < TEXT_CAP → 전체 보존(절단 0)
+        r_mid = buf.feed(midtext, repo_cwd)
+        pv_mid = buf.render_preview()
+        kept = next(it["text"] for it in pv_mid["items"] if it["text"].startswith("B안으로 결정한다 가"))
+        check(not r_mid.get("truncated") and kept == midtext.strip(),
+              f"T7 문장 전체 보존(< {TEXT_CAP}자 절단 0)")
+        longtext = "B안으로 결정한다 " + ("가" * 1100)  # > TEXT_CAP → 대화 덩어리로 간주 절단
         r = buf.feed(longtext, repo_cwd)
         pv = buf.render_preview()
-        stored_text = next(it["text"] for it in pv["items"] if it["text"].startswith("B안으로 결정한다"))
+        stored_text = max((it["text"] for it in pv["items"]
+                           if it["text"].startswith("B안으로 결정한다 가")), key=len)
         check(r.get("truncated") and len(stored_text) == TEXT_CAP,
-              f"T7 원문 전문 미저장 → 발췌 cap({TEXT_CAP})로 truncate")
+              f"T7b 대화 덩어리(> {TEXT_CAP}자) 절단(원문 전문 저장 금지)")
 
         # T8 candidate-only: state 항상 captured_candidate
         check(all(it["state"] == "captured_candidate" for it in pv["items"]),
@@ -353,8 +362,8 @@ def _selftest():
         # T9 영속 round-trip: 새 인스턴스 재오픈 시 누적 유지 (hook 발화간 누적 핵심)
         size_before = buf.size
         buf2 = PersistentCaptureBuffer(home=home)
-        check(buf2.size == size_before and size_before == 2,
-              "T9 영속 round-trip(새 인스턴스 재오픈 누적 유지, size=2)")
+        check(buf2.size == size_before and size_before == 3,
+              "T9 영속 round-trip(새 인스턴스 재오픈 누적 유지, size=3)")
 
         # T10 TTL 자동 폐기: 미래 시각으로 preview → 경과분 삭제
         future = time.time() + (DEFAULT_TTL_DAYS + 1) * 86400

@@ -106,7 +106,7 @@ preview → 사람이 SAVE n → 기존 게이트(save_selected) commit (schema/
 | 실패 내성 | — | fail-soft→rule | fail-soft→L2→rule |
 
 - capture hook 은 **async**(settings.json `"async": true`) → 사용자 입력 지연에 영향 0. L3 band 히트율을 낮게(예 10–20%) 유지해 평균 지연 관리.
-- **프라이버시 핵심**: 원문은 로컬 모델까지만. ledger 는 여전히 ≤80자 발췌 + L1 이 secret/PII 제거. semantic 이 프라이버시를 **악화시키지 않음**(외부 전송 0).
+- **프라이버시 핵심**: 원문은 로컬 모델까지만. ledger 는 사용자가 고른 문장 전체 + L1 이 secret/PII 제거(대화 전문은 미저장). semantic 이 프라이버시를 **악화시키지 않음**(외부 전송 0).
 
 ---
 
@@ -385,4 +385,4 @@ preview → 사람이 SAVE n → 기존 게이트(save_selected) commit (schema/
 ### 14-5. 검증(2026-06-14)
 - canonical selftest 9/9 · capture_preview 회귀 11/11(OFF 무영향) · candidate_save·semantic_shadow·publish 8/8 전건 GO · tree CLEAN.
 - 실측(ON): 종결어로 fallback났던 5문장 → 판단(0.65)·상태(0.81)·증거(0.85)·개념(0.67)·문서(0.77) 정확 분류 · 헌법판정 PASS · 플래그 OFF 원복.
-- **미완(다음)**: 저장 결함(80자 절단·실패이유 비노출 = 4cli B 작업지시 Q2/Q3).
+- **완료(2026-06-15 옵션 A)**: 저장 결함 해소 — 80자 발췌 폐기→문장 전체 저장(MAX_NODE_SENTENCE=1000), `_show` 실패이유 노출. 정체성 [[feedback_binggupack_identity_personal_ontology_agi]].

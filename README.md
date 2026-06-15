@@ -138,7 +138,7 @@ hosted pull = inbox 에서 본 번호만 골라 ledger 에 저장합니다(전�
 **list** — 저장된 후보 조회(read-only):
 
 ```text
-조회 전용입니다 — 아무것도 변경되지 않았습니다. 표시는 저장된 발췌(≤80자)의 60자 cap, 원문 전문은 저장되어 있지 않습니다.
+조회 전용입니다 — 아무것도 변경되지 않았습니다. 표시는 저장된 문장 전체의 60자 cap, 원문 전문(대화 전체)은 저장되어 있지 않습니다.
 변경 작업의 confirm 문구에는 # 와 id 를 함께 적습니다 (예: DEPRECATE 3 a1b2c3d4).
 ```
 
@@ -150,7 +150,7 @@ hosted pull = inbox 에서 본 번호만 골라 ledger 에 저장합니다(전�
 - **AGI memory = 작업 전역 후보수집이 기본 경험**(`init --agi-memory`/`--global`). 현재 workspace로 좁히려면 플래그 없이 `init`(privacy 모드). 어느 scope든 **시크릿/PII 발화는 자동 후보 제외** + 시크릿 디렉토리는 deny.
 - **자동 저장 없음** — 캡처 범위가 넓어도 저장은 preview → `SAVE n` confirm만. `actor=auto`·confirm 누락/불일치·preview 미확인은 전부 BLOCK.
 - **ledger/active/confirmed/OpenCrab 자동 write 0.**
-- **원문 전문 저장 없음** — 80자 이내 발췌만.
+- **원문 전문(대화 전체) 저장 없음** — 사용자가 고른 문장 전체만(80자 발췌 폐기).
 - pause / resume / uninstall 로 언제든 중단·완전 원복. 모든 변경 전 스냅샷 + checksum rollback + append-only audit chain.
 
 이 불변식들은 약속이 아니라 selftest로 증명됩니다(아래 [검증](#검증--verify)).
@@ -332,7 +332,7 @@ binggupack/
 - **secret/PII hard block** — 시크릿/PII 발화는 정규식이 후보 단계에서 무조건 제외(semantic이 못 뒤집음).
 - **inbox disabled by default** — 폰/웹 save-intent inbox는 평소 잠김(fail-closed), `SAVE n`이 사람 승인 신호.
 - **신형 서명 전용** — `SAVE_SIG_V2_ONLY=1`, 구형 HMAC 차단.
-- **원문 전문 저장 없음** — 80자 이내 발췌만. shadow/로그에도 원문 미보관.
+- **원문 전문(대화 전체) 저장 없음** — 사용자가 고른 문장 전체만(80자 발췌 폐기). shadow/로그에도 원문 미보관.
 
 **비목표 (HOLD — 별도 결정 전 동작 안 함):**
 

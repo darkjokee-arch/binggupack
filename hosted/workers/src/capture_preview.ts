@@ -6,7 +6,10 @@
 const INPUT_CAP = 20000;
 const DEFAULT_MAX = 10;
 const HARD_MAX = 20;
-const EXCERPT = 80;
+// 정체성(owner 2026-06-15): 저장 단위 = 사용자가 고른 문장 전체(80자 발췌 cut 폐기 — 개인 온톨로지/AGI화).
+// MAX_NODE_SENTENCE = 단일 문장 정당 상한. 초과 = 종결어미 없는 문단/로그 덩어리 → 후보 제외.
+// Python 정본(MAX_NODE_SENTENCE) 1:1 — parity selftest 로 강제.
+const MAX_NODE_SENTENCE = 1000;
 const SENT_SPLIT = /(?<=[.!?다음임함됨까요])\s+|\n+/;
 // 콜론을 문자 클래스로 — 소스/번들 텍스트에 영문자+콜론+백슬래시 시퀀스가 생기지 않게 (스캐너 자기검출 회피)
 const REDACT_RE = /\[REDACTED[:]\w+\]/g;
@@ -134,6 +137,7 @@ export function capturePreview(text: string, maxCandidates?: number): Record<str
     const sent = (piece || "").trim();
     if (!sent) continue;
     if (!meaningful(sent)) { excl("short_or_fragment"); continue; }
+    if (sent.length > MAX_NODE_SENTENCE) { excl("over_max_sentence"); continue; }
     const pii = scanPii(sent);
     if (pii.length) { for (const k of pii) excl("pii_" + k); continue; }
     if (SECRET_RES.some((re) => re.test(sent))) { excl("secret_pattern"); continue; }
@@ -142,7 +146,8 @@ export function capturePreview(text: string, maxCandidates?: number): Record<str
     seen.add(norm);
     if (candidates.length >= maxC) { excl("over_max_candidates"); continue; }
     const [kind, ruleId] = classify(sent);
-    candidates.push({ sentence: sent.slice(0, EXCERPT), label_kind: kind, rule_id: ruleId,
+    // 문장 전체 저장(발췌 cut 제거) — 본 것 = 저장된 것. Python 정본 1:1.
+    candidates.push({ sentence: sent, label_kind: kind, rule_id: ruleId,
                       a0_verdict: a0Verdict(sent), candidate: true });
   }
 

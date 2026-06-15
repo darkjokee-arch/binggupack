@@ -34,7 +34,7 @@
 문장 분리(종결어미/개행) → `_meaningful` 필터(mvp2 기준: 6자/12자) → **PII/secret 검출 시 해당 문장 후보 제외**(scan_residual_pii + SECRET_PATTERNS — redact가 아니라 제외, 사유는 kind 카운트만) → 중복 dedup(정규화 hash) → G0 5종 분류(lkmap) + A0 헌법 shadow 판정 → 상위 max_candidates.
 
 ## 4. 출력 포맷
-표(문장 발췌 ≤80자 · 도장 5종 · 분류 근거 · 헌법 판정) + 제외 통계(kind: count만, raw 0) + 푸터 고정:
+표(문장 전체 · 도장 5종 · 분류 근거 · 헌법 판정) + 제외 통계(kind: count만, raw 0) + 푸터 고정:
 > "미리보기일 뿐 아무것도 저장되지 않았습니다(nothing_saved=true). 등재는 로컬 승인 게이트에서만."
 
 ## 5. 저장 0 원칙 (구현 강제)

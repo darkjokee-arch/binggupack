@@ -23,7 +23,11 @@ import binggu_canonical_semantic as canon            # 도장 semantic 제안 (o
 INPUT_CAP = 20000
 DEFAULT_MAX = 10
 HARD_MAX = 20
-EXCERPT = 80
+# 정체성(owner 2026-06-15): 빙구팩 = 개인 온톨로지/AGI화 → 저장 단위 = 사용자가 고른 문장 전체.
+# 80자 발췌 저장 폐기(사고 절단 금지). preview 표시도 전체("본 것 = 저장된 것" confirm 무결성).
+# MAX_NODE_SENTENCE = 단일 문장 정당 상한. 초과 = 종결어미 없이 이어진 문단/로그 덩어리(비정상) →
+# silent 절단 아닌 후보 제외(BLOCK). 정당한 긴 교훈 문장은 전부 통과. [[feedback_binggupack_identity_personal_ontology_agi]]
+MAX_NODE_SENTENCE = 1000
 _SENT_SPLIT = re.compile(r"(?<=[.!?다음임함됨까요])\s+|\n+")
 _REDACT_RE = re.compile(r"\[REDACTED:\w+\]")
 
@@ -72,6 +76,10 @@ def capture_preview(text, max_candidates=DEFAULT_MAX):
         if not _meaningful(sent):
             excl("short_or_fragment")
             continue
+        if len(sent) > MAX_NODE_SENTENCE:
+            # 단일 문장 정당 상한 초과 = 문단/로그 덩어리(split 실패) — 절단 아닌 제외.
+            excl("over_max_sentence")
+            continue
         # PII/secret — redact 가 아니라 후보 제외 (owner 조건). 사유 kind 만 집계.
         pii = scan_residual_pii(sent) + [k for k, rx in _PREVIEW_PII_EXTRA if rx.search(sent)]
         if pii:
@@ -99,7 +107,8 @@ def capture_preview(text, max_candidates=DEFAULT_MAX):
         verdict = a0.classify_node(
             {"id": "preview:" + h, "sentence": sent, "node_type": lkmap.KO2EN[kind],
              "evidence_refs": ["preview"]}, status="candidate")
-        candidates.append({"sentence": sent[:EXCERPT], "label_kind": kind, "rule_id": rule_id,
+        # 문장 전체 저장(발췌 cut 제거) — 본 것 = 저장된 것. node_id/hash 도 전체 기준.
+        candidates.append({"sentence": sent, "label_kind": kind, "rule_id": rule_id,
                            "a0_verdict": verdict["verdict"], "candidate": True})
 
     lines = ["# 캡처 미리보기 — 후보 %d건 (전부 candidate, 미저장)" % len(candidates),
@@ -208,6 +217,28 @@ def run_selftest():
 
     # 9. 멱등 (2회 동일)
     rec(9, "멱등(2회 동일)", capture_preview(convo) == capture_preview(convo))
+
+    # 12. 긴 문장(80자 초과·MAX 이내) 전체 저장 + preview 전체 표시(본 것 = 저장된 것)
+    long_sent = "이 입찰은 " + "매우 " * 30 + "신중하게 검토한 끝에 보류한다."  # 한 문장, ~110자
+    r12 = capture_preview(long_sent)
+    rec(12, "긴 문장 전체 보존(발췌 cut 0) + preview 전체 표시",
+        len(r12["candidates"]) == 1 and r12["candidates"][0]["sentence"] == long_sent
+        and len(long_sent) > 80 and long_sent in r12["preview_markdown"])
+
+    # 13. MAX_NODE_SENTENCE 초과(문단/로그 덩어리) → silent 절단 아닌 후보 제외
+    huge = "가 " * 600 + "이다."  # 한 문장, ~1200자 (종결어미 중간 없음 = split 1건)
+    r13 = capture_preview(huge)
+    rec(13, "MAX_NODE_SENTENCE 초과 후보 제외(절단 0)",
+        len(huge) > MAX_NODE_SENTENCE and len(r13["candidates"]) == 0
+        and r13["excluded_counts"].get("over_max_sentence", 0) >= 1)
+
+    # 14. 80자 뒤 PII 차단 — 발췌 저장 시절엔 sent[:80] 이 못 보던 위협(전체 스캔으로 해소)
+    pii_tail = "이 입찰은 " + "매우 " * 30 + "신중히 검토 후 담당자 연락처 010-" + "9876-5432 로 보류한다."
+    r14 = capture_preview(pii_tail)
+    rec(14, "80자 뒤 PII 차단(전체 스캔) + raw 미출력",
+        len(pii_tail) > 80 and len(r14["candidates"]) == 0
+        and any(k.startswith("pii_") for k in r14["excluded_counts"])
+        and "9876" not in r14["preview_markdown"])
 
     # 10. write/save 0 — 감시 디렉토리 FS 전후 동일 + 본 모듈 save 함수 부재
     fs_after = _fs_snapshot(watch)

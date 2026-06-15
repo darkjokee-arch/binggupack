@@ -61,8 +61,8 @@ def run_selftest():
         lambda: num_pair("py_preview", "DEFAULT_MAX", "ts_preview", "DEFAULT_MAX"))
     rec(3, "HARD_MAX py==ts (후보 상한 최대)",
         lambda: num_pair("py_preview", "HARD_MAX", "ts_preview", "HARD_MAX"))
-    rec(4, "EXCERPT py==ts (문장 발췌 캡)",
-        lambda: num_pair("py_preview", "EXCERPT", "ts_preview", "EXCERPT"))
+    rec(4, "MAX_NODE_SENTENCE py==ts (단일 문장 정당 상한 — 발췌 cut 폐기)",
+        lambda: num_pair("py_preview", "MAX_NODE_SENTENCE", "ts_preview", "MAX_NODE_SENTENCE"))
 
     def bizno_pair(name):
         a = _grab(srcs["py_preview"],

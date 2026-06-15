@@ -7,7 +7,7 @@
 표시: 도장(label_kind 결정론 재분류) · state · review 상태 · evidence 연결 · candidate 플래그.
 
 불변: write 0 (조회 전후 store_checksum 동일을 모드 내 자체 검증) · raw 원문 출력 금지
-(저장된 80자 발췌만, 표시 60자 cap) · 수정/기각/확정 실행 없음(다음 단계 분리).
+(저장된 문장 전체, 표시 60자 cap) · 수정/기각/확정 실행 없음(다음 단계 분리).
 모드:
   --selftest    temp SQLite — 저장→resolve→기각 시나리오 구성 후 필터 전건 검증
   --real-smoke  real staging read-only 1회 (private 설정 모듈 환경 한정 — lazy import)
@@ -74,7 +74,7 @@ def list_candidates(db, status="all", kind=None):
             ",".join(e[:14] for e in r["evidence"]) or "-",
             "✓" if r["candidate_only"] else "⚠비후보"))
     lines.append("")
-    lines.append("조회 전용입니다 — 아무것도 변경되지 않았습니다. 표시는 저장된 발췌(≤80자)의 60자 cap, 원문 전문은 저장되어 있지 않습니다.")
+    lines.append("조회 전용입니다 — 아무것도 변경되지 않았습니다. 표시는 저장된 문장 전체의 60자 cap, 원문 전문(대화 전체)은 저장되어 있지 않습니다.")
     lines.append("변경 작업의 confirm 문구에는 # 와 id 를 함께 적습니다 (예: DEPRECATE 3 %s)." % (rows[2]["id8"] if len(rows) >= 3 else "a1b2c3d4"))
     return {"rows": rows, "markdown": "\n".join(lines), "non_candidate": non_candidate}
 

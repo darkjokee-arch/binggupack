@@ -91,7 +91,13 @@ def _show(r):
     if r.get("applied"):
         print("OK:", {k: v for k, v in r.items() if k != "applied"} or "적용됨")
         return 0
+    # 실패 이유 전체 노출(사일런트 실패 금지) — BLOCK reason + 후보별 거부 코드/건수 + 기존재 skip.
     print("BLOCK:", r.get("reason"))
+    rej = r.get("rejected")
+    if rej:
+        print("  거부:", ", ".join("%s=%d" % (k, v) for k, v in sorted(rej.items())))
+    if r.get("skipped_existing"):
+        print("  기존재 skip: %d건" % r["skipped_existing"])
     return 1
 
 
@@ -473,6 +479,17 @@ def selftest():
                      for r in db.con.execute("SELECT * FROM " + t))
     db.close()
     ck("10_candidate-only+chain+raw0", bad == 0 and chain and TEXT not in blob)
+
+    # 10b. _show 실패노출 — 이미 저장된 TEXT 재선택 → nothing_to_save + skip 건수까지 stdout 출력
+    import io
+    import contextlib
+    _buf = io.StringIO()
+    with contextlib.redirect_stdout(_buf):
+        _rc = cmd_save(args(text=TEXT, preview_id=_preview_id(TEXT), pick="1",
+                            confirm="SAVE 1", due=None))
+    _out = _buf.getvalue()
+    ck("10b_show_실패이유_노출(BLOCK+skip)",
+       _rc == 1 and "BLOCK" in _out and "skip" in _out)
 
     # ---- hosted: collect broad, commit narrow (worker 미접촉 · 별도 temp · staging 직접) ----
     import time as _time
