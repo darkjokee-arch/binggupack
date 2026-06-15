@@ -5,15 +5,16 @@ OpenBinggu MCP server (stdio JSON-RPC) wrapper 후보 — 실 등록/공개 前.
 
 목적:
 - openbinggu_mcp_server_handlers.handle_tool 을 stdio JSON-RPC 형태로 감싼다.
-- read/dry-run 도구만 노출(tools/list). 위험 도구는 노출 0.
+- read/dry-run + save_candidate(write-gated) 노출(tools/list). 위험 도구는 노출 0.
 - 모든 path 입력은 기존 path gate/adapter(guarded_tool_call)를 통과(handle_tool 경유).
 - 응답에는 tool/verdict/executed/reason_code/path_id/count 만 — raw 경로/secret 출력 0.
 - malformed request 안전 처리(JSON-RPC error).
 
-범위: wrapper 코드 + synthetic protocol selftest.
-  ⚠️ 실제 MCP 설정 등록/공개는 **미실행(별도 GO)**. serve_stdio()는 정의만 두고 selftest에서 호출하지 않는다.
+범위: wrapper 코드(serve_stdio 정식 구현) + synthetic protocol selftest.
+  serve_stdio()는 정식 JSON-RPC 루프(initialize/tools/list/tools/call). selftest 는 handle_jsonrpc 직접 검증.
+  실제 MCP 설정 파일(.mcp.json/.claude.json) 등록은 owner 운영 행위(코드 변경 아님).
 CLI: python openbinggu_mcp_server.py --selftest      # 프로토콜 synthetic 검증
-     python openbinggu_mcp_server.py --serve <ROOT>  # 실 stdio 서버(등록/공개 시 별도 GO)
+     python openbinggu_mcp_server.py --serve <ROOT>  # 실 stdio 서버(설정 등록은 owner)
 """
 import sys
 import os
@@ -28,6 +29,9 @@ _TOOL_DESC = {
     "consumer_smoke": "pack 소비(읽기) smoke(read)",
     "publish_guard_dryrun": "공개 fail-closed 게이트 dry-run",
     "selftest": "자가검사(read)",
+    "capture_classify": "발화 1건 캡처 판정(read·메모리 순수)",
+    "capture_preview": "대화 발췌 도장 미리보기(read·저장 0)",
+    "save_candidate": "선택 후보 staging 저장(dry-run 기본·SAVE n confirm·actor 하드 reader·자동호출 차단)",
 }
 
 
@@ -43,8 +47,8 @@ def _list_tools():
     # read/dry-run 도구만. 위험 도구는 TOOLS 부재로 자연 제외. description 에 경로/secret 없음.
     out = []
     for name, spec in TOOLS.items():
-        if spec["mode"] not in ("read", "dry-run"):
-            continue  # 방어: read/dry-run 외 노출 금지
+        if spec["mode"] not in ("read", "dry-run", "write-gated"):
+            continue  # 방어: read/dry-run/write-gated 외 노출 금지(write-gated=confirm+actor 게이트 단건)
         props = {p: {"type": "string", "description": f"{p} (작업 폴더 내 경로)"}
                  for p in spec["path_params"]}
         req = list(spec["path_params"])
@@ -127,7 +131,11 @@ def handle_jsonrpc(req, allow_root):
 
 
 def serve_stdio(allow_root):
-    """실 stdio JSON-RPC 루프. ⚠️ 실 등록/공개 시 별도 GO. selftest 에서는 호출하지 않음."""
+    """실 stdio JSON-RPC 루프 (initialize/tools/list/tools/call → handle_jsonrpc → handle_tool).
+
+    정식 구현. .mcp.json/.claude.json 에 `python openbinggu_mcp_server.py --serve <ROOT>` 엔트리 추가는
+    owner 운영 행위(코드 변경 아님). notification(id 없음)은 응답 미발신(JSON-RPC 2.0 표준).
+    """
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -135,11 +143,14 @@ def serve_stdio(allow_root):
         try:
             req = json.loads(line)
         except Exception:
+            # parse error 는 표준상 응답 의무(id 없이 발신).
             sys.stdout.write(json.dumps(_err(None, -32700, "parse error")) + "\n")
             sys.stdout.flush()
             continue
         resp = handle_jsonrpc(req, allow_root)
-        if req.get("id") is not None if isinstance(req, dict) else False:
+        # notification(id 없음)은 응답 미발신. request(id 있음)만 1줄 발신.
+        has_id = isinstance(req, dict) and req.get("id") is not None
+        if has_id:
             sys.stdout.write(json.dumps(resp, ensure_ascii=False) + "\n")
             sys.stdout.flush()
 
@@ -165,14 +176,15 @@ def _selftest():
     r = call({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
     checks.append(("initialize", "result" in r and r["result"]["serverInfo"]["name"] == "openbinggu"))
 
-    # 2) tools/list — read/dry-run 만, forbidden 없음
+    # 2) tools/list — read/dry-run/write-gated 만, forbidden 없음, save_candidate 노출
     r = call({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
     tools = r.get("result", {}).get("tools", [])
     names = {t["name"] for t in tools}
-    list_ok = (all(t["mode"] in ("read", "dry-run") for t in tools)
+    list_ok = (all(t["mode"] in ("read", "dry-run", "write-gated") for t in tools)
                and names == set(TOOLS.keys())
+               and "save_candidate" in names
                and not (names & _FORBIDDEN))
-    checks.append(("tools_list_read_dryrun_only", list_ok))
+    checks.append(("tools_list_read_dryrun_writegated_only", list_ok))
 
     # 3) call pack_validate toy → ALLOW executed
     r = call({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
@@ -199,6 +211,25 @@ def _selftest():
                   "params": {"name": tool, "arguments": {"pack_path": "examples/toy_project/p.json"}}})
         res = r.get("result", {})
         checks.append((nm, res.get("executed") is False and res.get("verdict") == "REJECT"))
+
+    # 9b) save_candidate tools/call — dry-run 기본은 write 0(executed_write=False·PREVIEW).
+    r = call({"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+              "params": {"name": "save_candidate",
+                         "arguments": {"text": "이 문서는 배포 절차를 정의한다.", "indices": [1]}}})
+    res = r.get("result", {})
+    tr = res.get("tool_result") or {}
+    checks.append(("save_call_dryrun_write0",
+                   res.get("executed") is True and tr.get("executed_write") is False
+                   and tr.get("verdict") == "PREVIEW"))
+
+    # 9c) save_candidate confirm 불일치(dry_run=False) — write 0 REJECT.
+    r = call({"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+              "params": {"name": "save_candidate",
+                         "arguments": {"text": "이 문서는 배포 절차를 정의한다.", "indices": [1],
+                                       "confirm": "SAVE 9", "dry_run": False}}})
+    tr = (r.get("result", {}).get("tool_result")) or {}
+    checks.append(("save_call_confirm_mismatch_write0",
+                   tr.get("executed_write") is False and tr.get("reason") == "confirm_phrase_mismatch"))
 
     # 10) malformed: missing method
     r = call({"jsonrpc": "2.0", "id": 10})
@@ -238,8 +269,9 @@ def _selftest():
         print("  [%s] %s" % ("OK" if ok else "FAIL", nm))
 
     print("\n  raw_path_not_leaked:", (not raw_leak))
-    print("  mcp_registration: NOT_DONE (실 등록/공개 별도 GO)")
-    print("  operating_store_unchanged: True (wrapper + mock, FS write 0)")
+    print("  serve_stdio: IMPLEMENTED (initialize/tools/list/tools/call). 실 설정 등록은 owner")
+    print("  save_default_dry_run: True  real_ledger_write: 0 (selftest=handle_jsonrpc, temp/mock only)")
+    print("  operating_store_unchanged: True (wrapper + mock, 운영 ledger write 0)")
 
     gate = "GO" if (all_ok and not raw_leak) else "NO-GO"
     print("\n  GATE:", gate)

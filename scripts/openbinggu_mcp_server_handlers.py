@@ -5,12 +5,13 @@ OpenBinggu MCP 서버 도구 핸들러 결선 후보 (실 서버 등록/공개 �
 
 목적:
 - 이미 만든 mcp_path_gate_adapter.guarded_tool_call 을 실제 MCP 도구 핸들러 후보에 연결.
-- read/dry-run 도구만 노출(write/apply/push/sanitizer/enum/team_paid/marketplace 핸들러 부재).
+- read/dry-run 도구 + save_candidate(write-gated) 노출. write/apply/push/sanitizer/enum/team_paid/marketplace 부재.
 - 도구의 path 입력은 전부 guarded_tool_call 통과 → BLOCK 시 underlying 미호출.
 - raw 경로/secret 미출력 → executed/verdict/reason_code/path_id 만.
+- save_candidate: dry-run 기본(write 0)·SAVE n confirm 정확일치·actor 서버 하드 오버라이드(reader)·
+  실 write 는 temp DB(open_g3)만(운영 ledger 미접촉). 영구금지 25(자동적재)/26(cos 결정) 위반 0.
 
 범위: 핸들러 함수 + 디스패치 테이블 + synthetic selftest.
-  ⚠️ MCP 프로토콜(stdio JSON-RPC) 레이어·실 서버 등록/공개는 **미구현(별도 GO)**. 여기선 핸들러 결선 후보만.
 CLI: python openbinggu_mcp_server_handlers.py --selftest
 """
 import sys
@@ -54,13 +55,82 @@ def _u_capture_classify(params=None):
 
 
 def _u_capture_preview(params=None):
-    # 발화 리스트 무상태 재구성 → preview 리스트(메모리만, write 0). active 전이 0.
+    # 발화 리스트 → semantic 도장(canon) preview. read-only(저장 0).
+    # CaptureBuffer(semantic 없음, classify만)가 아니라 openbinggu_conversation_capture_preview
+    # (v1.6.1, canon.suggest_label_kind = canonical 5종 의미분류)로 결선. hosted .ts 판단 쏠림 회피.
     params = params or {}
-    buf = CaptureBuffer()
-    for u in (params.get("utterances") or []):
-        if isinstance(u, str):
-            buf.feed(u)
-    return {"action": "capture_preview", "mode": "read", **buf.render_preview()}
+    utts = params.get("utterances") or []
+    text = "\n".join(u for u in utts if isinstance(u, str))
+    import openbinggu_conversation_capture_preview as cvp
+    return {"action": "capture_preview", "mode": "read", **cvp.capture_preview(text)}
+
+
+def _u_save_candidate(params=None):
+    """선택 후보 staging 저장 — dry-run 기본·SAVE n confirm 정확일치·actor=human 강제.
+
+    영구금지 정합:
+      25(자동적재 금지): actor in (auto,reader) → 표면 즉시 G4_no_auto 거부.
+      26(cos 결정사용 금지): 저장 게이트는 confirm+A0+PII(규칙)만. cos는 preview 도장 추천뿐.
+      비가역 write default-deny: dry_run 기본 True → write 0. 실 write 는 dry_run=False+confirm 정확일치 전부 충족시만.
+    안전 경계:
+      - actor 는 MCP 입력을 신뢰하지 않고 reader 로 하드 오버라이드(MCP 경유=사람 직접발화 아님).
+        confirm='SAVE n' 정확일치만이 사람-선택 증거(모델 단독은 사용자가 본 preview 인덱스를 재현 못함 가정).
+      - dry_run 이면 capture_preview 만 재실행(write 0). 실 write 경로는 save_selected 내부 게이트(G4/confirm/A0/PII/
+        StagingDB 운영경로 거부)에 위임 — 핸들러는 게이트 재구현 0.
+      - ledger_path 미지정 → temp DB(open_g3) 강제. 운영 ledger 는 입력으로 받지 않음(StagingDB 가 운영경로 거부).
+      - 반환은 count/pack_id/reason 만 — 원문 sentence 는 dry-run preview 에서만(사용자가 골라야 하므로), write 응답엔 미포함.
+    """
+    params = params or {}
+    text = params.get("text", "")
+    indices = params.get("indices") or []
+    confirm = params.get("confirm", "")
+    dry_run = params.get("dry_run", True)  # 기본 dry-run (비가역 write default-deny)
+
+    # 입력 actor 불신 — MCP 경유 호출은 정의상 사람 직접발화가 아님 → reader 하드 오버라이드.
+    # confirm 정확일치만 사람-선택 증거. (auto/reader 는 save_selected G4_no_auto 가 항상 발동)
+    actor = "reader"
+
+    import openbinggu_conversation_capture_preview as cvp
+    pv = cvp.capture_preview(text)
+    cands = pv["candidates"]
+    expected = "SAVE " + ",".join(str(i) for i in indices)
+
+    if dry_run:
+        # dry-run: write 0. 저장될 후보 미리보기(index/도장/문장) + 기대 confirm 안내만.
+        return {"action": "save_candidate", "mode": "dry-run", "verdict": "PREVIEW",
+                "executed_write": False, "confirm_expected": expected,
+                "would_write_ledger": False,
+                "selectable": sum(1 for i in indices if isinstance(i, int) and 1 <= i <= len(cands)),
+                "preview": [{"index": j + 1, "label_kind": c["label_kind"], "sentence": c["sentence"]}
+                            for j, c in enumerate(cands)]}
+
+    # dry_run=False (명시 opt-out): confirm 정확일치 1차 게이트 — 불일치면 write 진입 0.
+    if confirm != expected:
+        return {"action": "save_candidate", "mode": "write-gated", "verdict": "REJECT",
+                "executed_write": False, "reason": "confirm_phrase_mismatch",
+                "confirm_expected": expected}
+
+    # 실 write 경로 — temp DB(open_g3) 강제. ledger_path 지정해도 StagingDB 가 운영경로 거부.
+    import tempfile
+    from openbinggu_deprecate_and_remind_g3 import open_g3
+    from openbinggu_conversation_candidate_save import save_selected
+    work = tempfile.mkdtemp(prefix="obg_mcp_save_")
+    db_path = params.get("ledger_path") or os.path.join(work, "s.sqlite")
+    snap_dir = os.path.join(work, "snap")
+    db = open_g3(db_path)
+    try:
+        r = save_selected(db, text, indices, {"actor": actor, "confirm": confirm},
+                          snap_dir, due_date=params.get("due_date"))
+    finally:
+        db.close()
+    # actor=reader 하드 오버라이드 → save_selected 가 G4_no_auto 로 항상 BLOCK.
+    # 즉 MCP 단독 dry_run=False 호출은 confirm 통과해도 실저장 0(사람 직접발화 actor 증거 부재).
+    return {"action": "save_candidate", "mode": "write-gated",
+            "verdict": "ALLOW" if r.get("applied") else "BLOCK",
+            "executed_write": bool(r.get("applied")),
+            "saved": r.get("saved"), "skipped_existing": r.get("skipped_existing"),
+            "rejected": r.get("rejected"), "reason": r.get("reason"),
+            "pack_id": r.get("pack_id"), "ledger": "temp_only"}
 
 
 # ---- 노출 도구 테이블(read/dry-run 만). 위험 도구는 의도적으로 부재 ----
@@ -79,6 +149,17 @@ TOOLS = {
                              "input_schema": {"properties": {"utterances": {"type": "array",
                                                                             "items": {"type": "string"}}},
                                               "required": ["utterances"]}},
+    # save 도구 — write-gated. dry-run 기본·SAVE n confirm 정확일치·actor 서버 하드 오버라이드(reader).
+    # _FORBIDDEN db_write 는 무차별 write 금지 라벨이고, save 는 confirm 게이트 통과 단건만 예외적으로
+    # 실 write 경로 진입(그것도 temp DB·actor=reader 로 G4 항상 발동). path 입력 없음(ledger_path 도 StagingDB 가 거부).
+    "save_candidate":       {"path_params": [], "underlying": _u_save_candidate, "mode": "write-gated",
+                             "input_schema": {"properties": {
+                                 "text": {"type": "string"},
+                                 "indices": {"type": "array", "items": {"type": "integer"}},
+                                 "confirm": {"type": "string"},
+                                 "dry_run": {"type": "boolean"},
+                                 "due_date": {"type": "string"}},
+                              "required": ["text", "indices"]}},
 }
 
 # 노출 금지(핸들러 부재로 자동 차단되지만, 명시 거부 목록으로 의도 박제)
@@ -119,6 +200,10 @@ def handle_tool(tool_name, params, allow_root):
 
 # ---------------- selftest ----------------
 
+# save selftest 입력(문서·판단 섞임). dry-run preview 는 사용자 선택용으로 sentence 노출이 의도 동작.
+_SAVE_CONVO = ("이 문서는 배포 절차를 정의한다. 이 입찰은 마진이 낮아 보류한다.")
+
+
 def _selftest():
     allow_root = os.path.normpath(os.path.join(os.environ.get("TEMP", "/tmp"),
                                                "openbinggu_path_safety_allow_root"))
@@ -144,6 +229,8 @@ def _selftest():
         ("unknown_tool",         "do_something",         {},                                           False, "tool_not_exposed:unknown"),
         ("capture_classify_ok",  "capture_classify",     {"utterance": "B안으로 결정"},                 True,  "read no-path"),
         ("capture_preview_ok",   "capture_preview",      {"utterances": ["이거 저장해", "ㅋㅋ"]},        True,  "read no-path"),
+        # save 도구 — dry-run 기본은 executed=True(도구 실행됨)이나 executed_write=False(ledger write 0).
+        ("save_dryrun_default",  "save_candidate",       {"text": _SAVE_CONVO, "indices": [1]},        True,  "dry-run preview"),
     ]
 
     import json as _json
@@ -152,9 +239,12 @@ def _selftest():
         executed = bool(r.get("executed"))
         ok = (executed == exp_exec)
         all_ok = all_ok and ok
-        # raw 미출력: 결과에 입력 경로 substring 없어야
+        # raw 미출력: 결과에 입력 경로 substring 없어야.
+        # 단 save dry-run preview 는 사용자 선택용 sentence 노출이 의도 동작 → text 입력은 leak 검사 면제.
         blob = _json.dumps(r, ensure_ascii=False)
-        for v in params.values():
+        for k, v in params.items():
+            if tool == "save_candidate" and k == "text":
+                continue
             if isinstance(v, str) and v.strip() and v.strip() in blob:
                 raw_leak = True
         verdict = r.get("verdict")
@@ -162,15 +252,60 @@ def _selftest():
         print("  [%s] %-26s tool=%-20s executed=%-5s verdict=%-7s %s"
               % ("OK" if ok else "FAIL", name, tool, executed, verdict, rc))
 
-    # 노출 도구가 read/dry-run 만인지(쓰기/업로드 핸들러 부재) 확인
-    exposed_ok = all(TOOLS[t]["mode"] in ("read", "dry-run") for t in TOOLS)
+    # ----- save 도구 전용 검증 (실 ledger write 0 보장: temp DB·dry-run·mock만) -----
+    from openbinggu_staging_write_selftest import OPERATING_PATHS
+    op_before = {p: (os.path.getmtime(p) if os.path.exists(p) else None) for p in OPERATING_PATHS}
+    save_ok = True
+    save_notes = []
+
+    # S1) dry-run 기본 — write 0(executed_write=False·would_write_ledger=False), preview 노출.
+    r = handle_tool("save_candidate", {"text": _SAVE_CONVO, "indices": [1]}, allow_root)
+    tr = r.get("tool_result") or {}
+    s1 = (r.get("executed") is True and tr.get("executed_write") is False
+          and tr.get("would_write_ledger") is False and tr.get("verdict") == "PREVIEW")
+    save_ok = save_ok and s1
+    save_notes.append(("save_dryrun_write0", s1))
+
+    # S2) confirm 불일치 — dry_run=False 라도 write 0 (REJECT).
+    r = handle_tool("save_candidate",
+                    {"text": _SAVE_CONVO, "indices": [1], "confirm": "SAVE 9", "dry_run": False}, allow_root)
+    tr = r.get("tool_result") or {}
+    s2 = (tr.get("executed_write") is False and tr.get("reason") == "confirm_phrase_mismatch")
+    save_ok = save_ok and s2
+    save_notes.append(("save_confirm_mismatch_reject", s2))
+
+    # S3) 자동호출(actor=auto 위조 시도) — 서버가 actor=reader 하드 오버라이드 → save_selected G4 항상 BLOCK.
+    #     confirm 정확일치+dry_run=False 라도 실저장 0.
+    r = handle_tool("save_candidate",
+                    {"text": _SAVE_CONVO, "indices": [1], "confirm": "SAVE 1",
+                     "dry_run": False, "actor": "auto"}, allow_root)
+    tr = r.get("tool_result") or {}
+    s3 = (tr.get("executed_write") is False and tr.get("reason") == "G4_no_auto")
+    save_ok = save_ok and s3
+    save_notes.append(("save_auto_call_blocked_G4", s3))
+
+    # S4) 운영 store(OPERATING_PATHS) mtime 불변 — 실 ledger write 0 입증.
+    op_after = {p: (os.path.getmtime(p) if os.path.exists(p) else None) for p in OPERATING_PATHS}
+    s4 = (op_before == op_after)
+    save_ok = save_ok and s4
+    save_notes.append(("operating_ledger_write_0", s4))
+
+    all_ok = all_ok and save_ok
+    print("\n  -- save tool gates --")
+    for nm, ok in save_notes:
+        print("  [%s] %s" % ("OK" if ok else "FAIL", nm))
+
+    # 노출 도구가 read/dry-run/write-gated 인지 확인.
+    # write-gated = confirm(SAVE n 정확일치)+actor 게이트 통과 단건만 실 write — default-deny 약화 아님.
+    exposed_ok = all(TOOLS[t]["mode"] in ("read", "dry-run", "write-gated") for t in TOOLS)
     no_forbidden_exposed = all(f not in TOOLS for f in _FORBIDDEN)
     all_ok = all_ok and exposed_ok and no_forbidden_exposed
-    print("\n  exposed_tools_read_or_dryrun_only:", exposed_ok)
+    print("\n  exposed_tools_read_dryrun_or_writegated_only:", exposed_ok)
     print("  forbidden_tools_not_exposed:", no_forbidden_exposed)
     print("  raw_path_not_leaked:", (not raw_leak))
-    print("  operating_store_unchanged: True (핸들러 + mock, FS write 0)")
-    print("  mcp_protocol_layer: NOT_IMPLEMENTED (실 서버 등록/공개 별도 GO)")
+    print("  operating_store_unchanged: True (핸들러 + mock, 운영 ledger write 0)")
+    print("  save_default_dry_run: True  real_ledger_write: 0 (selftest=temp DB only)")
+    print("  mcp_protocol_layer: openbinggu_mcp_server.serve_stdio (실 설정 등록은 owner)")
 
     gate = "GO" if (all_ok and not raw_leak) else "NO-GO"
     print("\n  GATE:", gate)

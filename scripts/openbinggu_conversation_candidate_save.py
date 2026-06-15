@@ -42,7 +42,9 @@ def save_selected(db, text, indices, ctx, snap_dir, due_date=None):
         return {"applied": False, "saved": 0, "skipped_existing": 0, "rejected": {}, "reason": reason}
 
     # 1) actor + confirm 문구 (사람 발화 유래 증거 — 정확 일치 의무)
-    if ctx.get("actor") in ("auto", "reader"):
+    # allowlist: 'human'만 허용. denylist(auto/reader만 차단)는 'agent'/'system'/누락/대문자
+    # 우회로 자동저장 가능(영구금지 25 우회) → human 정확매칭+정규화로 default-deny.
+    if ctx.get("actor", "").strip().lower() != "human":
         return block("G4_no_auto")
     expected = "SAVE " + ",".join(str(i) for i in indices)
     if ctx.get("confirm") != expected:
