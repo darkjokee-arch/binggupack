@@ -52,7 +52,13 @@ python scripts/localbinggu_ingest_executor.py <pack.zip>
 python scripts/localbinggu_ingest_executor.py <real_pack.zip> --execute
 ```
 
-## 6. HOLD (이번 전환 범위 밖)
+## 6. OpenCrab plan 안내 (역인제스트 가능 조건)
+
+- **OpenCrab Cloud 역인제스트(ontology_ingest / Cloud 적재)는 Expert plan 전용** — Free/Pro plan에서는 역방향 인제스트 불가([[feedback_opencrab_cloud_plan_gate]] 정합).
+- **본 구현(로컬 CLI `opencrab ingest`, LOCAL MODE)은 plan 무관** — 실측(2026-06-15): 실 ledger ZIP(real_active, node 9/edge 8) `--execute` 적재 시 plan 게이트 없이 성공(20/20, query score 1.000).
+- 정리: 빙구팩 **로컬** 역인제스트는 plan 제약 없이 동작한다. 향후 **Cloud** 역인제스트로 확장할 때에만 Expert plan이 필요하다.
+
+## 7. HOLD (이번 전환 범위 밖)
 
 - OpenCrab **Cloud** 실 업로드 / Cloud 원본화 / marketplace / 팀·공유·과금 — 계속 HOLD.
 - 폰 수집(hosted save-intent v2/mcp) — 별개 축(폰↔PC). 이번 작업 미수정.
