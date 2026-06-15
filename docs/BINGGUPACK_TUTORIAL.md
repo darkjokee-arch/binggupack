@@ -116,7 +116,7 @@ python scripts/openbinggu_v1_candidate_cycle_real_once.py --dry-run-temp   # 17/
 - 모듈별 selftest 기대값: 목록 13/13 · 기각 15/15 · 수정 16/16 · 수용 16/16 · resolve 16/16 (명령은 `../INSTALL.md` 참조).
 - 쓰기 루프(preview→선택 저장→피드백) 통합은 `python scripts/openbinggu_v08_real_cycle_once.py --dry-run-temp` (14/14 기대).
 
-### 내 영속 장부 시작 (v1.0.0)
+### 내 영속 장부 시작
 
 ```bash
 python binggu.py init

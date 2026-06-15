@@ -4,7 +4,11 @@
 
 > **무엇인가** — local-first · evidence-backed context packs · candidate capture/preview · human-confirmed SAVE gate · ontology graph validation. **자동 ledger/confirmed write 없음** — 저장은 preview → `SAVE n`(정확한 confirm) 게이트로만 진행됩니다.
 >
-> **Latest release = v1.7.0** (사용자가 고른 문장 전체 저장 — 80자 발췌 폐기). `binggu init`이 현재 workspace scope에 자동 후보 수집을 기본 ON으로 만드는 capture profile(scope-gated) + 영속 candidate 버퍼 + opt-in hook support + `binggu hosted pull`(폰 SAVE n→PC 한 번에). **자동 저장은 없음**(저장 = preview → `SAVE n`). 라이브 save-intent는 **신형 v2 서명 전용**(`SAVE_SIG_V2_ONLY=1`, 구형 차단). 라인: v1.0.0(개인 장부) → v1.1.0(그래프 문법) → v1.2.0(hosted save-intent) → v1.3.x(자동 캡처·preview·어댑터) → v1.4.0(AGI memory capture)~v1.4.6 → v1.5.0(PC-mediated read publish pipeline + evidence graph) → v1.5.1(cross-platform + `BINGGU_HOME`) → v1.5.2(3-OS real-device 검증 + e2e CI) → v1.6.0(의미 기반 도장 분류 + 캐싱) → **v1.6.1: 의미 기반 도장(label_kind) 분류 — bge-m3 임베딩 + 중심점 유사도로 5종을 뜻으로 분류(**Ollama+bge-m3 감지 시 자동 ON** — 한 번 설치하면 재설정 0, 거부는 `BINGGU_SEMANTIC_OFF=1`), 디스크 캐싱(1899배), 독립 테스트셋 정확도 97%(문서 종 경계 seed 보강). OpenCrab Cloud ingest는 HOLD.**
+> **Latest release = v1.8.0 — 똑똑한 뜻 분류 자동 켜짐 + 첫 설치 환경 점검.**
+> - `binggu init` → 장부 생성 + 자동 후보 수집(기본 ON) + **환경 점검표**(무엇이 켜지고 무엇을 더 깔면 되는지 안내, 자동 설치는 안 함).
+> - **똑똑한 뜻 분류**: Ollama+bge-m3 한 번 설치(또는 폰/claude.ai 사용) 시 자동 감지·자동 ON. 없으면 정규식 분류. 거부 `BINGGU_SEMANTIC_OFF=1`.
+> - **자동 저장은 없음** — 저장은 preview → `SAVE n` 사람 게이트만. cos는 도장 제안에만, PII/secret 선차단.
+> - 사용자가 고른 문장 전체 저장(80자 발췌 폐기). 라이브 save-intent는 신형 v2 서명 전용(`SAVE_SIG_V2_ONLY=1`). OpenCrab 로컬 역인제스트 지원, Cloud 업로드는 HOLD.
 >
 > OpenCrab 업로드는 **planned**(preflight G1~G7까지 구현·검증, 실 전송은 별도 결정 — 노출 0). "100% 완성판"이 아니며 모든 사용자 환경 동작을 보장하지 않습니다. 전체 로드맵·범위는 `README.md`, 따라하기는 `docs/BINGGUPACK_TUTORIAL.md` 참조.
 
