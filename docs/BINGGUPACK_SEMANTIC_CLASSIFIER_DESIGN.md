@@ -1,6 +1,6 @@
-# BingguPack — Semantic Capture Classifier 설계 (DRAFT, 2026-06-13)
+# BingguPack — Semantic Capture Classifier 설계 (구현·배포 완료 — 2026-06-13 설계 → 2026-06-15 라이브)
 
-> **설계만 — 코드 0.** 구현은 owner 별도 GO 후. 기존 정규식은 **건드리지 않는다**(§7 확약).
+> **상태: 구현·검증·라이브 배포 완료.** 로컬 v1.6.x opt-in + hosted P1~P3 라이브(2026-06-15, worker Version 63592dc1, `SEMANTIC_LABEL_ENABLED=1`). 아래 §0~§12는 원안 설계, §13~는 구현 정정·실측. 기존 정규식은 **건드리지 않았다**(§7 확약 — semantic 실패 시 RULES→no_suggestion fallback으로 보존).
 > 원칙: 자동 저장 아님 · semantic 은 후보 추천만 · secret/PII hard block 은 정규식이 항상 최우선 ·
 > 원문 전문 저장 금지 · 최종 저장은 preview 후 `SAVE n` 게이트만.
 >

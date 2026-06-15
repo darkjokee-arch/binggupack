@@ -20,14 +20,18 @@
 
 - read 라인과 save 라인은 **`name` 완전 분리** — 오배포·삭제 모두 격리, read 라인(장부 조회) 무접촉.
 - `src/capture_preview.ts` — `conversation_capture_preview` 공용 모듈(대화 텍스트→핵심 문장 후보 미리보기, 저장 0·PII/secret 문장 제외). read 라인 6번째 도구이자 save MCP 라인의 미리보기 도구.
+- `src/capture_preview_semantic.ts` + `src/centroids_canonical_5.json` — 도장(label_kind) **semantic 분류**(@cf/baai/bge-m3 임베딩 + centroid cos, 로컬과 일원화). opt-in `SEMANTIC_LABEL_ENABLED=1` + `[ai] binding=AI` 일 때만 활성, 미설정이면 정규식 passthrough(기존 동작 보존). 실패/lo → RULES → 매치 실패 시 `no_suggestion`(판단 강제 안 함). **라이브**: Version 63592dc1(2026-06-15).
+- `src/embed_probe.ts` + `wrangler.embed_probe.toml` — centroid 재생성 전용 임시 임베드 endpoint(`wrangler dev --remote`로만, deploy 안 함). seed 변경 시 `scripts/binggu_hosted_centroid_gen.py --endpoint ...` 로 centroids JSON 재생성.
 - `src/load_packs.ts` — 실 pack JSON 검증 로더(fail-closed: 위반 1건 = 기동 실패).
 
 ## read 라인 배포 (개인용)
 ```bash
+npm install                                 # wrangler 등 의존성(package.json) 설치
 npx wrangler login                          # 본인 Cloudflare 계정
 npx wrangler deploy                         # workers.dev 서브도메인 필요(계정 1회 설정)
-npx wrangler secret put MCP_PATH_TOKEN      # 비공개 경로 토큰(예: 32자 hex) — 코드/설정 평문 금지
+npx wrangler secret put MCP_PATH_TOKEN      # 비공개 경로 토큰 — 예: openssl rand -hex 16 (코드/설정 평문 금지)
 ```
+- (선택) semantic 도장 활성: `wrangler.toml`에 `[ai] binding="AI"` + `[vars] SEMANTIC_LABEL_ENABLED="1"` 후 재배포. 미설정이면 정규식 RULES passthrough(기존 동작).
 - 접속 경로는 `https://<worker>.<subdomain>.workers.dev/mcp/<MCP_PATH_TOKEN>` — **토큰 미설정 시 전 요청 503(fail-closed)**, 무토큰/오토큰 404.
 - 로컬 개발: `.dev.vars` 파일에 `MCP_PATH_TOKEN` 한 줄(키와 값)을 작성 후 `npx wrangler dev` (`.dev.vars`는 커밋 금지).
 

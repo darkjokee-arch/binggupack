@@ -2,6 +2,28 @@
 .wrangler/
 **/.wrangler/
 
+# wrangler deploy 빌드 산출(번들 — 추적 금지, deploy 시 재생성)
+dist/
+**/dist/
+
+# node 의존성
+node_modules/
+**/node_modules/
+
+# python 가상환경 (테스트/설치 부산물 — 추적 금지)
+.venv/
+.venv*/
+**/.venv/
+venv/
+*venv*/
+**/*venv*/
+
+# python 컴파일 캐시
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+
 # secrets / credentials
 .env
 *.env

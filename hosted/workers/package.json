@@ -1,0 +1,15 @@
+{
+  "name": "binggupack-workers",
+  "version": "1.7.0",
+  "private": true,
+  "description": "BingguPack hosted MCP workers (Cloudflare Workers). read-only pack/capture_preview + save-intent. 자가 배포는 owner 명시 GO에서만.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "dev:remote": "wrangler dev --remote",
+    "deploy": "wrangler deploy",
+    "centroid:gen": "echo '실 centroid 재생성: wrangler dev --remote --config wrangler.embed_probe.toml --port 8799 후, py ../../scripts/binggu_hosted_centroid_gen.py --endpoint http://127.0.0.1:8799'"
+  },
+  "devDependencies": {
+    "wrangler": "^4.100.0"
+  }
+}
