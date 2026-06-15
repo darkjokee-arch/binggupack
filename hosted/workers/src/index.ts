@@ -12,6 +12,11 @@
 //   fail-closed 누출 스캔(SANITIZE_BLOCK) · 배포/OAuth/등록 0 (wrangler dev 로컬 전용).
 
 import { capturePreview, scanPii } from "./capture_preview";
+import { capturePreviewSemantic, Centroids } from "./capture_preview_semantic";
+import centroidsData from "./centroids_canonical_5.json";
+
+// P3: 실 @cf/baai/bge-m3 centroid(코드 상수 박제). opt-in OFF면 미사용(capturePreviewSemantic 가 passthrough).
+const CENTROIDS = centroidsData as unknown as Centroids;
 
 const PROTOCOL_VERSION = "2025-06-18";
 const SUPPORTED_PROTOCOL_VERSIONS = ["2025-03-26", "2025-06-18", "2025-11-25"];
@@ -399,7 +404,7 @@ interface ToolDef {
   description: string;
   inputSchema: Record<string, any>;
   outputSchema: Record<string, any>;
-  handler: (store: PackStore, args: Record<string, any>) => any;
+  handler: (store: PackStore, args: Record<string, any>, env?: any) => any | Promise<any>;
 }
 
 const TOOLS: Record<string, ToolDef> = {
@@ -477,18 +482,25 @@ const TOOLS: Record<string, ToolDef> = {
       candidates: { type: "array", items: { type: "object", properties: {
         sentence: { type: "string" }, label_kind: { type: "string" },
         rule_id: { type: "string" }, a0_verdict: { type: "string" },
-        candidate: { type: "boolean" } },
+        candidate: { type: "boolean" },
+        // P3 opt-in ON 시에만 보강(B'7⑤ 격리·기존 label_kind 무변경). null=no_suggestion.
+        label_kind_suggestion: { type: ["string", "null"] },
+        semantic_conf: { type: ["number", "null"] },
+        semantic_band: { type: ["string", "null"] },
+        semantic_source: { type: "string" } },
         required: ["sentence", "label_kind", "rule_id", "a0_verdict", "candidate"] } },
       excluded_counts: { type: "object" },
       truncated: { type: "boolean" },
       preview_markdown: { type: "string" },
-      nothing_saved: { type: "boolean" } },
+      nothing_saved: { type: "boolean" },
+      semantic_applied: { type: "boolean" } },
       required: ["candidates", "excluded_counts", "truncated", "preview_markdown", "nothing_saved"] },
-    handler: (_store: PackStore, args: Record<string, any>) => {
+    handler: (_store: PackStore, args: Record<string, any>, env?: any) => {
       if (typeof args.text !== "string" || !args.text.trim()) {
         throw new ToolError("INVALID_ARGUMENT", "missing required string: text");
       }
-      return capturePreview(args.text, args.max_candidates);
+      // P3: opt-in ON(env.SEMANTIC_LABEL_ENABLED=="1") 이면 semantic 도장 보강, OFF 면 base passthrough.
+      return capturePreviewSemantic(args.text, env, CENTROIDS, args.max_candidates);
     },
   },
   handoff_context: {
@@ -543,7 +555,7 @@ function fitResult(result: Record<string, any>): Record<string, any> {
   return result;
 }
 
-function handleRpc(store: PackStore, rpc: Record<string, any>): Record<string, any> | null {
+async function handleRpc(store: PackStore, rpc: Record<string, any>, env?: any): Promise<Record<string, any> | null> {
   const rpcId = rpc.id ?? null;
   const method = rpc.method ?? "";
   if (rpcId === null) return null; // notification — 202
@@ -573,7 +585,7 @@ function handleRpc(store: PackStore, rpc: Record<string, any>): Record<string, a
     let out: Record<string, any>;
     let isErr: boolean;
     try {
-      out = fitResult(TOOLS[name].handler(store, args));
+      out = fitResult(await TOOLS[name].handler(store, args, env));
       isErr = "error_code" in out;
     } catch (e) {
       if (e instanceof ToolError) {
@@ -633,6 +645,8 @@ function protocolVersionOk(request: Request): boolean {
 
 interface Env {
   MCP_PATH_TOKEN?: string;
+  AI?: any;                        // P3 Workers AI 바인딩(@cf/baai/bge-m3). opt-in ON 시에만 호출.
+  SEMANTIC_LABEL_ENABLED?: string; // "1" 이면 semantic 도장 활성. 미설정/기타=OFF(기존 동작).
 }
 
 // store 주입형 핸들러 팩토리 — toy(기본 STORE)와 실 pack 빌드(index.real.ts)가 동일 코드 경로 공유
@@ -668,7 +682,7 @@ export function makeFetchHandler(store: PackStore) {
     }
     let resp: Record<string, any> | null;
     try {
-      resp = handleRpc(store, rpc);
+      resp = await handleRpc(store, rpc, env);
     } catch { // 미상 예외 — 내부 정보 미노출 정적 -32603
       resp = { jsonrpc: "2.0", id: rpc.id ?? null,
                error: { code: -32603, message: "internal error" } };

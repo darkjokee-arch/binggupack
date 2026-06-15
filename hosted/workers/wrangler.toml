@@ -2,5 +2,9 @@ name = "binggupack-workers-port-local"
 main = "src/index.ts"
 compatibility_date = "2025-05-01"
 
-# GO-WORKERS-PORT-LOCAL — wrangler dev 로컬 한정 PoC.
-# 배포(deploy)·routes·custom domain·KV·secrets 전부 미설정 (HOLD).
+# P3(2026-06-15): conversation_capture_preview semantic 도장 일원화 배포.
+# 경로 토큰은 wrangler secret 으로 기배포 유지. SEMANTIC_LABEL_ENABLED 미설정이면 OFF(기존 동작 보존).
+# AI 바인딩만 추가 — opt-in OFF 배포 시 실호출 0.
+
+[ai]
+binding = "AI"
