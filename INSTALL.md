@@ -123,9 +123,9 @@ python scripts/openbinggu_v1_candidate_cycle_real_once.py --dry-run-temp # 17/17
 
 ## PC-mediated read publish pipeline selftest / 퍼블리시 파이프라인 검증 (P1~P8)
 ```bash
-py scripts/binggu_publish_run_all_selftests.py    # 8/8 PASS · REGRESSION=GO (P1~P6 + cloud_pack export + tree scan)
+py scripts/binggu_publish_run_all_selftests.py    # 9/9 PASS · REGRESSION=GO (P1~P6 + cloud_pack export + local ingest + tree scan)
 ```
-> 회귀 검증만 수행합니다 — **Cloud upload / DB insert / OpenCrab ingest 0**. P3는 실 ledger를 read-only(mode=ro)로만 읽고, active 데이터 없으면 `NO_REAL_LEDGER_DATA`로 BLOCK합니다.
+> 회귀 검증만 수행합니다 — **Cloud upload / DB insert 0**. 로컬 역인제스트는 `localbinggu_ingest_executor.py` 별도 명령(회귀는 그 selftest만 호출). P3는 실 ledger를 read-only(mode=ro)로만 읽고, active 데이터 없으면 `NO_REAL_LEDGER_DATA`로 BLOCK합니다.
 
 ## Cross-platform selftest / 크로스플랫폼 정책 검증 (Windows/WSL/macOS)
 ```bash

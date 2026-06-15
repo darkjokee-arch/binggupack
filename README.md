@@ -5,7 +5,7 @@
 AI와의 대화에서 건질 판단·상태·개념을 후보로 **자동 수집**하고, 사람이 직접 confirm 문구를 타이핑해야만 저장되는 **로컬 우선(local-first)** 지식장부입니다. 자동 수집은 켜지지만, **자동 저장은 없습니다.**
 
 - **Latest release: v1.6.1** — <https://github.com/darkjokee-arch/binggupack/releases/tag/v1.6.1>
-- **v1.6.x 핵심** — **의미 기반 도장(label_kind) 분류**. 기존엔 문장 종결어미 정규식으로 5종(문서/증거/개념/상태/판단)을 가려 대부분 "판단"으로 흘렀는데, bge-m3 임베딩 + 중심점 유사도로 **뜻으로 5종 분류**. opt-in(기본 꺼짐)·PII 선차단·사람 confirm 게이트 유지(영구금지26 개정). 중심점 디스크 캐싱(첫 16s→0.009s, 1899배). **정확도(독립 테스트셋 60문장) 97%** — 증거/개념/상태/판단 100%, 문서 보강(v1.6.1). 라인: v1.5.2(3-OS real verified + e2e CI) → v1.6.0(의미 기반 도장 분류 + 캐싱) → **v1.6.1(문서 종 경계 seed 보강)**. OpenCrab Cloud ingest는 **HOLD**.
+- **v1.6.x 핵심** — **의미 기반 도장(label_kind) 분류**. 기존엔 문장 종결어미 정규식으로 5종(문서/증거/개념/상태/판단)을 가려 대부분 "판단"으로 흘렀는데, bge-m3 임베딩 + 중심점 유사도로 **뜻으로 5종 분류**. opt-in(기본 꺼짐)·PII 선차단·사람 confirm 게이트 유지(영구금지26 개정). 중심점 디스크 캐싱(첫 16s→0.009s, 1899배). **정확도(독립 테스트셋 60문장) 97%** — 증거/개념/상태/판단 100%, 문서 보강(v1.6.1). 라인: v1.5.2(3-OS real verified + e2e CI) → v1.6.0(의미 기반 도장 분류 + 캐싱) → **v1.6.1(문서 종 경계 seed 보강)** → **v1.7.0(전체문장 저장)**. OpenCrab **로컬 역인제스트 구현** (ZIP→`opencrab ingest`·dry-run 기본·`--execute` 시 실적재). OpenCrab **Cloud** 업로드/원본화는 **HOLD**.
 - **Python 3.10+ · 외부 런타임 의존성 0 · Windows / WSL / macOS / Linux** — 같은 정책으로 동작이 **3-OS CI로 실증**. OS별 사용법·장부 공유는 [docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md](docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md). 런처: Windows `py` · WSL/macOS `python3`.
 
 ---
@@ -244,12 +244,12 @@ PC-mediated read 공유는 **로컬 PC ledger를 단일 원본**으로 두고, o
 py scripts/binggu_publish_run_all_selftests.py
 ```
 
-통과 기준은 `REGRESSION=GO` + exit code 0 입니다. 이 명령은 회귀 검증만 수행하며, Cloud upload/DB insert/OpenCrab ingest를 하지 않습니다.
+통과 기준은 `REGRESSION=GO` + exit code 0 입니다. 이 명령은 회귀 검증만 수행하며, Cloud upload/DB insert를 하지 않습니다(로컬 역인제스트는 `localbinggu_ingest_executor.py` 별도 실행 — 회귀 묶음은 그 selftest만 호출).
 
 현재 OpenCrab 상태:
 
 - Desktop ZIP validation: **PASS**
-- local ingest: **NOT_FOUND** (opencrab_data 전수 조회 — BingguPack pack 흔적 0)
+- local ingest 경로: **구현됨** (`localbinggu_ingest_executor` — ZIP→`opencrab ingest`, dry-run 검증 GO) · 실 적재 흔적 0(`--execute` 미실행)
 - Cloud ingest / owned pack 반영: **UNKNOWN** (AI 접근 경로 없음 — Desktop 화면 전용)
 - Cloud 건: **HOLD** (업로드/재인제스트/owned 확인/MCP·CLI 업로드 전부 보류)
 - 기준 ZIP: `C:\Users\PC\.binggupack\_opencrab_repaired\binggupack_opencrab_pack_v1.zip` (doc1/node9/edge8, bundle_hash 5f9158cd…)
@@ -336,7 +336,7 @@ binggupack/
 
 **비목표 (HOLD — 별도 결정 전 동작 안 함):**
 
-- OpenCrab Cloud 실 업로드/ingest · Cloud 원본화 · marketplace · 팀/공유/과금
+- OpenCrab **Cloud** 실 업로드 · Cloud 원본화 · marketplace · 팀/공유/과금 (로컬 역인제스트는 구현 — 비목표 아님)
 - 자동 확정(confirmed) · 자동 업로드 · 상주 데몬 · 주기적 자동 pull
 - cos/확률 지표로 capture/save/approve를 결정하는 자동화. semantic_subtype은 표시·추천 보조층일 뿐입니다.
 

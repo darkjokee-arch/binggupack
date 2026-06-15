@@ -222,14 +222,16 @@ def build_cloud_pack(out_dir, nodes, evidence, graph_preview, graph_confirm,
                      "cloud_upload": False, "db_insert": False, "operating_db_touched": False}
     graphrag = {"nodes": counts["nodes"], "edges": counts["edges"], "verb_edges": SUPPORTS,
                 "new_predicates": 0, "node_to_node_verb_edges": sum(1 for e in graph_edges if e.get("edge_kind") == "verb")}
-    ingest_plan = {"target": "opencrab-cloud (NOT executed)", "executed": False, "cloud_upload": False,
-                   "db_insert": False, "batches": 1, "note": "dry-run plan only — owner IRREVERSIBLE 승인 전 실행 0"}
+    ingest_plan = {"target": "opencrab-local-ingest (NOT executed)", "executed": False, "cloud_upload": False,
+                   "db_insert": False, "batches": 1,
+                   "note": "로컬 역인제스트 대기 — localbinggu_ingest_executor가 ZIP 풀어 opencrab ingest. execute 명시 전 실행 0(비가역 write 방어)"}
     ingest_batches = [{"batch": 1, "nodes": counts["nodes"], "edges": counts["edges"], "executed": False}]
     neo4j_ingest = [{"op": "MERGE_NODE", "id": n["id"], "executed": False} for n in graph_nodes] + \
                    [{"op": "MERGE_EDGE", "from": e.get("from") or e.get("source"),
                      "to": e.get("to") or e.get("target"), "executed": False} for e in graph_edges]
     neo4j_status = {"exported": True, "ingested": False, "cloud_upload": False, "db_insert": False,
-                    "note": "neo4j ingest jsonl 생성만 — 실행 0(dry-run)"}
+                    "ingest_target": "local", "ingest_method": "offline-unzip-and-ingest",
+                    "note": "ingest jsonl 생성만 — ZIP 해제 후 로컬 opencrab ingest 진입 대기(실행 0)"}
 
     # ---- write 산출물 ----
     def wjson(rel, obj):

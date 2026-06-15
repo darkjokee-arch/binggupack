@@ -26,6 +26,7 @@ GATES = [
     ("P5 promote",        "binggu_publish_p5_promote_selftest.py",     [], "GATE=GO"),
     ("P6 OpenCrab repair","binggu_publish_p6_opencrab_pack_selftest.py",[], "GATE=GO"),
     ("cloud_pack export", "binggu_cloud_pack_export.py",               ["--selftest"], "GATE=GO"),
+    ("local ingest",      "localbinggu_ingest_executor.py",            ["--selftest"], "GATE=GO"),
     ("tree scan",         "openbinggu_public_tree_scan.py",            ["--tree", REPO], "verdict=CLEAN"),
 ]
 

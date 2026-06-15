@@ -208,13 +208,14 @@ def build_opencrab_pack(active_rows, ts="t0"):
         "benchmark/queries.jsonl": jl(bench_q),
         "benchmark/results.jsonl": jl(bench_r),
         "ingest/plan.json": json.dumps(
-            {"target": "opencrab-cloud", "mode": "single_zip_upload", "executed": False,
+            {"target": "opencrab-local-ingest", "mode": "unzip_and_ingest", "executed": False,
              "order": ["documents", "chunks", "evidence", "nodes", "edges"],
              "batches": len(batches)}, ensure_ascii=False, indent=1),
         "ingest/batches.jsonl": jl(batches),
         "neo4j/opencrab_ingest.jsonl": jl(neo_rows),
         "neo4j/export_status.json": json.dumps(
-            {"exported": True, "ingested": False, "cloud_upload": False, "db_insert": False},
+            {"exported": True, "ingested": False, "cloud_upload": False, "db_insert": False,
+             "ingest_target": "local", "ingest_method": "offline-unzip-and-ingest"},
             ensure_ascii=False, indent=1),
         "reports/visual_processing.json": json.dumps(
             {"status": "not_applicable", "note": "텍스트 전용"}, ensure_ascii=False, indent=1),
