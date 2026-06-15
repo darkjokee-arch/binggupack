@@ -14,6 +14,8 @@ hag_commit_reveal.py — commit-reveal 봉인 (hybrid_agi)
   - actor != 'human' 은 commit_answer 에서 BLOCK (allowlist default-deny).
   - L0(사람 원문) 불변. AI 제안은 봉인된 휘발 상태일 뿐, 영구 노드/엣지 직접 못 씀.
   - 결정론적: 실시간 시각/난수 미사용. nonce·seal_ts·commit_ts 는 호출자 주입.
+  - 순서 무결성: blind 순서('사람이 먼저 답했다')는 호출자 주입 ts 가 아니라
+    vault 내부 단조 시퀀스(self._seq)로 강제 — 호출자가 ts 숫자를 조작해도 못 뚫음.
 
 핵심 함수
   seal_proposal(text, nonce, seal_ts)
@@ -81,10 +83,18 @@ class CommitRevealVault:
         if not secret or not isinstance(secret, str):
             raise CommitRevealBlock("vault secret 필수 — attestation 위조 방지 키(H2-1)")
         self._secret = secret.encode("utf-8")
-        # seal -> {text, nonce, seal_ts, qid}  (잠금보관: 평문은 reveal 전까지 비공개)
+        # seal -> {text, nonce, seal_ts, qid, seq}  (잠금보관: 평문은 reveal 전까지 비공개)
         self._sealed: Dict[str, Dict[str, str]] = {}
-        # qid -> {answer_hash, norm_hash, commit_ts, actor}  (수정불가)
+        # qid -> {answer_hash, norm_hash, commit_ts, actor, seq}  (수정불가)
         self._commits: Dict[str, Dict[str, str]] = {}
+        # 내부 단조 시퀀스 — seal/commit/reveal 매 호출마다 +1 부여. 실제 호출 순서의 진실원본.
+        #   호출자 주입 ts(seal_ts/commit_ts)는 결정론 인터페이스 호환 위해 유지하되,
+        #   blind 순서('사람이 먼저 답했다') 판정은 이 _seq 로만 강제 → ts 조작 무력화.
+        self._seq: int = 0
+
+    def _next_seq(self) -> int:
+        self._seq += 1
+        return self._seq
 
     # ── seal ────────────────────────────────────────────────────────────────
     def seal_proposal(self, text: str, nonce: str, seal_ts: int, qid: str) -> Dict[str, object]:
@@ -101,14 +111,15 @@ class CommitRevealVault:
         if not isinstance(qid, str) or qid == "":
             raise CommitRevealBlock("qid 필수 — seal 은 답변 질문에 바인딩되어야 함(fail-closed)")
         seal = compute_seal(text, nonce)
-        # 동일 seal 재봉인 시: 동일 text/nonce/qid 면 멱등, 다르면 충돌 BLOCK
+        # 동일 seal 재봉인 시: 동일 text/nonce/qid 면 멱등(기존 seq 유지), 다르면 충돌 BLOCK
         if seal in self._sealed:
             prev = self._sealed[seal]
             if prev["text"] != text or prev["nonce"] != nonce or prev["qid"] != qid:
                 raise CommitRevealBlock("seal 충돌 — 동일 seal 에 다른 내용/qid")
         else:
             self._sealed[seal] = {"text": text, "nonce": nonce,
-                                  "seal_ts": str(seal_ts), "qid": qid}
+                                  "seal_ts": str(seal_ts), "qid": qid,
+                                  "seq": str(self._next_seq())}  # 내부 단조 seq — 실제 봉인 순서
         return {"seal": seal, "seal_ts": seal_ts, "qid": qid, "sealed": True}
 
     # ── commit ───────────────────────────────────────────────────────────────
@@ -137,6 +148,7 @@ class CommitRevealVault:
             "norm_hash": _sha256_hex(_normalize(human_answer)),   # H2-2: 정규화 copy 탐지용
             "commit_ts": str(commit_ts),
             "actor": actor,
+            "seq": str(self._next_seq()),   # 내부 단조 seq — 실제 commit 호출 순서(ts 조작 무관)
         }
         return {"answer_hash": answer_hash, "commit_ts": commit_ts, "committed": True}
 
@@ -150,10 +162,17 @@ class CommitRevealVault:
           1) seal 미존재 BLOCK.
           2) seal 에 바인딩된 qid 가 commit 되지 않았으면 BLOCK(prior-peek 차단).
              — H1: 차단이 호출 인자가 아니라 seal↔qid 바인딩으로 **강제**된다.
+          2b) 내부 단조 seq 순서 강제(ts 조작 차단):
+              commit_seq > seal_seq AND reveal_seq > commit_seq 여야 함.
+              seal→commit→reveal 의 **실제 호출 순서**를 vault 내부 _seq 가 기록하므로,
+              호출자가 seal_ts/commit_ts 숫자를 거꾸로 조작해도(commit_ts<seal_ts) blind 순서
+              판정은 _seq 기준이라 뚫리지 않는다. ts 인자는 결정론 인터페이스 호환용으로만 유지.
+              **한계(정직)**: 사이드채널(사용자가 별도 경로로 AI 제안을 미리 보고 와서 commit)은
+              여전히 코드로 못 막는다 = 사용자 자기규율 영역. 내부 seq 는 'ts 조작'만 닫는다.
           3) nonce 불일치(위조) BLOCK — 재계산 대조.
         검증 통과 시 원문(text) 공개 + blind attestation 반환.
         attestation = {qid, blind_passed, copy_suspected, seal} — l1/l2 stamp 게이트 입력.
-          - blind_passed: 사람이 commit 을 먼저 했고 봉인 검증 통과(항상 True 도달 조건).
+          - blind_passed: 사람이 commit 을 먼저 했고(seq 순서 강제) 봉인 검증 통과.
           - copy_suspected: 사람 답변 hash 가 AI 제안 텍스트 hash 와 동일 = 베껴쓰기 의심(H2).
         """
         # 불변식 1: 봉인 존재
@@ -166,6 +185,19 @@ class CommitRevealVault:
             raise CommitRevealBlock(
                 f"commit 전 reveal BLOCK — bound qid={qid!r} 미커밋(prior-peek, fail-closed)"
             )
+        # 불변식 2b: 내부 단조 seq 순서 강제 — ts 조작 차단.
+        #   실제 호출 순서가 seal → commit → reveal 였는지를 vault _seq 로만 판정.
+        commit_rec = self._commits[qid]
+        seal_seq = int(rec["seq"])
+        commit_seq = int(commit_rec["seq"])
+        reveal_seq = self._next_seq()  # 이 reveal 호출 시점의 단조 seq
+        if not (commit_seq > seal_seq):
+            raise CommitRevealBlock(
+                "seq 순서 위반 — commit 이 seal 보다 먼저(또는 동시) 호출됨(ts 조작 의심, fail-closed)"
+            )
+        if not (reveal_seq > commit_seq):
+            # _next_seq 단조 증가라 정상 흐름에선 항상 성립. 방어적 BLOCK.
+            raise CommitRevealBlock("seq 순서 위반 — reveal 이 commit 보다 앞섬(fail-closed)")
         # 불변식 3: nonce 위조 차단 (저장 nonce 와 재도출 seal 둘 다 대조)
         if nonce != rec["nonce"]:
             raise CommitRevealBlock("nonce 불일치 — 위조 BLOCK")
@@ -176,7 +208,6 @@ class CommitRevealVault:
         # H2-2: 베껴쓰기 탐지 — 정규화 후 사람 답변 == AI 제안이면 blind 무효 신호
         #   (exact-hash 가 아니라 정규화 비교라 공백/대소문자 편집 회피 차단.
         #    구두점·단어치환·의미유사는 못 잡음 — 정규화 한계, 사람 도장이 최종 게이트)
-        commit_rec = self._commits[qid]
         copy_suspected = (commit_rec["norm_hash"] == _sha256_hex(_normalize(rec["text"])))
         return {
             "revealed": True,
@@ -357,6 +388,36 @@ def _selftest() -> bool:
     except CommitRevealBlock:
         empty_qid_blocked = True
     check("seal_empty_qid_BLOCK", empty_qid_blocked)
+
+    # 10) 내부 단조 seq — ts 조작(commit_ts<seal_ts) 해도 실제 호출 순서가 seal→commit→reveal
+    #     이면 PASS (seq 가 진실원본). ts 는 거꾸로지만 호출 순서는 정상.
+    vSeqOk = CommitRevealVault(SECRET)
+    sSeqOk = vSeqOk.seal_proposal(TEXT, NONCE, seal_ts=9999, qid=QID)["seal"]  # seal_ts 큼
+    vSeqOk.commit_answer(QID, "사람 먼저 답", commit_ts=1, actor="human")        # commit_ts 작음(거꾸로)
+    revSeqOk = vSeqOk.reveal_proposal(sSeqOk, NONCE)
+    check("seq_order_ok_despite_reversed_ts", revSeqOk["revealed"] is True)
+
+    # 10b) 내부 seq — 실제 호출 순서가 commit→seal 이면(사람이 봉인 전 답을 미리 commit)
+    #      ts 를 정상처럼 꾸며도(commit_ts>seal_ts) BLOCK. seq 가 commit<seal 을 잡음.
+    vSeqBad = CommitRevealVault(SECRET)
+    vSeqBad.commit_answer(QID, "봉인 전 미리 답", commit_ts=8888, actor="human")  # 먼저 commit (seq=1)
+    sSeqBad = vSeqBad.seal_proposal(TEXT, NONCE, seal_ts=1, qid=QID)["seal"]       # 나중 seal (seq=2)
+    seq_blocked = False
+    try:
+        vSeqBad.reveal_proposal(sSeqBad, NONCE)  # commit_seq(1) < seal_seq(2) → BLOCK
+    except CommitRevealBlock:
+        seq_blocked = True
+    check("seq_commit_before_seal_BLOCK", seq_blocked)
+
+    # 10c) commit 없이 reveal 은 여전히 prior-peek BLOCK (seq 도입 후 회귀 확인)
+    vSeqNoCommit = CommitRevealVault(SECRET)
+    sNoC = vSeqNoCommit.seal_proposal(TEXT, NONCE, seal_ts=1, qid=QID)["seal"]
+    nocommit_blocked = False
+    try:
+        vSeqNoCommit.reveal_proposal(sNoC, NONCE)
+    except CommitRevealBlock:
+        nocommit_blocked = True
+    check("seq_reveal_without_commit_still_BLOCK", nocommit_blocked)
 
     passed = sum(1 for _, ok in results if ok)
     total = len(results)
