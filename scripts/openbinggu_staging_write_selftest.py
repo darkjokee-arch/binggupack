@@ -16,14 +16,13 @@ CUR_REDACTION_POLICY = "v1"
 # 사용자가 자기 운영 경로를 거부 대상으로 등록하려면 아래 env 를 설정한다.
 # 미설정 시 temp 의 dummy 경로(존재하지 않아도 됨)로, "거부 대상 표식" 의미만 유지한다.
 _TMP = tempfile.gettempdir()
-# 운영 ledger 표준 위치(런타임 계산 — 소스에 작성자 절대경로 미포함). env 미설정에도 항상 거부 대상(default-deny 심층방어).
-_LEDGER_HOME = os.environ.get("BINGGU_HOME") or os.path.join(os.path.expanduser("~"), ".binggupack")
+# 운영 store 경로(거부 대상) = OpenCrab user_graph/graph_merge 등. env 미설정 시 temp dummy(거부 표식).
+# 주의: ledger.sqlite/capture_buffer.sqlite 는 StagingDB 의 정상 운영 대상(binggu.py 가 직접 연다) → 거부 목록 금지.
+# MCP 경로 입력 차단은 핸들러(_u_save_candidate)가 ledger_path 입력 자체를 무시하는 방식으로 처리(과방어 회피).
 OPERATING_PATHS = [
     os.environ.get("OPENBINGGU_USER_GRAPH",  os.path.join(_TMP, "openbinggu_user_graph_dummy.yaml")),
     os.environ.get("OPENBINGGU_GRAPH_MERGE", os.path.join(_TMP, "openbinggu_graph_merge_dummy.yaml")),
     os.environ.get("OPENBINGGU_OPERATING_DB", os.path.join(_TMP, "openbinggu_operating_dummy.sqlite")),
-    os.path.join(_LEDGER_HOME, "ledger.sqlite"),       # 운영 ledger — 항상 거부
-    os.path.join(_LEDGER_HOME, "capture_buffer.sqlite"),  # 운영 capture buffer — 항상 거부
 ]
 
 def _canon(s): return re.sub(r"\s+", " ", str(s)).strip().encode("utf-8", "replace")
