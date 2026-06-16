@@ -7,7 +7,10 @@ KV put / deploy 를 "대신 실행" 하지 않는다. 신규 사용자는 본인
 묶고 멱등·실패정지" 다.
 
 설계 단계(전부 멱등 — 여러 번 돌려도 KV 중복생성·toml 중복기입·스케줄러 중복 0):
-  [0] preflight (read-only): Python 3.10+ + wrangler --version 확인 + detect_os.
+  [0] preflight (read-only): Python 3.10+ + wrangler 존재(글로벌/로컬) + detect_os.
+  [0d] wrangler 로컬 설치 (멱등): hosted/workers 에 npm install — 신규 사용자의
+       npx 재다운로드/스케줄러 timeout(0xC000013A)/좀비 누적(0x800710E0) 원천 차단.
+       node_modules/.bin/wrangler 있으면 skip.
   [1] wrangler login 점검·안내(대행 금지): wrangler whoami 만. 미로그인 → 멈춤 + 안내.
   [2] KV namespace create (멱등): toml id 가 placeholder 면 create + id 파싱, 실 id 면 skip.
   [3] toml id 자동 기입 (멱등): [2] id 를 wrangler.real.toml 의 id 라인에 정밀 치환(.bak 백업).
@@ -129,22 +132,75 @@ def _real_runner(args, cwd=None):
             "args": full, "cwd": cwd}
 
 
+# ── wrangler 로컬 설치 ([0d]) — 신규 사용자 npx 재다운로드/timeout/좀비 차단 ──
+def _wrangler_local_path(workers_dir=None):
+    """hosted/workers/node_modules 에 wrangler 가 설치돼 있으면 경로, 없으면 None.
+
+    npx 는 cwd 의 node_modules/.bin 을 먼저 쓴다 — 로컬 설치돼 있으면 재다운로드 0.
+    """
+    wd = workers_dir or WORKERS_DIR
+    for name in ("wrangler.cmd", "wrangler"):
+        p = os.path.join(wd, "node_modules", ".bin", name)
+        if os.path.exists(p):
+            return p
+    return None
+
+
+def _real_npm_runner(args, cwd=None):
+    """실 npm 호출 — owner 셸에서만. import 시점 부수효과 0(호출 때만)."""
+    import subprocess  # noqa: 지역 import — 모듈 로드 시 외부명령 의존 0
+    npm = "npm.cmd" if os.name == "nt" else "npm"
+    npm = shutil.which(npm) or npm
+    proc = subprocess.run([npm] + list(args), cwd=cwd, capture_output=True, text=True)
+    return {"rc": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr}
+
+
+def ensure_wrangler_local(apply=False, npm_runner=None, local_path=None, workers_dir=None):
+    """[0d] hosted/workers 에 wrangler 로컬 설치(npm install) 멱등.
+
+    신규 사용자 회귀 차단: 로컬 미설치면 autopush 가 npx 로 매번 wrangler 를 새로 받아
+    5분 ExecutionTimeLimit 을 넘겨 스케줄러가 작업을 죽이고(0xC000013A) 좀비가 누적돼
+    이후 실행이 거부된다(0x800710E0). 로컬 핀 설치 1회로 npx 가 즉시 로컬 바이너리를
+    써 재다운로드 0. 멱등 — node_modules/.bin/wrangler 가 이미 있으면 SKIP.
+    """
+    wd = workers_dir or WORKERS_DIR
+    found = local_path if local_path is not None else _wrangler_local_path(wd)
+    if found:
+        return step("0d", SKIP, "wrangler 로컬 설치 이미 있음 (npx 재다운로드 0)")
+    if not apply:
+        return step("0d", INFO, "wrangler 로컬 미설치 — --apply 시 npm install (hosted/workers)")
+    runner = npm_runner or _real_npm_runner
+    r = runner(["install"], wd)
+    if r.get("rc") != 0:
+        return step("0d", STOP, "npm install 실패 (wrangler 로컬 설치)",
+                    "직접: cd hosted/workers && npm install\n원문: %s"
+                    % (r.get("stderr") or r.get("stdout") or "(no output)"))
+    return step("0d", OK, "wrangler 로컬 설치 완료 (npx 재다운로드/timeout/좀비 차단)")
+
+
 # ── 단계 구현 (전부 read-only 또는 멱등) ───────────────────────────
-def preflight(os_name=None, py_version=None, which_wrangler=None):
-    """[0] read-only — Python 3.10+ + wrangler 존재 + OS 분기. 변경 0."""
+def preflight(os_name=None, py_version=None, which_wrangler=None, wrangler_local=None, apply=False):
+    """[0] read-only — Python 3.10+ + wrangler 존재(글로벌/로컬) + OS 분기. 변경 0.
+
+    wrangler 가 글로벌·로컬 모두 없을 때: --apply 면 [0d]에서 로컬 설치하므로 STOP 아닌
+    INFO, dry-run 이면 STOP(설치 안내).
+    """
     os_name = os_name or P.detect_os()
     ver = py_version if py_version is not None else sys.version_info[:2]
     py_ok = tuple(ver) >= (3, 10)
     wpath = which_wrangler if which_wrangler is not None else shutil.which("wrangler")
+    wlocal = wrangler_local if wrangler_local is not None else _wrangler_local_path()
     steps = []
     steps.append(step("0a", OK if py_ok else STOP,
                       "Python %d.%d" % (ver[0], ver[1]),
                       None if py_ok else "Python 3.10+ 필요 — https://python.org"))
-    if wpath:
-        steps.append(step("0b", OK, "wrangler 발견: %s" % wpath))
+    if wpath or wlocal:
+        steps.append(step("0b", OK, "wrangler 발견: %s" % (wpath or wlocal)))
+    elif apply:
+        steps.append(step("0b", INFO, "wrangler 미설치 — [0d]에서 로컬 자동 설치 예정(--apply)"))
     else:
         steps.append(step("0b", STOP, "wrangler 미설치",
-                          "직접 설치: npm i -g wrangler  (또는 명령마다 npx wrangler)"))
+                          "직접 설치: npm i -g wrangler  /  또는 --apply 시 로컬 자동 설치"))
     steps.append(step("0c", INFO, "OS: %s (python launcher=%s)"
                       % (os_name, P.python_cmd(os_name))))
     ok = all(s["status"] != STOP for s in steps)
@@ -309,7 +365,7 @@ def autopush_dryrun(runner=None, run_fn=None):
 
 # ── 오케스트레이터 ─────────────────────────────────────────────────
 def run_setup(apply=False, deploy=False, os_name=None,
-              login_runner=None, kv_runner=None, sched_runner=None,
+              login_runner=None, kv_runner=None, sched_runner=None, npm_runner=None,
               task_exists=None, toml_path=None, build_fn=None, write_fn=None,
               packs_out=None, autopush_run_fn=None, preflight_kwargs=None):
     """전체 흐름 1회. 기본 dry-run(변경 0). apply=True 면 실 변경(멱등).
@@ -322,10 +378,16 @@ def run_setup(apply=False, deploy=False, os_name=None,
     kv_runner = kv_runner or _real_runner
     steps = []
 
-    pf_ok, pf_steps = preflight(os_name=os_name, **(preflight_kwargs or {}))
+    pf_ok, pf_steps = preflight(os_name=os_name, apply=apply, **(preflight_kwargs or {}))
     steps.extend(pf_steps)
     if not pf_ok:
         return {"apply": apply, "deploy": deploy, "steps": steps, "halted_at": "0"}
+
+    # [0d] wrangler 로컬 설치 (신규 사용자 npx 재다운로드/timeout/좀비 차단)
+    s0d = ensure_wrangler_local(apply=apply, npm_runner=npm_runner)
+    steps.append(s0d)
+    if s0d["status"] == STOP:
+        return {"apply": apply, "deploy": deploy, "steps": steps, "halted_at": "0d"}
 
     # [1] login (read-only whoami)
     login_ok, s1 = check_login(login_runner)
@@ -456,9 +518,9 @@ def _selftest():
     # 12. preflight read-only — Python 3.9 → STOP
     pf_ok, pf = preflight(os_name="windows", py_version=(3, 9), which_wrangler="C:/w")
     chk("12.preflight py<3.10 → STOP", pf_ok is False and any(s["status"] == STOP for s in pf))
-    # 13. preflight wrangler 부재 → STOP
-    pf_ok2, _ = preflight(os_name="windows", py_version=(3, 11), which_wrangler=None)
-    chk("13.preflight wrangler 부재 → STOP", pf_ok2 is False)
+    # 13. preflight wrangler 부재(글로벌·로컬 모두) + dry-run → STOP
+    pf_ok2, _ = preflight(os_name="windows", py_version=(3, 11), which_wrangler="", wrangler_local="")
+    chk("13.preflight wrangler 부재 + dry-run → STOP", pf_ok2 is False)
     # 14. preflight 정상 → ok
     pf_ok3, _ = preflight(os_name="windows", py_version=(3, 11), which_wrangler="C:/w")
     chk("14.preflight 정상 → ok", pf_ok3 is True)
@@ -561,6 +623,48 @@ def _selftest():
     # 38. 실 toml 은 이미 실 id(placeholder 아님) → setup 멱등 skip 확인
     real_id = read_kv_id(open(WRANGLER_REAL, encoding="utf-8").read())
     chk("38.실 toml id 이미 채워짐(멱등 skip)", not is_placeholder_id(real_id))
+
+    # ── [0d] wrangler 로컬 설치 (신규 사용자 회귀 차단) ──
+    # 39. _wrangler_local_path: node_modules/.bin/wrangler 있으면 탐지
+    wdir = tempfile.mkdtemp(prefix="wlocal_st_")
+    binp = os.path.join(wdir, "node_modules", ".bin")
+    os.makedirs(binp)
+    open(os.path.join(binp, "wrangler.cmd"), "w").write("")
+    chk("39.로컬 wrangler 탐지", _wrangler_local_path(wdir) is not None)
+    # 40. _wrangler_local_path: 없으면 None
+    chk("40.로컬 미설치 → None", _wrangler_local_path(tempfile.mkdtemp(prefix="wempty_st_")) is None)
+    # 41. ensure: 이미 있음 → SKIP (npm 미호출)
+    npm_calls = []
+
+    def mock_npm(args, cwd=None):
+        npm_calls.append(args)
+        return {"rc": 0, "stdout": "added 34 packages", "stderr": ""}
+    chk("41.로컬 이미있음 → SKIP",
+        ensure_wrangler_local(apply=True, npm_runner=mock_npm, local_path="X")["status"] == SKIP and not npm_calls)
+    # 42. ensure: dry-run → INFO (npm 미호출)
+    chk("42.dry-run → INFO + npm 미호출",
+        ensure_wrangler_local(apply=False, npm_runner=mock_npm, local_path=None, workers_dir=wdir + "_none")["status"] == INFO and not npm_calls)
+    # 43. ensure: apply + 미설치 → npm install OK
+    s43 = ensure_wrangler_local(apply=True, npm_runner=mock_npm, local_path=None, workers_dir=os.path.join(wdir, "nomod"))
+    chk("43.apply+미설치 → npm install OK", s43["status"] == OK and npm_calls == [["install"]])
+    # 44. ensure: npm install 실패 → STOP
+    def mock_npm_fail(args, cwd=None):
+        return {"rc": 1, "stdout": "", "stderr": "ENOENT"}
+    chk("44.npm install 실패 → STOP",
+        ensure_wrangler_local(apply=True, npm_runner=mock_npm_fail, local_path=None, workers_dir=os.path.join(wdir, "nomod2"))["status"] == STOP)
+    # 45. preflight: apply + wrangler 둘다 없음 → 0b INFO(STOP 아님), pf_ok True
+    pf_ok4, pf4 = preflight(os_name="windows", py_version=(3, 11), which_wrangler="", wrangler_local="", apply=True)
+    chk("45.apply+wrangler부재 → STOP 아님([0d]에서 설치)",
+        pf_ok4 is True and any(s["stage"] == "0b" and s["status"] == INFO for s in pf4))
+    # 46. run_setup dry-run: [0d] 단계 존재 + npm 미호출
+    npm_calls.clear()
+    res46 = run_setup(apply=False, os_name="windows",
+                      login_runner=mock_login_ok, kv_runner=mock_kv_track, npm_runner=mock_npm,
+                      task_exists=False, toml_path=tp,
+                      preflight_kwargs={"py_version": (3, 11), "which_wrangler": "C:/w"},
+                      autopush_run_fn=mock_autopush)
+    chk("46.run_setup [0d] 단계 존재 + dry-run npm 미호출",
+        any(s["stage"] == "0d" for s in res46["steps"]) and not npm_calls)
 
     print("\n" + "=" * 62)
     print("binggu_setup_cloud — selftest (mock + temp · 실 CF/스케줄러 미접촉)")

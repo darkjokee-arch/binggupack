@@ -14,7 +14,15 @@ $ScriptPath = Join-Path $RepoRoot "scripts\binggu_publish_autopush.py"
 
 $act = New-ScheduledTaskAction -Execute $PyExe -Argument ('"{0}"' -f $ScriptPath) -WorkingDirectory $RepoRoot
 $trg = New-ScheduledTaskTrigger -Once -At ((Get-Date).AddMinutes(2)) -RepetitionInterval (New-TimeSpan -Minutes 10) -RepetitionDuration ([TimeSpan]::FromDays(3650))
-$set = New-ScheduledTaskSettingsSet -StartWhenAvailable -Hidden -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
+# ExecutionTimeLimit 15분: wrangler 로컬 설치(setup-cloud [0d]) 시 1초지만, 첫 실행/네트워크 지연
+#   대비 여유. 5분이면 wrangler 재다운로드가 한도를 넘겨 작업이 강제 종료(0xC000013A)되고
+#   죽은 인스턴스가 누적돼 이후 실행이 거부된다(0x800710E0).
+# 배터리 조건 해제: 기본값(DisallowStartIfOnBatteries)이면 노트북 배터리 사용 시 작업이
+#   거부(0x800710E0)/중단된다 → -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries.
+$set = New-ScheduledTaskSettingsSet -StartWhenAvailable -Hidden `
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 15) `
+    -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+    -MultipleInstances IgnoreNew
 Register-ScheduledTask -TaskName "BingguPack_AutoPush" -Action $act -Trigger $trg -Settings $set -Description "BingguPack SAVE->KV auto upload (double-gate)" -Force | Out-Null
 Write-Host "=== 등록 결과 ==="
 Get-ScheduledTask -TaskName "BingguPack_AutoPush" | Select-Object TaskName, State | Format-List
