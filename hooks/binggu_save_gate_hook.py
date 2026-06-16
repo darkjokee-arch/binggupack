@@ -30,8 +30,11 @@ def _run(data):
         if (data.get("hook_event_name") or "") != "UserPromptSubmit":
             return
         prompt = data.get("prompt", "")
-        if "SAVE" not in prompt.upper():
-            return  # 빠른 차단 — SAVE 토큰 없으면 모듈 로드도 안 함
+        # 빠른 차단 — 트리거 토큰(SAVE/저장/세이브) 없으면 모듈 로드도 안 함.
+        #   결함수정(6/16): 한글 '저장'/'세이브' 까지 감지하도록 토큰 확장(영문 SAVE 외).
+        up = prompt.upper()
+        if not any(t in up for t in ("SAVE", "저장", "세이브")):
+            return
         sd = str(_scripts_dir())
         if sd not in sys.path:
             sys.path.insert(0, sd)
@@ -104,6 +107,17 @@ def _selftest():
         check(sgate.gate_human_for([SA], path=str(gate_log)) is True
               and sgate.gate_human_for([SB], path=str(gate_log)) is False,
               "T3 SA→통과 / SB→차단")
+
+        # T3b 한글 '저장 2' 발화 → idx2(SB) 기록 (결함수정 6/16 end-to-end)
+        r = call({"hook_event_name": "UserPromptSubmit", "prompt": "저장 2", "cwd": "x"})
+        hangul_ok = (r.returncode == 0 and r.stdout.strip() == ""
+                     and sgate.gate_human_for([SB], path=str(gate_log)) is True)
+        check(hangul_ok, "T3b 한글 '저장 2' → SB hash 기록(한글 트리거)")
+
+        # T3c 한글 '세이브 1' 도 동작 (이미 SA 기록됨 → 재대조 True 유지)
+        r = call({"hook_event_name": "UserPromptSubmit", "prompt": "세이브 1", "cwd": "x"})
+        check(r.returncode == 0 and sgate.gate_human_for([SA], path=str(gate_log)) is True,
+              "T3c 한글 '세이브 1' → exit 0 · SA 통과 유지")
 
         # T4 Stop 이벤트는 무시(발급 안 함)
         before = gate_log.read_text(encoding="utf-8")

@@ -36,10 +36,26 @@ def sent_hash(s):
     return hashlib.sha256(_norm(s).encode("utf-8")).hexdigest()[:16]
 
 
+# 사람-발화 저장 트리거 토큰 — 영문 'SAVE' 외 한글 '저장'/'세이브' 도 동등 인정.
+#   결함수정(6/16): 사장님이 '저장 1'·'세이브 1' 처럼 한글로 쳐도 게이트 기록되도록 확장.
+#   0-A 정신 유지 — 발화 전체가 정확히 '<트리거> n' 형태일 때만(부분문자열·인용문 무시),
+#   AI 는 UserPromptSubmit 를 못 거침 → 위조 불가는 그대로.
+SAVE_TRIGGER_RE = re.compile(
+    r"\s*(?:SAVE|저장|세이브)\s+\d+(\s*,\s*\d+)*\s*", re.IGNORECASE)
+# hook 의 빠른 차단(모듈 로드 전 substring 체크)용 토큰. upper() 비교는 한글에 영향 0.
+TRIGGER_TOKENS = ("SAVE", "저장", "세이브")
+
+
+def has_trigger_token(prompt):
+    """발화에 트리거 토큰(영문/한글)이 substring 으로라도 있나 — hook 빠른 차단용(정밀 판정 아님)."""
+    up = str(prompt or "").upper()
+    return any(t.upper() in up for t in TRIGGER_TOKENS)
+
+
 def parse_save_indices(prompt):
-    """발화 전체가 정확히 'SAVE n' / 'SAVE 1,3' 형태일 때만 인덱스 반환(부분문자열·인용문 무시).
-    아니면 None."""
-    if not re.fullmatch(r"\s*SAVE\s+\d+(\s*,\s*\d+)*\s*", str(prompt or "")):
+    """발화 전체가 정확히 '<트리거> n' / '<트리거> 1,3' 형태일 때만 인덱스 반환.
+    트리거 = SAVE/저장/세이브(대소문자 무시). 부분문자열·인용문·부정문 무시. 아니면 None."""
+    if not SAVE_TRIGGER_RE.fullmatch(str(prompt or "")):
         return None
     return [int(x) for x in re.findall(r"\d+", prompt)]
 
@@ -163,6 +179,14 @@ def _selftest():
     chk("T2b 'SAVE 1,3' 파싱", parse_save_indices("SAVE 1,3") == [1, 3])
     chk("T2c 딴얘기 속 'save 7' 무시", parse_save_indices("아 그거 save 7 말이야") is None)
     chk("T2d 부정문 무시", parse_save_indices("SAVE 안 해") is None)
+    # T2e~T2h 한글 트리거 확장(결함수정 6/16) — '저장 n'·'세이브 n' 도 SAVE 와 동등
+    chk("T2e '저장 1' 파싱", parse_save_indices("저장 1") == [1])
+    chk("T2f '저장 1,3' 파싱", parse_save_indices("저장 1,3") == [1, 3])
+    chk("T2g '세이브 2' 파싱", parse_save_indices("세이브 2") == [2])
+    chk("T2h 소문자 'save 1' 파싱", parse_save_indices("save 1") == [1])
+    chk("T2i 한글 부정문 무시", parse_save_indices("저장 하지마") is None)
+    chk("T2j 딴얘기 속 '저장 7' 무시", parse_save_indices("그거 저장 7 어쩌고") is None)
+    chk("T2k has_trigger_token 한글 감지", has_trigger_token("저장 1") and has_trigger_token("세이브 2"))
     # T3 기록 후 통과
     gate_record([S1], path=gp)
     chk("T3 기록된 문장 → True", gate_human_for([S1], path=gp) is True)
