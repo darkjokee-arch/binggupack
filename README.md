@@ -183,6 +183,7 @@ binggu.py capture status | pause | resume | preview | uninstall
 
 # 저장 흐름 (사람 승인 게이트)
 binggu.py preview "<대화/메모 텍스트>"                         # 후보 + preview_id (저장 0)
+binggu.py reflect "<자가평가/회고>"  [--from-file <경로>]      # 회고·자가평가 → 지식 후보 (반성→지식 · 저장 0)
 binggu.py save "<텍스트>" --preview-id <id> --pick 1,2 --confirm "SAVE 1,2"
 
 # cloud (폰·웹 자동 공유 — 선택)
@@ -302,7 +303,7 @@ pack이 `real_active`로 빌드돼도 받는 쪽 OpenCrab 운영 그래프에는
 ```bash
 python scripts/openbinggu_doctor.py --selftest        # 12/12   (운영 정합 게이트 포함, write=0)
 python scripts/binggu_platform_selftest.py            # 36/36   (cross-platform 경로·lock 정책)
-python binggu.py --selftest                           # 27/27   (장부 + capture + hosted 통합)
+python binggu.py --selftest                           # 30/30   (장부 + capture + reflect + hosted 통합)
 python scripts/binggu_capture_persist.py              # GATE=GO (영속 candidate 버퍼)
 python scripts/binggu_capture_profile.py              # GATE=GO (profile · settings hook · pause/resume/uninstall)
 python hooks/binggu_capture_hook.py --selftest        # 8/8     (UserPromptSubmit/Stop)

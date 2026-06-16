@@ -337,6 +337,43 @@ def cmd_preview(a):
     return 0
 
 
+def cmd_reflect(a):
+    """회고·자가평가를 빙구팩 지식 후보로 흘려보내는 전용 진입점 (반성→지식).
+
+    preview 와 **동일 게이트**(저장 0·write_last_preview 연동·사람 SAVE 만)를 재사용하되,
+    회고/자가평가를 일급 흐름으로 명시한다. 작업 끝 자가평가가 traj 에만 남고 지식으로
+    안 흘러들던 구조 갭(반성≠지식)을 메우는 경로. --from-file 로 쌓인 회고를 일괄 후보화.
+    """
+    text = a.text
+    if getattr(a, "from_file", None):
+        try:
+            with open(a.from_file, encoding="utf-8") as f:
+                text = f.read()
+        except OSError as e:
+            print("회고 파일을 열 수 없습니다: %s (%s)" % (a.from_file, e))
+            return 1
+    if not text or not text.strip():
+        print("회고 텍스트가 비어있습니다.  binggu reflect \"<자가평가/교훈>\"  또는  --from-file <경로>")
+        return 1
+    print("# 회고·자가평가 → 지식 후보 (반성이 지식으로 · 저장 0 · 사람 SAVE 만)\n")
+    pv = capture_preview(text)
+    print(pv["preview_markdown"])
+    # preview 와 동일하게 last_preview 영속 → 사람 'SAVE n' 발화 시 save_gate 가 도장(autopush 호환).
+    try:
+        import binggu_save_gate as _sg
+        _sg.write_last_preview(pv.get("candidates") or [])
+    except Exception:
+        pass
+    pid = _preview_id(text)
+    print("\npreview_id: %s" % pid)
+    if pv["candidates"]:
+        print("이 회고에서 남길 교훈만 골라 도장:  python binggu.py save \"<같은 텍스트>\" "
+              "--preview-id %s --pick <번호들> --confirm \"SAVE <번호들>\"" % pid)
+    else:
+        print("후보 0 — 회고에서 남길 판단/교훈 문장이 추출되지 않았습니다(시크릿/PII는 자동 제외).")
+    return 0
+
+
 def cmd_save(a):
     # 승인 정책: preview 를 실제로 본 텍스트만 저장 가능 — raw text 직행 저장 차단
     if a.preview_id != _preview_id(a.text):
@@ -477,6 +514,10 @@ def selftest():
     TEXT = ("이 입찰은 마진이 낮아 보류한다. 백필 작업이 진행 중이다. "
             "낙찰하한율은 기초금액 대비 최저 투찰 비율을 말한다.")
     ck("2_preview(저장0)", cmd_preview(args(text=TEXT)) == 0)
+    ck("2c_reflect(회고→후보·저장0)", cmd_reflect(args(text=TEXT, from_file=None)) == 0)
+    ck("2d_reflect_빈입력_안내", cmd_reflect(args(text=None, from_file=None)) == 1)
+    ck("2e_reflect_파일오류_안내",
+       cmd_reflect(args(text=None, from_file=os.path.join(tmp, "_no_such_reflect_file.txt"))) == 1)
     ck("2b_preview없는_save_BLOCK", cmd_save(args(text=TEXT, preview_id="deadbeef",
                                                   pick="1,2,3", confirm="SAVE 1,2,3",
                                                   due=None)) == 1)
@@ -610,6 +651,9 @@ def main():
     ip.add_argument("--no-capture", action="store_true", dest="no_capture")   # 장부만, capture profile 생략
     sub.add_parser("status")
     sp = sub.add_parser("preview"); sp.add_argument("text")
+    rp = sub.add_parser("reflect")          # 회고·자가평가 → 지식 후보(반성이 지식으로 · 저장 0)
+    rp.add_argument("text", nargs="?", default=None)
+    rp.add_argument("--from-file", dest="from_file", default=None)  # 쌓인 회고 파일 일괄 후보화
     sp = sub.add_parser("save"); sp.add_argument("text")
     sp.add_argument("--preview-id", required=True, dest="preview_id")
     sp.add_argument("--pick", required=True); sp.add_argument("--confirm", required=True)
@@ -647,7 +691,7 @@ def main():
     scp.add_argument("--apply", action="store_true")     # 실제 변경(미지정=점검만)
     scp.add_argument("--deploy", action="store_true")    # (--apply 와) wrangler deploy 까지 — 비가역
     a = p.parse_args()
-    fn = {"init": cmd_init, "status": cmd_status, "preview": cmd_preview, "save": cmd_save,
+    fn = {"init": cmd_init, "status": cmd_status, "preview": cmd_preview, "reflect": cmd_reflect, "save": cmd_save,
           "list": cmd_list, "deprecate": cmd_deprecate, "replace": cmd_replace,
           "accept": cmd_accept, "unaccept": cmd_unaccept, "due": cmd_due,
           "resolve": cmd_resolve, "reminders": cmd_reminders, "capture": cmd_capture,

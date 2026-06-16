@@ -10,12 +10,12 @@ cross-platform 정책(`scripts/binggu_platform.py`)이 **각 OS의 실제 환경
 
 | OS | 경로 정책(home/ledger/settings) | lock 충돌 fail-closed | 실기기 selftest/regression | 검증 수단 | 상태 |
 |---|---|---|---|---|---|
-| **Windows** | real verified | real verified (temp O_EXCL 실측) | real (platform 40/40 · binggu 27/27 · doctor 12/12 · publish 13/13 · tree CLEAN) | native + GitHub Actions `windows-latest` | ✅ **real verified** |
+| **Windows** | real verified | real verified (temp O_EXCL 실측) | real (platform 40/40 · binggu 30/30 · doctor 12/12 · publish 13/13 · tree CLEAN) | native + GitHub Actions `windows-latest` | ✅ **real verified** |
 | **WSL** | real verified (detect_os=wsl 실측) | real verified (정책 GO) | real (5종 GATE=GO) | docker(WSL2 커널, detect_os=wsl) | ✅ **real verified** |
 | **macOS** | real verified | real verified (정책 GO) | real (5종 GATE=GO) | GitHub Actions `macos-latest` 러너 | ✅ **real verified** |
 
 - **real verified** = 그 OS의 실제 파이썬/파일시스템에서 selftest·regression 5종이 GATE=GO.
-- 검증 5종 = platform 40/40 · binggu 27/27 · doctor 12/12 · publish 13/13(REGRESSION=GO) · tree scan CLEAN.
+- 검증 5종 = platform 40/40 · binggu 30/30 · doctor 12/12 · publish 13/13(REGRESSION=GO) · tree scan CLEAN.
 - **CI 자동화** = `.github/workflows/ci.yml`이 매 push마다 `ubuntu-latest`·`macos-latest`·`windows-latest` 3-OS matrix로 5종을 자동 실행(`fail-fast:false`). macOS/리눅스 real 검증은 이 CI로 영구 유지됩니다.
 - WSL은 이 개발 머신의 docker-desktop(WSL2 커널) 위에서 `detect_os()==wsl`로 실측 검증됐습니다. ubuntu CI(`detect_os==linux`)도 동일 5종 GO.
 
@@ -73,7 +73,7 @@ unset BINGGU_HOME
 ### 2-5. selftest / regression (전부 GATE=GO 기대)
 ```bash
 python3 scripts/binggu_platform_selftest.py            # 40/40 (detect_os 실측 wsl 포함)
-python3 binggu.py --selftest                           # 27/27 (temp 장부 · 운영 store 미접촉)
+python3 binggu.py --selftest                           # 30/30 (temp 장부 · 운영 store 미접촉)
 python3 scripts/openbinggu_doctor.py --selftest        # 12/12 · GATE=GO
 python3 scripts/binggu_publish_run_all_selftests.py    # 13/13 · REGRESSION=GO
 python3 scripts/openbinggu_public_tree_scan.py --tree .  # hits=0 · CLEAN
@@ -119,7 +119,7 @@ unset BINGGU_HOME
 ### 3-5. selftest / regression (전부 GATE=GO 기대)
 ```bash
 python3 scripts/binggu_platform_selftest.py            # 40/40 (detect_os 실측 macos 포함)
-python3 binggu.py --selftest                           # 27/27
+python3 binggu.py --selftest                           # 30/30
 python3 scripts/openbinggu_doctor.py --selftest        # 12/12 · GATE=GO
 python3 scripts/binggu_publish_run_all_selftests.py    # 13/13 · REGRESSION=GO
 python3 scripts/openbinggu_public_tree_scan.py --tree .  # hits=0 · CLEAN
