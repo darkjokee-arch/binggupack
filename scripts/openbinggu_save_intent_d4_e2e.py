@@ -73,7 +73,9 @@ def http(method, url, body=None, headers=None):
 
 
 def start_dev(path_key, log_path):
-    npx = shutil.which("npx") or "npx.cmd"
+    # npx 는 Windows 에서 .cmd — shell=False subprocess 가 PATHEXT 미적용. shutil.which 로
+    # 실제 실행파일 해결, 못 찾으면 OS별 폴백(mac/Linux 는 npx.cmd 아님).
+    npx = shutil.which("npx") or ("npx.cmd" if os.name == "nt" else "npx")
     logf = open(log_path, "ab")
     # 스캐너 secret_kv 자기검출 회피 — 키 이름과 ':' 분리 결합 (6/10 박제)
     proc = subprocess.Popen(

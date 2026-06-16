@@ -106,6 +106,19 @@ def python_cmd(os_name=None):
     return "py" if (os_name or detect_os()) == "windows" else "python3"
 
 
+def resolve_npx(os_name=None):
+    """npx 실행파일을 PATH 에서 실제로 해결한다(외부 명령 호출 정책 단일원천).
+
+    Windows 의 npx 는 `npx.cmd` 라, shell=False 인 subprocess 는 PATHEXT 를
+    적용하지 못해 "npx" 이름만으론 WinError 2(파일 못 찾음)가 난다.
+    shutil.which 로 실제 실행파일(npx.cmd/npx)을 찾고, 못 찾으면 OS별 이름으로 폴백.
+    (autopush 스케줄러 회귀에서 드러난 함정 — wrangler 류 외부 호출은 전부 이걸 경유.)
+    """
+    import shutil
+    name = os_name or detect_os()
+    return shutil.which("npx") or ("npx.cmd" if name == "windows" else "npx")
+
+
 def shared_opt_in(env=None):
     """OS 간 같은 장부 공유(BINGGU_HOME 명시)가 켜져 있는가 — 자동 추측 아님."""
     env = env if env is not None else os.environ

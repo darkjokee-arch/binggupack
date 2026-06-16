@@ -115,9 +115,15 @@ def parse_kv_create_output(stdout):
 
 # ── runner 추상화 (실 wrangler 는 owner 셸 / selftest 는 mock) ──────
 def _real_runner(args, cwd=None):
-    """실 wrangler 호출 — owner 셸에서만. import 시점 부수효과 0(호출 때만)."""
+    """실 wrangler 호출 — owner 셸에서만. import 시점 부수효과 0(호출 때만).
+
+    npx 경유(P.resolve_npx) — Windows 의 wrangler 는 npm-global 설치 시 .cmd 라,
+    shell=False subprocess 로 "wrangler" 이름만 호출하면 WinError 2(파일 못 찾음)가 난다.
+    autopush(_real_wrangler_runner)와 동일 정책으로 통일(신규 Windows 사용자 회귀 방지).
+    """
     import subprocess  # noqa: 지역 import — 모듈 로드 시 외부명령 의존 0
-    full = ["wrangler"] + list(args)
+    npx = P.resolve_npx()
+    full = [npx, "wrangler"] + list(args)
     proc = subprocess.run(full, cwd=cwd, capture_output=True, text=True)
     return {"rc": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr,
             "args": full, "cwd": cwd}
@@ -254,14 +260,17 @@ def scheduler_step(os_name, runner=None, task_exists=None, apply=False):
     mac/WSL/linux=launchd/cron 라인 안내만(P1 자동화 X).
     """
     if os_name != "windows":
+        # cron/launchd 는 PATH 가 빈약 — "python3" 이름은 not found 위험. 현재 실행 중인
+        # 파이썬 절대경로(sys.executable)로 안내해 PATH 무관하게 동작(autopush 회귀 교훈).
+        py_abs = sys.executable or P.python_cmd(os_name)
         if os_name == "macos":
             hint = ("launchd plist 안내(자동생성은 P2): ~/Library/LaunchAgents 에 10분 주기 plist.\n"
                     "  또는 cron: */10 * * * * %s %s"
-                    % (P.python_cmd(os_name), os.path.join(SCRIPTS_DIR, "binggu_publish_autopush.py")))
+                    % (py_abs, os.path.join(SCRIPTS_DIR, "binggu_publish_autopush.py")))
         else:  # wsl / linux
             hint = ("cron 라인 추가(중복 점검 후): crontab -l | grep binggu || "
                     "(crontab -l 2>/dev/null; echo '*/10 * * * * %s %s') | crontab -"
-                    % (P.python_cmd(os_name), os.path.join(SCRIPTS_DIR, "binggu_publish_autopush.py")))
+                    % (py_abs, os.path.join(SCRIPTS_DIR, "binggu_publish_autopush.py")))
         return step("7", INFO, "스케줄러 자동 등록은 Windows 만 — %s 는 아래 명령 복붙" % os_name, hint)
     # Windows — 존재 확인 후 없으면 register_autopush.ps1
     if task_exists:

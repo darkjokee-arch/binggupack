@@ -79,6 +79,19 @@ def main():
     ck("12c_python_macos", P.python_cmd("macos") == "python3")
     ck("12d_python_linux", P.python_cmd("linux") == "python3")
 
+    # ---- 4b. npx 실행파일 해결 (외부 호출 PATH 폴백 — autopush 회귀 교훈, mock 이 못 잡던 실로직) ----
+    import shutil as _sh
+    _orig_which = _sh.which
+    try:
+        _sh.which = lambda n: None      # PATH 미발견 시뮬 → OS별 폴백 분기 검증
+        ck("12e_resolve_npx_win_fallback", P.resolve_npx("windows") == "npx.cmd")
+        ck("12f_resolve_npx_linux_fallback", P.resolve_npx("linux") == "npx")
+        ck("12g_resolve_npx_macos_fallback", P.resolve_npx("macos") == "npx")
+        _sh.which = lambda n: "/usr/local/bin/npx"   # 발견 시 실제 경로(.cmd 포함) 우선
+        ck("12h_resolve_npx_prefers_which", P.resolve_npx("windows") == "/usr/local/bin/npx")
+    finally:
+        _sh.which = _orig_which
+
     # ---- 5. 경로 표시 변환 (표시용만 — 파일 미접촉) ----
     ck("13_to_wsl", P.to_wsl_path(r"C:\Users\PC\.binggupack") == "/mnt/c/Users/PC/.binggupack")
     ck("13b_from_wsl", P.from_wsl_path("/mnt/c/Users/PC/.binggupack") == r"C:\Users\PC\.binggupack")

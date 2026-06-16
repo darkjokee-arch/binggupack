@@ -366,6 +366,8 @@ def _selftest():
     chk("T4 config=wrangler.real.toml 고정", "--config" in a and a[a.index("--config") + 1] == "wrangler.real.toml")
     chk("T4b binding=PACKS 고정", "--binding" in a and a[a.index("--binding") + 1] == "PACKS")
     chk("T4c kv key put 명령", a[:3] == ["kv", "key", "put"])
+    # T4d: --remote 필수 — 없으면 local miniflare 에만 써서 라이브 worker 미반영(silent 회귀).
+    chk("T4d --remote 포함(라이브 KV 전송 보장)", "--remote" in a)
 
     # T5 멱등: 변화 없음(같은 checksum) → NOOP(전송 0)
     calls.clear()
