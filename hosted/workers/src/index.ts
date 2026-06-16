@@ -648,6 +648,8 @@ interface Env {
   MCP_PATH_TOKEN?: string;
   AI?: any;                        // P3 Workers AI 바인딩(@cf/baai/bge-m3). opt-in ON 시에만 호출.
   SEMANTIC_LABEL_ENABLED?: string; // "1" 이면 semantic 도장 활성. 미설정/기타=OFF(기존 동작).
+  PACKS?: KVNamespace;             // U2 — 실 pack KV(index.real.ts lazy 로드). toy(STORE) 경로는 미사용.
+  PACKS_KEY?: string;              // U2 — KV 키(기본 "packs.json"). index.real.ts 에서만 읽음.
 }
 
 // store 주입형 핸들러 팩토리 — toy(기본 STORE)와 실 pack 빌드(index.real.ts)가 동일 코드 경로 공유

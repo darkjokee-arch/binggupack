@@ -5,3 +5,16 @@
 name = "binggupack-workers-port-local"
 main = "src/index.real.ts"
 compatibility_date = "2025-05-01"
+
+# U2 — 실 pack 데이터는 KV(PACKS)에 owner 가 별도 적재. 코드 번들에 데이터 0(데이터/배포 분리).
+#   owner 절차(너의 권한 밖 — 직접 실행 금지):
+#   1) npx wrangler kv namespace create PACKS   → 출력된 id 를 아래 <OWNER_FILLS_KV_ID> 자리에 채움
+#   2) py scripts/binggu_realpack_build.py --write   → hosted/workers/data/packs.json 생성(gitignore)
+#   3) npx wrangler kv key put --binding=PACKS packs.json --path=hosted/workers/data/packs.json --config wrangler.real.toml
+#   4) (별도 GO) npx wrangler deploy --config wrangler.real.toml   → 코드만 배포, KV 가 데이터 서빙
+[[kv_namespaces]]
+binding = "PACKS"
+id = "<OWNER_FILLS_KV_ID>"  # ← wrangler kv namespace create PACKS 출력 id 로 교체
+
+[vars]
+PACKS_KEY = "packs.json"

@@ -1,0 +1,92 @@
+name: Deploy Worker
+
+# 데이터/배포 분리: 코드(src·wrangler.real.toml·package.json)만 트리거.
+#   data/** 는 gitignore — 트리거에 없음(코드 배포가 데이터를 끌어들이지 않음).
+#   실 pack 데이터는 owner 가 KV(PACKS)에 별도 적재(wrangler kv key put). 이 워크플로우는 코드만 배포.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "hosted/workers/src/**"
+      - "hosted/workers/wrangler.real.toml"
+      - "hosted/workers/package.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-worker-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHONUTF8: "1"
+
+jobs:
+  # selftest 게이트 — BLOCK 이면 deploy 진행 안 함(needs 의존). ci.yml 과 동일 selftest 재실행(1-OS).
+  selftest-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Cross-platform policy selftest (GATE=GO)
+        run: python scripts/binggu_platform_selftest.py
+
+      - name: binggu core selftest (GATE=GO)
+        run: python binggu.py --selftest
+
+      - name: Doctor selftest (GATE=GO)
+        run: python scripts/openbinggu_doctor.py --selftest
+
+      - name: Realpack builder selftest (GATE=GO)
+        run: python scripts/binggu_realpack_build.py --selftest
+
+      - name: Publish pipeline regression (REGRESSION=GO)
+        run: python scripts/binggu_publish_run_all_selftests.py
+
+      - name: Public tree secret/PII scan (verdict=CLEAN)
+        run: python scripts/openbinggu_public_tree_scan.py --tree . --public
+
+  deploy:
+    needs: selftest-gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install deps (lockfile 있으면 npm ci, 없으면 npm install)
+        working-directory: hosted/workers
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            echo "no package-lock.json — npm install fallback (lockfile 커밋 권장)"
+            npm install
+          fi
+
+      # 데이터 미혼입 이중 차단: data/packs.json 이 트리에 있으면 deploy 중단(코드만 배포 보장).
+      - name: Assert no data bundled (data/packs.json must NOT exist)
+        run: |
+          if [ -f hosted/workers/data/packs.json ]; then
+            echo "::error::data/packs.json present in deploy tree — data must live in KV, not the bundle"
+            exit 1
+          fi
+          echo "OK: no data/packs.json (data served from KV)"
+
+      - name: Deploy worker (코드만 — KV 가 데이터 서빙)
+        working-directory: hosted/workers
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_DEPLOY_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+        run: npx wrangler deploy --config wrangler.real.toml

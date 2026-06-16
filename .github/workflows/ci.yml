@@ -43,4 +43,4 @@ jobs:
         run: python scripts/binggu_e2e_lifecycle_selftest.py
 
       - name: Public tree secret/PII scan (verdict=CLEAN required)
-        run: python scripts/openbinggu_public_tree_scan.py --tree .
+        run: python scripts/openbinggu_public_tree_scan.py --tree . --public

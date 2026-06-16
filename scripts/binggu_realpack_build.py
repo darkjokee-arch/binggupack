@@ -25,6 +25,11 @@ FORMAT_VERSION = "opencrab-pack-v1"
 DEFAULT_PACK_ID = "real/owner_judgments"
 DEFAULT_TITLE = "내 확정 판단(SAVE 확정분)"
 
+# hosted worker(index.real.ts)가 lazy 로드(KV)/배포 머신이 참조하는 산출 경로(gitignore).
+# 빌더 write 는 이 경로로만 — 라이브 worker/KV/Cloud 미접촉(파일 write 뿐, 배포는 별도 owner GO).
+DATA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "..", "hosted", "workers", "data", "packs.json")
+
 
 def _h8(node_id):
     """node:CONV:<h8> → h8 (마지막 콜론 뒤). 형식 외면 None."""
@@ -125,6 +130,26 @@ def validate_packs_obj(obj):
     return errs
 
 
+def write_packs(res, out_path=DATA_PATH):
+    """build_packs() 결과를 packs.json 으로 실제 write — validate_packs_obj GO(위반 0)일 때만.
+
+    미스매치 #2 정식 해결: 수동 inline write 를 빌더 안으로. data/ write 만 — KV/Cloud/배포 0.
+    반환: {"written": path, "violations": []} 또는 {"blocked": reason}.
+    """
+    import json
+    if res.get("status") != "OK":
+        return {"blocked": res.get("reason", "BUILD_NOT_OK")}
+    viol = validate_packs_obj(res)
+    if viol:
+        return {"blocked": "LOAD_PACKS_VIOLATION", "violations": viol}
+    payload = {"packs": res["packs"]}
+    out_path = os.path.abspath(out_path)
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    return {"written": out_path, "violations": []}
+
+
 # ---------------- 셀프테스트 (synthetic ledger 주입 — 실 ledger/배포 미접촉) ----------------
 def _selftest():
     import sqlite3
@@ -196,6 +221,24 @@ def _selftest():
     c3.close()
     chk("T11 evidence 미연결 active → 제외(BLOCK NO_LINKED)", build_packs(lp3)["reason"] == "NO_LINKED_ACTIVE_NODES")
 
+    # --write 경로(temp 전용 — 라이브 data/packs.json 미접촉)
+    import json
+    out = os.path.join(work, "packs.json")
+    r_ok = build_packs(lp)
+    w = write_packs(r_ok, out)
+    chk("T12 write OK(위반 0)", w.get("violations") == [] and "written" in w)
+    chk("T13 packs.json 실제 생성", os.path.exists(out))
+    with open(out, encoding="utf-8") as f:
+        wrote = json.load(f)
+    chk("T14 write 산출 = packs 키만(데이터 구조 정합)",
+        list(wrote.keys()) == ["packs"] and validate_packs_obj(wrote) == [])
+    # BLOCK 결과는 write 안 함(fail-closed)
+    out2 = os.path.join(work, "blocked.json")
+    wb = write_packs(build_packs(lp2), out2)  # lp2 = active 0 → BLOCK
+    chk("T15 BLOCK 결과는 write 안 함", "blocked" in wb and not os.path.exists(out2))
+    # 라이브 경로 미접촉 확증: write_packs 기본 out_path 는 DATA_PATH 지만 selftest 는 temp 만 사용
+    chk("T16 selftest 는 라이브 DATA_PATH 미접촉(temp 경로만)", os.path.abspath(out) != os.path.abspath(DATA_PATH))
+
     print("\nRESULT: %d/%d %s" % (ok, tot, "PASS" if ok == tot else "FAIL"))
     print("GATE: %s" % ("GO" if ok == tot else "BLOCK"))
     return ok == tot
@@ -204,9 +247,22 @@ def _selftest():
 if __name__ == "__main__":
     if "--selftest" in sys.argv:
         sys.exit(0 if _selftest() else 1)
-    # 실 ledger 미리보기(빌드만 — data/ write 0, 배포 0)
     import json
     res = build_packs()
+    if "--write" in sys.argv:
+        # 명시 write 모드: build → validate GO → data/packs.json 실제 write (gitignore 경로).
+        #   KV/Cloud/배포 미접촉(파일 write 뿐). 라이브 반영은 owner 가 KV 적재 후 별도 deploy.
+        if res["status"] != "OK":
+            print(json.dumps(res, ensure_ascii=False, indent=2))
+            sys.exit(1)
+        w = write_packs(res)
+        if "written" in w:
+            print(json.dumps({"status": "WRITTEN", "path": w["written"],
+                              "built": res["built"]}, ensure_ascii=False, indent=2))
+            sys.exit(0)
+        print(json.dumps({"status": "BLOCK", **w}, ensure_ascii=False, indent=2))
+        sys.exit(1)
+    # 기본(dry-run): 실 ledger 미리보기만 — data/ write 0, 배포 0.
     if res["status"] == "OK":
         res_view = {"status": res["status"], "stats": res["stats"], "built": res["built"],
                     "skipped": res["skipped"],
