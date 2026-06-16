@@ -112,8 +112,8 @@ python3 binggu.py status
 
 ```bash
 # Windows
-py scripts\binggu_platform_selftest.py            # cross-platform 정책 36/36 GATE=GO
-py scripts\binggu_publish_run_all_selftests.py    # 회귀 묶음 8/8 REGRESSION=GO
+py scripts\binggu_platform_selftest.py            # cross-platform 정책 40/40 GATE=GO
+py scripts\binggu_publish_run_all_selftests.py    # 회귀 묶음 13/13 REGRESSION=GO
 py scripts\openbinggu_public_tree_scan.py --tree .
 
 # WSL / macOS

@@ -22,7 +22,7 @@ cd binggupack
 python scripts/openbinggu_doctor.py --selftest
 ```
 
-✅ 기대: 마지막에 `summary: 15/15 PASS` + `GATE: GO` + 종료코드 `0`.
+✅ 기대: 마지막에 `summary: 12/12 PASS` + `GATE: GO` + 종료코드 `0`.
 (버전에 따라 검사 개수는 늘어날 수 있습니다 — `GATE: GO` + 종료코드 `0`이면 정상입니다. `GATE: GO`가 아니거나 종료코드가 0이 아닐 때만 사용을 멈추고 이슈를 확인하세요.)
 
 ## 3. toy 예제로 pack 흐름 보기
@@ -113,7 +113,7 @@ python scripts/openbinggu_v1_candidate_cycle_real_once.py --dry-run-temp   # 17/
 | 피드백 | resolve 4값: `성공/실패/불확실/판정불가` + 사유 | 기록만 — `실패`여도 자동 강등 0 |
 
 - confirm 문구가 정확히 일치하지 않으면 BLOCK, `actor=auto`도 전부 BLOCK(사람 발화만).
-- 모듈별 selftest 기대값: 목록 13/13 · 기각 15/15 · 수정 16/16 · 수용 16/16 · resolve 16/16 (명령은 `../INSTALL.md` 참조).
+- 모듈별 selftest 기대값: 목록 13/13 · 기각 15/15 · 수정 19/19 · 수용 16/16 · resolve 16/16 (명령은 `../INSTALL.md` 참조).
 - 쓰기 루프(preview→선택 저장→피드백) 통합은 `python scripts/openbinggu_v08_real_cycle_once.py --dry-run-temp` (14/14 기대).
 
 ### 내 영속 장부 시작

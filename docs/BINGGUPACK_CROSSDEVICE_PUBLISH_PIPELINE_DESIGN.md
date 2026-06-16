@@ -1,7 +1,7 @@
 # BingguPack "PC-mediated read 공유" — 반자동 publish 파이프라인 설계
 
-> 상태: **설계 + P1 스펙 확정 (P1 구현 = 대기열+잠금+selftest만 · 실장부/cloud/DB insert 0)**
-> 결정: owner 명시 (2026-06-14) + 4cli 토론 REFINE(session 20260614_1330_publish_pipeline)
+> 상태: **P1~P8 구현 완료 · 라이브 (v1.9.0)** — autopush 스케줄러가 SAVE→자동 KV 전송(이중게이트: 확정 변화 AND 사람 SAVE 기록), `setup-cloud --apply` 한 방 설치. 폰/claude.ai/ChatGPT 양쪽 실측 조회 확인.
+> 결정: owner 명시 (2026-06-14) + 4cli 토론 REFINE(session 20260614_1330_publish_pipeline). 이하 본문은 설계 시점(P1) 기록 — 현행 운영 요약은 `../README.md` PC-mediated read 공유 섹션 참조.
 > 트랙명: **PC-mediated read 공유** ("실시간 공유" 표현 금지)
 > 박제: `feedback_binggupack_crossdevice_publish_pipeline`
 

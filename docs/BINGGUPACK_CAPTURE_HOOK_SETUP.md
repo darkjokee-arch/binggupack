@@ -126,7 +126,7 @@ privacy (특정 위치만):
 
 ```bash
 python hooks/binggu_capture_hook.py --selftest      # GATE=GO (8/8)
-python scripts/binggu_capture_persist.py            # GATE=GO (14/14)
+python scripts/binggu_capture_persist.py            # GATE=GO
 ```
 
 - 기본 OFF(플래그 없으면 import 전 즉시 종료 → 타 세션 부담 0)
