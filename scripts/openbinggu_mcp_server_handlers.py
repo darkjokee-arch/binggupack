@@ -62,7 +62,14 @@ def _u_capture_preview(params=None):
     utts = params.get("utterances") or []
     text = "\n".join(u for u in utts if isinstance(u, str))
     import openbinggu_conversation_capture_preview as cvp
-    return {"action": "capture_preview", "mode": "read", **cvp.capture_preview(text)}
+    result = cvp.capture_preview(text)
+    # 사람-발화 게이트(0-A): 후보 hash 만 영속(원문 0) → SAVE hook 이 'SAVE n' 대조용으로 읽음.
+    try:
+        import binggu_save_gate as sgate
+        sgate.write_last_preview(result.get("candidates", []))
+    except Exception:
+        pass  # 영속 실패해도 preview 반환엔 무영향(read 도구)
+    return {"action": "capture_preview", "mode": "read", **result}
 
 
 def _u_save_candidate(params=None):
@@ -77,7 +84,7 @@ def _u_save_candidate(params=None):
         confirm='SAVE n' 정확일치만이 사람-선택 증거(모델 단독은 사용자가 본 preview 인덱스를 재현 못함 가정).
       - dry_run 이면 capture_preview 만 재실행(write 0). 실 write 경로는 save_selected 내부 게이트(G4/confirm/A0/PII/
         StagingDB 운영경로 거부)에 위임 — 핸들러는 게이트 재구현 0.
-      - ledger_path 미지정 → temp DB(open_g3) 강제. 운영 ledger 는 입력으로 받지 않음(StagingDB 가 운영경로 거부).
+      - MCP는 경로 입력(ledger_path 등)을 일절 무시 → temp DB(open_g3) 강제. 운영 ledger 경로 주입 구조적 불가.
       - 반환은 count/pack_id/reason 만 — 원문 sentence 는 dry-run preview 에서만(사용자가 골라야 하므로), write 응답엔 미포함.
     """
     params = params or {}
@@ -110,12 +117,13 @@ def _u_save_candidate(params=None):
                 "executed_write": False, "reason": "confirm_phrase_mismatch",
                 "confirm_expected": expected}
 
-    # 실 write 경로 — temp DB(open_g3) 강제. ledger_path 지정해도 StagingDB 가 운영경로 거부.
+    # 실 write 경로 — temp DB(open_g3) 강제. MCP는 경로 입력을 일절 받지 않음(운영 ledger 차단).
     import tempfile
     from openbinggu_deprecate_and_remind_g3 import open_g3
     from openbinggu_conversation_candidate_save import save_selected
     work = tempfile.mkdtemp(prefix="obg_mcp_save_")
-    db_path = params.get("ledger_path") or os.path.join(work, "s.sqlite")
+    # ledger_path 등 외부 경로 입력 무시 — MCP는 temp staging 전용(default-deny). 운영 ledger 경로 주입 불가.
+    db_path = os.path.join(work, "s.sqlite")
     snap_dir = os.path.join(work, "snap")
     db = open_g3(db_path)
     try:
@@ -151,7 +159,7 @@ TOOLS = {
                                               "required": ["utterances"]}},
     # save 도구 — write-gated. dry-run 기본·SAVE n confirm 정확일치·actor 서버 하드 오버라이드(reader).
     # _FORBIDDEN db_write 는 무차별 write 금지 라벨이고, save 는 confirm 게이트 통과 단건만 예외적으로
-    # 실 write 경로 진입(그것도 temp DB·actor=reader 로 G4 항상 발동). path 입력 없음(ledger_path 도 StagingDB 가 거부).
+    # 실 write 경로 진입(그것도 temp DB·actor=reader 로 G4 항상 발동). 경로 입력(ledger_path 등) 일절 무시 — MCP는 운영 ledger 못 염.
     "save_candidate":       {"path_params": [], "underlying": _u_save_candidate, "mode": "write-gated",
                              "input_schema": {"properties": {
                                  "text": {"type": "string"},

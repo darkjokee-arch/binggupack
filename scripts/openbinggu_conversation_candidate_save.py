@@ -32,8 +32,29 @@ def _sent_hash(s):
     return hashlib.sha256(re.sub(r"\s+", " ", s).strip().encode("utf-8")).hexdigest()[:8]
 
 
+def _maybe_promote_actor_by_gate(text, indices, ctx):
+    """사람-발화 게이트(binggu_save_gate): actor 비human 이어도 선택 문장이 사람 SAVE 발화로
+    기록됐으면 human 승격(0-A 해법, 4cli REFINE). 게이트 실패/미기록 → 승격 0(fail-closed)."""
+    if ctx.get("actor", "").strip().lower() == "human":
+        return ctx
+    try:
+        import binggu_save_gate as sgate
+        cands = capture_preview(text)["candidates"]
+        sents = [cands[i - 1]["sentence"] for i in indices
+                 if isinstance(i, int) and 1 <= i <= len(cands)]
+        if sents and sgate.gate_human_for(sents):
+            ctx = dict(ctx)
+            ctx["actor"] = "human"
+            ctx["actor_promoted_by"] = "save_gate"  # 사후감사 표식
+    except Exception:
+        pass  # 게이트 부재/오류 → 기존 actor 게이트 유지(default-deny)
+    return ctx
+
+
 def save_selected(db, text, indices, ctx, snap_dir, due_date=None):
-    """선택 후보만 staging 저장. 반환 {applied, saved, skipped_existing, rejected, reason, pack_id}."""
+    """선택 후보만 staging 저장. 반환 {applied, saved, skipped_existing, rejected, reason, pack_id}.
+    진입 시 사람-발화 게이트로 actor 승격 후 기존 게이트(actor/confirm/A0/PII) 그대로 적용."""
+    ctx = _maybe_promote_actor_by_gate(text, indices, ctx)
     before = db.store_checksum()
 
     def block(reason):
