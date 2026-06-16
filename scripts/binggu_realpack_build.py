@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """binggu_realpack_build — active 확정 노드 → worker packs.json(opencrab-pack-v1) 변환.
 
+출구: serve (hosted worker index.real.ts 가 서빙하는 data/packs.json — claude.ai/ChatGPT 실데이터 조회용).
+
 PC-mediated read 공유: 로컬 ledger 의 active(SAVE 확정) 노드를 hosted worker(index.real.ts)가
 읽는 packs.json 형식으로 변환. 폰/claude.ai/ChatGPT 에서 실 데이터 조회 가능하게 하는 빌드 단계.
 

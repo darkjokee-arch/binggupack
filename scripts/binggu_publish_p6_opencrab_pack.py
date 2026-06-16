@@ -1,5 +1,7 @@
 """BingguPack PC-mediated read 공유 — P6: OpenCrab Desktop 기대 구조로 pack 수리 (로컬 ZIP 재생성).
 
+출구: local-ingest (OpenCrab Desktop OC12 스키마 ZIP — 로컬 역인제스트용, hosted serve 아님).
+
 기준 커밋: 24fab4d (P4) 위.
 owner 지시(2026-06-14 GO-P6, 업로드 GO 아님):
 - 목표 = 업로드가 아니라 OpenCrab Desktop이 기대하는 ZIP 구조로 pack 수리.

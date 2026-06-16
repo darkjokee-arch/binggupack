@@ -84,6 +84,9 @@ def to_nodes(chunks):
             continue
         # G0 — deterministic 5종 분류 (매칭 실패 = 판단 fallback, 현행 동일값)
         kind, rule_id = lkmap.classify_label_kind(sent)
+        # node_type = OpenCrab space 노드타입(Document/Evidence/Concept/Claim) — v0.7 loader VALID_NTYPE 계약.
+        #   conv 경로의 KO2EN 5종 도장(state/judgment)과 다른 스키마 층: 여기 node_type 은 OpenCrab 적재용이므로
+        #   상태·판단→Claim 붕괴가 정상(loader 가 TitleCase 4종만 허용). 5종 도장은 A0 validator(아래 KO2EN) 전용.
         space, ntype = lkmap.KIND_TO_SPACE_NTYPE[kind]
         # G0 — A0 노드 헌법 shadow 판정 (기록만. 캡처 문장 품질 개선 전까지 stop 미적용)
         a0_res = a0.classify_node(

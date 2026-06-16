@@ -26,8 +26,46 @@ _TEXT_EXT = {".py", ".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".ini",
 _MAX_BYTES = 512 * 1024  # 큰/바이너리 파일 skip
 
 # 파일 내용 패턴(raw 미출력, reason_code 만)
+# secret_kv: key 뒤에 "실제 secret 값(하드코딩 리터럴/토큰)"이 올 때만 검출. _secret_kv_match 로 후처리.
+#   - 검출 유지: 하드코딩 리터럴/토큰 값 (cloud access key 토큰, 'ghp_...' 형 따옴표 리터럴 등)
+#   - 오탐 제외: 타입주석(secret: str) / 기본값(vault_secret=None) / 함수호출·변수참조(secret = _read_secret(path))
+#     / 주석라인(# secret = ...) / 합성 placeholder(selftest/dummy/changeme)
+_SECRET_KV_RE = re.compile(
+    r"(?P<key>api[_-]?key|token|secret|passwd|password)\s*[:=]\s*(?P<val>\S.*)$", re.I)
+_SECRET_KV_TYPEDEFAULT = re.compile(
+    r"^(None|True|False|str|int|bytes|float|bool|dict|list|Optional|Any)\b", re.I)
+# 하드코딩 secret 리터럴: 따옴표 4자+ 또는 대소문자+숫자 혼합 토큰 8자+(AKIA.../ghp_... 형). 순수 식별자 제외.
+_SECRET_KV_LITERAL = re.compile(
+    r"""^['"][^'"\n]{4,}['"]|^[A-Za-z0-9][A-Za-z0-9_\-./+=]{7,}""")
+_SECRET_KV_PLACEHOLDER = re.compile(r"selftest|dummy|changeme|placeholder|<[a-z_]+>|x{6,}", re.I)
+
+
+def _secret_kv_match(line):
+    """secret_kv 정밀 판정. 진짜 하드코딩 secret 값일 때만 True (변수명/타입/함수호출/주석/placeholder 제외)."""
+    if line.lstrip().startswith("#"):           # 주석 라인 = 라이브 secret 아님
+        return False
+    m = _SECRET_KV_RE.search(line)
+    if not m:
+        return False
+    val = m.group("val").strip()
+    if _SECRET_KV_TYPEDEFAULT.match(val):       # 타입주석/None/bool 등 기본값
+        return False
+    if _SECRET_KV_PLACEHOLDER.search(val):      # 합성 테스트 placeholder
+        return False
+    # 함수호출/변수참조 (secret = _read_secret(path) / secrets.token_hex(...) / get_or_create_secret(...))
+    quoted = val[:1] in "'\""
+    if not quoted:
+        first = val.split()[0] if val.split() else ""
+        first = first.rstrip(",;)")
+        if "(" in first or "." in first:        # 함수호출/속성참조
+            return False
+    if not _SECRET_KV_LITERAL.match(val):       # 하드코딩 리터럴/토큰 형태가 아님 = 순수 식별자 참조
+        return False
+    return True
+
+
 _CONTENT = [
-    ("secret_kv", re.compile(r"(api[_-]?key|token|secret|passwd|password)\s*[:=]\s*\S", re.I)),
+    # secret_kv 는 _secret_kv_match(라인 단위 후처리)로 검출 — _CONTENT 루프 밖에서 별도 호출.
     ("aws_key", re.compile(r"AKIA[0-9A-Z]{12,}")),
     ("github_token", re.compile(r"ghp_[A-Za-z0-9]{20,}")),
     ("private_key_block", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
@@ -103,6 +141,11 @@ def scan_public_tree(root, ignore_globs=()):
                     continue
                 with _open_text(full) as fh:
                     for lineno, line in enumerate(fh, 1):
+                        # secret_kv: 정밀 판정(하드코딩 리터럴/토큰만 — 변수명/타입/함수호출/주석 제외)
+                        if _secret_kv_match(line):
+                            findings.append({"reason_code": "secret_kv", "file_id": fid,
+                                             "where": "L%d" % lineno})
+                            by_reason["secret_kv"] = by_reason.get("secret_kv", 0) + 1
                         for code, rx in _CONTENT:
                             if rx.search(line):
                                 # raw 라인 미저장: 위치는 line 번호 라벨만
@@ -237,12 +280,21 @@ def _selftest():
     sys.exit(0 if gate == "GO" else 1)
 
 
+# 공개 트리 scan 기본 제외(.gitignore 계열 — 공개 대상 아님). doctor._real_tree_scan 과 동일 + 비공개 pack 데이터.
+# 주의: .env/credentials*/private_key* 는 scanner 검출 대상이므로 여기 절대 추가 금지(검출 무력화 방지).
+PUBLIC_IGNORE = ["*.sqlite", "*.db", "*_graph.yaml", "reports/", "reviews/", "captures/",
+                 "tmp/", "__pycache__/", "*.bak_*",
+                 # gitignore 대상 비공개·미커밋 라이브 데이터 (path_private_pack_data 자기탐지 회피)
+                 "hosted/workers/data/", "data/packs.json"]
+
+
 def main():
     args = sys.argv[1:]
     if not args or args[0] == "--selftest":
         _selftest()
     elif args[0] == "--tree" and len(args) >= 2:
-        r = scan_public_tree(args[1])
+        ignore = PUBLIC_IGNORE if "--public" in args[2:] else ()
+        r = scan_public_tree(args[1], ignore_globs=ignore)
         # 요약만 출력(raw 미출력)
         print("scanned=%d skipped_ignored=%d content_skipped=%s hits=%d verdict=%s by_reason=%s"
               % (r["scanned"], r["skipped_ignored"], r["content_skipped"],

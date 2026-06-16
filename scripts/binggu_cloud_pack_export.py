@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """binggu_cloud_pack_export.py — 6층 OpenCrab Cloud Pack v1 ZIP export (dry-run · fixture).
 
+출구: fixture-only (synthetic fixture 로 빌더 계약 검증만 — 실데이터 serve/local-ingest 아님).
+
 정본 파이프라인: 1층 node → 2층 edge → 3층 graph → 4층 validation → 5층 confirm → **6층 pack/export**.
 본 모듈 = 6층. 5층 approved edge 만 OpenCrab Cloud Pack v1 ZIP 으로 변환 + 계약 검증.
 **Cloud 업로드 0 · DB insert 0 · 운영 ledger/candidate 미접촉**(owner 명시: ZIP 생성+검증까지만).
