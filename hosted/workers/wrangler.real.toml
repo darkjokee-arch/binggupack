@@ -14,7 +14,7 @@ compatibility_date = "2025-05-01"
 #   4) (별도 GO) npx wrangler deploy --config wrangler.real.toml   → 코드만 배포, KV 가 데이터 서빙
 [[kv_namespaces]]
 binding = "PACKS"
-id = "<OWNER_FILLS_KV_ID>"  # ← wrangler kv namespace create PACKS 출력 id 로 교체
+id = "78badf369eac47498a8e60038bba0f2b"  # owner 가 wrangler kv namespace create PACKS 로 생성
 
 [vars]
 PACKS_KEY = "packs.json"
