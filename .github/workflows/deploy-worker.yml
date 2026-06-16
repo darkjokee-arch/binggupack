@@ -63,7 +63,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"   # wrangler 4.100+ 는 Node 22+ 요구
 
       - name: Install deps (lockfile 있으면 npm ci, 없으면 npm install)
         working-directory: hosted/workers

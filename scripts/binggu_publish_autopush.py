@@ -174,7 +174,11 @@ def _real_wrangler_runner(args, cwd):
     읽지도 전달하지도 않는다.
     """
     import subprocess
-    p = subprocess.run(["npx", "wrangler"] + args, cwd=cwd,
+    import shutil
+    # Windows: npx 는 npx.cmd — shell=False subprocess 는 .cmd 확장을 못 찾아 WinError 2.
+    # shutil.which 로 실제 실행파일 해석(npx.cmd/npx), 없으면 OS별 폴백.
+    npx = shutil.which("npx") or ("npx.cmd" if os.name == "nt" else "npx")
+    p = subprocess.run([npx, "wrangler"] + args, cwd=cwd,
                        capture_output=True, text=True, timeout=600)
     return {"rc": p.returncode, "stdout": (p.stdout or "")[-2000:],
             "stderr": (p.stderr or "")[-2000:]}
@@ -191,6 +195,7 @@ def kv_put_packs(packs_path, runner=None):
         "--path", os.path.abspath(packs_path),
         "--binding", PACKS_BINDING,
         "--config", WRANGLER_CONFIG,   # 고정
+        "--remote",   # 실 Cloudflare KV(라이브 worker가 읽는 곳). 없으면 local miniflare 에만 써서 라이브 미반영.
     ]
     run = runner or _real_wrangler_runner
     return run(args, WRANGLER_CWD)
