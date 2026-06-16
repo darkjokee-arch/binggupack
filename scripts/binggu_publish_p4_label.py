@@ -24,8 +24,10 @@ import binggu_publish_p3_real_ledger as P3
 
 DEFAULT_LEDGER = P3.DEFAULT_LEDGER
 
-# ledger node_type(영문 canonical) → build label_kind(한글 canonical 5종) 매핑
-EN2KO = {"Claim": "판단", "Evidence": "증거", "Concept": "개념", "State": "상태", "Document": "문서"}
+# ledger node_type(영문 5종) → label_kind(한글 5종). label_kind_map 단일원천.
+# ②정합: 저장 node_type이 KO2EN(judgment/evidence/concept/state/doc, lowercase)이므로
+# 자체 TitleCase(Claim 등) 매핑 폐기 — 어휘 분산이 발산 원인이었음.
+from openbinggu_label_kind_map import EN2KO  # noqa: E402
 
 
 def _rows_to_build(rows):
