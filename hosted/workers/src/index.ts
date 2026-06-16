@@ -186,6 +186,7 @@ function consume(pack: Pack): any {
   const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
   return {
     pack_id: manifest.pack_id ?? "",
+    title: manifest.title ?? "",
     scope: manifest.scope ?? "",
     topics: Array.isArray(manifest.topics) ? manifest.topics : [],
     visibility, status,
@@ -259,7 +260,7 @@ function toolPackList(store: PackStore, args: Record<string, any>): any {
   const limit = Math.max(1, Math.min(toInt(args.limit ?? 20), 70)); // v2.1: MAX_PACKS 70 정합
   const packs = store.ids().slice(0, limit).map((pid) => {
     const v = store.get(pid);
-    const title = (v.topics && v.topics.length ? v.topics.join("·") : v.scope) ?? "";
+    const title = (v.title || (v.topics && v.topics.length ? v.topics.join("·") : v.scope)) ?? "";
     return { pack_id: pid, title, counts: v.counts,
              candidate_note: "all items candidate (not confirmed)" };
   });
