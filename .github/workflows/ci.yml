@@ -27,14 +27,20 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Cross-platform policy selftest (36/36, GATE=GO)
+      - name: Cross-platform policy selftest (40/40, GATE=GO)
         run: python scripts/binggu_platform_selftest.py
 
-      - name: binggu core selftest (26/26, GATE=GO)
+      - name: binggu core selftest (27/27, GATE=GO)
         run: python binggu.py --selftest
 
-      - name: Doctor selftest (15 checks, GATE=GO required)
+      - name: Doctor selftest (12/12, GATE=GO required)
         run: python scripts/openbinggu_doctor.py --selftest
+
+      - name: Autopush double-gate selftest (18/18, GATE=GO — npx/--remote 실경로)
+        run: python scripts/binggu_publish_autopush.py --selftest
+
+      - name: Cloud setup selftest (38/38, GATE=GO — wrangler npx 폴백)
+        run: python scripts/binggu_setup_cloud.py --selftest
 
       - name: Publish pipeline regression (P1~cloud_pack, REGRESSION=GO required)
         run: python scripts/binggu_publish_run_all_selftests.py
