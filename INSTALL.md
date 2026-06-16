@@ -4,11 +4,14 @@
 
 > **무엇인가** — local-first · evidence-backed context packs · candidate capture/preview · human-confirmed SAVE gate · ontology graph validation. **자동 ledger/confirmed write 없음** — 저장은 preview → `SAVE n`(정확한 confirm) 게이트로만 진행됩니다.
 >
-> **Latest release = v1.8.0 — 똑똑한 뜻 분류 자동 켜짐 + 첫 설치 환경 점검.**
+> **Latest release = v1.9.0 — 확정한 판단이 폰·웹까지 자동으로 흐름 + 새 사람도 한 방 셋업.**
 > - `binggu init` → 장부 생성 + 자동 후보 수집(기본 ON) + **환경 점검표**(무엇이 켜지고 무엇을 더 깔면 되는지 안내, 자동 설치는 안 함).
-> - **똑똑한 뜻 분류**: Ollama+bge-m3 한 번 설치(또는 폰/claude.ai 사용) 시 자동 감지·자동 ON. 없으면 정규식 분류. 거부 `BINGGU_SEMANTIC_OFF=1`.
+> - **확정→자동 공유**: PC에서 `SAVE n`으로 확정한 항목을 내 PC 스케줄러가 클라우드 KV(읽기 전용)로 자동 업로드 → 폰·claude.ai·ChatGPT에서 그대로 조회(라이브). 사람 SAVE 기록 없으면 전송 0(이중게이트·fail-closed).
+> - **한 방 셋업**: `binggu setup-cloud --apply` 가 로그인 점검→KV 생성→설정 기입→자동전송 스케줄러 등록까지(기본 dry-run).
+> - **사람-발화 저장 게이트(0-A)**: 키보드로 친 `SAVE n`만 사람 승인. AI는 입력 경로를 못 거쳐 위조 불가.
+> - **똑똑한 뜻 분류(5종)**: Ollama+bge-m3 한 번 설치(또는 폰/claude.ai 사용) 시 자동 감지·자동 ON. 없으면 정규식 분류. 거부 `BINGGU_SEMANTIC_OFF=1`.
 > - **자동 저장은 없음** — 저장은 preview → `SAVE n` 사람 게이트만. cos는 도장 제안에만, PII/secret 선차단.
-> - 사용자가 고른 문장 전체 저장(80자 발췌 폐기). 라이브 save-intent는 신형 v2 서명 전용(`SAVE_SIG_V2_ONLY=1`). OpenCrab 로컬 역인제스트 지원, Cloud 업로드는 HOLD.
+> - 사용자가 고른 문장 전체 저장(화면 표시 cap은 별개). 라이브 save-intent는 신형 v2 서명 전용(`SAVE_SIG_V2_ONLY=1`). OpenCrab 로컬 역인제스트 지원, Cloud 업로드는 HOLD.
 >
 > OpenCrab 업로드는 **planned**(preflight G1~G7까지 구현·검증, 실 전송은 별도 결정 — 노출 0). "100% 완성판"이 아니며 모든 사용자 환경 동작을 보장하지 않습니다. 전체 로드맵·범위는 `README.md`, 따라하기는 `docs/BINGGUPACK_TUTORIAL.md` 참조.
 
