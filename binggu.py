@@ -584,6 +584,20 @@ def selftest():
     return 0 if ok else 1
 
 
+def cmd_setup_cloud(a):
+    """setup-cloud — 흩어진 cloud 셋업 명령을 1개 진입점으로(멱등·실패정지).
+    얇은 래퍼 — 실 오케스트레이션은 scripts/binggu_setup_cloud.py(순수함수+selftest).
+      python binggu.py setup-cloud            # 점검만(dry-run · 변경 0)
+      python binggu.py setup-cloud --apply    # kv create/toml 기입/kv put/스케줄러 등록
+      python binggu.py setup-cloud --apply --deploy   # 위 + wrangler deploy(비가역)
+    login(브라우저 OAuth)·deploy 결정은 본인 손 — 스크립트는 점검+안내+멱등 적용만."""
+    import binggu_setup_cloud as SC  # scripts/ 는 이미 sys.path 에 있음
+    res = SC.run_setup(apply=bool(getattr(a, "apply", False)),
+                       deploy=bool(getattr(a, "deploy", False)))
+    print(SC.render_report(res))
+    return 0 if res["halted_at"] is None else 2
+
+
 def main():
     if sys.argv[1:] == ["--selftest"]:
         sys.exit(selftest())
@@ -629,12 +643,15 @@ def main():
     pp = hsub.add_parser("pull")            # 선택 항목만 ledger commit (전량 자동 없음)
     pp.add_argument("--select", default=None)            # 'inbox' 에서 본 번호들 (예: 1,3)
     pp.add_argument("--confirm", default=None)           # "LIVE SAVE <select>" 정확 일치
+    scp = sub.add_parser("setup-cloud")     # cloud 셋업 1개 진입점(멱등·실패정지·dry-run 기본)
+    scp.add_argument("--apply", action="store_true")     # 실제 변경(미지정=점검만)
+    scp.add_argument("--deploy", action="store_true")    # (--apply 와) wrangler deploy 까지 — 비가역
     a = p.parse_args()
     fn = {"init": cmd_init, "status": cmd_status, "preview": cmd_preview, "save": cmd_save,
           "list": cmd_list, "deprecate": cmd_deprecate, "replace": cmd_replace,
           "accept": cmd_accept, "unaccept": cmd_unaccept, "due": cmd_due,
           "resolve": cmd_resolve, "reminders": cmd_reminders, "capture": cmd_capture,
-          "hosted": cmd_hosted}[a.cmd]
+          "hosted": cmd_hosted, "setup-cloud": cmd_setup_cloud}[a.cmd]
     sys.exit(fn(a))
 
 
