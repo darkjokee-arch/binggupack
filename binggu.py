@@ -376,6 +376,12 @@ def cmd_reflect(a):
 
 def cmd_save(a):
     # 승인 정책: preview 를 실제로 본 텍스트만 저장 가능 — raw text 직행 저장 차단
+    if getattr(a, "from_file", None):
+        try:
+            a.text = open(a.from_file, encoding="utf-8").read()
+        except OSError as e:
+            print("저장 파일을 열 수 없습니다: %s (%s)" % (a.from_file, e))
+            return 1
     if a.preview_id != _preview_id(a.text):
         print("BLOCK: preview_required_mismatch — 먼저 preview 를 실행하고, "
               "거기 표시된 preview_id 와 같은 텍스트로 저장하세요.")
@@ -654,7 +660,8 @@ def main():
     rp = sub.add_parser("reflect")          # 회고·자가평가 → 지식 후보(반성이 지식으로 · 저장 0)
     rp.add_argument("text", nargs="?", default=None)
     rp.add_argument("--from-file", dest="from_file", default=None)  # 쌓인 회고 파일 일괄 후보화
-    sp = sub.add_parser("save"); sp.add_argument("text")
+    sp = sub.add_parser("save"); sp.add_argument("text", nargs="?", default=None)
+    sp.add_argument("--from-file", dest="from_file", default=None)   # reflect --from-file 과 동일 text 로 저장(preview_id 일치)
     sp.add_argument("--preview-id", required=True, dest="preview_id")
     sp.add_argument("--pick", required=True); sp.add_argument("--confirm", required=True)
     sp.add_argument("--due", default=None)
