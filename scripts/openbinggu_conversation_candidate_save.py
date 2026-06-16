@@ -124,7 +124,10 @@ def save_selected(db, text, indices, ctx, snap_dir, due_date=None):
     pack_id = "conv_" + _hash(pack_content)[:8]
     nodes, edges, evidence = [], [], []
     for it in saved_items:
-        space, ntype = lkmap.KIND_TO_SPACE_NTYPE[it["kind"]]
+        # 도장 단일 원천: node_type = 분류 결과 5종 EN 라벨(doc/evidence/concept/state/judgment).
+        # KIND_TO_SPACE_NTYPE(space ntype: 상태·판단 둘 다 Claim 으로 붕괴)는 적재 node_type 에 쓰지 않는다.
+        # A0(LABEL_KINDS=5종 EN)가 이미 이 값으로 검증했으므로 저장값=검증값=표시값 3자 일치.
+        ntype = lkmap.KO2EN[it["kind"]]
         eid = "EVC-CONV-" + _sent_hash(it["sent"])
         th = _hash(it["sent"])  # capture 시점 동결 — ephemeral 출처(동어반복임을 audit 에 명시)
         nodes.append({"id": it["nid"], "type": ntype, "sentence": it["sent"]})
@@ -192,9 +195,12 @@ def run():
     nt = db.con.execute("SELECT node_type FROM nodes ORDER BY node_id").fetchall()
     aud = db.con.execute("SELECT count(*) FROM audit_log WHERE action='conv_save' AND result='ALLOW'").fetchone()[0]
     rev = db.con.execute("SELECT count(*) FROM judgment_reviews WHERE status='pending'").fetchone()[0]
-    rec(1, "정상 저장(2건+어휘 매핑+conv_save audit+판단 due)",
+    # 도장 5종 세분화: node_type 은 doc/evidence/concept/state/judgment EN 라벨로 저장(Claim 붕괴 폐기).
+    # 후보 1·5 = 문서(doc)·판단(judgment) → 정확히 그 두 값이어야.
+    rec(1, "정상 저장(2건+5종 node_type+conv_save audit+판단 due)",
         r1["applied"] and r1["saved"] == 2 and n == 2 and e == 2 and v == 2
-        and {x[0] for x in nt} <= {"Document", "Evidence", "Concept", "Claim"}
+        and {x[0] for x in nt} == {"doc", "judgment"}
+        and {x[0] for x in nt} <= set(lkmap.KO2EN.values())
         and aud == 1 and rev == 1 and r1["due_set"] == 1)
 
     # 2. confirm 문구 불일치 BLOCK

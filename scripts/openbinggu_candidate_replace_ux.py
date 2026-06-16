@@ -197,7 +197,8 @@ def replace_from_list(db, index, node_hash8, new_sentence, reason, ctx, snap_dir
             raise RuntimeError("crash_sim_after_deprecate")
 
         # ---- (b) 신규 candidate 저장 — save 모듈과 동일 mini-pack 구조 + staging_apply 경유 ----
-        _space, ntype = lkmap.KIND_TO_SPACE_NTYPE[kind_ko]
+        # 도장 단일 원천 정합(conversation_candidate_save 와 동일): node_type = 5종 EN 라벨.
+        ntype = lkmap.KO2EN[kind_ko]
         eid = "EVC-CONV-" + _sent_hash(new_sentence)
         th = _hash(new_sentence)  # capture 시점 동결 (자기증빙 동어반복 — conv-self prefix 명시)
         pack = {"pack_id": "convr_" + _hash(new_sentence)[:8], "content": new_sentence,

@@ -25,7 +25,7 @@ from openbinggu_staging_write_selftest import OPERATING_PATHS  # noqa: E402
 from openbinggu_deprecate_and_remind_g3 import (  # noqa: E402
     open_g3, deprecate_item, set_review_due, resolve_review)
 from openbinggu_conversation_candidate_save import save_selected  # noqa: E402
-from openbinggu_label_kind_map import classify_label_kind, KIND_KO  # noqa: E402
+from openbinggu_label_kind_map import classify_label_kind, KIND_KO, EN2KO  # noqa: E402
 
 STATUSES = ("all", "pending", "deprecated", "resolved")
 DISPLAY_CAP = 60
@@ -36,9 +36,21 @@ def node_id8(node_id):
     return hashlib.sha256(node_id.encode("utf-8")).hexdigest()[:8]
 
 
+def stamp_from_node_type(node_type, sentence):
+    """저장된 node_type(5종 EN 라벨) → 도장(한글). 저장값을 단일 진실로 EN2KO 역매핑.
+
+    재분류(classify_label_kind) 폐기 — 저장 도장 ↔ 표시 도장 발산 구조 제거.
+    legacy 호환: node_type 이 5종 EN 라벨이 아니면(옛 Claim/Document 등) 부득이 문장 재분류
+    fallback(신규 저장은 전부 5종 EN 이므로 이 경로 미진입). 빈 ledger 전제."""
+    if node_type in EN2KO:
+        return EN2KO[node_type]
+    kind_ko, _ = classify_label_kind(sentence or "")
+    return kind_ko
+
+
 def list_candidates(db, status="all", kind=None):
-    """read-only 목록. 반환 {rows, markdown, non_candidate}. node_type만으론 상태/판단 구분이
-    안 되므로(둘 다 Claim) 도장은 저장 문장의 결정론 재분류로 표시한다."""
+    """read-only 목록. 반환 {rows, markdown, non_candidate}. 도장은 저장된 node_type(5종 EN 라벨)을
+    EN2KO 로 역매핑해 표시 — 저장값이 단일 진실(표시 때 재분류 폐기로 발산 구조 제거)."""
     rows = []
     non_candidate = 0
     for nid, ntype, sent, cand, promo, state in db.con.execute(
@@ -49,7 +61,7 @@ def list_candidates(db, status="all", kind=None):
         review = "-" if not rev else (rev[0] if rev[0] == "pending" else "resolved:%s" % rev[1])
         ev = [r[0] for r in db.con.execute(
             "SELECT source FROM edges WHERE relation='evidence_supports' AND target=?", (nid,))]
-        kind_ko, _ = classify_label_kind(sent or "")
+        kind_ko = stamp_from_node_type(ntype, sent)
         if cand != 1 or promo != 0:
             non_candidate += 1
         if status == "pending" and review != "pending":

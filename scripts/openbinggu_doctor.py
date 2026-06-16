@@ -399,6 +399,11 @@ def _oi_selftest():
         gmt = os.path.getmtime(good)
         gres, _, _ = _run_oi_checks(good)
         ck("good_oi2_pass", gres["oi2"]["pass"], "evidence 폐쇄 정상")
+        # 5종 세분화 저장이면 node_type 이 전부 5종 EN 라벨 → OI1 비교가능(comparable=total).
+        # (Claim 단일 적재였을 땐 comparable=0 으로 발산을 못 봤음 — 그 사각이 닫혔는지 검증.)
+        ck("good_oi1_comparable>0(5종세분화)", gres["oi1"]["comparable"] == gres["oi1"]["total_nodes"]
+           and gres["oi1"]["comparable"] == 2,
+           "comparable=%d total=%d" % (gres["oi1"]["comparable"], gres["oi1"]["total_nodes"]))
         ck("good_oi1_발산검출", gres["oi1"]["divergent"] == 1,
            "도장 거꾸로 1건 검출(divergent=%d)" % gres["oi1"]["divergent"])
         ck("good_oi3_출구카운트", gres["oi3"]["candidate_staging"] == 1

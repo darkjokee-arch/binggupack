@@ -144,12 +144,13 @@ def _selftest():
         CREATE TABLE nodes(node_id TEXT, node_type TEXT, sentence TEXT, candidate INT, state TEXT, content_hash TEXT);
         CREATE TABLE evidence(evidence_id TEXT, sentence TEXT, source_pointer_id TEXT, source_hash TEXT);
     """)
+    # 도장 5종 세분화: node_type = 저장 도장 EN 라벨(judgment/state/...) — realpack label_kind = 이 값.
     conn.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?)",
-                 ("node:CONV:aaaaaaaa", "Claim", "확정 판단 가나다", 0, "active", "h1"))
+                 ("node:CONV:aaaaaaaa", "judgment", "확정 판단 가나다", 0, "active", "h1"))
     conn.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?)",
-                 ("node:CONV:bbbbbbbb", "Claim", "확정 판단 라마바", 0, "active", "h2"))
+                 ("node:CONV:bbbbbbbb", "state", "확정 상태 라마바", 0, "active", "h2"))
     conn.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?)",
-                 ("node:CONV:cccccccc", "Claim", "미확정 후보 사아자", 1, None, "h3"))  # candidate
+                 ("node:CONV:cccccccc", "concept", "미확정 후보 사아자", 1, None, "h3"))  # candidate
     conn.execute("INSERT INTO evidence VALUES(?,?,?,?)",
                  ("EVC-CONV-aaaaaaaa", "확정 판단 가나다", "conv-self:aaaaaaaa", "aaaaaaaa"))
     conn.execute("INSERT INTO evidence VALUES(?,?,?,?)",
@@ -165,6 +166,10 @@ def _selftest():
     chk("T4 promotion_allowed false", all(n["promotion_allowed"] is False for n in pack["nodes"]))
     chk("T5 counts 정합", pack["manifest"]["counts"]["nodes"] == 2 and pack["manifest"]["counts"]["evidence"] == 2)
     chk("T6 evidence_refs 연결", pack["nodes"][0]["evidence_refs"][0].startswith("EVC-CONV-"))
+    # 도장 5종: label_kind = 저장 node_type 직사용(Claim 단일 아님) — 5종 EN 라벨로 직통.
+    lk = {n["properties"]["label_kind"] for n in pack["nodes"]}
+    chk("T6b label_kind = 저장 node_type 5종(Claim 아님)",
+        lk == {"judgment", "state"} and lk <= {"doc", "evidence", "concept", "state", "judgment"})
     chk("T7 load_packs 게이트 통과(위반 0)", validate_packs_obj(r) == [])
     chk("T8 format_version", pack["manifest"]["format_version"] == FORMAT_VERSION)
     chk("T9 status validated 아님", pack["manifest"]["status"] != "validated")
