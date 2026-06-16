@@ -321,6 +321,13 @@ def _preview_id(text):
 def cmd_preview(a):
     pv = capture_preview(a.text)
     print(pv["preview_markdown"])
+    # SAVE 게이트 대조용 — 직전 preview 후보를 last_preview 에 영속(hook 이 사람 'SAVE n' 발화 시 이걸 읽어 도장).
+    # 이 연결이 없으면 CLI preview→save 흐름이 save_gate_log 와 분리돼 autopush 이중게이트가 영구 BLOCK.
+    try:
+        import binggu_save_gate as _sg
+        _sg.write_last_preview(pv.get("candidates") or [])
+    except Exception:
+        pass
     pid = _preview_id(a.text)
     print("\npreview_id: %s" % pid)
     if pv["candidates"]:

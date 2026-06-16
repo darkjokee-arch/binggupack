@@ -41,7 +41,7 @@ def sent_hash(s):
 #   0-A 정신 유지 — 발화 전체가 정확히 '<트리거> n' 형태일 때만(부분문자열·인용문 무시),
 #   AI 는 UserPromptSubmit 를 못 거침 → 위조 불가는 그대로.
 SAVE_TRIGGER_RE = re.compile(
-    r"\s*(?:SAVE|저장|세이브)\s+\d+(\s*,\s*\d+)*\s*", re.IGNORECASE)
+    r"\s*(?:SAVE|저장|세이브)\s*\d+(\s*,\s*\d+)*\s*", re.IGNORECASE)  # 트리거↔숫자 공백 선택적(저장1·저장 1 모두)
 # hook 의 빠른 차단(모듈 로드 전 substring 체크)용 토큰. upper() 비교는 한글에 영향 0.
 TRIGGER_TOKENS = ("SAVE", "저장", "세이브")
 
