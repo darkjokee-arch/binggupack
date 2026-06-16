@@ -36,9 +36,10 @@ def _group_has_marker(group, marker):
     return any(marker in (h.get("command") or "") for h in group.get("hooks", []))
 
 
-def register_hook(settings_path, command, events=("UserPromptSubmit", "Stop"), marker=HOOK_MARKER):
-    """settings.json 의 각 이벤트에 binggu capture hook 그룹 추가(백업·idempotent).
-    이미 marker 가 있으면 skip. 반환 = 새로 추가된 이벤트 목록."""
+def register_hook(settings_path, command, events=("UserPromptSubmit", "Stop"), marker=HOOK_MARKER, is_async=True):
+    """settings.json 의 각 이벤트에 binggu hook 그룹 추가(백업·idempotent).
+    이미 marker 가 있으면 skip. 반환 = 새로 추가된 이벤트 목록.
+    is_async=False 면 async 키 생략(sync) — save_gate 처럼 저장 전 완료 보장 필요한 hook 용(레이스 회피)."""
     sp = Path(settings_path)
     data = json.loads(sp.read_text(encoding="utf-8")) if sp.exists() else {}
     if sp.exists():
@@ -51,7 +52,10 @@ def register_hook(settings_path, command, events=("UserPromptSubmit", "Stop"), m
         groups = hooks.setdefault(ev, [])
         if any(_group_has_marker(g, marker) for g in groups):
             continue  # idempotent
-        groups.append({"hooks": [{"type": "command", "command": command, "async": True}]})
+        entry = {"type": "command", "command": command}
+        if is_async:
+            entry["async"] = True
+        groups.append({"hooks": [entry]})
         added.append(ev)
     sp.parent.mkdir(parents=True, exist_ok=True)
     sp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")

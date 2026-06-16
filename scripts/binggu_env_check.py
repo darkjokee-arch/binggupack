@@ -25,8 +25,9 @@ def _ollama_install_cmd(os_name):
     return "curl -fsSL https://ollama.com/install.sh | sh"   # wsl / linux
 
 
-def check_env(os_name=None, ollama_probe=None, node_probe=None):
-    """환경 점검 결과 dict. probe= 테스트 주입(실제는 자동 감지). write 0."""
+def check_env(os_name=None, ollama_probe=None, node_probe=None, settings_path=None, savegate_probe=None):
+    """환경 점검 결과 dict. probe= 테스트 주입(실제는 자동 감지). write 0.
+    settings_path 주어지면 save_gate hook 등록 여부도 점검(SAVE n 저장 인식용)."""
     os_name = os_name or P.detect_os()
     py_ok = sys.version_info >= (3, 10)
     if ollama_probe is not None:
@@ -38,12 +39,23 @@ def check_env(os_name=None, ollama_probe=None, node_probe=None):
         except Exception:
             oll = False
     node = node_probe if node_probe is not None else (shutil.which("node") is not None)
+    if savegate_probe is not None:
+        sg = savegate_probe
+    elif settings_path:
+        try:
+            import binggu_capture_profile as CP
+            sg = CP.hook_registered(settings_path, marker="binggu_save_gate_hook")
+        except Exception:
+            sg = None
+    else:
+        sg = None  # settings 미지정 → 점검 안 함(표시 생략)
     return {
         "os": os_name,
         "python": {"ok": bool(py_ok), "version": "%d.%d" % sys.version_info[:2]},
         "semantic": {"ready": bool(oll),
                      "install": _ollama_install_cmd(os_name), "pull": "ollama pull bge-m3"},
         "hosted": {"node": bool(node)},
+        "save_gate": {"registered": sg},
     }
 
 
@@ -65,6 +77,14 @@ def render_report(res):
         L.append("[OK] 폰/클라우드(hosted) 자가배포 가능 — Node 감지됨")
     else:
         L.append("[--] 폰/클라우드(hosted) — 쓸 때만 Node 필요: https://nodejs.org")
+    sg = res.get("save_gate", {}).get("registered")
+    if sg is True:
+        L.append("[ON] 저장 게이트 — 'SAVE n' 발화 인식 hook 등록됨(사람 발화만 저장 통과)")
+    elif sg is False:
+        L.append("[--] 저장 게이트 — 미설치. 'SAVE n' 으로 직접 저장하려면 한 번 설치(선택):")
+        L.append("       python binggu.py capture install-gate")
+        L.append("     사람 'SAVE n' 발화만 인식 — 자동 저장 아님. (자동 설치는 안 합니다)")
+    # sg None(settings 미점검) → 표시 생략
     L.append("-" * 62)
     L.append("거부/강제 끄기: 환경변수 BINGGU_SEMANTIC_OFF=1 (정규식 분류로 고정)")
     return "\n".join(L)
@@ -78,8 +98,8 @@ def run_selftest():
 
     # 1. 구조
     r = check_env(os_name="windows", ollama_probe=True, node_probe=True)
-    rec("1.결과 키(os/python/semantic/hosted)",
-        set(r.keys()) == {"os", "python", "semantic", "hosted"})
+    rec("1.결과 키(os/python/semantic/hosted/save_gate)",
+        set(r.keys()) == {"os", "python", "semantic", "hosted", "save_gate"})
     # 2. ollama probe True → ready
     rec("2.Ollama 감지 시 semantic.ready=True", r["semantic"]["ready"] is True)
     # 3. ollama probe False → ready False + 설치 명령 존재
@@ -106,6 +126,13 @@ def run_selftest():
         not any(n.startswith("save") or n.startswith("write") or "persist" in n for n in dir(sys.modules[__name__])))
     # 12. python 버전 판정
     rec("12.python 버전 ok 필드", isinstance(check_env(ollama_probe=False)["python"]["ok"], bool))
+    # 13~15. save_gate hook 점검 + 안내
+    rec("13.savegate_probe True → registered True",
+        check_env(ollama_probe=False, savegate_probe=True)["save_gate"]["registered"] is True)
+    rec("14.savegate_probe False → render 설치 명령 안내",
+        "install-gate" in render_report(check_env(os_name="windows", ollama_probe=False, node_probe=False, savegate_probe=False)))
+    rec("15.settings 미지정 → registered None(표시 생략)",
+        check_env(ollama_probe=False)["save_gate"]["registered"] is None)
 
     print("=" * 62)
     print("binggu_env_check — selftest (환경 점검 + 설치 안내, 자동설치 X)")

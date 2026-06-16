@@ -47,7 +47,10 @@ from openbinggu_owner_accept_ux import (  # noqa: E402
     open_accept, accept_from_list, unaccept_from_list, accepted_view)
 from binggu_capture_profile import (  # noqa: E402
     init_profile, pause as cap_pause, resume as cap_resume,
-    uninstall as cap_uninstall, status as cap_status)
+    uninstall as cap_uninstall, status as cap_status,
+    register_hook, unregister_hook, hook_registered)
+
+SAVE_GATE_MARKER = "binggu_save_gate_hook"  # 사람-발화 저장 게이트 hook 식별 토큰
 from binggu_capture_persist import PersistentCaptureBuffer  # noqa: E402
 from binggu_capture_to_save import build_save_commands  # noqa: E402
 import binggu_platform as _plat  # noqa: E402
@@ -62,6 +65,11 @@ def _hook_command():
     """settings.json 에 등록할 capture hook 실행 명령(repo hooks 절대경로).
     런처는 OS별: Windows=py, WSL/macOS/Linux=python3."""
     return '%s "%s"' % (_plat.python_cmd(), os.path.join(BASE, "hooks", "binggu_capture_hook.py"))
+
+
+def _save_gate_hook_command():
+    """settings.json 에 등록할 사람-발화 저장 게이트 hook 실행 명령(sync 등록 대상)."""
+    return '%s "%s"' % (_plat.python_cmd(), os.path.join(BASE, "hooks", "binggu_save_gate_hook.py"))
 
 
 def _ledger_paths(ledger):
@@ -137,8 +145,9 @@ def cmd_init(a):
         import sys as _sys
         _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
         import binggu_env_check as _ec
+        gate_settings = getattr(a, "capture_settings", None) or DEFAULT_SETTINGS
         print()
-        print(_ec.render_report(_ec.check_env()))
+        print(_ec.render_report(_ec.check_env(settings_path=gate_settings)))
         print()
     except Exception:
         pass
@@ -189,6 +198,21 @@ def cmd_capture(a):
               % (", ".join(res["removed_files"]) or "없음",
                  ", ".join(res["hook_removed_events"]) or "없음"))
         print("(장부 ledger.sqlite 는 그대로 보존됩니다.)")
+        return 0
+    if sub == "install-gate":
+        # 사람-발화 저장 게이트 hook 등록 — 사용자가 명시 실행(설치 의도 표현). sync(레이스 회피).
+        added = register_hook(settings, _save_gate_hook_command(),
+                              events=("UserPromptSubmit",), marker=SAVE_GATE_MARKER, is_async=False)
+        if added:
+            print("저장 게이트 hook 등록 완료(sync · settings.json 백업됨): %s" % ", ".join(added))
+        else:
+            print("저장 게이트 hook 이미 등록됨 — 그대로 사용")
+        print("이제 'SAVE n' 발화가 인식되어 선택 저장이 통과합니다(자동 저장 아님 · 사람 발화만).")
+        print("제거:  python binggu.py capture uninstall-gate")
+        return 0
+    if sub == "uninstall-gate":
+        removed = unregister_hook(settings, marker=SAVE_GATE_MARKER)
+        print("저장 게이트 hook 제거: %s" % (", ".join(removed) or "없음(미등록)"))
         return 0
     return 1
 
@@ -585,7 +609,7 @@ def main():
     sp = sub.add_parser("reminders"); sp.add_argument("--today", default=None)
     cp = sub.add_parser("capture"); cp.add_argument("--settings", default=None)
     csub = cp.add_subparsers(dest="capture_cmd", required=True)
-    for cs in ("status", "pause", "resume", "preview", "uninstall"):
+    for cs in ("status", "pause", "resume", "preview", "uninstall", "install-gate", "uninstall-gate"):
         csub.add_parser(cs)
     hp = sub.add_parser("hosted")
     hsub = hp.add_subparsers(dest="hosted_cmd", required=True)
