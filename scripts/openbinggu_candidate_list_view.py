@@ -66,13 +66,15 @@ def list_candidates(db, status="all", kind=None):
 
     lines = ["# candidate 목록 — %d건 (status=%s kind=%s · read-only · 실행 버튼 없음)"
              % (len(rows), status, kind or "전체"),
-             "", "| # | id | 도장 | state | review | 문장(발췌) | evidence | candidate |",
+             "", "| # | id | 도장 | state | review | 문장(발췌) | evidence | 출구 |",
              "|---|---|---|---|---|---|---|---|"]
     for i, r in enumerate(rows, 1):
+        # 출구 라벨: candidate=1(staging 미확정) / candidate=0(sealed 공개대상). 저장값 무변경(표시 문자열만).
+        exit_label = "미확정(staging)" if r["candidate_only"] else "확정(sealed)"
         lines.append("| %d | %s | %s | %s | %s | %s | %s | %s |" % (
             i, r["id8"], r["kind"], r["state"], r["review"], r["sentence"],
             ",".join(e[:14] for e in r["evidence"]) or "-",
-            "✓" if r["candidate_only"] else "⚠비후보"))
+            exit_label))
     lines.append("")
     lines.append("조회 전용입니다 — 아무것도 변경되지 않았습니다. 표시는 저장된 문장 전체의 60자 cap, 원문 전문(대화 전체)은 저장되어 있지 않습니다.")
     lines.append("변경 작업의 confirm 문구에는 # 와 id 를 함께 적습니다 (예: DEPRECATE 3 %s)." % (rows[2]["id8"] if len(rows) >= 3 else "a1b2c3d4"))
