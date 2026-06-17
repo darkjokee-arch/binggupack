@@ -47,6 +47,7 @@ from openbinggu_owner_accept_ux import (  # noqa: E402
     open_accept, accept_from_list, unaccept_from_list, accepted_view)
 from binggu_capture_profile import (  # noqa: E402
     init_profile, pause as cap_pause, resume as cap_resume,
+    disable_capture as cap_disable, enable_capture as cap_enable,
     uninstall as cap_uninstall, status as cap_status,
     register_hook, unregister_hook, hook_registered)
 
@@ -129,16 +130,22 @@ def cmd_init(a):
         cwd = getattr(a, "capture_cwd", None) or os.getcwd()
         # AGI memory mode = 전역 후보수집이 기본 경험(--agi-memory 또는 --global). 플래그 없는 init = 현재 위치만(privacy).
         global_scope = bool(getattr(a, "global_scope", False) or getattr(a, "agi_memory", False))
+        force_cap = bool(getattr(a, "force_capture", False))
         r = init_profile(home, cwd, hook_command=_hook_command(),
-                         settings_path=settings, global_scope=global_scope)
+                         settings_path=settings, global_scope=global_scope, force_enable=force_cap)
         scope_desc = "전역(AGI memory — 모든 작업 세션)" if r["global"] else ("현재 위치만 %s (privacy)" % cwd)
-        print("AGI memory capture ON — scope: %s" % scope_desc)
-        if r["hook_events"]:
-            print("hook 등록(settings.json 백업됨): %s" % ", ".join(r["hook_events"]))
+        if not r["enabled"]:
+            # owner sticky OFF — init 이 정책(자동수집 영구 OFF)을 깨지 않음.
+            print("capture 는 owner 가 OFF 로 고정해 두어 켜지 않았습니다(scope/hook 만 갱신).")
+            print("정말 켜려면:  python binggu.py capture enable   (또는 init --force-capture)")
         else:
-            print("hook 이미 등록됨 — 그대로 사용")
-        print("자동 후보 수집만 켜집니다. 저장은 preview 후 SAVE n 게이트로만(자동 저장 없음).")
-        print("상태:  python binggu.py capture status   ·   끄기:  capture pause   ·   제거:  capture uninstall")
+            print("AGI memory capture ON — scope: %s" % scope_desc)
+            if r["hook_events"]:
+                print("hook 등록(settings.json 백업됨): %s" % ", ".join(r["hook_events"]))
+            else:
+                print("hook 이미 등록됨 — 그대로 사용")
+            print("자동 후보 수집만 켜집니다. 저장은 preview 후 SAVE n 게이트로만(자동 저장 없음).")
+        print("상태:  capture status   ·   잠깐 끄기:  capture pause   ·   영구 끄기:  capture disable   ·   제거:  capture uninstall")
     # 환경 점검(옵션1, 4cli 20260615_1900) — 무엇이 켜지고 무엇을 더 깔면 뭐가 생기는지 1회 안내.
     # 점검만 — 자동 설치 안 함(없는 건 명령만 안내). 실패해도 init 흐름엔 영향 0.
     try:
@@ -162,8 +169,9 @@ def cmd_capture(a):
     sub = a.capture_cmd
     if sub == "status":
         st = cap_status(home, cwd, settings)
-        print("capture: %s%s" % ("ON" if st["enabled"] else "OFF",
-                                  " (paused)" if st["paused"] else ""))
+        print("capture: %s%s%s" % ("ON" if st["enabled"] else "OFF",
+                                   " (paused)" if st["paused"] else "",
+                                   " (owner OFF 고정)" if st.get("disabled") else ""))
         print("scope: %s · 현재 위치 수집 대상: %s"
               % ("전역" if st["global"] else "지정 위치", "예" if st["in_current_scope"] else "아니오"))
         print("버퍼 후보: %d건 · hook 등록: %s"
@@ -176,6 +184,16 @@ def cmd_capture(a):
     if sub == "resume":
         cap_resume(home)
         print("capture 재개(resume).")
+        return 0
+    if sub == "disable":
+        # owner sticky OFF: init 재실행에도 OFF 유지(정책 영구 OFF). pause 와 달리 영구.
+        cap_disable(home)
+        print("capture 영구 OFF 고정(owner 정책). `binggu init` 재실행해도 켜지지 않습니다.")
+        print("다시 켜기:  python binggu.py capture enable")
+        return 0
+    if sub == "enable":
+        cap_enable(home)
+        print("capture ON(sticky OFF 해제). 자동 후보 수집만 — 저장은 SAVE n 게이트로만.")
         return 0
     if sub == "preview":
         pv = PersistentCaptureBuffer(home=home).render_preview()
@@ -514,6 +532,13 @@ def selftest():
        and not cap_status(cap_home, cap_cwd, cap_settings)["enabled"])
     ck("1f_resume→ON", cmd_capture(args(capture_cmd="resume", settings=cap_settings, capture_cwd=cap_cwd)) == 0
        and cap_status(cap_home, cap_cwd, cap_settings)["enabled"])
+    ck("1f2_disable→sticky OFF", cmd_capture(args(capture_cmd="disable", settings=cap_settings, capture_cwd=cap_cwd)) == 0
+       and not cap_status(cap_home, cap_cwd, cap_settings)["enabled"]
+       and cap_status(cap_home, cap_cwd, cap_settings)["disabled"])
+    ck("1f3_재init중_sticky OFF 유지", cmd_init(args(no_capture=False, capture_settings=cap_settings, capture_cwd=cap_cwd)) == 0
+       and not cap_status(cap_home, cap_cwd, cap_settings)["enabled"])
+    ck("1f4_enable→ON 복구", cmd_capture(args(capture_cmd="enable", settings=cap_settings, capture_cwd=cap_cwd)) == 0
+       and cap_status(cap_home, cap_cwd, cap_settings)["enabled"])
     ck("1g_preview(저장0)", cmd_capture(args(capture_cmd="preview", settings=cap_settings, capture_cwd=cap_cwd)) == 0)
     ck("1h_uninstall", cmd_capture(args(capture_cmd="uninstall", settings=cap_settings, capture_cwd=cap_cwd)) == 0
        and not cap_status(cap_home, cap_cwd, cap_settings)["enabled"])
@@ -655,6 +680,7 @@ def main():
     ip.add_argument("--agi-memory", action="store_true", dest="agi_memory")  # 명시 별칭(동작 동일)
     ip.add_argument("--global", action="store_true", dest="global_scope")     # 전역 수집(미지정 시 현재 위치만)
     ip.add_argument("--no-capture", action="store_true", dest="no_capture")   # 장부만, capture profile 생략
+    ip.add_argument("--force-capture", action="store_true", dest="force_capture")  # owner sticky OFF 해제하고 강제 ON
     sub.add_parser("status")
     sp = sub.add_parser("preview"); sp.add_argument("text")
     rp = sub.add_parser("reflect")          # 회고·자가평가 → 지식 후보(반성이 지식으로 · 저장 0)
@@ -681,7 +707,7 @@ def main():
     sp = sub.add_parser("reminders"); sp.add_argument("--today", default=None)
     cp = sub.add_parser("capture"); cp.add_argument("--settings", default=None)
     csub = cp.add_subparsers(dest="capture_cmd", required=True)
-    for cs in ("status", "pause", "resume", "preview", "uninstall", "install-gate", "uninstall-gate"):
+    for cs in ("status", "pause", "resume", "disable", "enable", "preview", "uninstall", "install-gate", "uninstall-gate"):
         csub.add_parser(cs)
     hp = sub.add_parser("hosted")
     hsub = hp.add_subparsers(dest="hosted_cmd", required=True)

@@ -29,6 +29,7 @@ def profile_paths(home=None):
         "scope": h / "capture_scope.json",
         "buffer": h / "capture_buffer.sqlite",
         "preview": h / "capture_last_preview.json",
+        "disabled": h / "capture_disabled",  # owner sticky OFF 정책 마커(있으면 init 재실행도 안 켬)
     }
 
 
@@ -108,13 +109,24 @@ def hook_registered(settings_path, marker=HOOK_MARKER):
     return False
 
 
-def init_profile(home, cwd, hook_command=None, settings_path=None, global_scope=False):
-    """capture profile 생성: 플래그 ON + scope(현재 cwd 또는 global) + (선택) settings hook 등록."""
+def init_profile(home, cwd, hook_command=None, settings_path=None, global_scope=False, force_enable=False):
+    """capture profile 생성: 플래그 ON + scope(현재 cwd 또는 global) + (선택) settings hook 등록.
+
+    owner sticky OFF: `capture_disabled` 마커가 있으면 init 재실행이 정책(자동수집 영구 OFF)을
+    깨지 않는다(enabled 미생성·OFF 유지). 신규 유저(마커 없음)는 기본 ON 그대로.
+    force_enable=True(또는 `capture enable`)면 마커를 지우고 ON 으로 강제 전환한다.
+    반환 dict 의 'enabled' = 이번 init 으로 capture 가 켜졌는지."""
     p = profile_paths(home)
     p["home"].mkdir(parents=True, exist_ok=True)
-    p["enabled"].write_text("1", encoding="utf-8")
-    if p["paused"].exists():
-        p["paused"].unlink()  # init = 활성 상태
+    if force_enable and p["disabled"].exists():
+        p["disabled"].unlink()  # 명시 강제 ON → sticky OFF 해제
+    if p["disabled"].exists():
+        capture_on = False  # owner 가 끈 상태 — init 이 정책을 깨지 않음
+    else:
+        p["enabled"].write_text("1", encoding="utf-8")
+        if p["paused"].exists():
+            p["paused"].unlink()  # init = 활성 상태
+        capture_on = True
     if global_scope:
         scope = {"global": True, "allowed_cwd_prefixes": [], "denied_cwd_substrings": []}
     else:
@@ -123,7 +135,28 @@ def init_profile(home, cwd, hook_command=None, settings_path=None, global_scope=
                  "denied_cwd_substrings": []}
     p["scope"].write_text(json.dumps(scope, ensure_ascii=False, indent=2), encoding="utf-8")
     added = register_hook(settings_path, hook_command) if (settings_path and hook_command) else []
-    return {"scope": scope, "hook_events": added, "global": global_scope}
+    return {"scope": scope, "hook_events": added, "global": global_scope, "enabled": capture_on}
+
+
+def disable_capture(home):
+    """owner sticky OFF: enabled 플래그 제거 + capture_disabled 마커 생성.
+    pause(일시정지)와 달리 init 재실행에도 OFF 가 유지된다(정책 영구 OFF)."""
+    p = profile_paths(home)
+    p["home"].mkdir(parents=True, exist_ok=True)
+    if p["enabled"].exists():
+        p["enabled"].unlink()
+    p["disabled"].write_text("1", encoding="utf-8")
+
+
+def enable_capture(home):
+    """sticky OFF 해제 + enabled ON. owner 가 명시적으로 다시 켤 때만."""
+    p = profile_paths(home)
+    p["home"].mkdir(parents=True, exist_ok=True)
+    if p["disabled"].exists():
+        p["disabled"].unlink()
+    if p["paused"].exists():
+        p["paused"].unlink()
+    p["enabled"].write_text("1", encoding="utf-8")
 
 
 def pause(home):
@@ -140,7 +173,7 @@ def uninstall(home, settings_path=None, marker=HOOK_MARKER):
     """완전 rollback: profile 파일 전부 삭제 + settings hook 제거. ledger.sqlite 는 미접촉."""
     p = profile_paths(home)
     removed = []
-    for k in ("enabled", "paused", "scope", "buffer", "preview"):
+    for k in ("enabled", "paused", "scope", "buffer", "preview", "disabled"):
         if p[k].exists():
             p[k].unlink()
             removed.append(k)
@@ -154,6 +187,7 @@ def status(home, cwd, settings_path=None):
     return {
         "enabled": sc.enabled(),
         "paused": sc.paused(),
+        "disabled": profile_paths(home)["disabled"].exists(),  # owner sticky OFF 정책 마커
         "global": sc._scope()["global"],
         "in_current_scope": sc.in_scope(cwd),
         "buffer_count": buf.size,
@@ -251,6 +285,25 @@ def _selftest():
 
         # T9 ledger.sqlite 미접촉(애초에 생성 0)
         check(not (home / "ledger.sqlite").exists(), "T9 ledger.sqlite 미생성(write 0)")
+
+        # T10 owner sticky OFF — disable 후 재init 해도 OFF 유지(정책 영구 OFF 보존)
+        init_profile(home, cwd, hook_command=cmd, settings_path=settings)
+        check(status(home, cwd, settings)["enabled"], "T10a 재설치 init → ON")
+        disable_capture(home)
+        st_d = status(home, cwd, settings)
+        check(not st_d["enabled"] and st_d["disabled"], "T10b capture disable → OFF · sticky 마커 생성")
+        r_re = init_profile(home, cwd, hook_command=cmd, settings_path=settings)
+        check(not status(home, cwd, settings)["enabled"] and not r_re["enabled"],
+              "T10c sticky OFF 중 재init → OFF 유지(init 이 정책을 안 깸)")
+
+        # T11 명시 enable / --force-capture → sticky 해제 후 ON
+        enable_capture(home)
+        st_e = status(home, cwd, settings)
+        check(st_e["enabled"] and not st_e["disabled"], "T11a capture enable → ON · 마커 제거")
+        disable_capture(home)
+        r_f = init_profile(home, cwd, hook_command=cmd, settings_path=settings, force_enable=True)
+        check(status(home, cwd, settings)["enabled"] and r_f["enabled"],
+              "T11b init --force-capture → sticky 해제 ON")
 
         print(f"\nGATE={'GO' if ok else 'NO-GO'}")
         return 0 if ok else 1

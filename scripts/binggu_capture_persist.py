@@ -46,12 +46,16 @@ class CaptureScope:
         self.home = binggu_home(home)
         self.flag = self.home / "capture_enabled"
         self.paused_flag = self.home / "capture_paused"
+        self.disabled_flag = self.home / "capture_disabled"  # owner sticky OFF 정책(영구 OFF)
         self.scope_file = self.home / "capture_scope.json"
         self.sem_preview_flag = self.home / "semantic_preview_enabled"  # opt-in 기본 OFF
         self.rationale_preview_flag = self.home / "rationale_preview_enabled"  # 2층 opt-in 기본 OFF
 
     def enabled(self):
-        """기본 OFF: capture_enabled 플래그 존재 AND capture_paused 없음."""
+        """기본 OFF: capture_enabled 플래그 존재 AND capture_paused 없음 AND sticky OFF 마커 없음.
+        owner sticky OFF(capture_disabled)는 enabled 플래그 존재보다 우선(정책 영구 OFF)."""
+        if self.disabled_flag.exists():
+            return False
         return self.flag.exists() and not self.paused_flag.exists()
 
     def paused(self):
