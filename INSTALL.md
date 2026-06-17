@@ -2,7 +2,9 @@
 
 > `scripts/`·`docs/`의 `openbinggu_`/`OPENBINGGU_` 접두사는 레거시 내부 코드네임입니다(BingguPack과 동일 프로젝트).
 
-> **무엇인가** — local-first · evidence-backed context packs · candidate capture/preview · human-confirmed SAVE gate · ontology graph validation. **자동 ledger/confirmed write 없음** — 저장은 preview → `SAVE n`(정확한 confirm) 게이트로만 진행됩니다.
+> **무엇인가** — **빈 뼈대 프레임워크**. 내 노드·관계·그래프를 내가 채웁니다(빙구팩에 owner 데이터·정답 그래프 0). local-first · evidence-backed context packs · candidate capture/preview · human-confirmed SAVE gate · ontology graph validation. **자동 ledger/confirmed write 없음** — 저장은 preview → `SAVE n`(정확한 confirm) 게이트로만 진행됩니다.
+>
+> **3층 구조** — 🔒 안전벨트(코드 고정·전 사용자 공통: AI는 추천만·확정은 사람·직감 보존·자동 가치관 판정 0) / ⚙️ 설정값(각자 조정: `challenge_threshold` 기본 3·랭킹 가중치·외부 소스, `<binggu_home>/binggu_config.json`) / 👤 가치관(각자 user_ontology를 꽂는 자리). 자세히는 `README.md`.
 >
 > **Latest release = v1.9.0 — 확정한 판단이 폰·웹까지 자동으로 흐름 + 새 사람도 한 방 셋업.**
 > - `binggu init` → 장부 생성 + 자동 후보 수집(기본 ON) + **환경 점검표**(무엇이 켜지고 무엇을 더 깔면 되는지 안내, 자동 설치는 안 함).
@@ -69,6 +71,16 @@ python hooks/binggu_capture_hook.py --selftest   # 8/8  (UserPromptSubmit/Stop �
 python binggu.py --selftest                      # 26/26 (장부 + capture + hosted 통합)
 ```
 > **자동 저장이 아니라 자동 후보 수집입니다.** `binggu init`이 만든 profile 안에서만 동작 — clone 직후엔 수집 0. **AGI memory(`--agi-memory`/`--global`)는 작업 전역**이 기본 경험, privacy(`init`)는 현재 위치만. 어느 scope든 시크릿/PII 발화는 자동 후보 제외 + 시크릿 디렉토리 deny. ledger/active/confirmed write 0. 저장은 preview → `SAVE n` 게이트만. scope·hook·롤백 상세: `docs/BINGGUPACK_CAPTURE_HOOK_SETUP.md`.
+
+## 기존 기록·외부 수확·철학 필터 selftest / P0·P1 검증 (dry-run·temp·후보만)
+```bash
+python scripts/watcher_incoming_folder_adapter.py --selftest   # GATE=GO (P0 기존 기록 폴더→후보, dry-run·마크다운 구조보존·PII STOP)
+python scripts/binggu_harvest.py --selftest                    # 30/30 GATE=GO (P1 외부 수확 3중 게이트, mock fetch·temp)
+python scripts/openbinggu_a0_node_dryrun.py --selftest         # GATE=GO (철학 필터 keep/challenge/discard — AI 추천만)
+python scripts/binggu_p1_ranking.py --selftest                 # 20/20 GATE=GO (P1 랭킹 3축 가중합)
+python scripts/binggu_p1_config.py                             # GATE=GO (3층: 안전벨트·설정값·가치관 로더)
+```
+> **셋 다 후보까지만**(영구는 사람 `SAVE n`). **P0 incoming은 dry-run 전용** — 산출은 temp에만, 운영 장부(`~/.binggupack`)는 read-only stat만(write 0), node→node edge 미생성. **외부 수확은 owner가 소스를 등록**(`harvest_sources.json` 기본 빈 `[]`·deny-by-default)하고 **스케줄러를 등록**(`register_harvest.ps1`)해야 동작하며, 실 네트워크 fetch는 owner 스케줄러 프로세스에서만(Claude tool_use 아님). 긴급 스위치 `~/.binggupack/harvest_disabled`. **철학 필터는 추천만**(`confirmed=False`)이고 확정은 actor=human뿐, 직감 메모는 검열·자동폐기 0. 랭킹의 폰·웹 use_count 집계는 worker write 필요로 deferred.
 
 ## Reviewer/confirmed preview selftest / 리뷰·확정 preview 검증 (preview only)
 ```bash

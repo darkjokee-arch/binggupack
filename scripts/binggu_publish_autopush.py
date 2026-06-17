@@ -96,8 +96,12 @@ def active_checksum(ledger_path=None):
     h = hashlib.sha256()
     # node_id 기준 정렬 → 결정적. 각 행 canonical json.
     # r[6]=semantic_subtype(보조 메타) 포함 → backfill/subtype 변경도 KV 전송 트리거(필드만 바뀐 변화 감지).
+    # r[7]=created_at(P1 신선도) 포함 → created_at backfill 도 KV 전송 트리거(폰/웹 신선도 반영).
+    #   r[8]=use_count(P1 유용성)는 **제외** — 로컬 회상 빈도라 매 회상마다 KV 전송 트리거 안 함(폰/웹 표시용 deferred).
     for r in sorted(rows, key=lambda x: str(x[0])):
-        h.update(json.dumps([r[0], r[1], r[2], r[5], r[6] if len(r) > 6 else None],
+        h.update(json.dumps([r[0], r[1], r[2], r[5],
+                             r[6] if len(r) > 6 else None,
+                             r[7] if len(r) > 7 else None],
                             ensure_ascii=False, sort_keys=True).encode("utf-8"))
     # edge 변화도 전송 트리거(사람 도장→운영 등재 시 자동 KV 반영). "E" prefix 로 node 와 분리.
     for e in sorted(edge_rows, key=lambda x: str(x[0])):

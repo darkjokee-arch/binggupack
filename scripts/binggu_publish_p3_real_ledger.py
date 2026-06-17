@@ -30,15 +30,20 @@ def extract_real_ledger(ledger_path):
     """ledger read-only. active(non-candidate) node = SAVE 확정분만. candidate(미SAVE)는 실데이터 취급 금지."""
     conn = sqlite3.connect("file:%s?mode=ro" % ledger_path, uri=True)
     cur = conn.cursor()
-    # 보조 필드 semantic_subtype — 마이그레이션 전 구 ledger(ro라 ALTER 불가) 대비 방어.
-    # 항상 7컬럼(...,semantic_subtype)으로 정규화: 컬럼 부재 시 None 패딩(r[6] 일관).
+    # 보조 필드 정규화 — 마이그레이션 전 구 ledger(ro라 ALTER 불가) 대비 방어.
+    # 항상 9컬럼(...,semantic_subtype,created_at,use_count)으로 정규화: 컬럼 부재 시 패딩.
+    #   r[6]=semantic_subtype(보조 메타) / r[7]=created_at(P1 신선도) / r[8]=use_count(P1 유용성).
+    #   기존 사슬의 r[6] 약속 불변 — created_at/use_count 는 그 뒤에 append.
     ncols = [c[1] for c in cur.execute("PRAGMA table_info(nodes)")]
-    if "semantic_subtype" in ncols:
-        cur.execute("SELECT node_id,node_type,sentence,candidate,state,content_hash,semantic_subtype FROM nodes")
-        nrows = cur.fetchall()
-    else:
-        cur.execute("SELECT node_id,node_type,sentence,candidate,state,content_hash FROM nodes")
-        nrows = [r + (None,) for r in cur.fetchall()]
+    has_sub = "semantic_subtype" in ncols
+    has_created = "created_at" in ncols
+    has_use = "use_count" in ncols
+    sel = ["node_id", "node_type", "sentence", "candidate", "state", "content_hash",
+           "semantic_subtype" if has_sub else "NULL AS semantic_subtype",
+           "created_at" if has_created else "NULL AS created_at",
+           "use_count" if has_use else "0 AS use_count"]
+    cur.execute("SELECT " + ",".join(sel) + " FROM nodes")
+    nrows = cur.fetchall()
     cur.execute("SELECT evidence_id,sentence,source_pointer_id,source_hash FROM evidence")
     erows = cur.fetchall()
     # edges (구버전 ledger 에 테이블 부재 가능 — 방어)

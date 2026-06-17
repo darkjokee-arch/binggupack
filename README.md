@@ -1,8 +1,12 @@
 # BingguPack
 
-**Local-first AGI memory layer for human-confirmed AI context capture.**
+**Local-first AGI memory layer — 빈 뼈대 프레임워크. 네가 채운다.**
 
-AI와의 대화에서 건질 판단·상태·개념을 후보로 **자동 수집**하고, 사람이 직접 confirm 문구를 타이핑해야만 저장되는 **로컬 우선(local-first)** 지식장부입니다. 자동 수집은 켜지지만, **자동 저장은 없습니다.** 내가 확정한 것만 폰·웹에서 읽기 사본으로 자동으로 흐릅니다.
+BingguPack은 **빈 뼈대(empty skeleton) 프레임워크**입니다. 내 노드·관계·그래프를 **내가 채웁니다.** 빙구팩 코드에는 owner의 데이터도, 정답 그래프도 들어있지 않습니다 — 어떤 사용자가 깔아도 똑같이 빈 장부에서 시작해, 자기 기록과 자기 가치관으로 채워 나갑니다.
+
+AI와의 대화·내 기록에서 건질 판단·상태·개념을 **후보로 자동 수집**하고, 사람이 직접 confirm 문구를 타이핑해야만 저장되는 **로컬 우선(local-first)** 지식장부입니다. 자동 수집은 후보까지만 — **자동 저장은 없습니다.** 영구화는 사람 `SAVE n` 뿐이고, 내가 확정한 것만 폰·웹에서 읽기 사본으로 자동으로 흐릅니다.
+
+> **빈 장부엔 채울 게 없다** — 그래서 빙구팩은 ① 내 기존 기록(박제·메모·md)을 읽어 후보로 채우고 ② 사람이 등록한 외부 소스를 후보로 수확하고 ③ AI가 keep/challenge/discard를 **추천만** 하고, 확정은 늘 사람이 합니다. 자세히는 [기존 기록·외부 수확·철학 필터](#기존-기록--외부-수확--철학-필터-p0p1) 참조.
 
 - **Latest release: v1.9.0** — <https://github.com/darkjokee-arch/binggupack/releases/tag/v1.9.0>
 - **v1.9.0 핵심 — 내가 확정한 판단이 폰·웹까지 "물 흐르듯" 자동으로 갑니다.**
@@ -67,9 +71,32 @@ AI와 대화하다 보면 정작 남기고 싶은 것들 — **내 판단, 배�
 
 ---
 
+## 3층 구조 — 무엇이 고정이고 무엇을 내가 채우나
+
+빙구팩은 세 층으로 나뉩니다. **고정(전 사용자 공통)** 과 **내가 채우는 것**을 헷갈리지 않게:
+
+- **🔒 안전벨트 (코드 고정 · 전 사용자 공통 · 못 바꿈)** — AI는 추천만, **확정은 사람(actor=human)**. 근거 없는 직감 메모도 검열·자동폐기 0(보존). AI 자동 가치관 판정 0. 가치관을 코드에 동결하지 않음. 이 네 가지는 설정·가치관 어떤 값으로도 못 바꿉니다(`binggu_p1_config.SAFETY_BELT`, selftest로 강제).
+- **⚙️ 설정값 (기본값 제공 · 각자 조정)** — `<binggu_home>/binggu_config.json`. `challenge_threshold`(철학 재검토 신호 임계, 기본 **3**) · 랭킹 가중치(`freshness`/`relevance`/`utility`, 기본 각 1.0) · 외부 소스 목록(기본 빈 `[]`). 없으면 기본값으로 동작.
+- **👤 가치관 (각자 user_ontology를 꽂는 자리)** — 빙구팩은 가치관 파일을 **읽는 자리**만 제공합니다. 내용은 각 사용자 것. `binggu_config.json`의 `ontology_path` 또는 `<binggu_home>/user_ontology.{yaml,md,txt}`. 없어도 graceful(예외 0), 빙구팩이 그 내용을 자동 판정하지 않습니다.
+
+---
+
+## 기존 기록 · 외부 수확 · 철학 필터 (P0/P1)
+
+빈 그래프엔 채울 게 없습니다. 그래서 채우는 세 갈래 — 셋 다 **후보까지만**(영구는 사람 `SAVE n`):
+
+- **P0 · 내 기존 기록 → 후보 자동 채움** (`scripts/watcher_incoming_folder_adapter.py`) — 내 기록 폴더(박제·메모·`.md`/`.txt`)를 읽어 노드·근거 후보로 정규화합니다. 표·코드블록·리스트·인용 같은 **마크다운 구조를 보존**하며(빈 줄로만 단락 분리), 각 블록에 원본 파일+라인을 붙여 역추적 가능. 시크릿/PII는 마스킹하고, 잔존이 발견되면 **전체 STOP**(후보 미생성). 현재는 **dry-run 전용** — 산출은 temp에만 쓰고, 운영 장부(`~/.binggupack`)는 read-only로 stat만 합니다(write 0). node→node 강한관계(edge)는 만들지 않습니다.
+- **P1 · 외부 수확** (`scripts/binggu_harvest.py`) — **사람이 등록한 소스만** 가져옵니다. `harvest_sources.json` 화이트리스트는 **기본 빈 `[]`**(빙구팩에 owner 소스 하드코딩 0)이라, 내가 직접 `add_source`로 등록하기 전엔 아무것도 fetch하지 않습니다(deny-by-default). 3중 게이트: ① 사람 등록 소스만 fetch(로컬 경로·내부 IP·localhost는 거부) ② 긁은 건 후보로만(candidate, 영구화 0) ③ 영구는 사람 `SAVE n`. 표준 `urllib`만 사용(추가 의존성 0). **실 네트워크 fetch는 owner 본인의 작업 스케줄러 프로세스에서만** 일어납니다(`register_harvest.ps1`로 등록). 긴급 스위치: `~/.binggupack/harvest_disabled`.
+- **P1 · 철학 필터** (`scripts/openbinggu_a0_node_dryrun.py`의 `recommend_open_classification`) — 후보를 **keep / challenge / discard**로 분류하되 **AI는 추천만**(`confirmed=False`), 확정은 사람(actor=human)뿐입니다. owner 직감은 검열·자동폐기 0(보존)이라 에코챔버를 막습니다. `challenge`(근거는 있으나 재검토 대상)는 신규 카운터 없이 **기존 `judgment_reviews` 테이블을 재사용**해 누적을 집계합니다.
+- **P1 · 랭킹** (`scripts/binggu_p1_ranking.py`) — 후보 우선순위 = 신선도(반감기 90일 감쇠) + 관련성 + 유용성(use_count log 포화)의 가중합. 가중치는 ⚙️ 설정값입니다. 빌드 단계엔 query가 없어 **관련성은 중립(0.0)**, 실제 관련성은 worker 회상 시점에 더합니다.
+
+> **미완·owner 행위 필요 (정직하게)**: P0 incoming은 현재 **dry-run**(temp 산출만, 운영 장부 자동 적재 아님). 외부 수확은 **owner가 소스를 등록하고 스케줄러를 등록**해야 실제로 동작하며, 빈 화이트리스트에선 fetch 0. 실 네트워크 fetch는 owner 스케줄러에서만. 랭킹의 폰·웹 회상 빈도(use_count) 집계는 worker write가 필요해 **deferred**입니다.
+
+---
+
 ## 핵심 개념 (5)
 
-1. **자동 후보 수집** — `binggu init --agi-memory`를 하면 어느 작업에서든 남길 만한 문장을 **후보로 자동 수집**합니다(비밀번호·개인정보 발화는 자동 제외). 현재 폴더만 원하면 `binggu init`. 설치 직후(init 전)엔 수집하지 않습니다.
+1. **자동 후보 수집** — `binggu init --agi-memory`를 하면 어느 작업에서든 남길 만한 문장을 **후보로 자동 수집**합니다(비밀번호·개인정보 발화는 자동 제외). 현재 폴더만 원하면 `binggu init`. 설치 직후(init 전)엔 수집하지 않습니다. capture는 Claude Code 환경의 hook으로 동작 — 없으면 수동 `binggu preview`로 대신합니다.
 2. **미리보기** — "빙구팩 저장해" 또는 `binggu capture preview`로 모인 후보를 확인합니다. 저장은 0.
 3. **사람 승인 저장(도장)** — 키보드로 직접 친 `SAVE n`만 저장됩니다. 고른 문장은 뜻으로 **5종(문서·증거·개념·상태·판단)** 도장이 찍힙니다. 자동·번호 없는 저장은 전부 막힙니다.
 4. **증거 기반 그래프** — 저장한 문장을 종류(5종)로 묶고 서로 관계로 잇되, **모든 연결에는 원문 근거가 붙습니다**(근거 없는 연결은 만들지 않음).
@@ -311,6 +338,11 @@ python scripts/binggu_save_gate.py --selftest         # 23/23   (사람-발화 �
 python scripts/binggu_publish_autopush.py --selftest  # 17/17   (SAVE→자동 KV 이중게이트)
 python scripts/binggu_setup_cloud.py --selftest       # 38/38   (cloud 셋업 한 방)
 py scripts/binggu_publish_run_all_selftests.py        # 13/13   (publish P1~P8 회귀 묶음)
+python scripts/watcher_incoming_folder_adapter.py --selftest   # GATE=GO (P0 기존 기록→후보, dry-run·PII STOP)
+python scripts/binggu_harvest.py --selftest           # GATE=GO (P1 외부 수확 3중 게이트, mock·temp)
+python scripts/binggu_p1_config.py                    # GATE=GO (3층: 안전벨트·설정값·가치관 로더)
+python scripts/openbinggu_a0_node_dryrun.py --selftest # GATE=GO (철학 필터 keep/challenge/discard 추천)
+python scripts/binggu_p1_ranking.py --selftest        # 20/20   (P1 랭킹 3축 가중합)
 python scripts/openbinggu_public_tree_scan.py --tree .   # CLEAN
 ```
 

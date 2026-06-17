@@ -20,6 +20,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import binggu_publish_p3_real_ledger as P3
+import binggu_p1_ranking as RANK
 
 FORMAT_VERSION = "opencrab-pack-v1"
 DEFAULT_PACK_ID = "real/owner_judgments"
@@ -37,9 +38,16 @@ def _h8(node_id):
     return m.group(1) if m else None
 
 
-def build_packs(ledger_path=P3.DEFAULT_LEDGER, pack_id=DEFAULT_PACK_ID, title=DEFAULT_TITLE):
-    """active 노드 → worker packs 구조(dict). status BLOCK/OK. data/ write 0."""
+def build_packs(ledger_path=P3.DEFAULT_LEDGER, pack_id=DEFAULT_PACK_ID, title=DEFAULT_TITLE,
+                home=None):
+    """active 노드 → worker packs 구조(dict). status BLOCK/OK. data/ write 0.
+
+    P1 ② 랭킹: created_at(신선도)+use_count(유용성)로 rank_score pre-compute(설정 가중치) →
+    properties.rank_score 에 박고 노드를 점수 내림차순 정렬 → worker 는 sort 만(read-only).
+    relevance(관련성)는 query 가 있을 때 worker evidence_search 가 회상 시점에 가산.
+    """
     ext = P3.extract_real_ledger(ledger_path)
+    weights = None  # node_rank_score 가 설정값(ranking_weights) 로드 — home 전달
     stats = {k: ext[k] for k in ("total_nodes", "candidate_nodes", "active_nodes", "evidence_count")}
     if ext["active_nodes"] == 0:
         return {"status": "BLOCK", "reason": "NO_REAL_LEDGER_DATA", "stats": stats}
@@ -51,16 +59,22 @@ def build_packs(ledger_path=P3.DEFAULT_LEDGER, pack_id=DEFAULT_PACK_ID, title=DE
     for r in ext["active_rows"]:
         node_id, node_type, sentence = r[0], r[1], r[2]
         semantic_subtype = r[6] if len(r) > 6 else None  # 보조 메타(canonical 도장 아님)
+        created_at = r[7] if len(r) > 7 else None         # P1 신선도 축
+        use_count = r[8] if len(r) > 8 else 0             # P1 유용성 축(로컬 회상 빈도)
         h8 = _h8(node_id)
         ev_id = ("EVC-CONV-" + h8) if h8 else None
         if not ev_id or ev_id not in ev_sent:
             skipped.append({"node_id": node_id, "reason": "evidence 미연결"})
             continue  # evidence 없는 노드는 load_packs fail → 제외
+        # P1 ② rank_score pre-compute(설정 가중치). relevance=0(빌드 시 중립) — worker 가 query 시 가산.
+        rank_score = RANK.node_rank_score(created_at, use_count, weights=weights, home=home)
         nodes.append({
             "id": node_id,
             "promotion_allowed": False,
             "properties": {"candidate": True, "label_kind": node_type, "sentence": sentence,
-                           "semantic_subtype": semantic_subtype},
+                           "semantic_subtype": semantic_subtype,
+                           "created_at": created_at, "use_count": int(use_count or 0),
+                           "rank_score": round(rank_score, 6)},
             "evidence_refs": [ev_id],
         })
         if ev_id not in seen_ev:
@@ -71,6 +85,9 @@ def build_packs(ledger_path=P3.DEFAULT_LEDGER, pack_id=DEFAULT_PACK_ID, title=DE
     if not nodes:
         return {"status": "BLOCK", "reason": "NO_LINKED_ACTIVE_NODES",
                 "stats": stats, "skipped": skipped}
+
+    # P1 ② 정렬: rank_score 내림차순(동점은 node_id 사전순 — 결정적). worker 는 이 순서를 보존.
+    nodes.sort(key=lambda n: (-n["properties"]["rank_score"], n["id"]))
 
     # active edge → pack edge. src·tgt 둘 다 pack 노드에 있을 때만(dangling 제외).
     # pack edge 도 hosted candidate 규약(candidate=True·promotion_allowed=False·evidence_refs 필수).
@@ -188,18 +205,22 @@ def _selftest():
     lp = os.path.join(work, "ledger.sqlite")
     conn = sqlite3.connect(lp)
     conn.executescript("""
-        CREATE TABLE nodes(node_id TEXT, node_type TEXT, sentence TEXT, candidate INT, state TEXT, content_hash TEXT, semantic_subtype TEXT);
+        CREATE TABLE nodes(node_id TEXT, node_type TEXT, sentence TEXT, candidate INT, state TEXT, content_hash TEXT, semantic_subtype TEXT, created_at TEXT, use_count INTEGER DEFAULT 0);
         CREATE TABLE evidence(evidence_id TEXT, sentence TEXT, source_pointer_id TEXT, source_hash TEXT);
         CREATE TABLE edges(edge_id TEXT, relation TEXT, source TEXT, target TEXT, candidate INT, state TEXT, evidence_refs TEXT);
     """)
     # 도장 5종 세분화: node_type = 저장 도장 EN 라벨(judgment/state/...) — realpack label_kind = 이 값.
     # semantic_subtype = 보조 메타(있으면 properties 전파, None 이면 None — canonical 도장과 별개 축).
-    conn.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?,?)",
-                 ("node:CONV:aaaaaaaa", "judgment", "확정 판단 가나다", 0, "active", "h1", "결정"))
-    conn.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?,?)",
-                 ("node:CONV:bbbbbbbb", "state", "확정 상태 라마바", 0, "active", "h2", None))
-    conn.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?,?)",
-                 ("node:CONV:cccccccc", "concept", "미확정 후보 사아자", 1, None, "h3", "교훈"))  # candidate
+    # created_at/use_count = P1 랭킹 축. aaaa=오래됐지만 자주 씀 / bbbb=최신이지만 안 씀.
+    conn.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?,?,?,?)",
+                 ("node:CONV:aaaaaaaa", "judgment", "확정 판단 가나다", 0, "active", "h1", "결정",
+                  "2026-01-01T00:00:00Z", 15))
+    conn.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?,?,?,?)",
+                 ("node:CONV:bbbbbbbb", "state", "확정 상태 라마바", 0, "active", "h2", None,
+                  "2026-06-17T00:00:00Z", 0))
+    conn.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?,?,?,?)",
+                 ("node:CONV:cccccccc", "concept", "미확정 후보 사아자", 1, None, "h3", "교훈",
+                  "2026-06-17T00:00:00Z", 0))  # candidate
     conn.execute("INSERT INTO evidence VALUES(?,?,?,?)",
                  ("EVC-CONV-aaaaaaaa", "확정 판단 가나다", "conv-self:aaaaaaaa", "aaaaaaaa"))
     conn.execute("INSERT INTO evidence VALUES(?,?,?,?)",
@@ -247,6 +268,32 @@ def _selftest():
     chk("T_e5 counts.edges 정합", pack["manifest"]["counts"]["edges"] == 1)
     chk("T_e6 edge 포함 load_packs 게이트 통과", validate_packs_obj(r) == [])
     chk("T9 status validated 아님", pack["manifest"]["status"] != "validated")
+
+    # ── P1 ② 랭킹(3축 pre-compute + 정렬) ──
+    props_by_id = {n["id"]: n["properties"] for n in pack["nodes"]}
+    chk("T_r1 rank_score / created_at / use_count properties 전파",
+        all("rank_score" in p and "created_at" in p and "use_count" in p for p in props_by_id.values()))
+    chk("T_r1b created_at/use_count 값 정확(aaaa=오래·자주, bbbb=최신·안씀)",
+        props_by_id["node:CONV:aaaaaaaa"]["use_count"] == 15
+        and props_by_id["node:CONV:bbbbbbbb"]["created_at"] == "2026-06-17T00:00:00Z")
+    # 기본 가중치(전부 1.0) 환경: aaaa(오래됐지만 use_count 15)가 utility 로 점수↑ → 앞 순위
+    chk("T_r2 노드가 rank_score 내림차순 정렬",
+        [n["properties"]["rank_score"] for n in pack["nodes"]]
+        == sorted([n["properties"]["rank_score"] for n in pack["nodes"]], reverse=True))
+    chk("T_r2b 자주 쓴 노드(aaaa, use_count15)가 안 쓴 노드(bbbb)보다 점수↑(기본 가중치)",
+        props_by_id["node:CONV:aaaaaaaa"]["rank_score"] > props_by_id["node:CONV:bbbbbbbb"]["rank_score"])
+    chk("T_r3 rank_score 추가 후에도 load_packs 게이트 통과(위반 0)", validate_packs_obj(r) == [])
+
+    # 가중치 설정 override: utility 가중치 0 → use_count 무시, 신선도만 → bbbb(최신)가 앞
+    import tempfile as _tf
+    cfg_home = os.path.join(_tf.mkdtemp(prefix="realpack_cfg_"), ".binggupack")
+    os.makedirs(cfg_home)
+    import binggu_p1_config as _cfg
+    _cfg.save_user_config({"ranking_weights": {"freshness": 1.0, "relevance": 0.0, "utility": 0.0}}, home=cfg_home)
+    r_w = build_packs(lp, home=cfg_home)
+    pw = r_w["packs"][0]
+    chk("T_r4 가중치 override(utility 0·freshness만) → 최신 노드(bbbb)가 1순위",
+        pw["nodes"][0]["id"] == "node:CONV:bbbbbbbb")
 
     # active 0 → BLOCK
     lp2 = os.path.join(work, "empty.sqlite")

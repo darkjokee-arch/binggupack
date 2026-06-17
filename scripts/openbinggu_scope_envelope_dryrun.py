@@ -248,19 +248,80 @@ def run_publish_guard_checks():
 # ---------- source pointer 공개 차단 판정 (판정 only · 치환/sanitizer 없음) ----------
 # 비공개/내부 형태 = dirty, 판정불가 = unknown, 그 외 안전 형태 = clean.
 # raw 경로값은 반환/출력하지 않음 (라벨·count 만).
+import ipaddress  # noqa: E402 — IP 정규화(integer/hex/octal/short-form SSRF 회피 차단)
+from urllib.parse import urlsplit  # noqa: E402
+
 _WIN_ABSPATH = re.compile(r"^[A-Za-z]:[\\/]")                       # C:\... or C:/...
 _FILE_URI = re.compile(r"^file://", re.I)
 _UNC = re.compile(r"^\\\\[^\\]+\\")                                 # \\server\share
 _UNIX_PRIVATE = re.compile(r"^(/home/|/Users/|/root/|/var/|/etc/|/mnt/|/opt/|/private/)")
-_LOCALHOST = re.compile(r"(localhost|127\.0\.0\.1|0\.0\.0\.0|::1)", re.I)
-_INTERNAL_HOST = re.compile(
-    r"(192\.168\.|10\.\d+\.|172\.(1[6-9]|2\d|3[01])\.|\.local\b|\.internal\b|\.lan\b|\.intra\b)", re.I)
+# 호스트명 형태(IP 아님) 내부 표식 — 도메인 suffix·localhost 등.
+_INTERNAL_NAME = re.compile(
+    r"(^|\.)(localhost)$|(\.local|\.internal|\.lan|\.intra|\.corp|\.home|\.localdomain)$", re.I)
+# raw 문자열 어디에든 내부 IP 옥텟이 보이면(스킴/포트 무관) 보수적 dirty — fail-closed 보조.
+_INTERNAL_OCTET = re.compile(
+    r"(127\.0\.0\.1|0\.0\.0\.0|192\.168\.|10\.\d+\.|169\.254\.|"
+    r"172\.(1[6-9]|2\d|3[01])\.)")
 _UNDECIDED_TOKENS = {"mask_undecided_token", "unknown", "n/a", "na", "?", "tbd"}
+
+
+def _ip_is_internal(ip):
+    """ipaddress 객체가 비공개/루프백/링크로컬/예약/멀티캐스트/미지정이면 True(공개 아님)."""
+    return (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
+            or ip.is_multicast or ip.is_unspecified or
+            (ip.version == 4 and ip.is_global is False))
+
+
+def _host_is_internal(host):
+    """host 문자열(IP 표기 정규화 포함) 이 내부/비공개면 True. SSRF 우회(integer/hex/octal/short) 차단.
+
+    파싱 불가/판정 애매(호스트명) 면 False 반환(이름 표식은 _INTERNAL_NAME 이 별도 판정).
+    """
+    if not host:
+        return False
+    h = host.strip().strip("[]").lower()  # IPv6 대괄호 제거
+    if not h:
+        return False
+    # 1) 표준/축약 IPv4·IPv6 직접 파싱
+    try:
+        return _ip_is_internal(ipaddress.ip_address(h))
+    except ValueError:
+        pass
+    # 2) integer / hex / octal / dotted 부분표기(127.1, 0x7f.1, 010.0.0.1, 0177.0.0.1 …) → 32bit int.
+    def _octet(p):
+        pl = p.lower()
+        if pl.startswith("0x"):
+            return int(pl, 16)
+        if pl.startswith("0o"):
+            return int(pl, 8)
+        if pl.startswith("0") and len(pl) > 1:   # 선행 0 = 8진(0177 등) — Python3 int(.,0) 거부 우회
+            return int(pl, 8)
+        return int(pl, 10)
+    try:
+        parts = h.split(".")
+        if 1 <= len(parts) <= 4 and all(p != "" for p in parts):
+            vals = [_octet(p) for p in parts]  # 0x.. /0o.. /0NN(8진) /10진 자동 인식
+            # dotted short form 규칙: 마지막 파트가 나머지 비트를 차지 (예: 127.1 → 127.0.0.1)
+            n = len(vals)
+            if n == 1:
+                num = vals[0]
+            elif n == 2:
+                num = (vals[0] << 24) | vals[1]
+            elif n == 3:
+                num = (vals[0] << 24) | (vals[1] << 16) | vals[2]
+            else:
+                num = (vals[0] << 24) | (vals[1] << 16) | (vals[2] << 8) | vals[3]
+            if 0 <= num <= 0xFFFFFFFF:
+                return _ip_is_internal(ipaddress.ip_address(num))
+    except (ValueError, TypeError):
+        pass
+    return False
 
 
 def classify_source_pointer(value):
     """source pointer 1건 → 'clean' | 'dirty' | 'unknown'. raw 값 미반환(판정만, 치환 없음).
     dirty = Windows 절대경로 / file:// / UNC / 비공개 unix path / localhost / 내부 URL·IP.
+            (IP 는 integer/hex/octal/short-form/IPv6 까지 정규화해 내부대역 차단 — SSRF 우회 봉쇄.)
     unknown = None·빈값·판정불가 토큰.
     clean = 그 외(synthetic 식별자·hash_reference·상대경로·외부 공개 URL)."""
     if value is None:
@@ -268,8 +329,20 @@ def classify_source_pointer(value):
     s = str(value).strip()
     if not s or s.lower() in _UNDECIDED_TOKENS:
         return "unknown"
-    if (_WIN_ABSPATH.match(s) or _FILE_URI.match(s) or _UNC.match(s) or _UNIX_PRIVATE.match(s)
-            or _LOCALHOST.search(s) or _INTERNAL_HOST.search(s)):
+    if (_WIN_ABSPATH.match(s) or _FILE_URI.match(s) or _UNC.match(s) or _UNIX_PRIVATE.match(s)):
+        return "dirty"
+    # URL 형태면 host 만 추려 IP 정규화 판정(스킴 무관). 파싱 실패 시 원문 보조검사로 폴백.
+    host = None
+    try:
+        sp = urlsplit(s if "://" in s else "//" + s, scheme="")
+        host = sp.hostname  # 포트/인증정보 제거된 순수 호스트(IPv6 대괄호도 제거됨)
+    except ValueError:
+        host = None
+    if host is not None:
+        if _host_is_internal(host) or _INTERNAL_NAME.search(host):
+            return "dirty"
+    # 보조 fail-closed — URL 파싱이 host 를 못 뽑았어도 raw 에 내부 옥텟/이름 표식이 보이면 dirty.
+    if _INTERNAL_OCTET.search(s) or _INTERNAL_NAME.search(s):
         return "dirty"
     return "clean"
 

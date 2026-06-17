@@ -39,7 +39,8 @@ class StagingDB:
     SCHEMA = """
     CREATE TABLE IF NOT EXISTS nodes(node_id TEXT PRIMARY KEY, node_type TEXT, sentence TEXT,
         candidate INTEGER DEFAULT 1, promotion_allowed INTEGER DEFAULT 0, state TEXT DEFAULT 'active',
-        supersedes TEXT, pack_id TEXT, content_hash TEXT, created_at TEXT, semantic_subtype TEXT);
+        supersedes TEXT, pack_id TEXT, content_hash TEXT, created_at TEXT, semantic_subtype TEXT,
+        use_count INTEGER DEFAULT 0);
     CREATE TABLE IF NOT EXISTS edges(edge_id TEXT PRIMARY KEY, relation TEXT, source TEXT, target TEXT,
         candidate INTEGER DEFAULT 1, state TEXT DEFAULT 'active', evidence_refs TEXT,
         pack_id TEXT, content_hash TEXT, created_at TEXT);
@@ -71,6 +72,11 @@ class StagingDB:
         ncols = [c[1] for c in self.con.execute("PRAGMA table_info(nodes)")]
         if "semantic_subtype" not in ncols:
             self.con.execute("ALTER TABLE nodes ADD COLUMN semantic_subtype TEXT")
+        # P1 랭킹 유용성 축 — use_count(노드 회상 빈도). 없으면 추가(기존 ledger 비파괴·기존 행 0).
+        #   created_at(신선도 축)은 이미 base SCHEMA 컬럼이라 신규 ALTER 불필요(INSERT 시 채워짐).
+        #   use_count 는 로컬 회상 카운터(폰/웹 집계는 worker write 필요 = deferred). DEFAULT 0.
+        if "use_count" not in ncols:
+            self.con.execute("ALTER TABLE nodes ADD COLUMN use_count INTEGER DEFAULT 0")
         self.con.commit()
 
     def snapshot(self, snap_dir, name):
@@ -331,6 +337,24 @@ def run():
     os.remove(db.path + ".lock")
     r14 = staging_apply(db, base_pack(pack_id="p14", content="c14"), {"actor":"human"}, snap_dir)
     rec(14,"이중 실행 lock 감지(명시 에러)→해제 후 정상", locked_err and r14["applied"]); db.close()
+    # 15. created_at 기록 + use_count 기본 0 (P1 랭킹 신선도/유용성 축)
+    db = StagingDB(os.path.join(tmp,"s15.sqlite"))
+    staging_apply(db, base_pack(pack_id="p15", content="c15"), {"actor":"human"}, snap_dir, ts="2026-06-17T00:00:00Z")
+    row = db.con.execute("SELECT created_at, use_count FROM nodes WHERE node_id='n1'").fetchone()
+    rec(15,"INSERT 시 created_at 기록 + use_count 기본 0", row==("2026-06-17T00:00:00Z", 0)); db.close()
+    # 16. use_count ALTER 비파괴 — 구 ledger(use_count 컬럼 없음)에 기존 행 보존 + 컬럼 추가
+    legacy = os.path.join(tmp,"legacy16.sqlite")
+    lc = sqlite3.connect(legacy)
+    lc.executescript("CREATE TABLE nodes(node_id TEXT PRIMARY KEY, node_type TEXT, sentence TEXT,"
+                     " candidate INTEGER DEFAULT 1, promotion_allowed INTEGER DEFAULT 0, state TEXT,"
+                     " supersedes TEXT, pack_id TEXT, content_hash TEXT, created_at TEXT, semantic_subtype TEXT);")
+    lc.execute("INSERT INTO nodes(node_id,node_type,sentence,candidate,state) VALUES('old1','judgment','옛 노드',0,'active')")
+    lc.commit(); lc.close()
+    db = StagingDB(legacy)  # __init__ 마이그레이션이 use_count 추가해야
+    cols16 = [c[1] for c in db.con.execute("PRAGMA table_info(nodes)")]
+    old_row = db.con.execute("SELECT sentence, use_count FROM nodes WHERE node_id='old1'").fetchone()
+    rec(16,"use_count ALTER 비파괴(기존 행 보존·신규 컬럼 0/NULL)",
+        "use_count" in cols16 and old_row[0]=="옛 노드" and old_row[1] in (0, None)); db.close()
 
     after_mtime = {p:(os.path.getmtime(p) if os.path.exists(p) else None) for p in OPERATING_PATHS}
     store_unchanged = before_mtime == after_mtime

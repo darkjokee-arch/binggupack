@@ -52,11 +52,23 @@ _NL = r"(?<![0-9])"   # 좌 숫자 경계
 _NR = r"(?![0-9])"    # 우 숫자 경계
 
 # 명확한 PII shape (무하이픈/공백/점/+82 변형 포함). 형태가 명확하므로 도메인 문맥과 무관하게 마스킹.
+# 이메일 TLD: ASCII(2+) | punycode(xn--..) | 한글 TLD(.한국 등). 신용카드/AKIA/vendor 토큰은 secret 계열.
+_EMAIL_TLD = r"(?:[A-Za-z]{2,}|xn--[A-Za-z0-9-]+|[가-힣]{2,})"
 PII_SHAPES = [
     ("rrn",            re.compile(_NL + r"\d{6}[-\s.]?\d{7}" + _NR)),                                  # 주민(13)
     ("phone_mobile",   re.compile(_NL + r"(?:\+?82[-\s.]?)?0?1[016789][-\s.]?\d{3,4}[-\s.]?\d{4}" + _NR)),
     ("phone_landline", re.compile(_NL + r"(?:\+?82[-\s.]?)?0\d{1,2}[-\s.]?\d{3,4}[-\s.]?\d{4}" + _NR)),
-    ("email",          re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")),
+    # 신용카드: 4-4-4-4 (구분자 -/공백/점 또는 무구분 16자리). Luhn 불요 형태매칭. 사업자번호(3-2-5)와 자릿수 상이.
+    ("credit_card",    re.compile(_NL + r"\d{4}[-\s.]?\d{4}[-\s.]?\d{4}[-\s.]?\d{4}" + _NR)),
+    ("email",          re.compile(r"[A-Za-z0-9._%+\-가-힣]+@[A-Za-z0-9.\-가-힣]+\." + _EMAIL_TLD)),
+    # AWS access key: AKIA + 7자 이상(짧은 변형까지 공격적으로).
+    ("aws_akia",       re.compile(r"\bAKIA[0-9A-Z]{7,}")),
+    # vendor 토큰: sk-live-/sk-/ghp_/gho_/ghs_ 등 prefix + 충분 길이.
+    ("vendor_token",   re.compile(r"\b(?:sk-live-[A-Za-z0-9]{8,}|sk-[A-Za-z0-9]{16,}|gh[oprsu]_[A-Za-z0-9]{20,})")),
+    # bearer 토큰: 'bearer ' + 긴 토큰.
+    ("bearer_token",   re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._\-]{16,}")),
+    # 긴 base64-ish secret (>=32, 영숫자+/=_-). 카드/주민 등 숫자열은 먼저 매칭되어 제외됨.
+    ("b64_secret",     re.compile(r"\b[A-Za-z0-9+/=_-]{32,}\b")),
 ]
 
 # 도메인 식별자 형태 — 문맥이 명확히 일치할 때만 보존(아니면 마스킹+review_flag).
@@ -70,18 +82,29 @@ DENYLIST_CONTEXT = ("인증", "토큰", "비밀", "비번", "패스워드", "cre
                     "api", "apikey", "api_key", "key", "session", "cookie", "fingerprint",
                     "secret", "password", "passwd", "private")
 
+# substring 오매칭 차단 — ASCII 토큰은 경계(\b 또는 _ 구분자), 한글 토큰은 인접 한글 미존재로 경계 판정.
+# 'key' in turkey/monkey, '공고' in 공고문 등 부분일치 제거. 정규식 캐시(모듈 1회 컴파일).
+def _compile_kw(kw):
+    if re.fullmatch(r"[A-Za-z0-9_]+", kw):
+        # ASCII 식별자: 영숫자/언더스코어 경계. notice_no, api_key 등 _ 포함 토큰도 단일 토큰 취급.
+        return re.compile(r"(?<![A-Za-z0-9_])" + re.escape(kw) + r"(?![A-Za-z0-9_])", re.IGNORECASE)
+    # 한글(또는 혼합) 키워드: 좌우 한글 인접 시 부분일치로 간주, 경계 요구.
+    return re.compile(r"(?<![가-힣])" + re.escape(kw) + r"(?![가-힣])")
+
+_WHITELIST_RX = [_compile_kw(k) for k in WHITELIST_CONTEXT]
+_DENYLIST_RX = [_compile_kw(k) for k in DENYLIST_CONTEXT]
+
 
 def _ctx_window(text, start, end, w=20):
     return text[max(0, start - w):min(len(text), end + w)]
 
 
 def _domain_preserve(ctx, field):
-    """문맥/필드명이 도메인 식별자로 명확하고 denylist 아니면 True(보존)."""
+    """문맥/필드명이 도메인 식별자로 명확하고 denylist 아니면 True(보존). 토큰 경계 매칭."""
     joined = (field or "") + " " + ctx
-    low = joined.lower()
-    if any(d in joined or d in low for d in DENYLIST_CONTEXT):
+    if any(rx.search(joined) for rx in _DENYLIST_RX):
         return False
-    return any(k in joined or k in low for k in WHITELIST_CONTEXT)
+    return any(rx.search(joined) for rx in _WHITELIST_RX)
 
 
 def batch_redact(text, field_name=""):
@@ -136,9 +159,19 @@ _SCAN_SHAPES = [
     ("scan_rrn_nohp", re.compile(r"(?<![0-9])\d{13}(?![0-9])")),
     ("scan_mobile",   re.compile(r"(?<![0-9])0?1[016789][-\s.]?\d{3,4}[-\s.]?\d{4}(?![0-9])")),
     ("scan_landline", re.compile(r"(?<![0-9])0\d{1,2}[-\s.]\d{3,4}[-\s.]\d{4}(?![0-9])")),
-    ("scan_email",    re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")),
-    ("scan_aws",      re.compile(r"AKIA[0-9A-Z]{12,}")),
+    # 신용카드 4-4-4-4 (구분자 또는 무구분 16자리). 사업자번호 10자리(3-2-5)는 미매칭.
+    ("scan_credit_card", re.compile(r"(?<![0-9])\d{4}[-\s.]?\d{4}[-\s.]?\d{4}[-\s.]?\d{4}(?![0-9])")),
+    # 이메일: ASCII | punycode | 한글 TLD.
+    ("scan_email",    re.compile(r"[A-Za-z0-9._%+\-가-힣]+@[A-Za-z0-9.\-가-힣]+\.(?:[A-Za-z]{2,}|xn--[A-Za-z0-9-]+|[가-힣]{2,})")),
+    # AKIA: 7자 이상(짧은 변형 포함, redactor와 동일 임계).
+    ("scan_aws",      re.compile(r"\bAKIA[0-9A-Z]{7,}")),
+    # vendor 토큰: sk-live/sk-/ghp_ 등.
+    ("scan_vendor",   re.compile(r"\b(?:sk-live-[A-Za-z0-9]{8,}|sk-[A-Za-z0-9]{16,}|gh[oprsu]_[A-Za-z0-9]{20,})")),
+    # bearer 토큰.
+    ("scan_bearer",   re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._\-]{16,}")),
     ("scan_kv",       re.compile(r"(?i)(?:api[_-]?key|token|secret|password|passwd)\s*[:=]\s*\S{4,}")),
+    # 긴 base64-ish secret.
+    ("scan_b64",      re.compile(r"\b[A-Za-z0-9+/=_-]{32,}\b")),
 ]
 
 

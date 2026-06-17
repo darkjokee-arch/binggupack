@@ -314,6 +314,105 @@ def cmd_hosted(a):
     return 1
 
 
+def cmd_recall(a):
+    """recall/why — query 관련 기억 회상(기본 read-only). P1 rank_score 정렬 + why-edge.
+    use_count++ 는 --record 명시 시에만(헌법 '자동 저장 0' — 회상만으론 ledger write 0).
+    --record 는 '이 기억이 유용했다'는 사람의 명시 신호(유용성 랭킹용·도장/문장 불변)."""
+    import binggu_recall as RC
+    import binggu_p1_ranking as RANK
+    ledger, _ = _ledger_paths(a.ledger)
+    if not os.path.exists(ledger):
+        print("장부가 없습니다(회상할 기억 없음): %s · 먼저 python binggu.py init" % ledger)
+        return 0  # 빈 그래프 graceful
+    res = RC.why_search(ledger, a.query, limit=getattr(a, "limit", None))
+    if not res["relevant_nodes"]:
+        print("관련 기억이 없습니다: \"%s\"" % a.query)
+        return 0
+    print("# 회상 — \"%s\" 관련 기억 %d건 (랭킹순 · candidate · read-only)"
+          % (a.query, len(res["relevant_nodes"])))
+    for i, n in enumerate(res["relevant_nodes"], 1):
+        sub = (" [%s]" % n["semantic_subtype"]) if n["semantic_subtype"] else ""
+        print("  %d. (%s%s rank=%.3f rel=%.2f) %s"
+              % (i, n["node_type"], sub, n["rank_score"], n["relevance"], n["claim"]))
+    if res["relevant_edges"]:
+        print("\n연결(why-edge · candidate):")
+        for e in res["relevant_edges"]:
+            print("  %s -%s-> %s" % (e["source"], e["relation"], e["target"]))
+    print("\n%s" % res["summary"])
+    # P1-② use_count++ — --record 명시 시에만(사람의 '유용했다' 신호). 기본 회상은 read-only.
+    if getattr(a, "record", False):
+        db, _ = _open(ledger)
+        for n in res["relevant_nodes"]:
+            RANK.record_use(db, n["node_id"])
+        db.close()
+        print("\n(use_count 기록됨 · 유용성 신호 · 도장/문장 불변)")
+    return 0
+
+
+def cmd_trace(a):
+    """trace — judgment_trace: 판단 노드에서 근거 엣지를 따라 사슬(다홉). read-only."""
+    import binggu_recall as RC
+    ledger, _ = _ledger_paths(a.ledger)
+    if not os.path.exists(ledger):
+        print("장부가 없습니다: %s · 먼저 python binggu.py init" % ledger)
+        return 0
+    res = RC.judgment_trace(ledger, a.node_id)
+    if not res["found"]:
+        print("노드를 찾을 수 없습니다: %s (binggu.py list 로 node_id 확인)" % a.node_id)
+        return 0
+    r = res["root"]
+    print("# 근거 사슬 — %s" % r["claim"])
+    print("  root: %s (%s rank=%.3f)" % (r["node_id"], r["node_type"], r["rank_score"]))
+    if not res["chain"]:
+        print("  (연결된 근거 엣지 없음 — 고립 노드)")
+    for c in res["chain"]:
+        arrow = "→" if c["direction"] == "out" else "←"
+        peer = c["peer_claim"] if c["peer_present"] else "(dangling: %s)" % c["to"]
+        print("  %s -%s-> %s  %s" % (c["from"], c["relation"], c["to"], arrow))
+        if c["peer_present"]:
+            print("      %s" % peer)
+    print("\n%s (신뢰도 %.2f)" % (res["summary"], res["confidence"]))
+    return 0
+
+
+def cmd_preflight(a):
+    """preflight — 작업 시작 전 관련 기억 + 위험패턴 반문(L5+L6). read-only.
+    cwd 미지정 시 현재 디렉토리(capture 와 동일 패턴). 위험패턴 닮으면 반문 표시."""
+    import binggu_recall as RC
+    ledger, _ = _ledger_paths(a.ledger)
+    cwd = getattr(a, "cwd", None) or os.getcwd()
+    files = (getattr(a, "files", None) or "").split(",") if getattr(a, "files", None) else None
+    if files:
+        files = [f.strip() for f in files if f.strip()]
+    if not os.path.exists(ledger):
+        print("장부가 없습니다(신규 사용자 — 회상할 기억 없음): %s" % ledger)
+        return 0  # 빈 그래프 graceful
+    res = RC.preflight_context(ledger, prompt=getattr(a, "prompt", None), cwd=cwd,
+                               domain=getattr(a, "domain", None), files_changed=files)
+    print("# preflight — 이번 작업 전 회상 (read-only · candidate)")
+    if res["remember"]:
+        print("\n## 기억할 것")
+        for n in res["remember"]:
+            sub = (" [%s]" % n["semantic_subtype"]) if n["semantic_subtype"] else ""
+            print("  - (%s%s) %s" % (n["node_type"], sub, n["claim"]))
+    if res["avoid_patterns"]:
+        print("\n## 하면 안 되는 과거 패턴(버그패턴)")
+        for m in res["avoid_patterns"]:
+            print("  - (위험도 %.2f) %s" % (m["risk_score"], m["claim"]))
+    if res["preferences"]:
+        print("\n## 사용자 선호")
+        for p in res["preferences"]:
+            print("  - %s" % p["claim"])
+    print("\n위험도: %s" % res["risk_level"])
+    if res["needs_question"] and res["question"]:
+        print("\n반문 ⚠ %s" % res["question"])
+    elif res["risk_level"] == "중간":
+        print("(주의: 과거 위험패턴과 일부 닮음 — 참고하세요)")
+    if not (res["remember"] or res["avoid_patterns"] or res["preferences"]):
+        print("(관련 기억 없음 — 새로운 작업이거나 그래프가 비어 있습니다)")
+    return 0
+
+
 def cmd_status(a):
     db, _ = _open(a.ledger)
     n = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
@@ -559,6 +658,41 @@ def selftest():
     rows = list_candidates(db)["rows"]
     db.close()
     ck("4_list_3건", len(rows) == 3 and cmd_list(args(status=None, kind=None)) == 0)
+    # ---- 회상(L4~L6 · read-only) — recall/trace/preflight CLI 래퍼 + use_count++ ----
+    # 빈 그래프(미존재 ledger) graceful — 에러 0
+    _empty = os.path.join(tmp, "no_ledger.sqlite")
+    ck("R1_recall_빈그래프_graceful",
+       cmd_recall(args(ledger=_empty, query="배포", limit=None, record=False)) == 0)
+    ck("R1b_preflight_빈그래프_graceful",
+       cmd_preflight(args(ledger=_empty, prompt="바로 배포", cwd=None, domain=None, files=None)) == 0)
+    # 저장된 후보 중 '마진' 관련 회상 → 결과 + use_count++ 기록(P1-② 프리미티브)
+    db, _ = _open(ledger)
+    _uc_before = {r["node_id"]: db.con.execute(
+        "SELECT use_count FROM nodes WHERE node_id=?", (r["node_id"],)).fetchone() for r in rows}
+    db.close()
+    ck("R2_recall_관련회상(use_count기록·--record)",
+       cmd_recall(args(ledger=ledger, query="마진 보류", limit=None, record=True)) == 0)
+    db, _ = _open(ledger)
+    # 적어도 1개 노드의 use_count 가 증가(회상 기록). 도장/문장 불변은 R5 에서 확인.
+    _uc_after = {nid: db.con.execute(
+        "SELECT use_count FROM nodes WHERE node_id=?", (nid,)).fetchone()[0]
+        for nid in _uc_before}
+    db.close()
+    ck("R3_use_count_증가(P1-②_유용성)",
+       any((_uc_after[nid] or 0) >= 1 for nid in _uc_before))
+    # judgment_trace — 저장된 판단 노드 1개 (사슬 없어도 found True graceful)
+    _j_nid = next((r["node_id"] for r in rows if r["kind"] == "판단"), rows[0]["node_id"])
+    ck("R4_trace_노드조회(고립_graceful)",
+       cmd_trace(args(ledger=ledger, node_id=_j_nid)) == 0)
+    ck("R4b_trace_dangling_graceful",
+       cmd_trace(args(ledger=ledger, node_id="node:CONV:nope")) == 0)
+    # 회상은 read-only — 문장/도장 불변(use_count 만 변경)
+    db, _ = _open(ledger)
+    _stamp_intact = all(
+        db.con.execute("SELECT sentence,node_type FROM nodes WHERE node_id=?", (r["node_id"],)).fetchone()
+        is not None for r in rows)
+    db.close()
+    ck("R5_회상_도장문장_불변(read-only)", _stamp_intact)
     i_state = next(i for i, r in enumerate(rows, 1) if r["kind"] == "상태")
     h_state = rows[i_state - 1]["id8"]
     ck("5_deprecate", cmd_deprecate(args(n=i_state, id8=h_state, reason="셀프테스트 기각",
@@ -656,6 +790,49 @@ def selftest():
     return 0 if ok else 1
 
 
+def cmd_harvest(a):
+    """harvest — 외부 수확(P1 ③). 사람이 등록한 소스만 fetch → 후보(candidate)로만.
+      add/list/remove: 소스 화이트리스트 관리(빈 시작 · owner 가 등록). 등록 단위=URL/계정/키워드.
+      run: 등록 소스 1회 수확(실 fetch=owner 스케줄러 권장). candidate=1 만 적재 · 영구 0.
+    3중게이트: ① 등록 소스만 ② 후보로만 ③ 영구는 사람 SAVE(기존 게이트). 원문 변형 0."""
+    import binggu_harvest as HV  # scripts/ 는 이미 sys.path 에 있음
+    home = os.path.dirname(os.path.abspath(a.ledger))
+    sub = getattr(a, "harvest_cmd", None)
+    sp = HV.sources_path(home)
+    if sub == "add":
+        r = HV.add_source(a.kind, a.url, keyword=getattr(a, "keyword", None), path=sp)
+        if r["status"] == "OK":
+            print("소스 등록(%s): %s" % (r["reason"], r["source_id"]))
+        else:
+            print("BLOCK: %s%s" % (r["reason"], (" (kind=%s)" % ",".join(r["valid"])) if r.get("valid") else ""))
+        return 0 if r["status"] == "OK" else 1
+    if sub == "list":
+        srcs = HV.load_sources(sp)
+        if not srcs:
+            print("등록된 외부 소스가 없습니다(빈 화이트리스트). 수확은 0입니다.")
+            print('  등록:  python binggu.py harvest add --kind arxiv --url "https://arxiv.org/..."')
+            return 0
+        print("등록된 외부 소스 %d개:" % len(srcs))
+        for s in srcs:
+            print("  [%s] %s  %s%s" % (s.get("kind"), s.get("source_id"), s.get("url"),
+                                       (" (keyword=%s)" % s["keyword"]) if s.get("keyword") else ""))
+        return 0
+    if sub == "remove":
+        r = HV.remove_source(a.source_id, path=sp)
+        print("소스 제거: %s (removed=%d)" % (r["reason"], r["removed"]))
+        return 0
+    if sub == "run":
+        # 실 fetch 는 owner 스케줄러 권장(외부 자동 동기화 = 주체 분리). 수동 1회도 가능.
+        res = HV.run_harvest(ledger_path=os.path.abspath(a.ledger), home=home, sources_path_=sp)
+        print("수확 결과: %s (%s) · fetched=%s candidates=%s skipped=%s"
+              % (res["status"], res["reason"], res.get("fetched"),
+                 res.get("candidates"), res.get("skipped")))
+        if res.get("candidates"):
+            print("  후보만 적재됨(candidate=1 · 영구화 0). 영구는 preview→SAVE n 게이트로만.")
+        return 0 if res["status"] in ("OK", "NOOP") else 1
+    return 1
+
+
 def cmd_setup_cloud(a):
     """setup-cloud — 흩어진 cloud 셋업 명령을 1개 진입점으로(멱등·실패정지).
     얇은 래퍼 — 실 오케스트레이션은 scripts/binggu_setup_cloud.py(순수함수+selftest).
@@ -693,6 +870,19 @@ def main():
     sp.add_argument("--due", default=None)
     sp = sub.add_parser("list"); sp.add_argument("--status", default=None)
     sp.add_argument("--kind", default=None)
+    # 회상(L4~L6 · read-only) — recall(why_search) / trace(judgment_trace) / preflight
+    rcp = sub.add_parser("recall"); rcp.add_argument("query")
+    rcp.add_argument("--limit", type=int, default=None)
+    rcp.add_argument("--record", action="store_true", dest="record")  # use_count++ (기본 read-only)
+    wp_ = sub.add_parser("why"); wp_.add_argument("query")                  # recall 별칭
+    wp_.add_argument("--limit", type=int, default=None)
+    wp_.add_argument("--record", action="store_true", dest="record")  # use_count++ (기본 read-only)
+    tp = sub.add_parser("trace"); tp.add_argument("node_id")
+    pfp = sub.add_parser("preflight")
+    pfp.add_argument("--prompt", default=None)
+    pfp.add_argument("--cwd", default=None)
+    pfp.add_argument("--domain", default=None)
+    pfp.add_argument("--files", default=None)  # 콤마 구분 변경 파일명
     for name in ("deprecate", "accept", "unaccept"):
         sp = sub.add_parser(name); sp.add_argument("n", type=int); sp.add_argument("id8")
         sp.add_argument("--reason", required=True); sp.add_argument("--confirm", required=True)
@@ -720,6 +910,15 @@ def main():
     pp = hsub.add_parser("pull")            # 선택 항목만 ledger commit (전량 자동 없음)
     pp.add_argument("--select", default=None)            # 'inbox' 에서 본 번호들 (예: 1,3)
     pp.add_argument("--confirm", default=None)           # "LIVE SAVE <select>" 정확 일치
+    hv = sub.add_parser("harvest")          # 외부 수확(P1 ③) — 등록 소스만·후보로만·영구는 사람 SAVE
+    hvsub = hv.add_subparsers(dest="harvest_cmd", required=True)
+    ha = hvsub.add_parser("add")            # 소스 화이트리스트 등록(사람 행위)
+    ha.add_argument("--kind", required=True, choices=["arxiv", "github", "rss", "url"])
+    ha.add_argument("--url", required=True)
+    ha.add_argument("--keyword", default=None)
+    hvsub.add_parser("list")                # 등록 소스 목록
+    hr = hvsub.add_parser("remove"); hr.add_argument("source_id")
+    hvsub.add_parser("run")                 # 등록 소스 1회 수확(실 fetch=owner 스케줄러 권장)
     scp = sub.add_parser("setup-cloud")     # cloud 셋업 1개 진입점(멱등·실패정지·dry-run 기본)
     scp.add_argument("--apply", action="store_true")     # 실제 변경(미지정=점검만)
     scp.add_argument("--deploy", action="store_true")    # (--apply 와) wrangler deploy 까지 — 비가역
@@ -728,7 +927,8 @@ def main():
           "list": cmd_list, "deprecate": cmd_deprecate, "replace": cmd_replace,
           "accept": cmd_accept, "unaccept": cmd_unaccept, "due": cmd_due,
           "resolve": cmd_resolve, "reminders": cmd_reminders, "capture": cmd_capture,
-          "hosted": cmd_hosted, "setup-cloud": cmd_setup_cloud}[a.cmd]
+          "recall": cmd_recall, "why": cmd_recall, "trace": cmd_trace, "preflight": cmd_preflight,
+          "hosted": cmd_hosted, "harvest": cmd_harvest, "setup-cloud": cmd_setup_cloud}[a.cmd]
     sys.exit(fn(a))
 
 

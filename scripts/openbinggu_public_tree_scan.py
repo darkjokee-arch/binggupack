@@ -288,7 +288,10 @@ PUBLIC_IGNORE = ["*.sqlite", "*.db", "*_graph.yaml", "reports/", "reviews/", "ca
                  "hosted/workers/data/", "data/packs.json",
                  # 서드파티 의존성(gitignore·미커밋) — CI/로컬에서 npm install 로 생성됨. 자기 코드 아님 → scan 제외.
                  # 중첩 경로(hosted/workers/node_modules/...)라 fnmatch 글롭으로 매칭(디렉토리 prefix startswith 불가).
-                 "*/node_modules/*", "node_modules/*"]
+                 "*/node_modules/*", "node_modules/*",
+                 # watcher selftest 합성 PII fixture(가짜 AWS예시키·가짜 주민/전화) — 자기 코드 아닌 테스트 자료.
+                 # ensure_fixtures()가 selftest 시 디스크 생성. gitignore 대상. (e6cd94a secret.diff 패턴)
+                 "tests/fixtures/watcher_m1_batch/", "*/watcher_m1_batch/*"]
 
 
 def main():

@@ -141,6 +141,9 @@ function consume(pack: Pack): any {
 
   const nodeView = pack.nodes.map((n) => {
     const p = n.properties ?? {};
+    // P1 ② 랭킹: 빌더가 pre-compute 한 rank_score(3축 가중합)·created_at(신선도)·use_count(유용성).
+    // worker 는 read-only — 점수 계산/저장 안 함. 빌더 점수를 surface 하고 sort 만 한다.
+    const rankScore = typeof p.rank_score === "number" ? p.rank_score : 0;
     return {
       id: n.id,
       claim: p.sentence ?? n.label ?? "",
@@ -150,9 +153,20 @@ function consume(pack: Pack): any {
       domain: p.domain ?? "",
       evidence_refs: [...(n.evidence_refs ?? [])],
       trust: "candidate_unverified",
+      rank_score: rankScore,
+      // §10 회상: semantic_subtype(버그패턴/교훈 등 보조 메타) + label_kind 을 view 로 surface.
+      // 빌더(realpack_build)가 properties 에 넣어준 값 — 반문 엔진(preflight)이 위험패턴 매칭에 사용.
+      // null 이면 미부착(빈 그래프/구 pack graceful). 도장/점수 계산 0 — surface 만.
+      ...(p.semantic_subtype ? { semantic_subtype: String(p.semantic_subtype) } : {}),
+      ...(p.label_kind ? { label_kind: String(p.label_kind) } : {}),
+      ...(p.created_at ? { created_at: String(p.created_at) } : {}),
+      ...(typeof p.use_count === "number" ? { use_count: p.use_count } : {}),
       ...(p.doc_status && p.doc_status !== "active" ? { doc_status: p.doc_status } : {}),
     };
   });
+  // P1 ② 정렬 보존: 빌더가 이미 rank_score 내림차순 정렬하지만, worker 도 방어적으로 재정렬
+  // (다른 적재 경로/구 packs.json 도 일관 순서 보장). 동점은 id 사전순 — 결정적.
+  nodeView.sort((a, b) => b.rank_score - a.rank_score || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
   const edgeView = pack.edges.map((e) => {
     const p = e.properties ?? {};
@@ -304,11 +318,14 @@ function toolEvidenceSearch(store: PackStore, args: Record<string, any>): any {
         const excerptSrc =
           fullList.find((x: string) => terms.some((t) => x.toLowerCase().includes(t))) || n.claim;
         hits.push({ pack_id: pid, node_id: n.id, evidence_id: refs[0] ?? "",
-                    sentence_excerpt: excerptSrc.slice(0, EXCERPT_MAX), score, candidate: true });
+                    sentence_excerpt: excerptSrc.slice(0, EXCERPT_MAX), score, candidate: true,
+                    rank_score: typeof n.rank_score === "number" ? n.rank_score : 0 });
       }
     }
   }
-  hits.sort((a, b) => b.score - a.score ||
+  // 관련성(term-frequency score) 1차 — 기존 신호 그대로. 동점은 P1 rank_score(신선도+유용성) 2차,
+  // 그래도 동점이면 evidence_id 사전순(결정적). 3축이 query 관련성을 보강하되 압도하지 않음.
+  hits.sort((a, b) => b.score - a.score || b.rank_score - a.rank_score ||
     (a.evidence_id < b.evidence_id ? -1 : a.evidence_id > b.evidence_id ? 1 : 0));
   return { hits: hits.slice(0, limit), total_hits: hits.length,
            candidate_note: "excerpts are candidate evidence" };
@@ -345,6 +362,9 @@ function toolNodeEdgeLookup(store: PackStore, args: Record<string, any>): any {
     }));
   return { node: { id: node.id, claim: node.claim, candidate: node.candidate,
                    evidence_refs: node.evidence_refs, trust: node.trust,
+                   rank_score: typeof node.rank_score === "number" ? node.rank_score : 0,
+                   ...(node.created_at ? { created_at: node.created_at } : {}),
+                   ...(typeof node.use_count === "number" ? { use_count: node.use_count } : {}),
                    ...(node.doc_status ? { doc_status: node.doc_status } : {}) },
            edges };
 }
@@ -388,6 +408,218 @@ function toolHandoffContext(store: PackStore, args: Record<string, any>): any {
   const out: Record<string, any> = { context_markdown: md, nodes_included: picked.length, truncated };
   if (truncated) out.next_offset = offset + picked.length;
   return out;
+}
+
+// ---------------- §10 회상 도구 (Phase4·5·6 · 전부 read-only) ----------------
+// 점수 계산/저장 0 — 빌더 pre-compute rank_score(consume 가 surface)·semantic_subtype(properties)
+// 만 surface·정렬. owner 31노드 하드코딩 0 — 빈 pack(신규 사용자)이면 빈 결과·반문 0·에러 0.
+
+// 위험 신호 subtype 가중 — 버그패턴(반복 결함) > 교훈. 그 외 subtype = 위험 후보 아님.
+const RISK_SUBTYPE_WEIGHT: Record<string, number> = { "버그패턴": 1.0, "교훈": 0.7 };
+const JUDGMENT_KINDS = new Set(["judgment", "판단"]);
+// 반문 위험도 경계(worker 기본값 — 로컬 binggu_p1_config.recall_config 와 동일 시작값).
+// worker 는 KV read-only·stateless 라 사용자 설정파일 미접근 → 코드 기본값(요청 args override 허용).
+const RISK_MID_DEFAULT = 0.30;
+const RISK_HIGH_DEFAULT = 0.55;
+// subtype → 반문 문구 토대(로컬 _SUBTYPE_WHY 와 동일·결정적·LLM 0).
+const SUBTYPE_WHY: Record<string, string> = {
+  "교훈": "반복 적용 가능한 규칙성(다음에 같은 실수 회피)",
+  "버그패턴": "반복 실수/결함 패턴 — 재발 방지 신호",
+  "결정": "선택의 방향과 이유", "선호": "반복되는 작업 방식",
+  "설계결정": "구조/절차 설계 근거", "사실": "확인된 사실/지식",
+};
+
+function relScore(terms: string[], text: string): number {
+  if (!terms.length) return 0;
+  const s = text.toLowerCase();
+  const uniq = new Set(terms);
+  let hit = 0;
+  for (const t of uniq) if (s.includes(t)) hit++;
+  return hit / uniq.size;
+}
+
+function toolWhySearch(store: PackStore, args: Record<string, any>): any {
+  const query = reqStr(args, "query");
+  if (!(query.length >= 2 && query.length <= 200)) {
+    throw new ToolError("QUERY_TOO_SHORT", "query must be 2~200 chars");
+  }
+  const limit = Math.max(1, Math.min(toInt(args.limit ?? 5), 20));
+  const packIds = args.pack_id ? [String(args.pack_id)] : store.ids();
+  const terms = query.toLowerCase().split(/\s+/).filter((t) => t.length >= 2);
+  const scored: any[] = [];
+  for (const pid of packIds) {
+    const v = store.get(pid);
+    for (const n of v.nodes) {
+      const rel = relScore(terms, n.claim ?? "");
+      if (rel <= 0) continue;
+      scored.push({ pid, n, rel });
+    }
+  }
+  // 관련성 1차, rank_score(신선도+유용성) 2차, node_id 사전순 3차 — 결정적(P1-② 활용).
+  scored.sort((a, b) => b.rel - a.rel || b.n.rank_score - a.n.rank_score ||
+    (a.n.id < b.n.id ? -1 : a.n.id > b.n.id ? 1 : 0));
+  const top = scored.slice(0, limit);
+  const relevant_nodes = top.map(({ pid, n, rel }) => ({
+    pack_id: pid, node_id: n.id, claim: (n.claim ?? "").slice(0, 120),
+    semantic_subtype: n.semantic_subtype ?? null,
+    rank_score: typeof n.rank_score === "number" ? n.rank_score : 0,
+    relevance: Math.round(rel * 10000) / 10000, candidate: true, trust: "candidate_unverified",
+  }));
+  const topIds = new Set(top.map(({ n }) => n.id));
+  const relevant_edges: any[] = [];
+  for (const { pid } of top) {
+    const v = store.get(pid);
+    for (const e of v.edges) {
+      if (topIds.has(e.source) || topIds.has(e.target)) {
+        relevant_edges.push({ edge_id: e.id, relation: e.relation,
+          source: e.source, target: e.target, candidate: true });
+      }
+    }
+  }
+  // edge dedup(전 팩 순회 시 중복 방지)
+  const seenE = new Set<string>();
+  const edges = relevant_edges.filter((e) => !seenE.has(e.edge_id) && seenE.add(e.edge_id));
+  const evidence = top.map(({ n }) => ({ node_id: n.id,
+    evidence_excerpt: (n.claim ?? "").slice(0, 120) }));
+  const confidence = top.length ? Math.round(top[0].rel * 10000) / 10000 : 0;
+  return {
+    relevant_nodes, relevant_edges: edges, evidence,
+    summary: top.length ? `관련 기억 ${top.length}건(랭킹순). candidate — 사람 확정 전 참고용.`
+                        : "query 와 관련된 노드를 찾지 못했습니다.",
+    recommended_question: null, confidence,
+    candidate_note: "all items candidate (not confirmed)",
+  };
+}
+
+function toolJudgmentTrace(store: PackStore, args: Record<string, any>): any {
+  const v = store.get(reqStr(args, "pack_id"));
+  const nodeId = reqStr(args, "node_id");
+  const maxHops = Math.max(1, Math.min(toInt(args.max_hops ?? 3), 5));
+  const byId: Record<string, any> = {};
+  for (const n of v.nodes) byId[n.id] = n;
+  if (!(nodeId in byId)) {
+    return { root: nodeId, found: false, chain: [], confidence: 0,
+             summary: "노드를 찾을 수 없습니다(dangling 또는 미저장)." };
+  }
+  const visited = new Set([nodeId]);
+  let frontier = [nodeId];
+  const chain: any[] = [];
+  for (let hop = 0; hop < maxHops; hop++) {
+    const next: string[] = [];
+    for (const cur of frontier) {
+      for (const e of v.edges) {
+        let peer: string | null = null, direction = "";
+        if (e.source === cur) { peer = e.target; direction = "out"; }
+        else if (e.target === cur) { peer = e.source; direction = "in"; }
+        if (peer === null) continue;
+        const pnode = byId[peer];
+        chain.push({ edge_id: e.id, relation: e.relation, from: cur, to: peer,
+          direction, peer_claim: pnode ? (pnode.claim ?? "").slice(0, 100) : null,
+          peer_present: Boolean(pnode) });
+        if (pnode && !visited.has(peer)) { visited.add(peer); next.push(peer); }
+      }
+    }
+    if (!next.length) break;
+    frontier = next;
+  }
+  const root = byId[nodeId];
+  const present = chain.filter((c) => c.peer_present).length;
+  return {
+    root: { node_id: nodeId, claim: (root.claim ?? "").slice(0, 120),
+            semantic_subtype: root.semantic_subtype ?? null,
+            rank_score: typeof root.rank_score === "number" ? root.rank_score : 0 },
+    found: true, chain,
+    confidence: chain.length ? Math.round(Math.min(1, present / 3) * 10000) / 10000 : 0,
+    summary: chain.length ? `판단 근거 사슬 ${chain.length}개 연결. candidate edge — 사람 확정 전 참고.`
+                          : "이 판단에 연결된 근거 엣지가 없습니다(고립 노드).",
+    candidate_note: "all items candidate (not confirmed)",
+  };
+}
+
+function toolPreflightContext(store: PackStore, args: Record<string, any>): any {
+  // 입력 = prompt / cwd / domain / files_changed (설계 Phase5). 거친 1차 신호로 합쳐 회상.
+  const prompt = typeof args.prompt === "string" ? args.prompt : "";
+  const cwd = typeof args.cwd === "string" ? args.cwd : "";
+  const domain = typeof args.domain === "string" ? args.domain : "";
+  const files: string[] = Array.isArray(args.files_changed)
+    ? args.files_changed.map((f: any) => String(f)) : [];
+  const dom = domain || (cwd ? cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "" : "");
+  const work = [prompt, dom, ...files.map((f) => f.split(/[\\/]/).pop() ?? "")].filter(Boolean).join(" ");
+  const terms = work.toLowerCase().split(/\s+/).filter((t) => t.length >= 2);
+  const riskMid = typeof args.risk_mid_score === "number" ? args.risk_mid_score : RISK_MID_DEFAULT;
+  const riskHigh = typeof args.risk_high_score === "number" ? args.risk_high_score : RISK_HIGH_DEFAULT;
+  const maxN = Math.max(1, Math.min(toInt(args.max_nodes ?? 5), 7));
+
+  const packIds = args.pack_id ? [String(args.pack_id)] : store.ids();
+  const allNodes: any[] = [];
+  for (const pid of packIds) for (const n of store.get(pid).nodes) allNodes.push({ pid, n });
+  if (!allNodes.length) {
+    return { remember: [], ask: [], avoid_patterns: [], preferences: [],
+             risk_level: "낮음", needs_question: false, question: null, confidence: 0,
+             summary: "그래프가 비어 있습니다(신규 사용자 — 회상할 기억 없음).",
+             candidate_note: "all items candidate (not confirmed)" };
+  }
+
+  // remember = 관련 노드 상위 maxN(why_search 정렬과 동일).
+  const scored = allNodes.map(({ pid, n }) => ({ pid, n, rel: relScore(terms, n.claim ?? "") }))
+    .filter((x) => x.rel > 0);
+  scored.sort((a, b) => b.rel - a.rel || b.n.rank_score - a.n.rank_score ||
+    (a.n.id < b.n.id ? -1 : a.n.id > b.n.id ? 1 : 0));
+  const remember = scored.slice(0, maxN).map(({ pid, n, rel }) => ({
+    pack_id: pid, node_id: n.id, claim: (n.claim ?? "").slice(0, 100),
+    semantic_subtype: n.semantic_subtype ?? null,
+    rank_score: typeof n.rank_score === "number" ? n.rank_score : 0,
+    relevance: Math.round(rel * 10000) / 10000,
+  }));
+
+  // 위험패턴 매칭(Phase6) — node 의 semantic_subtype 은 consume 가 properties 로 surface.
+  const matches: any[] = [];
+  const avoid: any[] = [];
+  const preferences: any[] = [];
+  for (const { n } of allNodes) {
+    const sub = n.semantic_subtype ?? null;
+    const kind = n.label_kind ?? n.node_type ?? "";
+    const rel = relScore(terms, n.claim ?? "");
+    if (rel <= 0) continue;
+    if (sub === "선호") {
+      preferences.push({ node_id: n.id, claim: (n.claim ?? "").slice(0, 100),
+        relevance: Math.round(rel * 10000) / 10000 });
+      continue;
+    }
+    const w = RISK_SUBTYPE_WEIGHT[sub as string];
+    if (w === undefined || !JUDGMENT_KINDS.has(kind)) continue;
+    const score = w * rel;
+    const m = { node_id: n.id, claim: (n.claim ?? "").slice(0, 100), semantic_subtype: sub,
+      risk_score: Math.round(score * 10000) / 10000, relevance: Math.round(rel * 10000) / 10000 };
+    matches.push(m);
+    if (sub === "버그패턴") avoid.push(m);
+  }
+  matches.sort((a, b) => b.risk_score - a.risk_score || (a.node_id < b.node_id ? -1 : 1));
+  avoid.sort((a, b) => b.risk_score - a.risk_score || (a.node_id < b.node_id ? -1 : 1));
+  preferences.sort((a, b) => b.relevance - a.relevance);
+  const top = matches.length ? matches[0].risk_score : 0;
+  let risk_level = "낮음", needs_question = false;
+  if (top >= riskHigh) { risk_level = "높음"; needs_question = true; }
+  else if (top >= riskMid) { risk_level = "중간"; needs_question = false; }
+  let question: string | null = null;
+  if (matches.length && needs_question) {
+    const src = allNodes.find(({ n }) => n.id === matches[0].node_id);
+    if (src) {
+      const sub = src.n.semantic_subtype ?? "";
+      const why = SUBTYPE_WHY[sub as string] ?? "과거 판단";
+      question = `이 작업은 과거 패턴과 닮았습니다: "${(src.n.claim ?? "").slice(0, 60)}" (${why}). ` +
+        "같은 실수를 반복하지 않도록, 먼저 점검/확인하고 진행할까요?";
+    }
+  }
+  return {
+    remember, ask: question ? [question] : [],
+    avoid_patterns: avoid.slice(0, 5), preferences: preferences.slice(0, maxN),
+    risk_level, needs_question, question,
+    confidence: remember.length ? remember[0].relevance : 0,
+    summary: `관련 기억 ${remember.length} · 위험패턴 ${matches.length} · 위험도 ${risk_level}` +
+      (needs_question ? " (반문 필요)" : ""),
+    candidate_note: "all items candidate (not confirmed)",
+  };
 }
 
 // §4 — 공통 annotations: 전 tool read-only·비파괴·멱등·closed-world
@@ -447,7 +679,8 @@ const TOOLS: Record<string, ToolDef> = {
       hits: { type: "array", items: { type: "object", properties: {
         pack_id: { type: "string" }, node_id: { type: "string" },
         evidence_id: { type: "string" }, sentence_excerpt: { type: "string" },
-        score: { type: "integer" }, candidate: { type: "boolean" } },
+        score: { type: "integer" }, candidate: { type: "boolean" },
+        rank_score: { type: "number", description: "P1 pre-compute 랭킹(신선도+유용성) — 동점 정렬 보조" } },
         required: ["evidence_id", "sentence_excerpt", "score", "candidate"] } },
       total_hits: { type: "integer" }, candidate_note: { type: "string" } },
       required: ["hits", "total_hits", "candidate_note"] },
@@ -461,7 +694,9 @@ const TOOLS: Record<string, ToolDef> = {
     outputSchema: { type: "object", properties: {
       node: { type: "object", properties: {
         id: { type: "string" }, claim: { type: "string" }, candidate: { type: "boolean" },
-        evidence_refs: { type: "array", items: { type: "string" } }, trust: { type: "string" } },
+        evidence_refs: { type: "array", items: { type: "string" } }, trust: { type: "string" },
+        rank_score: { type: "number", description: "P1 pre-compute 랭킹 점수(신선도+유용성)" },
+        created_at: { type: "string" }, use_count: { type: "integer" } },
         required: ["id", "claim", "candidate", "evidence_refs", "trust"] },
       edges: { type: "array", items: { type: "object", properties: {
         id: { type: "string" }, relation: { type: "string" }, direction: { type: "string" },
@@ -517,6 +752,74 @@ const TOOLS: Record<string, ToolDef> = {
       next_offset: { type: "integer", description: "truncated=true일 때만 포함 — 다음 호출 offset" } },
       required: ["context_markdown", "nodes_included", "truncated"] },
     handler: toolHandoffContext,
+  },
+  why_search: {
+    description: "query 관련 판단/근거 노드 + why-edge 회상(P1 rank_score 정렬). " +
+      "pack_id 생략 시 전 팩. 빈 그래프면 빈 결과(에러 0). read-only.",
+    inputSchema: { type: "object", properties: {
+      query: { type: "string", description: "2~200자" },
+      pack_id: { type: "string", description: "생략 시 전 팩" },
+      limit: { type: "integer", description: "기본 5, 최대 20" } },
+      required: ["query"] },
+    outputSchema: { type: "object", properties: {
+      relevant_nodes: { type: "array", items: { type: "object", properties: {
+        pack_id: { type: "string" }, node_id: { type: "string" }, claim: { type: "string" },
+        semantic_subtype: { type: ["string", "null"] }, rank_score: { type: "number" },
+        relevance: { type: "number" }, candidate: { type: "boolean" }, trust: { type: "string" } },
+        required: ["node_id", "claim", "rank_score", "relevance", "candidate"] } },
+      relevant_edges: { type: "array", items: { type: "object", properties: {
+        edge_id: { type: "string" }, relation: { type: "string" },
+        source: { type: "string" }, target: { type: "string" }, candidate: { type: "boolean" } },
+        required: ["edge_id", "relation", "source", "target", "candidate"] } },
+      evidence: { type: "array", items: { type: "object" } },
+      summary: { type: "string" }, recommended_question: { type: ["string", "null"] },
+      confidence: { type: "number" }, candidate_note: { type: "string" } },
+      required: ["relevant_nodes", "relevant_edges", "evidence", "summary", "confidence"] },
+    handler: toolWhySearch,
+  },
+  judgment_trace: {
+    description: "판단 노드에서 연결 엣지를 따라 근거 사슬(다홉) + peer claim. " +
+      "dangling node 면 found=false(에러 0). read-only.",
+    inputSchema: { type: "object", properties: {
+      pack_id: { type: "string" }, node_id: { type: "string" },
+      max_hops: { type: "integer", description: "기본 3, 최대 5" } },
+      required: ["pack_id", "node_id"] },
+    outputSchema: { type: "object", properties: {
+      root: { type: ["object", "string"] }, found: { type: "boolean" },
+      chain: { type: "array", items: { type: "object", properties: {
+        edge_id: { type: "string" }, relation: { type: "string" },
+        from: { type: "string" }, to: { type: "string" }, direction: { type: "string" },
+        peer_claim: { type: ["string", "null"] }, peer_present: { type: "boolean" } },
+        required: ["edge_id", "relation", "from", "to", "direction", "peer_present"] } },
+      confidence: { type: "number" }, summary: { type: "string" },
+      candidate_note: { type: "string" } },
+      required: ["root", "found", "chain", "confidence", "summary"] },
+    handler: toolJudgmentTrace,
+  },
+  preflight_context: {
+    description: "작업 시작 전 회상 + 반문(L5+L6). 입력=prompt/cwd/domain/files_changed. " +
+      "관련 기억 + 하면안되는 과거패턴(버그패턴) + 사용자 선호 + 위험도(낮음/중간/높음). " +
+      "위험패턴 닮으면 needs_question. 빈 그래프면 빈 결과·반문 0(에러 0). read-only.",
+    inputSchema: { type: "object", properties: {
+      prompt: { type: "string", description: "이번 작업 설명" },
+      cwd: { type: "string" }, domain: { type: "string" },
+      files_changed: { type: "array", items: { type: "string" } },
+      pack_id: { type: "string", description: "생략 시 전 팩" },
+      max_nodes: { type: "integer", description: "기본 5, 최대 7" },
+      risk_mid_score: { type: "number", description: "중간 경고 임계(기본 0.30)" },
+      risk_high_score: { type: "number", description: "반문 임계(기본 0.55)" } },
+      required: [] },
+    outputSchema: { type: "object", properties: {
+      remember: { type: "array", items: { type: "object" } },
+      ask: { type: "array", items: { type: "string" } },
+      avoid_patterns: { type: "array", items: { type: "object" } },
+      preferences: { type: "array", items: { type: "object" } },
+      risk_level: { type: "string" }, needs_question: { type: "boolean" },
+      question: { type: ["string", "null"] }, confidence: { type: "number" },
+      summary: { type: "string" }, candidate_note: { type: "string" } },
+      required: ["remember", "ask", "avoid_patterns", "preferences", "risk_level",
+        "needs_question", "confidence", "summary"] },
+    handler: toolPreflightContext,
   },
 };
 

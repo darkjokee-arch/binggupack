@@ -29,8 +29,15 @@ GATES = [
     ("save_gate",         "binggu_save_gate.py",                       ["--selftest"], "GATE: GO"),
     ("save_gate hook",    os.path.join("..", "hooks", "binggu_save_gate_hook.py"), ["--selftest"], "GATE=GO"),
     ("realpack build",    "binggu_realpack_build.py",                  ["--selftest"], "GATE: GO"),
+    ("p1 ranking",        "binggu_p1_ranking.py",                      ["--selftest"], "GATE: GO"),
+    ("p1 config",         "binggu_p1_config.py",                       [], "GATE=GO"),
+    ("recall engine",     "binggu_recall.py",                          ["--selftest"], "GATE=GO"),
+    ("worker recall (node)","binggu_worker_recall_selftest.py",        ["--selftest"], "GATE=GO"),
+    ("created_at backfill","binggu_created_at_backfill.py",            ["--selftest"], "GATE: GO"),
     ("cloud_pack export", "binggu_cloud_pack_export.py",               ["--selftest"], "GATE=GO"),
     ("local ingest",      "localbinggu_ingest_executor.py",            ["--selftest"], "GATE=GO"),
+    ("harvest inbound",   "binggu_harvest.py",                         ["--selftest"], "GATE: GO"),
+    ("P3 self-improve",   "openbinggu_p3_self_improve.py",             ["--selftest"], "GATE: GO"),
     ("tree scan",         "openbinggu_public_tree_scan.py",            ["--tree", REPO, "--public"], "verdict=CLEAN"),
 ]
 

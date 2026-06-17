@@ -55,3 +55,6 @@ __pycache__/
 
 # 로컬 키 사본 — 절대 커밋 금지
 .dev.vars*
+
+# watcher selftest 합성 PII fixture (가짜 AWS예시키·가짜 주민/전화 — ensure_fixtures가 런타임 생성)
+tests/fixtures/watcher_m1_batch/
