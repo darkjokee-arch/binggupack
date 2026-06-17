@@ -34,9 +34,16 @@ def extract_real_ledger(ledger_path):
     nrows = cur.fetchall()
     cur.execute("SELECT evidence_id,sentence,source_pointer_id,source_hash FROM evidence")
     erows = cur.fetchall()
+    # edges (구버전 ledger 에 테이블 부재 가능 — 방어)
+    try:
+        cur.execute("SELECT edge_id,relation,source,target,candidate,state,evidence_refs FROM edges")
+        edge_rows = cur.fetchall()
+    except sqlite3.OperationalError:
+        edge_rows = []
     conn.close()
     # candidate=falsy(0/None) && state confirmed/active 만 = SAVE 확정분 (미SAVE 후보 제외)
     active = [r for r in nrows if not r[3] and (r[4] in (None, "active", "confirmed"))]
+    active_edges = [r for r in edge_rows if not r[4] and (r[5] in (None, "active", "confirmed"))]
     return {
         "total_nodes": len(nrows),
         "candidate_nodes": sum(1 for r in nrows if r[3]),
@@ -44,6 +51,8 @@ def extract_real_ledger(ledger_path):
         "evidence_count": len(erows),
         "active_rows": active,
         "evidence_rows": erows,
+        "active_edge_rows": active_edges,
+        "active_edges": len(active_edges),
     }
 
 

@@ -90,12 +90,16 @@ def active_checksum(ledger_path=None):
         return "ABSENT"
     ext = P3.extract_real_ledger(ledger_path)
     rows = ext["active_rows"]
-    if not rows:
+    edge_rows = ext.get("active_edge_rows", [])
+    if not rows and not edge_rows:
         return "EMPTY"
     h = hashlib.sha256()
     # node_id 기준 정렬 → 결정적. 각 행 canonical json.
     for r in sorted(rows, key=lambda x: str(x[0])):
         h.update(json.dumps([r[0], r[1], r[2], r[5]], ensure_ascii=False, sort_keys=True).encode("utf-8"))
+    # edge 변화도 전송 트리거(사람 도장→운영 등재 시 자동 KV 반영). "E" prefix 로 node 와 분리.
+    for e in sorted(edge_rows, key=lambda x: str(x[0])):
+        h.update(json.dumps(["E", e[0], e[1], e[2], e[3]], ensure_ascii=False, sort_keys=True).encode("utf-8"))
     return h.hexdigest()[:16]
 
 
@@ -347,6 +351,17 @@ def _selftest():
 
     # T1 active checksum 결정적(같은 ledger 두 번 = 동일)
     chk("T1 active_checksum 결정적", active_checksum(lp) == active_checksum(lp) and active_checksum(lp) not in ("ABSENT", "EMPTY"))
+    # T1e active_checksum 이 edge 변화도 반영(노드 동일·edge 추가 → checksum 변 → 자동 전송 트리거)
+    import sqlite3 as _sq
+    lp_e = os.path.join(work, "ledger_edge.sqlite")
+    make_ledger(lp_e)
+    ck_no_edge = active_checksum(lp_e)
+    _c = _sq.connect(lp_e)
+    _c.execute("CREATE TABLE IF NOT EXISTS edges(edge_id TEXT,relation TEXT,source TEXT,target TEXT,candidate INT,state TEXT,evidence_refs TEXT)")
+    _c.execute("INSERT INTO edges VALUES('e1','supports_judgment','x','y',0,'active','[]')")
+    _c.commit()
+    _c.close()
+    chk("T1e active_checksum edge 변화 반영(edge 추가→checksum 변)", ck_no_edge != active_checksum(lp_e))
 
     # T2 🔴 이중게이트: 사람 SAVE 기록 없음 → BLOCK(전송 0)
     calls.clear()

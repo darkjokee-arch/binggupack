@@ -70,18 +70,36 @@ def build_packs(ledger_path=P3.DEFAULT_LEDGER, pack_id=DEFAULT_PACK_ID, title=DE
         return {"status": "BLOCK", "reason": "NO_LINKED_ACTIVE_NODES",
                 "stats": stats, "skipped": skipped}
 
+    # active edge → pack edge. src·tgt 둘 다 pack 노드에 있을 때만(dangling 제외).
+    # pack edge 도 hosted candidate 규약(candidate=True·promotion_allowed=False·evidence_refs 필수).
+    # edge evidence_refs = src 노드의 ev_id(ev_index 에 존재 — load_packs 게이트 통과).
+    node_ids = {n["id"] for n in nodes}
+    node_ev = {n["id"]: n["evidence_refs"][0] for n in nodes}
+    edges = []
+    for er in ext.get("active_edge_rows", []):
+        edge_id, relation, source, target = er[0], er[1], er[2], er[3]
+        if source not in node_ids or target not in node_ids:
+            skipped.append({"edge_id": edge_id, "reason": "src/tgt 노드 pack 미포함"})
+            continue
+        edges.append({
+            "id": edge_id, "source": source, "target": target,
+            "promotion_allowed": False,
+            "properties": {"candidate": True, "relation": relation},
+            "evidence_refs": [node_ev[source]],
+        })
+
     manifest = {
         "format_version": FORMAT_VERSION,
         "pack_id": pack_id,
         "title": title,
         "status": "candidate",  # validated 금지(hosted candidate 전용)
         "promotion_allowed_default": False,
-        "counts": {"nodes": len(nodes), "edges": 0, "evidence": len(ev_index)},
+        "counts": {"nodes": len(nodes), "edges": len(edges), "evidence": len(ev_index)},
     }
-    pack = {"manifest": manifest, "nodes": nodes, "edges": [],
+    pack = {"manifest": manifest, "nodes": nodes, "edges": edges,
             "evidence_index": ev_index, "evidence_chunk": ev_chunk}
     return {"status": "OK", "stats": stats, "skipped": skipped,
-            "built": {"nodes": len(nodes), "evidence": len(ev_index)},
+            "built": {"nodes": len(nodes), "edges": len(edges), "evidence": len(ev_index)},
             "packs": [pack]}
 
 
@@ -170,6 +188,7 @@ def _selftest():
     conn.executescript("""
         CREATE TABLE nodes(node_id TEXT, node_type TEXT, sentence TEXT, candidate INT, state TEXT, content_hash TEXT);
         CREATE TABLE evidence(evidence_id TEXT, sentence TEXT, source_pointer_id TEXT, source_hash TEXT);
+        CREATE TABLE edges(edge_id TEXT, relation TEXT, source TEXT, target TEXT, candidate INT, state TEXT, evidence_refs TEXT);
     """)
     # 도장 5종 세분화: node_type = 저장 도장 EN 라벨(judgment/state/...) — realpack label_kind = 이 값.
     conn.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?)",
@@ -182,6 +201,16 @@ def _selftest():
                  ("EVC-CONV-aaaaaaaa", "확정 판단 가나다", "conv-self:aaaaaaaa", "aaaaaaaa"))
     conn.execute("INSERT INTO evidence VALUES(?,?,?,?)",
                  ("EVC-CONV-bbbbbbbb", "확정 판단 라마바", "conv-self:bbbbbbbb", "bbbbbbbb"))
+    # active edge(src·tgt 둘 다 pack 노드) + dangling edge(tgt 미존재 → skip) + candidate edge(제외)
+    conn.execute("INSERT INTO edges VALUES(?,?,?,?,?,?,?)",
+                 ("EDG-sync-aaaa", "supports_judgment", "node:CONV:aaaaaaaa", "node:CONV:bbbbbbbb",
+                  0, "active", '["node:CONV:aaaaaaaa"]'))
+    conn.execute("INSERT INTO edges VALUES(?,?,?,?,?,?,?)",
+                 ("EDG-dang", "supports_judgment", "node:CONV:aaaaaaaa", "node:CONV:zzzzzzzz",
+                  0, "active", "[]"))
+    conn.execute("INSERT INTO edges VALUES(?,?,?,?,?,?,?)",
+                 ("EDG-cand", "supports_judgment", "node:CONV:aaaaaaaa", "node:CONV:bbbbbbbb",
+                  1, "candidate", "[]"))
     conn.commit()
     conn.close()
 
@@ -199,6 +228,17 @@ def _selftest():
         lk == {"judgment", "state"} and lk <= {"doc", "evidence", "concept", "state", "judgment"})
     chk("T7 load_packs 게이트 통과(위반 0)", validate_packs_obj(r) == [])
     chk("T8 format_version", pack["manifest"]["format_version"] == FORMAT_VERSION)
+    # ── edge 빌드(연결도 KV pack 에 싣기) ──
+    chk("T_e1 active edge 1건 pack 포함(dangling·candidate 제외)",
+        r["built"].get("edges") == 1 and len(pack["edges"]) == 1)
+    chk("T_e2 dangling edge 제외(src/tgt 노드 pack 존재만)",
+        all(e["target"] in {n["id"] for n in pack["nodes"]} for e in pack["edges"]))
+    chk("T_e3 edge candidate:true·promotion_allowed false",
+        all(e["properties"]["candidate"] and e["promotion_allowed"] is False for e in pack["edges"]))
+    chk("T_e4 edge evidence_refs = src 노드 ev(ev_index 정합)",
+        pack["edges"][0]["evidence_refs"][0] == "EVC-CONV-aaaaaaaa")
+    chk("T_e5 counts.edges 정합", pack["manifest"]["counts"]["edges"] == 1)
+    chk("T_e6 edge 포함 load_packs 게이트 통과", validate_packs_obj(r) == [])
     chk("T9 status validated 아님", pack["manifest"]["status"] != "validated")
 
     # active 0 → BLOCK
