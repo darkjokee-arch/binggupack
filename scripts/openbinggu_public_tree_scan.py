@@ -285,7 +285,10 @@ def _selftest():
 PUBLIC_IGNORE = ["*.sqlite", "*.db", "*_graph.yaml", "reports/", "reviews/", "captures/",
                  "tmp/", "__pycache__/", "*.bak_*",
                  # gitignore 대상 비공개·미커밋 라이브 데이터 (path_private_pack_data 자기탐지 회피)
-                 "hosted/workers/data/", "data/packs.json"]
+                 "hosted/workers/data/", "data/packs.json",
+                 # 서드파티 의존성(gitignore·미커밋) — CI/로컬에서 npm install 로 생성됨. 자기 코드 아님 → scan 제외.
+                 # 중첩 경로(hosted/workers/node_modules/...)라 fnmatch 글롭으로 매칭(디렉토리 prefix startswith 불가).
+                 "*/node_modules/*", "node_modules/*"]
 
 
 def main():
