@@ -111,7 +111,8 @@ def save_selected(db, text, indices, ctx, snap_dir, due_date=None):
         if db.con.execute("SELECT 1 FROM nodes WHERE node_id=?", (nid,)).fetchone():
             skipped += 1
             continue
-        saved_items.append({"nid": nid, "sent": sent, "kind": kind})
+        saved_items.append({"nid": nid, "sent": sent, "kind": kind,
+                            "subtype": c.get("semantic_subtype")})
 
     if not saved_items:
         db.audit_append(ctx.get("actor", "human"), "conv_save", "conv_noop", "BLOCK",
@@ -130,7 +131,8 @@ def save_selected(db, text, indices, ctx, snap_dir, due_date=None):
         ntype = lkmap.KO2EN[it["kind"]]
         eid = "EVC-CONV-" + _sent_hash(it["sent"])
         th = _hash(it["sent"])  # capture 시점 동결 — ephemeral 출처(동어반복임을 audit 에 명시)
-        nodes.append({"id": it["nid"], "type": ntype, "sentence": it["sent"]})
+        nodes.append({"id": it["nid"], "type": ntype, "sentence": it["sent"],
+                      "semantic_subtype": it.get("subtype")})  # 보조 메타(canonical 도장 아님)
         evidence.append({"id": eid, "sentence": it["sent"],
                          "source_pointer_id": "conv-self:" + _sent_hash(it["sent"]),
                          "source_missing": False, "source_hash": th, "captured_hash": th,

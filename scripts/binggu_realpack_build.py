@@ -50,6 +50,7 @@ def build_packs(ledger_path=P3.DEFAULT_LEDGER, pack_id=DEFAULT_PACK_ID, title=DE
     seen_ev, skipped = set(), []
     for r in ext["active_rows"]:
         node_id, node_type, sentence = r[0], r[1], r[2]
+        semantic_subtype = r[6] if len(r) > 6 else None  # 보조 메타(canonical 도장 아님)
         h8 = _h8(node_id)
         ev_id = ("EVC-CONV-" + h8) if h8 else None
         if not ev_id or ev_id not in ev_sent:
@@ -58,7 +59,8 @@ def build_packs(ledger_path=P3.DEFAULT_LEDGER, pack_id=DEFAULT_PACK_ID, title=DE
         nodes.append({
             "id": node_id,
             "promotion_allowed": False,
-            "properties": {"candidate": True, "label_kind": node_type, "sentence": sentence},
+            "properties": {"candidate": True, "label_kind": node_type, "sentence": sentence,
+                           "semantic_subtype": semantic_subtype},
             "evidence_refs": [ev_id],
         })
         if ev_id not in seen_ev:
@@ -186,17 +188,18 @@ def _selftest():
     lp = os.path.join(work, "ledger.sqlite")
     conn = sqlite3.connect(lp)
     conn.executescript("""
-        CREATE TABLE nodes(node_id TEXT, node_type TEXT, sentence TEXT, candidate INT, state TEXT, content_hash TEXT);
+        CREATE TABLE nodes(node_id TEXT, node_type TEXT, sentence TEXT, candidate INT, state TEXT, content_hash TEXT, semantic_subtype TEXT);
         CREATE TABLE evidence(evidence_id TEXT, sentence TEXT, source_pointer_id TEXT, source_hash TEXT);
         CREATE TABLE edges(edge_id TEXT, relation TEXT, source TEXT, target TEXT, candidate INT, state TEXT, evidence_refs TEXT);
     """)
     # 도장 5종 세분화: node_type = 저장 도장 EN 라벨(judgment/state/...) — realpack label_kind = 이 값.
-    conn.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?)",
-                 ("node:CONV:aaaaaaaa", "judgment", "확정 판단 가나다", 0, "active", "h1"))
-    conn.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?)",
-                 ("node:CONV:bbbbbbbb", "state", "확정 상태 라마바", 0, "active", "h2"))
-    conn.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?)",
-                 ("node:CONV:cccccccc", "concept", "미확정 후보 사아자", 1, None, "h3"))  # candidate
+    # semantic_subtype = 보조 메타(있으면 properties 전파, None 이면 None — canonical 도장과 별개 축).
+    conn.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?,?)",
+                 ("node:CONV:aaaaaaaa", "judgment", "확정 판단 가나다", 0, "active", "h1", "결정"))
+    conn.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?,?)",
+                 ("node:CONV:bbbbbbbb", "state", "확정 상태 라마바", 0, "active", "h2", None))
+    conn.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?,?)",
+                 ("node:CONV:cccccccc", "concept", "미확정 후보 사아자", 1, None, "h3", "교훈"))  # candidate
     conn.execute("INSERT INTO evidence VALUES(?,?,?,?)",
                  ("EVC-CONV-aaaaaaaa", "확정 판단 가나다", "conv-self:aaaaaaaa", "aaaaaaaa"))
     conn.execute("INSERT INTO evidence VALUES(?,?,?,?)",
@@ -226,6 +229,10 @@ def _selftest():
     lk = {n["properties"]["label_kind"] for n in pack["nodes"]}
     chk("T6b label_kind = 저장 node_type 5종(Claim 아님)",
         lk == {"judgment", "state"} and lk <= {"doc", "evidence", "concept", "state", "judgment"})
+    # 보조 semantic_subtype: 값 있으면 properties 전파, 없으면 None(canonical 도장과 별개 축).
+    sub_by_id = {n["id"]: n["properties"].get("semantic_subtype") for n in pack["nodes"]}
+    chk("T6c semantic_subtype 전파(값 있는 노드=결정, 없는 노드=None)",
+        sub_by_id.get("node:CONV:aaaaaaaa") == "결정" and sub_by_id.get("node:CONV:bbbbbbbb") is None)
     chk("T7 load_packs 게이트 통과(위반 0)", validate_packs_obj(r) == [])
     chk("T8 format_version", pack["manifest"]["format_version"] == FORMAT_VERSION)
     # ── edge 빌드(연결도 KV pack 에 싣기) ──

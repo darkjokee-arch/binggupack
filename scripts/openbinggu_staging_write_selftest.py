@@ -39,7 +39,7 @@ class StagingDB:
     SCHEMA = """
     CREATE TABLE IF NOT EXISTS nodes(node_id TEXT PRIMARY KEY, node_type TEXT, sentence TEXT,
         candidate INTEGER DEFAULT 1, promotion_allowed INTEGER DEFAULT 0, state TEXT DEFAULT 'active',
-        supersedes TEXT, pack_id TEXT, content_hash TEXT, created_at TEXT);
+        supersedes TEXT, pack_id TEXT, content_hash TEXT, created_at TEXT, semantic_subtype TEXT);
     CREATE TABLE IF NOT EXISTS edges(edge_id TEXT PRIMARY KEY, relation TEXT, source TEXT, target TEXT,
         candidate INTEGER DEFAULT 1, state TEXT DEFAULT 'active', evidence_refs TEXT,
         pack_id TEXT, content_hash TEXT, created_at TEXT);
@@ -67,6 +67,10 @@ class StagingDB:
         cols = [c[1] for c in self.con.execute("PRAGMA table_info(audit_log)")]
         if "chain_ver" not in cols:
             self.con.execute("ALTER TABLE audit_log ADD COLUMN chain_ver TEXT")
+        # nodes 보조 필드 마이그레이션 — semantic_subtype 없으면 추가(기존 ledger 비파괴·기존 행 NULL).
+        ncols = [c[1] for c in self.con.execute("PRAGMA table_info(nodes)")]
+        if "semantic_subtype" not in ncols:
+            self.con.execute("ALTER TABLE nodes ADD COLUMN semantic_subtype TEXT")
         self.con.commit()
 
     def snapshot(self, snap_dir, name):
@@ -189,8 +193,8 @@ def staging_apply(db, pack, ctx, snap_dir, ts=None):
         try:
             db.con.execute("BEGIN")
             for n in pack["nodes"]:
-                db.con.execute("INSERT INTO nodes(node_id,node_type,sentence,candidate,promotion_allowed,state,pack_id,content_hash,created_at) VALUES(?,?,?,1,0,'active',?,?,?)",
-                               (n["id"], n["type"], n["sentence"], pack["pack_id"], ch, now))
+                db.con.execute("INSERT INTO nodes(node_id,node_type,sentence,candidate,promotion_allowed,state,pack_id,content_hash,created_at,semantic_subtype) VALUES(?,?,?,1,0,'active',?,?,?,?)",
+                               (n["id"], n["type"], n["sentence"], pack["pack_id"], ch, now, n.get("semantic_subtype")))
             for e in pack["edges"]:
                 db.con.execute("INSERT INTO edges(edge_id,relation,source,target,candidate,state,evidence_refs,pack_id,content_hash,created_at) VALUES(?,?,?,?,1,'active',?,?,?,?)",
                                (e["id"], e["relation"], e["source"], e["target"], json.dumps(e["evidence_refs"]), pack["pack_id"], ch, now))

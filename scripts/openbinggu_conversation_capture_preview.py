@@ -53,6 +53,22 @@ def _norm_hash(s):
     return hashlib.sha256(re.sub(r"\s+", " ", s).strip().encode("utf-8")).hexdigest()[:12]
 
 
+def _suggest_subtype(sent):
+    """보조 semantic_subtype 제안 (교훈/결정/선호/설계결정/버그패턴/사실 — canonical 5종 도장 아님).
+    값 원천 = cos shadow, opt-in 게이트는 canon.enabled() 재사용(semantic_label_enabled OR Ollama bge-m3).
+    hi/ambiguous band 만 채움, lo/차단/실패/OFF → None(NULL 저장). enabled OFF면 embed 호출 0(순수성 보존)."""
+    if not canon.enabled():
+        return None
+    try:
+        from binggu_semantic_shadow import get_cached_shadow  # lazy import(순환 import 회피)
+        sug = get_cached_shadow().subtype_suggestion(sent)
+        if sug and sug.get("band") in ("hi", "ambiguous"):
+            return sug["sem_subtype"]
+    except Exception:
+        return None
+    return None
+
+
 def capture_preview(text, max_candidates=DEFAULT_MAX):
     """대화 발췌 → 핵심문장 후보 미리보기. 순수 함수(write 0). 반환 dict."""
     max_candidates = max(1, min(int(max_candidates or DEFAULT_MAX), HARD_MAX))
@@ -104,11 +120,14 @@ def capture_preview(text, max_candidates=DEFAULT_MAX):
         if sem is not None:
             kind = sem["kind"]
             rule_id = "semantic_%s_%.2f" % (sem["band"], sem["conf"])
+        # 보조 semantic_subtype(6종) — label_kind(5종 도장)와 별개 축. 있으면 채움, 없으면 None(NULL).
+        semantic_subtype = _suggest_subtype(sent)
         verdict = a0.classify_node(
             {"id": "preview:" + h, "sentence": sent, "node_type": lkmap.KO2EN[kind],
              "evidence_refs": ["preview"]}, status="candidate")
         # 문장 전체 저장(발췌 cut 제거) — 본 것 = 저장된 것. node_id/hash 도 전체 기준.
         candidates.append({"sentence": sent, "label_kind": kind, "rule_id": rule_id,
+                           "semantic_subtype": semantic_subtype,
                            "a0_verdict": verdict["verdict"], "candidate": True})
 
     lines = ["# 캡처 미리보기 — 후보 %d건 (전부 candidate, 미저장)" % len(candidates),

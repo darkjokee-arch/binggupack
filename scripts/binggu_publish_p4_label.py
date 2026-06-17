@@ -35,11 +35,12 @@ def _rows_to_build(rows):
     nodes, evidence = [], []
     for i, r in enumerate(rows):
         node_id, node_type, sentence = r[0], r[1], r[2]
+        semantic_subtype = r[6] if len(r) > 6 else None  # 보조 메타(canonical 도장 아님)
         label_kind = EN2KO.get(node_type, node_type)  # 비매핑은 그대로 → G23이 잡음(fail-closed)
         ev_id = "EVC-real-%d" % i
         nodes.append({"id": node_id,
                       "properties": {"label_kind": label_kind, "sentence": sentence,
-                                     "semantic_subtype": None},
+                                     "semantic_subtype": semantic_subtype},
                       "evidence_refs": [ev_id]})
         evidence.append({"id": ev_id, "text": sentence, "source": "real_ledger"})
     return nodes, evidence
@@ -51,8 +52,14 @@ def extract_by_state(ledger_path):
         return {"total": 0, "candidate_rows": [], "active_rows": []}
     conn = sqlite3.connect("file:%s?mode=ro" % ledger_path, uri=True)
     cur = conn.cursor()
-    cur.execute("SELECT node_id,node_type,sentence,candidate,state,content_hash FROM nodes")
-    nrows = cur.fetchall()
+    # 보조 필드 semantic_subtype — 구 ledger(컬럼 부재) 대비 방어, 항상 7컬럼(r[6]) 정규화.
+    ncols = [c[1] for c in cur.execute("PRAGMA table_info(nodes)")]
+    if "semantic_subtype" in ncols:
+        cur.execute("SELECT node_id,node_type,sentence,candidate,state,content_hash,semantic_subtype FROM nodes")
+        nrows = cur.fetchall()
+    else:
+        cur.execute("SELECT node_id,node_type,sentence,candidate,state,content_hash FROM nodes")
+        nrows = [r + (None,) for r in cur.fetchall()]
     conn.close()
     candidate_rows = [r for r in nrows if r[3]]
     active_rows = [r for r in nrows if not r[3] and (r[4] in (None, "active", "confirmed"))]

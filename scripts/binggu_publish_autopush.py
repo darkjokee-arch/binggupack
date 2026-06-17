@@ -95,8 +95,10 @@ def active_checksum(ledger_path=None):
         return "EMPTY"
     h = hashlib.sha256()
     # node_id 기준 정렬 → 결정적. 각 행 canonical json.
+    # r[6]=semantic_subtype(보조 메타) 포함 → backfill/subtype 변경도 KV 전송 트리거(필드만 바뀐 변화 감지).
     for r in sorted(rows, key=lambda x: str(x[0])):
-        h.update(json.dumps([r[0], r[1], r[2], r[5]], ensure_ascii=False, sort_keys=True).encode("utf-8"))
+        h.update(json.dumps([r[0], r[1], r[2], r[5], r[6] if len(r) > 6 else None],
+                            ensure_ascii=False, sort_keys=True).encode("utf-8"))
     # edge 변화도 전송 트리거(사람 도장→운영 등재 시 자동 KV 반영). "E" prefix 로 node 와 분리.
     for e in sorted(edge_rows, key=lambda x: str(x[0])):
         h.update(json.dumps(["E", e[0], e[1], e[2], e[3]], ensure_ascii=False, sort_keys=True).encode("utf-8"))

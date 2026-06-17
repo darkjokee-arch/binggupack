@@ -30,8 +30,15 @@ def extract_real_ledger(ledger_path):
     """ledger read-only. active(non-candidate) node = SAVE 확정분만. candidate(미SAVE)는 실데이터 취급 금지."""
     conn = sqlite3.connect("file:%s?mode=ro" % ledger_path, uri=True)
     cur = conn.cursor()
-    cur.execute("SELECT node_id,node_type,sentence,candidate,state,content_hash FROM nodes")
-    nrows = cur.fetchall()
+    # 보조 필드 semantic_subtype — 마이그레이션 전 구 ledger(ro라 ALTER 불가) 대비 방어.
+    # 항상 7컬럼(...,semantic_subtype)으로 정규화: 컬럼 부재 시 None 패딩(r[6] 일관).
+    ncols = [c[1] for c in cur.execute("PRAGMA table_info(nodes)")]
+    if "semantic_subtype" in ncols:
+        cur.execute("SELECT node_id,node_type,sentence,candidate,state,content_hash,semantic_subtype FROM nodes")
+        nrows = cur.fetchall()
+    else:
+        cur.execute("SELECT node_id,node_type,sentence,candidate,state,content_hash FROM nodes")
+        nrows = [r + (None,) for r in cur.fetchall()]
     cur.execute("SELECT evidence_id,sentence,source_pointer_id,source_hash FROM evidence")
     erows = cur.fetchall()
     # edges (구버전 ledger 에 테이블 부재 가능 — 방어)
@@ -62,10 +69,11 @@ def _to_build_inputs(ext):
     nodes, evidence = [], []
     for i, r in enumerate(ext["active_rows"]):
         node_id, node_type, sentence = r[0], r[1], r[2]
+        semantic_subtype = r[6] if len(r) > 6 else None  # 보조 메타(canonical 도장 아님)
         ev_id = "EVC-real-%d" % i
         nodes.append({"id": node_id,
                       "properties": {"label_kind": node_type, "sentence": sentence,
-                                     "semantic_subtype": None},
+                                     "semantic_subtype": semantic_subtype},
                       "evidence_refs": [ev_id]})
         evidence.append({"id": ev_id, "text": sentence, "source": "real_ledger"})
     return nodes, evidence
