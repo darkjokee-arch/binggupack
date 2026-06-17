@@ -1,5 +1,7 @@
 # v0.8 개인용 쓰기 루프 설계 (2026-06-11, GOAL MODE — 설계 단계)
 
+> ⚠️ **종속 고지 (2026-06-17):** `BINGGUPACK_CONSTITUTION_2026-06-17.md`(헌법)에 종속. 충돌 시 헌법 우선. 본 문서의 "자동 승격 0"·"자동 관찰 daemon/hook HOLD"는 다음으로 갱신: 상시 백그라운드 **daemon은 HOLD 유지**, trigger 기반 **capture(후보)는 허용**(헌법 §2). 점진 승격은 **사람 승인 게이트** 하에 허용(헌법 §2·§6).
+
 > **루프**: preview → 사용자 선택 → candidate 저장 → 피드백 기록 → real staging 검증.
 > **위험 인식**: v0.7=읽기, v0.8=저장. 설계→temp→real staging(별도 gate)→rollback 순서 고정.
 > **불변**: candidate-only · promotion_allowed=false · confirmed 0 · OpenCrab apply 0 · 원문 저장 금지 · audit/rollback 필수 · live deploy 금지(채팅 hosted write 노출은 v0.8 범위 외 — 로컬 루프 우선).

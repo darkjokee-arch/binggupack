@@ -2,6 +2,8 @@
 
 # OpenBinggu Public Release Policy — Public Skeleton / Private Data Separation
 
+> ⚠️ **종속 고지 (2026-06-17):** `BINGGUPACK_CONSTITUTION_2026-06-17.md`(헌법)에 종속. 충돌 시 헌법 우선. 외부 수확·철학 필터(keep/challenge/discard)·점진 승격·각 사용자=자기 데이터 owner(edge actor=human 자기확정)는 헌법 §2·§3·§6 적용. 자동 수집물은 후보 스테이지까지만, 영구화는 사람 SAVE/승인.
+
 > OpenBinggu는 향후 GitHub에 **framework/skeleton**으로 공개될 수 있다.
 > 공개 대상은 **골조·정책·템플릿·검증기·워크플로 코드**이며, **작성자의 실제 데이터는 절대 포함하지 않는다.**
 > 이번 문서는 문서화만. production write·GitHub push·repo 생성 0.
