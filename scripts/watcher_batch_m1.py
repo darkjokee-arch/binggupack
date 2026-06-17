@@ -169,7 +169,8 @@ _SCAN_SHAPES = [
     ("scan_vendor",   re.compile(r"\b(?:sk-live-[A-Za-z0-9]{8,}|sk-[A-Za-z0-9]{16,}|gh[oprsu]_[A-Za-z0-9]{20,})")),
     # bearer 토큰.
     ("scan_bearer",   re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._\-]{16,}")),
-    ("scan_kv",       re.compile(r"(?i)(?:api[_-]?key|token|secret|password|passwd)\s*[:=]\s*\S{4,}")),
+    # 값이 영숫자/특수 토큰일 때만 secret (한글 서술 "token: 서명방식…"=단어≠값 오탐 제외). 박제 feedback scan_kv 오탐.
+    ("scan_kv",       re.compile(r"(?i)(?:api[_-]?key|token|secret|password|passwd)\s*[:=]\s*['\"]?[A-Za-z0-9_\-+/=.]{4,}")),
     # 긴 base64-ish secret.
     ("scan_b64",      re.compile(r"\b[A-Za-z0-9+/=_-]{32,}\b")),
 ]
