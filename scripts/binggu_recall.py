@@ -24,8 +24,10 @@
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import sqlite3
+import struct
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -131,6 +133,78 @@ def _load_graph(ledger_path):
 _SEMANTIC_FLOOR = 0.55
 
 
+# ---- 노드 임베딩 영속 캐시 (회상 N+1 embed → query 1회) ----
+# 별도 sqlite(recall_embed_cache) — 운영 ledger 불변(순수 파생 데이터). 키 = sentence sha256 + model_digest
+# → 문장 변경/모델 교체 시 자동 miss·재계산(stale 0). leak_guard 통과 텍스트만 캐시(PII embed 0).
+def _embed_cache_path(home=None):
+    base = home or os.path.join(os.path.expanduser("~"), ".binggupack")
+    return os.path.join(base, "recall_embed_cache.sqlite")
+
+
+def _open_embed_cache(home=None):
+    p = _embed_cache_path(home)
+    d = os.path.dirname(p)
+    if d:
+        os.makedirs(d, exist_ok=True)
+    con = sqlite3.connect(p)
+    con.execute("CREATE TABLE IF NOT EXISTS embed_cache("
+                "sent_sha TEXT, model TEXT, dim INTEGER, vec BLOB, "
+                "PRIMARY KEY(sent_sha, model))")
+    return con
+
+
+def _sent_sha(text):
+    return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
+
+
+def _pack_vec(v):
+    return struct.pack("<%df" % len(v), *v)
+
+
+def _unpack_vec(blob, dim):
+    return list(struct.unpack("<%df" % dim, blob))
+
+
+def precompute_embeddings(ledger_path, home=None, embed_fn=None):
+    """active 노드 sentence 임베딩 미리 캐시(멱등) — 회상 N+1 embed → query 1회로.
+    semantic OFF(opt-in 미통과)면 SKIP. ledger read-only · 캐시 sqlite 만 write(운영 데이터 불변)."""
+    try:
+        if embed_fn is None:
+            import binggu_canonical_semantic as CS
+            if not CS.enabled():
+                return {"status": "SKIP", "reason": "semantic OFF (opt-in 미통과)"}
+        import binggu_semantic_shadow as SH
+        embed = embed_fn or SH._embed
+        model = SH.model_digest()
+        g = _load_graph(ledger_path)
+        cache = _open_embed_cache(home)
+        computed = skipped = failed = 0
+        for n in g["nodes"]:
+            text = n["sentence"]
+            sha = _sent_sha(text)
+            if cache.execute("SELECT 1 FROM embed_cache WHERE sent_sha=? AND model=?",
+                             (sha, model)).fetchone():
+                skipped += 1
+                continue
+            ok, _ = SH.leak_guard(text)
+            if not ok:
+                failed += 1
+                continue
+            v = embed(text)
+            if v is None:
+                failed += 1
+                continue
+            cache.execute("INSERT OR REPLACE INTO embed_cache VALUES(?,?,?,?)",
+                          (sha, model, len(v), _pack_vec(v)))
+            computed += 1
+        cache.commit()
+        cache.close()
+        return {"status": "OK", "total": len(g["nodes"]), "computed": computed,
+                "skipped": skipped, "failed": failed, "model": model}
+    except Exception as e:
+        return {"status": "ERROR", "reason": str(e)}
+
+
 def _semantic_scorer(home=None, embed_fn=None):
     """bge-m3 cos 보강 — 사용 가능하면 (query, sentence) → cos 유사도 함수, 아니면 None.
 
@@ -163,19 +237,37 @@ def _semantic_scorer(home=None, embed_fn=None):
             embed, dot = embed_fn, SH._dot
 
         _qcache = {}
+        # 노드 임베딩 영속 캐시 — 실 Ollama 경로(embed_fn None)만. fake embed 주입(테스트)은 캐시 우회.
+        _cache = _open_embed_cache(home) if embed_fn is None else None
+        _model = SH.model_digest()
+
+        def _emb(text):
+            if _cache is None:
+                return embed(text)
+            sha = _sent_sha(text)
+            row = _cache.execute("SELECT dim, vec FROM embed_cache WHERE sent_sha=? AND model=?",
+                                 (sha, _model)).fetchone()
+            if row:
+                return _unpack_vec(row[1], row[0])  # 캐시 hit — embed 0
+            v = embed(text)
+            if v is not None:
+                _cache.execute("INSERT OR REPLACE INTO embed_cache VALUES(?,?,?,?)",
+                               (sha, _model, len(v), _pack_vec(v)))
+                _cache.commit()
+            return v
 
         def score(query, sentence):
             # PII/secret 선차단(leak_guard) — shadow/canonical 임베드 경로와 동일 패리티(회상 경로 누락 수정).
             if query not in _qcache:
                 ok_q, _ = SH.leak_guard(query)
-                _qcache[query] = embed(query) if ok_q else None  # query 1회만 임베드(캐시)
+                _qcache[query] = _emb(query) if ok_q else None  # query 1회만 임베드(캐시)
             qe = _qcache[query]
             if qe is None:
                 return None
             ok_s, _ = SH.leak_guard(sentence)
             if not ok_s:
                 return None  # 잔존 PII/secret → semantic 미개입(어휘 fallback)
-            se = embed(sentence)
+            se = _emb(sentence)  # 노드 임베딩 영속 캐시(hit 시 embed 0)
             if se is None:
                 return None
             return dot(qe, se)
@@ -637,6 +729,12 @@ def _selftest():
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] and sys.argv[1] == "--precompute":
+        import json as _json
+        import binggu_platform as _plat
+        _r = precompute_embeddings(_plat.default_ledger())
+        print(_json.dumps(_r, ensure_ascii=False, indent=2))
+        sys.exit(0 if _r.get("status") in ("OK", "SKIP") else 1)
     if not sys.argv[1:] or sys.argv[1] == "--selftest":
         sys.exit(_selftest())
     print("usage: binggu_recall.py [--selftest]")
