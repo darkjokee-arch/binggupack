@@ -66,6 +66,14 @@ LLM wiki와의 차이는 다음이다.
 - `edges/evidence`에는 subtype 없음
 - subtype은 노드 보조필드이며 canonical node type이 아니다
 
+관계(edge) ledger 저장 실상태 (2026-06-17 코드 실측):
+
+- `watcher_edge_mvp21`: evidence_supports edge를 **dry-run temp JSONL로만 생성**(운영 INSERT 0).
+- `binggu_graph_confirm`: approve해도 **report only**, ledger write 0 (= §14 옛 우선순위가 메우려던 갭).
+- `hag_sync_adapter.import_confirmed_edges`: **유일하게 운영 ledger.edges INSERT 작동**. 단 `actor=human` owner-only + owner 31노드 전용 후보(신규 유저 후보 0).
+- `binggu.py` CLI: edge 관련 명령 0 (사용자가 손으로 관계를 만들어 저장하는 경로 없음).
+- → 결론: 신규/일반 유저가 관계를 ledger에 저장하는 작동 경로 = 0. 그래서 ㉯ 관계저장은 ㉮ 입력으로 점이 쌓인 뒤 `hag_sync_adapter` 경로 확장으로 연다(§14).
+
 ---
 
 ## 4. 핵심 데이터 모델
@@ -480,6 +488,8 @@ Harness = 반복 실수 강제 방지
 
 ## 9. 다음 구현 단계
 
+> ⚠️ **순서 주의 (2026-06-17):** 아래 Phase 1~10은 기능 축의 목록이며 **owner 환경 기준 구상**이다. 실제 착수 순서는 §14(공개배포 빈 뼈대 전제)가 우선한다 — 첫 삽은 **㉮ 입력 범용화(`watcher_incoming_folder_adapter`)**, 그다음 온보딩, 그다음에야 Phase 2(why-edge 저장)다. 점이 0개인 신규 유저에겐 입력이 선행 조건이다.
+
 ### Phase 1. subtype 품질 고정
 
 목표:
@@ -804,29 +814,37 @@ ai_promote
 
 ---
 
-## 14. 바로 다음 작업
+## 14. 바로 다음 작업 (2026-06-17 4cli 토론으로 순서 재확정)
 
-다음 구현은 새 시스템 작성이 아니라 기존 구현 연결이다.
+> ⚠️ **갱신 사유:** 아래 "graph_confirm → ledger edge 저장" 중심의 옛 우선순위는 **owner 31노드 환경 전제**(점이 이미 많아 선만 이으면 되는 상태)였다. 빙구팩은 **공개배포 빈 뼈대**이고, 신규 사용자는 점이 0개라 관계저장부터 만들면 화면이 영원히 빈칸이다(코드 실측: `binggu_graph_preview` 빈 입력 후보 0). 따라서 첫 삽은 **㉮ 입력 범용화**로 점·근거를 먼저 채우는 것이다. (debate: `~/.claude/memory/debate/20260617_1949_binggupack_p0_3branch/`)
 
-우선순위:
+### P0 3갈래와 확정 순서
+P0(헌법 §5) = 기존 기록 → 점·근거·관계 자동 채움. 세 갈래의 순서:
 
-1. `graph_confirm` 결과를 ledger edge 저장으로 연결
-2. `why_capture` 자연어 패턴 추가
-3. `why_search`/`judgment_trace` 읽기 API 추가
-4. `preflight_context` MCP 도구 추가
-5. 반복 why-edge를 AGENTS/hook/test로 승격하는 harness exporter 추가
+1. **㉮ 입력 범용화 (첫 삽)** — 박제·traj·md 폴더를 읽어 evidence·노드를 자동 채움. 이게 곧 신규 온보딩(자기 기록 먹이기).
+2. **㉰ 빈그래프 온보딩** — "폴더 넣기 → 점 생성" 흐름 노출 + 빈 장부가 정상임을 안내.
+3. **㉯ 관계 실제저장** — 점이 쌓인 뒤. 새 `EDGE SAVE` 경로를 만들지 말고 기존 `hag_sync_adapter.import_confirmed_edges(actor="human")`(멱등·dangling skip 완성)를 확장 재사용. (별도 경로 신설 시 ledger write 두 갈래로 갈려 데카르트곱 발산을 두 곳에서 막아야 함)
 
-첫 작업의 정의:
+### 첫 구현 모듈 — `watcher_incoming_folder_adapter.py` (신규)
+- 입력: 박제·traj·md 폴더 (`source_path`/`mtime`/`source_kind`)
+- 출력: 기존 MVP2 노드 파이프라인 호환 `evidence_chunk[]` (각 chunk: `evc_id`=`sha256[:24]`, `source_path`, `block_index`, `text`, `text_hash`). PII/secret 잔존 시 전체 STOP.
+- 핵심함수: `scan_markdown_files` / `parse_markdown_preserve_blocks`(표·코드블록·중첩리스트를 쪼개지 않고 한 덩어리 보존 — `adapt_text`의 빈줄 단락분할 우회) / `make_evidence_chunks` / `make_evc_id`(기존 `EVC-sha8` 폐기, 대량 박제 충돌 방지) / `redact_and_validate`(기존 `batch_redact`·`scan_residual_pii` 재사용) / `adapt_incoming_folder`
+- **P0 제외(나중)**: manifest 증분, quarantine, owner ledger 통합, 공개배포용 명칭 일반화.
 
+### 검증 게이트 (직접실행, mock만으론 GO 금지)
+실 박제 골든셋 20개+ / 근거 1:1 추적률 100%(output→source_path+block 역추적) / dedup 충돌 0 / redaction false negative 0 / PII잔존 시 전체 STOP / 기존 MVP2 노드 생성까지 실제 연결 / 표·코드블록·중첩리스트 구조보존 샘플 확인.
+
+### ㉯ 관계저장 단계의 옛 정의 (점이 쌓인 뒤 수행)
 ```text
 approved edge
 → validate_verb_edge 재검증
 → evidence_refs 확인
 → duplicate 확인
-→ ledger.edges INSERT
+→ ledger.edges INSERT  (hag_sync_adapter.import_confirmed_edges 경로 재사용)
 → audit append
 → pack export
 → cloud read-only publish
 ```
+node→node 강한관계(`supports_judgment`) 자동생성은 영구 금지(사람 도장만). 자동은 evidence_supports(증거→판단)뿐.
 
-이 작업이 끝나면 BingguPack은 "subtype이 붙은 노드 저장소"에서 "근거 사슬을 저장하는 판단 그래프"로 넘어간다.
+이 순서로 가면 BingguPack은 "owner 한 명의 노드 저장소"에서 "누구나 자기 기록을 먹여 채우는 판단 그래프"로 넘어간다.
