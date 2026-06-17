@@ -184,6 +184,89 @@ def record_proposals(conn, proposals, now=0):
             "total_proposed": len(proposals)}
 
 
+# ── B2: 사람 도장(confirm) + owner-only import (운영 edges write) ──
+class SyncError(Exception):
+    """동기화 정책 위반(BLOCK)."""
+
+
+def confirm_edge(conn, edge_key, actor, now=0):
+    """사람 도장 — sync_edges proposed→confirmed. actor='human' 만(C5 사칭 차단).
+
+    confirm 은 사람이 119 후보 중 의미 있는 것을 고르는 행위 = owner 행위. AI 경로 금지.
+    이미 imported 면 no-op(멱등).
+    """
+    if actor != "human":
+        raise SyncError("BLOCK actor!=human (confirm=사람 도장): %r" % actor)
+    cur = conn.cursor()
+    cur.execute("SELECT status FROM sync_edges WHERE edge_key = ?", (edge_key,))
+    row = cur.fetchone()
+    if row is None:
+        raise SyncError("unknown edge_key: %s" % edge_key)
+    if row[0] == "imported":
+        return {"edge_key": edge_key, "status": "imported", "noop": True}
+    cur.execute("UPDATE sync_edges SET status='confirmed', updated_at=? WHERE edge_key=?",
+                (now, edge_key))
+    conn.commit()
+    return {"edge_key": edge_key, "status": "confirmed"}
+
+
+def import_confirmed_edges(sync_conn, ledger_path, actor, now=0):
+    """owner-only — sync_edges 'confirmed'(사람 도장) → 운영 ledger edges INSERT.
+
+    멱등(imported_edge_id 있으면 skip·INSERT OR IGNORE)·dangling(운영 노드 부재) skip·
+    actor='human' 만(C5). ⚠️ 운영 ledger write 라 AI 하네스 hard block — owner 셸 전용.
+    selftest 는 temp 운영 ledger 로만 검증.
+    """
+    if actor != "human":
+        raise SyncError("BLOCK actor!=human (owner-only import): %r" % actor)
+    cur = sync_conn.cursor()
+    cur.execute("SELECT edge_key, src_node_id, dst_node_id, relation, evidence_refs, imported_edge_id "
+                "FROM sync_edges WHERE status = 'confirmed'")
+    confirmed = cur.fetchall()
+    op = sqlite3.connect(ledger_path)
+    imported = skipped = dangling = 0
+    try:
+        opc = op.cursor()
+        opc.execute("SELECT node_id FROM nodes")
+        node_ids = {r[0] for r in opc.fetchall()}
+        for ek, sid, did, rel, ev, imp in confirmed:
+            if imp:                       # 이미 import → no-op(멱등)
+                skipped += 1
+                continue
+            if sid not in node_ids or did not in node_ids:  # dangling 방지
+                dangling += 1
+                continue
+            edge_id = "EDG-sync-%s" % ek[:16]
+            content = hashlib.sha256(("%s|%s|%s|%s" % (rel, sid, did, ek)).encode()).hexdigest()
+            opc.execute(
+                "INSERT OR IGNORE INTO edges (edge_id, relation, source, target, candidate,"
+                " state, evidence_refs, content_hash, created_at) VALUES (?,?,?,?,0,'active',?,?,?)",
+                (edge_id, rel, sid, did, ev, content, now))
+            op.commit()
+            cur.execute("UPDATE sync_edges SET status='imported', imported_edge_id=?, updated_at=? "
+                        "WHERE edge_key=?", (edge_id, now, ek))
+            sync_conn.commit()
+            imported += 1
+    finally:
+        op.close()
+    return {"imported": imported, "skipped": skipped, "dangling": dangling}
+
+
+# ── 표시용 목록 (운영 노드 sentence 조인 · read-only) ──────────────
+def list_view(sync_conn, ledger_path, status=None):
+    """sync_edges + 운영 노드 sentence 조인 — 사람이 도장 결정할 때 보는 목록. read-only."""
+    snap = {}
+    if ledger_path and os.path.exists(ledger_path):
+        snap = {n["node_id"]: n["sentence"] for n in snapshot_operating_nodes(ledger_path)}
+    cur = sync_conn.cursor()
+    base = "SELECT edge_key, src_node_id, dst_node_id, relation, status FROM sync_edges"
+    rows = (cur.execute(base + " WHERE status = ?", (status,)).fetchall()
+            if status else cur.execute(base).fetchall())
+    return [{"edge_key": ek, "status": st, "relation": rel,
+             "src": (snap.get(sid) or sid)[:40], "dst": (snap.get(did) or did)[:40]}
+            for ek, sid, did, rel, st in rows]
+
+
 # ── selftest (temp 만 · 운영 ledger/blind/CF 미접촉) ───────────────
 def _selftest():
     import tempfile
@@ -275,6 +358,72 @@ def _selftest():
     from openbinggu_label_kind_map import EN2KO as SRC
     ck("T8 KMAP 단일 정본 재사용", EN2KO is SRC)
 
+    # ── B2: confirm(사람 도장) + owner-only import(운영 edges write) ──
+    conn = sqlite3.connect(led)
+    conn.execute("CREATE TABLE edges (edge_id TEXT PRIMARY KEY, relation TEXT, source TEXT, target TEXT,"
+                 " candidate INTEGER DEFAULT 1, state TEXT DEFAULT 'active', evidence_refs TEXT,"
+                 " pack_id TEXT, content_hash TEXT, created_at INTEGER)")
+    conn.commit()
+    conn.close()
+    sdb2 = os.path.join(tmp, "sync2.sqlite")
+    sc2 = open_sync_db(sdb2)
+    props_b2 = build_proposals(snapshot=snap)
+    record_proposals(sc2, props_b2, now=100)
+    target_key = props_b2[0]["edge_key"]
+
+    # T9 confirm actor!=human BLOCK
+    blk = False
+    try:
+        confirm_edge(sc2, target_key, actor="ai", now=110)
+    except SyncError:
+        blk = True
+    ck("T9 confirm actor!=human BLOCK", blk)
+    # T10 confirm human → confirmed
+    ck("T10 confirm human → confirmed", confirm_edge(sc2, target_key, actor="human", now=120)["status"] == "confirmed")
+    # T11 import actor!=human BLOCK(owner-only)
+    blk2 = False
+    try:
+        import_confirmed_edges(sc2, led, actor="auto", now=130)
+    except SyncError:
+        blk2 = True
+    ck("T11 import actor!=human BLOCK(owner-only·C5)", blk2)
+    # T12 import human → 운영 edges 1행(confirmed 1건만)
+    imp = import_confirmed_edges(sc2, led, actor="human", now=140)
+    op = sqlite3.connect(led)
+    ecnt = op.execute("SELECT count(*) FROM edges").fetchone()[0]
+    erow = op.execute("SELECT relation, candidate, state FROM edges").fetchone()
+    op.close()
+    ck("T12 import → 운영 edges 1행(confirmed만)", imp["imported"] == 1 and ecnt == 1)
+    ck("T12b 등재 edge=supports_judgment·active·non-candidate",
+       erow[0] == "supports_judgment" and erow[1] == 0 and erow[2] == "active")
+    # T13 import 멱등 — 2회 → 중복 0
+    imp2 = import_confirmed_edges(sc2, led, actor="human", now=150)
+    op = sqlite3.connect(led)
+    ecnt2 = op.execute("SELECT count(*) FROM edges").fetchone()[0]
+    op.close()
+    ck("T13 import 2회 → 중복 0(멱등)", imp2["imported"] == 0 and ecnt2 == 1)
+    # T14 sync_edges imported 표기 + imported_edge_id 역추적
+    st = sc2.execute("SELECT status, imported_edge_id FROM sync_edges WHERE edge_key=?", (target_key,)).fetchone()
+    ck("T14 imported 표기+역추적", st[0] == "imported" and st[1] and st[1].startswith("EDG-sync-"))
+    # T15 미도장(proposed)은 운영 미등재
+    other = props_b2[1]["edge_key"]
+    ck("T15 미도장(proposed)은 운영 미등재",
+       sc2.execute("SELECT status FROM sync_edges WHERE edge_key=?", (other,)).fetchone()[0] == "proposed")
+    # T16 dangling(운영 노드 부재) confirmed → skip
+    sc2.execute("INSERT INTO sync_edges (edge_key,src_node_id,dst_node_id,relation,kmap_version,status,created_at,updated_at)"
+                " VALUES ('dangkey','no_src','no_dst','supports_judgment','v1','confirmed',0,0)")
+    sc2.commit()
+    impd = import_confirmed_edges(sc2, led, actor="human", now=160)
+    ck("T16 dangling → skip(운영 미등재)", impd["dangling"] >= 1 and impd["imported"] == 0)
+    sc2.close()
+
+    # T17 list_view 운영 sentence 조인
+    sc3 = open_sync_db(os.path.join(tmp, "sync3.sqlite"))
+    record_proposals(sc3, build_proposals(snapshot=snap), now=0)
+    lv = list_view(sc3, led)
+    ck("T17 list_view sentence 조인", len(lv) == 4 and all("src" in x and "edge_key" in x for x in lv))
+    sc3.close()
+
     passed = sum(1 for _, ok in results if ok)
     total = len(results)
     for name, ok in results:
@@ -284,8 +433,75 @@ def _selftest():
     return passed == total
 
 
+def main(argv=None):
+    import argparse
+    import time
+    try:
+        import binggu_platform as P
+        home = P.binggu_home()
+    except Exception:
+        home = os.path.expanduser("~/.binggupack")
+    def_ledger = os.path.join(home, "ledger.sqlite")
+    def_sync = os.path.join(home, "sync_edges.sqlite")
+    p = argparse.ArgumentParser(prog="hag_sync_adapter",
+                                description="운영 ledger ↔ blind 동기화 어댑터(단방향·사람 도장)")
+    p.add_argument("--selftest", action="store_true")
+    p.add_argument("--build", action="store_true", help="운영 스냅샷→edge proposal 생성·기록(read-only 생성)")
+    p.add_argument("--list", action="store_true", help="후보 목록(sentence 조인)")
+    p.add_argument("--confirm", metavar="EDGE_KEY", help="사람 도장 proposed→confirmed (owner)")
+    p.add_argument("--import-edges", action="store_true", help="confirmed→운영 edges 등재(owner-only·운영 write)")
+    p.add_argument("--status", help="--list 필터(proposed/confirmed/imported)")
+    p.add_argument("--ledger", default=def_ledger)
+    p.add_argument("--sync-db", default=def_sync)
+    p.add_argument("--actor", default="human")
+    a = p.parse_args(argv)
+
+    if a.selftest:
+        return 0 if _selftest() else 1
+    now = int(time.time())
+    if a.build:
+        props = build_proposals(a.ledger)
+        sc = open_sync_db(a.sync_db)
+        r = record_proposals(sc, props, now=now)
+        sc.close()
+        print("build: snapshot→%d proposals · %s" % (len(props), r))
+        return 0
+    if a.list:
+        sc = open_sync_db(a.sync_db)
+        rows = list_view(sc, a.ledger, status=a.status)
+        sc.close()
+        for x in rows:
+            print("[%-9s] %s\n    %s --(%s)--> %s" % (x["status"], x["edge_key"][:16],
+                                                      x["src"], x["relation"], x["dst"]))
+        print("총 %d건" % len(rows))
+        return 0
+    if a.confirm:
+        sc = open_sync_db(a.sync_db)
+        try:
+            r = confirm_edge(sc, a.confirm, actor=a.actor, now=now)
+            print("confirm:", r)
+        except SyncError as e:
+            print("BLOCK:", e)
+            return 2
+        finally:
+            sc.close()
+        return 0
+    if a.import_edges:
+        sc = open_sync_db(a.sync_db)
+        try:
+            r = import_confirmed_edges(sc, a.ledger, actor=a.actor, now=now)
+            print("import(owner-only):", r)
+        except SyncError as e:
+            print("BLOCK:", e)
+            return 2
+        finally:
+            sc.close()
+        return 0
+    p.print_help()
+    return 2
+
+
 if __name__ == "__main__":
-    if "--selftest" in sys.argv or not sys.argv[1:]:
+    if not sys.argv[1:]:
         sys.exit(0 if _selftest() else 1)
-    print("usage: python hag_sync_adapter.py --selftest")
-    sys.exit(2)
+    sys.exit(main())
