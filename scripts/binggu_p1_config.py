@@ -100,15 +100,19 @@ DEFAULT_CONFIG = {
     #   preflight_max  : preflight 가 끌어올릴 관련 판단 최대 개수(3~7 권장).
     #   recall_limit   : why_search 기본 결과 개수.
     # 위험도 점수 = subtype 가중(버그패턴>교훈) × 관련성(term-frequency 정규화) — 0~1 정규.
+    #   semantic_recall_enabled: 의미(bge-m3 cos) 회상 보강 스위치(기본 False — 어휘 회상만).
+    #     실제 활성은 이 값 AND binggu_canonical_semantic.enabled()(opt-in) 둘 다 켜져야 한다.
     "recall_config": {
         "risk_mid_score": 0.30,
         "risk_high_score": 0.55,
         "preflight_max": 5,
         "recall_limit": 5,
+        "semantic_recall_enabled": False,
     },
 }
 
-_RECALL_KEYS = ("risk_mid_score", "risk_high_score", "preflight_max", "recall_limit")
+_RECALL_KEYS = ("risk_mid_score", "risk_high_score", "preflight_max", "recall_limit",
+                "semantic_recall_enabled")
 
 _RANKING_KEYS = ("freshness", "relevance", "utility")
 
@@ -207,6 +211,10 @@ def _coerce_recall(raw):
             except (TypeError, ValueError):
                 continue
             base[k] = max(1, v)
+        # semantic_recall_enabled — 불리언만 채택(잘못된 타입은 기본 False 유지).
+        sv = raw.get("semantic_recall_enabled", base["semantic_recall_enabled"])
+        if isinstance(sv, bool):
+            base["semantic_recall_enabled"] = sv
     if base["risk_high_score"] < base["risk_mid_score"]:
         warnings.warn(
             "recall_config: risk_high_score(%r) < risk_mid_score(%r) 역전 → 기본값 폴백."
@@ -344,8 +352,17 @@ def _selftest():
         check(c0["external_sources"] == [] and c0["ontology_path"] is None,
               "T2d 기본 external_sources [] · ontology_path None")
         check(c0["recall_config"]["risk_high_score"] == 0.55
-              and c0["recall_config"]["preflight_max"] == 5,
-              "T2d2 기본 recall_config(risk_high 0.55 · preflight_max 5)")
+              and c0["recall_config"]["preflight_max"] == 5
+              and c0["recall_config"]["semantic_recall_enabled"] is False,
+              "T2d2 기본 recall_config(risk_high 0.55 · preflight_max 5 · semantic OFF)")
+        # semantic_recall_enabled override(불리언만 채택)
+        save_user_config({"recall_config": {"semantic_recall_enabled": True}}, home=home)
+        check(load_user_config(home)["recall_config"]["semantic_recall_enabled"] is True,
+              "T2d2b semantic_recall_enabled True override 반영")
+        save_user_config({"recall_config": {"semantic_recall_enabled": "yes"}}, home=home)
+        check(load_user_config(home)["recall_config"]["semantic_recall_enabled"] is False,
+              "T2d2c 잘못된 타입(문자열) → 기본 False 유지")
+        config_path(home).unlink()
         # recall_config override + 역전 방어
         save_user_config({"recall_config": {"risk_mid_score": 0.4, "risk_high_score": 0.7,
                                             "preflight_max": 3, "recall_limit": 10}}, home=home)

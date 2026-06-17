@@ -35,7 +35,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from openbinggu_staging_write_selftest import StagingDB, OPERATING_PATHS, _hash, _now_iso  # noqa: E402
 from openbinggu_deprecate_and_remind_g3 import (  # noqa: E402
-    open_g3, philosophy_review_signals, CHALLENGE_OUTCOME)
+    open_g3, philosophy_review_signals, philosophy_diversity_signals, CHALLENGE_OUTCOME)
 try:  # 설정값(challenge_threshold = 반복 임계 단일 원천) 재사용
     from binggu_p1_config import challenge_threshold as _cfg_challenge_threshold
     from binggu_p1_config import is_confirm_actor
@@ -85,7 +85,36 @@ CREATE TABLE IF NOT EXISTS approval_queue(
     actor TEXT,                          -- 승인/거부한 사람(human 만)
     receipt_seq INTEGER,                 -- 안전 작업 자동적용 시 audit_log seq(영수증 앵커)
     ts TEXT);
+-- 점진 승격 효과 측정 — 하네스 적용 후 같은 패턴 재발 여부 관찰(stage 전환 근거).
+--   헌법 §2(line 45·86): 경고→소프트→하드 단계 승격, 효과 측정 후 증명되면 올리고 아니면 되돌림.
+--   관찰만 — 사람이 "이 하네스 적용 후 또 재발했나?" 입력. AI 자동 stage 변경 0.
+CREATE TABLE IF NOT EXISTS harness_effect_obs(
+    obs_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    candidate_id INTEGER NOT NULL,
+    at_stage TEXT NOT NULL,              -- 관찰 시점의 단계(warn|soft)
+    recurred INTEGER NOT NULL,           -- 1=하네스 적용 후 같은 실수 또 함 / 0=재발 안 함(효과 있음)
+    note TEXT,
+    actor TEXT,                          -- 관찰 입력한 사람(human 만)
+    ts TEXT);
+-- 단계 전환 승인 큐 — warn→soft, soft→hard 전환 제안(효과 측정 후) → 사람 승인 큐.
+--   applied_stage 는 사람이 apply 하기 전엔 NULL. AI 가 자동 전환 0(전부 pending 등재만).
+CREATE TABLE IF NOT EXISTS promotion_transitions(
+    trans_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    candidate_id INTEGER NOT NULL,
+    from_stage TEXT NOT NULL,            -- warn | soft
+    to_stage TEXT NOT NULL,              -- soft | hard
+    effect_summary TEXT,                 -- 효과 측정 근거(관찰 N건 중 재발 M건)
+    status TEXT DEFAULT 'pending',       -- pending | approved | rejected (사람만)
+    actor TEXT,                          -- 승인한 사람(human 만)
+    proposed_at TEXT, decided_at TEXT,
+    UNIQUE(candidate_id, from_stage, to_stage, status) ON CONFLICT IGNORE);
 """
+
+# 점진 승격 사다리 — 경고(warn) → 소프트필수(soft) → 하드게이트(hard). 단조 1단씩만.
+#   각 전환은 효과 측정(harness_effect_obs) 후 사람 승인. 건너뛰기·역행 금지.
+STAGE_LADDER = ["warn", "soft", "hard"]
+# 전환 제안 최소 효과 표본 — 이 횟수 이상 관찰돼야 stage 승격 제안 가능(섣부른 승격 차단).
+MIN_EFFECT_OBS = 3
 
 # 하네스 승격 위치 안내(설계 L7 / 실측 타깃) — 자동 write 금지, 사람이 붙여넣을 위치만 명시.
 HARNESS_TARGETS = {
@@ -275,6 +304,169 @@ def _rollback_hint(htype):
 
 
 # ============================================================
+# 2b. 점진 승격 — 경고(warn)→소프트(soft)→하드(hard), 각 전환 효과 측정 + 사람 승인
+#     헌법 §2(line 45·86): 효과 측정 후 증명되면 올리고 아니면 되돌림. AI 자동 전환 0.
+# ============================================================
+
+def _next_stage(stage):
+    """단조 사다리에서 다음 단계 — warn→soft→soft→hard. hard 는 끝(None)."""
+    try:
+        i = STAGE_LADDER.index(stage)
+    except ValueError:
+        return None
+    return STAGE_LADDER[i + 1] if i + 1 < len(STAGE_LADDER) else None
+
+
+def record_harness_effect(db, candidate_id, recurred, ctx, note=None, ts=None):
+    """하네스 적용 후 효과 1건 관찰 — 같은 패턴 재발 여부(recurred 0/1). 사람만 입력.
+
+    효과 = 하네스를 붙인 뒤에도 같은 실수를 또 했나? recurred=1(또 함=효과 없음) /
+      recurred=0(안 함=효과 있음). 관찰만 — stage 자동 변경 0. at_stage 는 후보 현재 단계.
+    """
+    before = db.store_checksum()
+
+    def block(rc):
+        db.audit_append(_audit_actor(ctx), "harness_effect", str(candidate_id), "BLOCK", rc, before, before, ts=ts)
+        return {"recorded": False, "reason": rc}
+
+    if not is_confirm_actor(ctx.get("actor")):  # allowlist(==human)
+        return block("G4_no_auto")
+    row = db.con.execute("SELECT stage FROM harness_candidates WHERE candidate_id=?", (candidate_id,)).fetchone()
+    if not row:
+        return block("candidate_not_found")
+    if recurred not in (0, 1, True, False):
+        return block("recurred_must_be_bool")
+    cur_stage = row[0]
+    with db.write_lock():
+        db.con.execute(
+            "INSERT INTO harness_effect_obs(candidate_id,at_stage,recurred,note,actor,ts) "
+            "VALUES(?,?,?,?,?,?)",
+            (candidate_id, cur_stage, 1 if recurred else 0, (note or "")[:200], "human", _now_iso(ts)))
+        db.con.commit()
+        db.audit_append(_audit_actor(ctx), "harness_effect", str(candidate_id), "ALLOW",
+                        "recurred=%d@%s" % (1 if recurred else 0, cur_stage), before, db.store_checksum(), ts=ts)
+    return {"recorded": True, "reason": None, "at_stage": cur_stage}
+
+
+def measure_effect(db, candidate_id, at_stage=None):
+    """후보의 효과 측정 집계(read-only) — 관찰 N건 중 재발 M건, 효과 입증 여부.
+
+    at_stage 지정 시 그 단계 관찰만. 효과 입증 = 표본 ≥ MIN_EFFECT_OBS AND 재발 0(완전 방지).
+      재발이 1건이라도 있으면 미입증(아직 효과 불충분 → 승격 보류, 헌법 '증명되면 올림').
+    """
+    q = "SELECT count(*), coalesce(sum(recurred),0) FROM harness_effect_obs WHERE candidate_id=?"
+    args = [candidate_id]
+    if at_stage is not None:
+        q += " AND at_stage=?"
+        args.append(at_stage)
+    total, recurred = db.con.execute(q, args).fetchone()
+    proven = (total >= MIN_EFFECT_OBS and recurred == 0)
+    return {"observations": total, "recurred": recurred, "proven": proven,
+            "min_obs": MIN_EFFECT_OBS, "at_stage": at_stage}
+
+
+def propose_stage_promotion(db, candidate_id, ctx, ts=None):
+    """효과 입증된 후보 → 다음 단계 승격을 '제안'(승인 큐 등재). 적용 0 — 사람 승인 대기.
+
+    헌법 §2: 효과 측정 후 증명되면 올린다. 단, 이 모듈은 '제안'만 — 실제 stage 전환은
+      apply_stage_promotion(사람 승인)에서. 효과 미입증/마지막 단계(hard)면 제안 안 함.
+    제안 자체는 누구나 트리거 가능하나 status=pending 고정(승인은 human allowlist).
+    """
+    before = db.store_checksum()
+
+    def block(rc):
+        db.audit_append(_audit_actor(ctx), "propose_promotion", str(candidate_id), "BLOCK", rc, before, before, ts=ts)
+        return {"proposed": False, "reason": rc}
+
+    row = db.con.execute("SELECT stage FROM harness_candidates WHERE candidate_id=?", (candidate_id,)).fetchone()
+    if not row:
+        return block("candidate_not_found")
+    cur = row[0]
+    nxt = _next_stage(cur)
+    if nxt is None:
+        return block("already_top_stage")  # hard 가 끝 — 더 올릴 곳 없음
+    eff = measure_effect(db, candidate_id, at_stage=cur)
+    if not eff["proven"]:
+        return block("effect_not_proven")  # 효과 미입증 → 승격 제안 0(섣부른 승격 차단)
+    summary = "효과 입증: %s 단계 관찰 %d건 중 재발 0 (≥%d)" % (cur, eff["observations"], MIN_EFFECT_OBS)
+    with db.write_lock():
+        db.con.execute(
+            "INSERT OR IGNORE INTO promotion_transitions"
+            "(candidate_id,from_stage,to_stage,effect_summary,status,proposed_at) "
+            "VALUES(?,?,?,?,'pending',?)", (candidate_id, cur, nxt, summary, _now_iso(ts)))
+        tid = db.con.execute(
+            "SELECT trans_id FROM promotion_transitions WHERE candidate_id=? AND from_stage=? "
+            "AND to_stage=? AND status='pending'", (candidate_id, cur, nxt)).fetchone()
+        db.con.commit()
+        db.audit_append(_audit_actor(ctx), "propose_promotion", str(candidate_id), "QUEUED",
+                        "%s->%s" % (cur, nxt), before, before, ts=ts)
+    return {"proposed": True, "reason": None, "from_stage": cur, "to_stage": nxt,
+            "trans_id": tid[0] if tid else None, "effect_summary": summary, "applied": False}
+
+
+def apply_stage_promotion(db, trans_id, ctx, ts=None):
+    """단계 전환 사람 승인 — actor=human 강제. 승인 시에만 harness_candidates.stage 1단 전진.
+
+    무승인 자동 적용 0 — pending 전환을 human 이 승인해야만 stage 가 실제로 바뀐다.
+      단조 1단 전진만(from_stage 가 현재 단계와 일치해야 — 중간에 다른 승격 끼면 stale 차단).
+    """
+    before = db.store_checksum()
+
+    def block(rc):
+        db.audit_append(_audit_actor(ctx), "apply_promotion", str(trans_id), "BLOCK", rc, before, before, ts=ts)
+        return {"applied": False, "reason": rc}
+
+    if not is_confirm_actor(ctx.get("actor")):  # allowlist(==human) — 자동 전환 절대 차단
+        return block("G4_no_auto")
+    row = db.con.execute(
+        "SELECT candidate_id, from_stage, to_stage, status FROM promotion_transitions WHERE trans_id=?",
+        (trans_id,)).fetchone()
+    if not row:
+        return block("transition_not_found")
+    cid, frm, to, status = row
+    if status != "pending":
+        return block("not_pending")
+    cur = db.con.execute("SELECT stage FROM harness_candidates WHERE candidate_id=?", (cid,)).fetchone()
+    if not cur or cur[0] != frm:  # 현재 단계가 from_stage 와 다르면 stale(이미 다른 전환 적용됨)
+        return block("stale_from_stage")
+    with db.write_lock():
+        db.con.execute("UPDATE harness_candidates SET stage=? WHERE candidate_id=?", (to, cid))
+        db.con.execute(
+            "UPDATE promotion_transitions SET status='approved', actor='human', decided_at=? WHERE trans_id=?",
+            (_now_iso(ts), trans_id))
+        db.con.commit()
+        db.audit_append("human", "apply_promotion", str(trans_id), "ALLOW",
+                        "%s->%s" % (frm, to), before, db.store_checksum(), ts=ts)
+    return {"applied": True, "reason": None, "candidate_id": cid, "from_stage": frm, "to_stage": to,
+            "note": "stage 전환 기록만 — 실제 하네스 강제력(soft/hard)은 사람이 export 텍스트로 적용."}
+
+
+def reject_stage_promotion(db, trans_id, ctx, reason, ts=None):
+    """효과 미입증 등으로 전환 거부(되돌림) — 사람만. stage 무변(현 단계 유지 = '아니면 되돌림')."""
+    before = db.store_checksum()
+
+    def block(rc):
+        db.audit_append(_audit_actor(ctx), "reject_promotion", str(trans_id), "BLOCK", rc, before, before, ts=ts)
+        return {"rejected": False, "reason": rc}
+
+    if not is_confirm_actor(ctx.get("actor")):
+        return block("G4_no_auto")
+    row = db.con.execute("SELECT status FROM promotion_transitions WHERE trans_id=?", (trans_id,)).fetchone()
+    if not row:
+        return block("transition_not_found")
+    if row[0] != "pending":
+        return block("not_pending")
+    with db.write_lock():
+        db.con.execute(
+            "UPDATE promotion_transitions SET status='rejected', actor='human', decided_at=? WHERE trans_id=?",
+            (_now_iso(ts), trans_id))
+        db.con.commit()
+        db.audit_append("human", "reject_promotion", str(trans_id), "ALLOW", (reason or "")[:80],
+                        before, db.store_checksum(), ts=ts)
+    return {"rejected": True, "reason": None}
+
+
+# ============================================================
 # 3. 철학진화 루프 — P1 challenge '옳음' 누적 ≥ threshold → 재검토 신호(자동 변경 0)
 #    (philosophy_review_signals 를 G3 에서 재사용 — 신규 카운터 0)
 # ============================================================
@@ -290,6 +482,25 @@ def philosophy_evolution_signals(db, threshold=None, home=None):
     after = db.store_checksum()
     sig["operating_unchanged"] = (before == after)  # read-only 증명(상태 무변)
     return sig
+
+
+def philosophy_loop_report(db, threshold=None, home=None, min_total=5, challenge_floor=0.10):
+    """철학진화 루프 통합 신호(read-only) — 두 축을 한 번에 본다(자동 변경 0).
+
+    축1 = challenge '옳음' 반복 → 철학 기준 재검토 신호(philosophy_evolution_signals).
+    축2 = 열린 분류 다양성(에코챔버) 진단(philosophy_diversity_signals).
+    둘 다 신호일 뿐 — 확정/조정은 사람. 닫힌 필터 고정 방지(헌법 §2 line 39~41·45).
+    """
+    before = db.store_checksum()
+    review = philosophy_evolution_signals(db, threshold=threshold, home=home)
+    diversity = philosophy_diversity_signals(db, min_total=min_total, challenge_floor=challenge_floor)
+    after = db.store_checksum()
+    return {
+        "review_signals": review,
+        "diversity": diversity,
+        "operating_unchanged": (before == after),
+        "markdown": review["markdown"] + "\n\n" + diversity["markdown"],
+    }
 
 
 # ============================================================
@@ -585,6 +796,90 @@ def run():
     # --- 18. 멀티LLM 공유 = 이미 라이브 · 신규 구현 0 ---
     ml = verify_multillm_shared()
     rec(18, "멀티LLM = 이미 KV 공유(Stage0) · 본 모듈 신규 구현 0", ml["already_shared"] and ml["new_impl_here"] == 0)
+
+    # --- 점진 승격: 경고(warn)→소프트(soft)→하드(hard) 효과 측정 + 사람 승인 ---
+    # checklist 후보(cid_chk) 로 승격 사다리 검증. 시작 단계 = warn.
+    stage0 = db.con.execute("SELECT stage FROM harness_candidates WHERE candidate_id=?", (cid_chk,)).fetchone()[0]
+    rec(21, "신규 하네스 후보 시작 단계 = warn(경고)", stage0 == "warn")
+
+    # 효과 미입증(관찰 0) → 승격 제안 0
+    prop_noeff = propose_stage_promotion(db, cid_chk, H, ts="2026-07-01T00:00:00Z")
+    rec(22, "효과 미입증(관찰 0) → 승격 제안 0 (effect_not_proven)",
+        (not prop_noeff["proposed"]) and prop_noeff["reason"] == "effect_not_proven")
+
+    # warn 단계 효과 관찰 3건 모두 재발 0(효과 입증) → 승격 제안 가능
+    for i in range(3):
+        record_harness_effect(db, cid_chk, recurred=False, ctx=H, note="적용 후 재발 없음 %d" % i,
+                              ts="2026-07-0%dT00:00:00Z" % (i + 2))
+    eff_warn = measure_effect(db, cid_chk, at_stage="warn")
+    rec(23, "warn 효과 관찰 3건 재발 0 → 효과 입증(proven)",
+        eff_warn["observations"] == 3 and eff_warn["recurred"] == 0 and eff_warn["proven"])
+
+    prop_warn = propose_stage_promotion(db, cid_chk, H, ts="2026-07-06T00:00:00Z")
+    rec(24, "효과 입증 → warn→soft 승격 제안(승인 큐 등재 · applied=False)",
+        prop_warn["proposed"] and prop_warn["from_stage"] == "warn"
+        and prop_warn["to_stage"] == "soft" and prop_warn["applied"] is False)
+
+    # auto 승인 차단 → human 승인만 stage 전진
+    appr_auto2 = apply_stage_promotion(db, prop_warn["trans_id"], {"actor": "auto"})
+    appr_h2 = apply_stage_promotion(db, prop_warn["trans_id"], H, ts="2026-07-07T00:00:00Z")
+    stage1 = db.con.execute("SELECT stage FROM harness_candidates WHERE candidate_id=?", (cid_chk,)).fetchone()[0]
+    rec(25, "단계 전환 = human 승인만 (auto 차단) → stage warn→soft 전진",
+        (not appr_auto2["applied"]) and appr_auto2["reason"] == "G4_no_auto"
+        and appr_h2["applied"] and stage1 == "soft")
+
+    # soft 단계 효과 관찰 — 재발 1건 발생 → 효과 미입증 → soft→hard 제안 0 (증명 안 되면 안 올림)
+    record_harness_effect(db, cid_chk, recurred=True, ctx=H, note="soft 적용 후 또 재발", ts="2026-07-08T00:00:00Z")
+    record_harness_effect(db, cid_chk, recurred=False, ctx=H, note="재발 없음", ts="2026-07-09T00:00:00Z")
+    record_harness_effect(db, cid_chk, recurred=False, ctx=H, note="재발 없음", ts="2026-07-10T00:00:00Z")
+    prop_soft_fail = propose_stage_promotion(db, cid_chk, H, ts="2026-07-11T00:00:00Z")
+    rec(26, "soft 단계 재발 1건 → 효과 미입증 → soft→hard 제안 0(증명 안 되면 안 올림)",
+        (not prop_soft_fail["proposed"]) and prop_soft_fail["reason"] == "effect_not_proven")
+
+    # 단계 단조성: hard 까지 올린 뒤 더 못 올림(already_top_stage)
+    # soft 에서 재발 없는 관찰 3건 더(앞 재발 1건 섞였으니 별도 검증용으로 hard 직접 세팅 후 경계 확인)
+    db.con.execute("UPDATE harness_candidates SET stage='hard' WHERE candidate_id=?", (cid_chk,))
+    db.con.commit()
+    for i in range(3):
+        record_harness_effect(db, cid_chk, recurred=False, ctx=H, ts="2026-07-1%dT00:00:00Z" % (i + 2))
+    prop_top = propose_stage_promotion(db, cid_chk, H, ts="2026-07-20T00:00:00Z")
+    rec(27, "hard = 최상 단계 → 더 승격 0 (already_top_stage · 단조 사다리)",
+        (not prop_top["proposed"]) and prop_top["reason"] == "already_top_stage")
+
+    # record_harness_effect auto 차단(allowlist 회귀)
+    eff_auto = all(not record_harness_effect(db, cid_chk, recurred=False, ctx={"actor": a})["recorded"]
+                   for a in [None, "", "auto", "agent", "system", "ai"])
+    rec(28, "record_harness_effect 비human 전수 BLOCK(자동 효과 위조 0)", eff_auto)
+
+    # 전환 거부(되돌림) — pending 전환을 reject → stage 무변
+    db.con.execute("UPDATE harness_candidates SET stage='warn' WHERE candidate_id=?", (cid_test,))
+    db.con.commit()
+    for i in range(3):
+        record_harness_effect(db, cid_test, recurred=False, ctx=H, ts="2026-07-2%dT00:00:00Z" % i)
+    prop_t = propose_stage_promotion(db, cid_test, H, ts="2026-07-25T00:00:00Z")
+    rej = reject_stage_promotion(db, prop_t["trans_id"], H, "현장 판단상 보류", ts="2026-07-26T00:00:00Z")
+    stage_after_rej = db.con.execute("SELECT stage FROM harness_candidates WHERE candidate_id=?", (cid_test,)).fetchone()[0]
+    apply_after_rej = apply_stage_promotion(db, prop_t["trans_id"], H)  # 이미 rejected
+    rec(29, "전환 거부 → stage 무변(되돌림) + rejected 후 apply 차단",
+        prop_t["proposed"] and rej["rejected"] and stage_after_rej == "warn"
+        and (not apply_after_rej["applied"]) and apply_after_rej["reason"] == "not_pending")
+
+    # 무승인 자동 적용 0 전수: promotion_transitions 중 actor!='human' 으로 approved 된 것 0
+    auto_approved = db.con.execute(
+        "SELECT count(*) FROM promotion_transitions WHERE status='approved' AND actor!='human'").fetchone()[0]
+    rec(30, "무승인 자동 stage 적용 0 (approved 는 전부 actor=human)", auto_approved == 0)
+
+    # --- 철학진화 루프 통합: 재검토 신호 + 에코챔버 다양성 진단(read-only) ---
+    from openbinggu_deprecate_and_remind_g3 import classify_harvest_item
+    # keep 만 잔뜩 → 에코챔버 위험
+    for i in range(6):
+        classify_harvest_item(db, "echo%d" % i, "keep", "전부 keep", H, ts="2026-08-0%dT00:00:00Z" % i)
+    before_loop = db.store_checksum()
+    loop = philosophy_loop_report(db, threshold=3, min_total=5, challenge_floor=0.10)
+    after_loop = db.store_checksum()
+    rec(31, "철학진화 루프 통합 = 재검토 신호 + 에코챔버 진단 + read-only(상태 무변)",
+        loop["review_signals"]["count"] == 1 and loop["diversity"]["echo_chamber_risk"]
+        and loop["operating_unchanged"] and before_loop == after_loop)
 
     # --- 19. audit chain intact → 변조 BROKEN ---
     intact = db.verify_chain()

@@ -16,6 +16,13 @@ $PyExe      = $Py.Source
 $RepoRoot   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ScriptPath = Join-Path $RepoRoot "scripts\binggu_harvest.py"
 
+# 사전점검: 대상 스크립트가 실제로 있어야 등록(없는 경로로 등록하면 매 사이클 0x80070002).
+if (-not (Test-Path $ScriptPath)) {
+    Write-Host "[STOP] harvest script not found: $ScriptPath" -ForegroundColor Red; exit 3
+}
+Write-Host "python: $PyExe"
+Write-Host "script: $ScriptPath"
+
 $act = New-ScheduledTaskAction -Execute $PyExe -Argument ('"{0}"' -f $ScriptPath) -WorkingDirectory $RepoRoot
 # inbound 수확은 외부 fetch 라 주기를 길게(1시간). autopush(10분)보다 느슨.
 $trg = New-ScheduledTaskTrigger -Once -At ((Get-Date).AddMinutes(3)) -RepetitionInterval (New-TimeSpan -Hours 1) -RepetitionDuration ([TimeSpan]::FromDays(3650))

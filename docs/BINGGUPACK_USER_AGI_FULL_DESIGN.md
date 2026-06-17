@@ -579,7 +579,7 @@ recommended_question
 confidence
 ```
 
-### Phase 5. preflight 주입
+### Phase 5. preflight 주입  — 자동주입 경로 구현됨(2026-06-18)
 
 목표:
 
@@ -598,6 +598,17 @@ confidence
 - "반문해야 할 것"
 - "하면 안 되는 과거 패턴"
 - "사용자 선호"
+
+구현 상태(2026-06-18):
+
+- 회상 엔진 `scripts/binggu_recall.py preflight_context()` — read-only(mode=ro · ledger write 0).
+- **자동주입 경로** `hooks/binggu_preflight_hook.py` (UserPromptSubmit hook):
+  작업 발화 → preflight_context → 관련 기억/위험패턴/선호/반문을 **대화 상단에 stdout 으로 주입**(정보 표시만).
+  - 기본 OFF(`~/.binggupack/preflight_enabled` 플래그 필요 — 타 세션 무부담).
+  - 차단 0(항상 exit 0) · 저장 0 · 무관 작업이면 주입 0(소음 0) · 신규 사용자 graceful.
+  - 설치/토글: `python binggu.py preflight --install / --enable / --disable / --uninstall / --auto-status`.
+- 헌법 절대제약 준수: 영구=사람 SAVE 만 · AI 추천(정보)만 · 무승인 자동적용 0 · 직감검열 0 ·
+  외부수확 없음(local ledger 만) · node→node 강한관계 자동생성 0 · 운영 ledger 무단 write 금지(read-only) · cloud 무관.
 
 ### Phase 6. 반문 엔진
 

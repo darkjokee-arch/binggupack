@@ -52,6 +52,7 @@ from binggu_capture_profile import (  # noqa: E402
     register_hook, unregister_hook, hook_registered)
 
 SAVE_GATE_MARKER = "binggu_save_gate_hook"  # 사람-발화 저장 게이트 hook 식별 토큰
+PREFLIGHT_MARKER = "binggu_preflight_hook"  # preflight 자동주입 hook 식별 토큰
 from binggu_capture_persist import PersistentCaptureBuffer  # noqa: E402
 from binggu_capture_to_save import build_save_commands  # noqa: E402
 import binggu_platform as _plat  # noqa: E402
@@ -71,6 +72,11 @@ def _hook_command():
 def _save_gate_hook_command():
     """settings.json 에 등록할 사람-발화 저장 게이트 hook 실행 명령(sync 등록 대상)."""
     return '%s "%s"' % (_plat.python_cmd(), os.path.join(BASE, "hooks", "binggu_save_gate_hook.py"))
+
+
+def _preflight_hook_command():
+    """settings.json 에 등록할 preflight 자동주입 hook 실행 명령(UserPromptSubmit)."""
+    return '%s "%s"' % (_plat.python_cmd(), os.path.join(BASE, "hooks", "binggu_preflight_hook.py"))
 
 
 def _ledger_paths(ledger):
@@ -377,7 +383,48 @@ def cmd_trace(a):
 
 def cmd_preflight(a):
     """preflight — 작업 시작 전 관련 기억 + 위험패턴 반문(L5+L6). read-only.
-    cwd 미지정 시 현재 디렉토리(capture 와 동일 패턴). 위험패턴 닮으면 반문 표시."""
+    cwd 미지정 시 현재 디렉토리(capture 와 동일 패턴). 위험패턴 닮으면 반문 표시.
+
+    자동주입(UserPromptSubmit hook) 설치/토글:
+      --install   : settings.json 에 preflight hook 등록(대화 상단 자동주입 · async)
+      --uninstall : hook 제거
+      --enable    : 자동주입 ON(~/.binggupack/preflight_enabled 플래그 · 기본 OFF)
+      --disable   : 자동주입 OFF(플래그 삭제)
+      --auto-status : 등록/활성 상태 표시
+    설치+활성 둘 다여야 자동주입이 동작한다(기본 OFF — 타 세션 무부담)."""
+    home = os.path.dirname(os.path.abspath(a.ledger))
+    settings = getattr(a, "settings", None) or DEFAULT_SETTINGS
+    flag = os.path.join(home, "preflight_enabled")
+    if getattr(a, "install", False):
+        added = register_hook(settings, _preflight_hook_command(),
+                              events=("UserPromptSubmit",), marker=PREFLIGHT_MARKER, is_async=True)
+        print("preflight 자동주입 hook 등록 완료(settings.json 백업됨): %s" % ", ".join(added)
+              if added else "preflight hook 이미 등록됨 — 그대로 사용")
+        print("활성화는 별도:  python binggu.py preflight --enable   (기본 OFF)")
+        return 0
+    if getattr(a, "uninstall", False):
+        removed = unregister_hook(settings, marker=PREFLIGHT_MARKER)
+        print("preflight 자동주입 hook 제거: %s" % (", ".join(removed) or "없음(미등록)"))
+        return 0
+    if getattr(a, "enable", False):
+        os.makedirs(home, exist_ok=True)
+        with open(flag, "w", encoding="utf-8") as f:
+            f.write("1")
+        print("preflight 자동주입 ON. 작업 발화 시 관련 기억이 상단에 표시됩니다(정보만 · 저장 0 · 차단 0).")
+        print("끄기:  python binggu.py preflight --disable")
+        return 0
+    if getattr(a, "disable", False):
+        if os.path.exists(flag):
+            os.remove(flag)
+        print("preflight 자동주입 OFF(플래그 삭제). 수동 회상은 `python binggu.py preflight --prompt ...` 로 가능.")
+        return 0
+    if getattr(a, "auto_status", False):
+        reg = hook_registered(settings, marker=PREFLIGHT_MARKER)
+        print("preflight 자동주입 — hook 등록: %s · 활성(플래그): %s"
+              % ({True: "예", False: "아니오", None: "미확인"}[reg],
+                 "예(ON)" if os.path.exists(flag) else "아니오(OFF)"))
+        print("자동주입은 '등록 AND 활성' 둘 다여야 동작합니다.")
+        return 0
     import binggu_recall as RC
     ledger, _ = _ledger_paths(a.ledger)
     cwd = getattr(a, "cwd", None) or os.getcwd()
@@ -808,14 +855,19 @@ def cmd_harvest(a):
         return 0 if r["status"] == "OK" else 1
     if sub == "list":
         srcs = HV.load_sources(sp)
+        disabled = os.path.exists(HV.harvest_disabled_path(home))
+        if disabled:
+            print("[일시중지] harvest_disabled 플래그 ON — 수확은 0(긴급 정지 중).")
+            print("  재개:  Remove-Item \"%s\"" % HV.harvest_disabled_path(home))
         if not srcs:
             print("등록된 외부 소스가 없습니다(빈 화이트리스트). 수확은 0입니다.")
             print('  등록:  python binggu.py harvest add --kind arxiv --url "https://arxiv.org/..."')
             return 0
         print("등록된 외부 소스 %d개:" % len(srcs))
-        for s in srcs:
-            print("  [%s] %s  %s%s" % (s.get("kind"), s.get("source_id"), s.get("url"),
+        for i, s in enumerate(srcs, 1):
+            print("  %d. [%s] %s%s" % (i, s.get("kind"), s.get("url"),
                                        (" (keyword=%s)" % s["keyword"]) if s.get("keyword") else ""))
+            print("       제거:  python binggu.py harvest remove %s" % s.get("source_id"))
         return 0
     if sub == "remove":
         r = HV.remove_source(a.source_id, path=sp)
@@ -827,10 +879,114 @@ def cmd_harvest(a):
         print("수확 결과: %s (%s) · fetched=%s candidates=%s skipped=%s"
               % (res["status"], res["reason"], res.get("fetched"),
                  res.get("candidates"), res.get("skipped")))
+        for sr in (res.get("sources") or []):
+            print("  - %s: %s%s · 노드=%s"
+                  % (sr.get("source_id"), sr.get("status"),
+                     (" (%s)" % sr["reason"]) if sr.get("reason") else "", sr.get("n_nodes")))
+        if res["reason"] == "NO_REGISTERED_SOURCES":
+            print("  등록된 소스가 없습니다 — 먼저 harvest add 로 소스를 등록하세요.")
+        elif res["reason"] == "HARVEST_DISABLED":
+            print("  긴급 정지 중(harvest_disabled). 플래그를 지우면 재개됩니다.")
         if res.get("candidates"):
             print("  후보만 적재됨(candidate=1 · 영구화 0). 영구는 preview→SAVE n 게이트로만.")
         return 0 if res["status"] in ("OK", "NOOP") else 1
     return 1
+
+
+def cmd_confirm_edges(a):
+    """confirm-edges — 관계 후보(graph_preview) → 사람 도장 → sync_edges 적재(일반 사용자 경로).
+
+    흐름: 운영 ledger(read-only) 스냅샷 → graph_preview(2층 후보) → graph_confirm(--approve/--reject)
+          → apply_confirm_to_sync(actor='human' 도장 → sync_edges 'confirmed').
+    영구(운영 edges) 등재는 owner-only 별도 단계(hag_sync_adapter --import-edges)로 안내만 한다.
+
+    헌법 준수:
+      - 신규 EDGE SAVE 경로 신설 0 — graph_preview/graph_confirm/hag_sync_adapter 전부 재사용.
+      - node→node 강한관계(supports_judgment) 자동생성 0 — --approve 로 사람이 고른 idx 만, actor='human'.
+      - --confirm 게이트 필수(raw 실행 차단) · 운영 ledger write 0(read-only 스냅샷만).
+      - apply 가 매트릭스/evidence/secret/dangling 재검증 + 멱등.
+
+      python binggu.py confirm-edges                                   # 후보 목록(report only · 적재 0)
+      python binggu.py confirm-edges --approve 1,3 --confirm "CONFIRM EDGES 1,3"
+    """
+    ledger, _ = _ledger_paths(a.ledger)
+    if not os.path.exists(ledger):
+        print("장부가 없습니다: %s\n먼저 만드세요:  python binggu.py init" % ledger)
+        return 2
+    # 운영 ledger 는 점검(read-only)만 — write 0. OPERATING_PATHS 신원(owner ledger 원본) 확인.
+    # confirm-edges 는 운영 ledger 를 read-only 스냅샷만 한다(write 0) — 경로 무관 안전.
+    # (옛 OPERATING_PATHS 분기는 pass 뿐인 죽은 가드라 제거 — 오해 소지.)
+    sys.path.insert(0, os.path.join(BASE, "scripts", "hybrid_agi"))
+    import hag_sync_adapter as SA
+    import binggu_graph_preview as GP
+    import binggu_graph_confirm as GC
+
+    # 1) 운영 노드 read-only 스냅샷 → graph_preview 입력(EN2KO label_kind 변환·자기증빙 evidence)
+    snap = SA.snapshot_operating_nodes(ledger)
+    cands = SA.to_candidates(snap)
+    nodes_in = [{"id": c["id"],
+                 "properties": {"label_kind": c["label_kind"], "sentence": c["text"]},
+                 "evidence_refs": c.get("evidence_refs") or []} for c in cands]
+    preview = GP.build_graph_preview(nodes_in)
+    confirm = GC.build_graph_confirm(
+        preview,
+        approve=[int(x) for x in a.approve.split(",") if x.strip()] if a.approve else None,
+        reject=[int(x) for x in a.reject.split(",") if x.strip()] if a.reject else None)
+
+    # 후보 목록 항상 표시(사람이 보고 고르는 행위) — report only.
+    edges = preview.get("edges", [])
+    sent = {n["id"]: n.get("text", "") for n in preview.get("nodes", [])}
+    print("# 관계 후보 (supports_judgment · candidate · 적재 0 — 사람 도장 전)")
+    if not edges:
+        print("관계 후보 0건 — 운영 노드(증거/상태/개념 → 판단)가 쌓여야 후보가 생깁니다.")
+        print("  먼저 preview→SAVE n 으로 노드를 도장(확정)하세요.")
+        return 0
+    for i, e in enumerate(edges, 1):
+        print("  [%d] %s\n        --(%s)--> %s"
+              % (i, sent.get(e["source_id"], e["source_id"])[:50],
+                 e["relation"], sent.get(e["target_id"], e["target_id"])[:50]))
+    print("\n승인 대기: %d · approved: %d · rejected: %d"
+          % (confirm["summary"]["deferred"], confirm["summary"]["approved"],
+             confirm["summary"]["rejected"]))
+
+    # 2) --approve 없으면 안내만(적재 0)
+    if not a.approve:
+        print("\n관계를 도장하려면(사람이 고른 것만):")
+        print('  python binggu.py confirm-edges --approve <번호들> --confirm "CONFIRM EDGES <번호들>"')
+        return 0
+
+    # 3) --confirm 게이트(raw 실행 차단) — "CONFIRM EDGES <approve>" 정확히 타이핑
+    expected = "CONFIRM EDGES %s" % a.approve
+    if a.confirm != expected:
+        print('\nBLOCK: confirm_required_mismatch — 정확히 입력하세요:  --confirm "%s"' % expected)
+        return 1
+
+    # 4) 사람 도장 → sync_edges 'confirmed' 적재(actor='human'·운영 write 0)
+    # full sentence(untruncated) — preview node text 는 [:60] 잘려 secret 스캔이 60자 이후 PII 를
+    # 놓치므로, 원본 노드 문장(nodes_in)을 _has_secret 대상으로 넘긴다(truncation 우회 차단).
+    _full_sent = {nd["id"]: nd["properties"]["sentence"] for nd in nodes_in}
+    nbi = {n["id"]: {"id": n["id"],
+                     "properties": {"label_kind": n.get("label_kind"), "candidate": True},
+                     "sentence": _full_sent.get(n["id"], n.get("text", ""))}
+           for n in preview.get("nodes", [])}
+    sync_db = os.path.join(os.path.dirname(ledger), "sync_edges.sqlite")
+    try:
+        r = GC.apply_confirm_to_sync(confirm["approved"], sync_db, nodes_by_id=nbi,
+                                     actor="human", now=int(__import__("time").time()))
+    except SA.SyncError as e:
+        print("BLOCK:", e)
+        return 2
+    print("\nOK: 사람 도장 %d건 → sync_edges 적재(%s)" % (r["applied"], sync_db))
+    if r["rejected"]:
+        print("  적재 제외: %s" % ", ".join("%s→%s(%s)" % (x["source_id"][:12], x["target_id"][:12], x["reason"])
+                                          for x in r["rejected"]))
+    if r["dangling"]:
+        print("  dangling skip: %d건" % len(r["dangling"]))
+    print("  %s" % r["caveat"])
+    print("\n운영 ledger 등재(영구·owner-only·운영 write):")
+    print('  python scripts/hybrid_agi/hag_sync_adapter.py --import-edges --actor human '
+          '--ledger "%s" --sync-db "%s"' % (ledger, sync_db))
+    return 0
 
 
 def cmd_setup_cloud(a):
@@ -883,6 +1039,12 @@ def main():
     pfp.add_argument("--cwd", default=None)
     pfp.add_argument("--domain", default=None)
     pfp.add_argument("--files", default=None)  # 콤마 구분 변경 파일명
+    pfp.add_argument("--settings", default=None)  # hook 등록 대상 settings.json (기본 OS별)
+    pfp.add_argument("--install", action="store_true")    # 자동주입 hook 등록
+    pfp.add_argument("--uninstall", action="store_true")  # 자동주입 hook 제거
+    pfp.add_argument("--enable", action="store_true")     # 자동주입 ON(플래그)
+    pfp.add_argument("--disable", action="store_true")    # 자동주입 OFF(플래그 삭제)
+    pfp.add_argument("--auto-status", dest="auto_status", action="store_true")  # 등록/활성 상태
     for name in ("deprecate", "accept", "unaccept"):
         sp = sub.add_parser(name); sp.add_argument("n", type=int); sp.add_argument("id8")
         sp.add_argument("--reason", required=True); sp.add_argument("--confirm", required=True)
@@ -919,6 +1081,10 @@ def main():
     hvsub.add_parser("list")                # 등록 소스 목록
     hr = hvsub.add_parser("remove"); hr.add_argument("source_id")
     hvsub.add_parser("run")                 # 등록 소스 1회 수확(실 fetch=owner 스케줄러 권장)
+    cep = sub.add_parser("confirm-edges")   # 관계 후보→사람 도장→sync_edges(일반 사용자 경로)
+    cep.add_argument("--approve", default=None)          # 도장할 관계 번호(1,3) — 미지정=후보 목록만
+    cep.add_argument("--reject", default=None)
+    cep.add_argument("--confirm", default=None)          # "CONFIRM EDGES <approve>" 게이트
     scp = sub.add_parser("setup-cloud")     # cloud 셋업 1개 진입점(멱등·실패정지·dry-run 기본)
     scp.add_argument("--apply", action="store_true")     # 실제 변경(미지정=점검만)
     scp.add_argument("--deploy", action="store_true")    # (--apply 와) wrangler deploy 까지 — 비가역
@@ -928,7 +1094,8 @@ def main():
           "accept": cmd_accept, "unaccept": cmd_unaccept, "due": cmd_due,
           "resolve": cmd_resolve, "reminders": cmd_reminders, "capture": cmd_capture,
           "recall": cmd_recall, "why": cmd_recall, "trace": cmd_trace, "preflight": cmd_preflight,
-          "hosted": cmd_hosted, "harvest": cmd_harvest, "setup-cloud": cmd_setup_cloud}[a.cmd]
+          "hosted": cmd_hosted, "harvest": cmd_harvest, "setup-cloud": cmd_setup_cloud,
+          "confirm-edges": cmd_confirm_edges}[a.cmd]
     sys.exit(fn(a))
 
 

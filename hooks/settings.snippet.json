@@ -1,5 +1,5 @@
 {
-  "_comment": "BingguPack 자동 후보 수집 hook 등록 예시. 본인 ~/.claude/settings.json 의 hooks 안에 MERGE 하세요(통째 덮어쓰기 금지). command 경로는 본인이 clone 한 binggupack 절대경로로 교체. 설치/활성화: docs/BINGGUPACK_CAPTURE_HOOK_SETUP.md",
+  "_comment": "BingguPack hook 등록 예시. 본인 ~/.claude/settings.json 의 hooks 안에 MERGE 하세요(통째 덮어쓰기 금지). command 경로는 본인이 clone 한 binggupack 절대경로로 교체. capture(자동 후보 수집) 설치: docs/BINGGUPACK_CAPTURE_HOOK_SETUP.md · preflight(작업 전 자동주입) 설치: `python binggu.py preflight --install` 후 `--enable`(기본 OFF).",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -7,6 +7,12 @@
           {
             "type": "command",
             "command": "python /ABSOLUTE/PATH/TO/binggupack/hooks/binggu_capture_hook.py",
+            "async": true
+          },
+          {
+            "_comment": "preflight 자동주입 — 작업 발화 시 관련 기억/위험패턴을 대화 상단에 정보로 주입(read-only · 저장 0 · 차단 0). 기본 OFF: ~/.binggupack/preflight_enabled 플래그가 있어야 동작. 등록은 `python binggu.py preflight --install` 권장.",
+            "type": "command",
+            "command": "python /ABSOLUTE/PATH/TO/binggupack/hooks/binggu_preflight_hook.py",
             "async": true
           }
         ]

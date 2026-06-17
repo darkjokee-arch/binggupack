@@ -44,11 +44,24 @@ CREATE TABLE IF NOT EXISTS deprecations(
 CREATE TABLE IF NOT EXISTS judgment_reviews(
     review_id INTEGER PRIMARY KEY AUTOINCREMENT, node_id TEXT, due_date TEXT,
     status TEXT DEFAULT 'pending', outcome TEXT, resolved_reason TEXT, ts TEXT);
+-- 철학필터 열린 분류 (keep / challenge / discard) — 닫힌 필터=에코챔버 차단(헌법 §2 line 39~41).
+--   keep: 내 가치관과 맞음(우선순위↑) / challenge: 다르지만 근거 있음(보존+주기적 반문) /
+--   discard: 무근거(이유 남기고 버림, 물리 보존). 확정은 사람(actor=human). 자동 가치판정 0.
+CREATE TABLE IF NOT EXISTS harvest_classifications(
+    item_id TEXT NOT NULL,               -- 분류 대상(수확물/노드/판단 id)
+    klass TEXT NOT NULL,                 -- keep | challenge | discard (열린 3분류)
+    reason TEXT,                         -- 분류 근거(discard 는 필수)
+    actor TEXT,                          -- 분류한 사람(human 만)
+    ts TEXT,
+    PRIMARY KEY(item_id));
 """
 
 OUTCOMES = {"성공", "실패", "불확실", "판정불가", "옳음", "그름"}
 # 철학필터 challenge — '옳음' 누적이 철학 재검토 신호의 카운터(judgment_reviews 단일 진실원천)
 CHALLENGE_OUTCOME = "옳음"
+# 열린 분류 3종 — keep(활용) / challenge(도전 보관·주기 반문) / discard(무근거만, 이유 남김).
+#   닫힌 필터(keep/discard 2분류)는 에코챔버 = "고집=무능" 위배 → challenge 가 발전의 핵심.
+HARVEST_CLASSES = {"keep", "challenge", "discard"}
 
 
 def open_g3(path):
@@ -203,6 +216,86 @@ def philosophy_review_signals(db, threshold=None, home=None):
             "markdown": "\n".join(lines)}
 
 
+# ---------------- 열린 분류 (keep / challenge / discard) — 에코챔버 차단 ----------------
+
+def classify_harvest_item(db, item_id, klass, reason, ctx, ts=None):
+    """수확물/판단 1건을 열린 3분류(keep/challenge/discard)로 분류 기록. 사람만(actor=human).
+
+    헌법 §2(line 39~41): 닫힌 필터(맞으면 keep·다르면 discard)는 에코챔버 = 발전 정지.
+      열린 분류 = 다르지만 근거 있으면 challenge 로 '보존'(주기적 반문 대상). 무근거만 discard.
+    자동 가치 판정 0 — AI 는 분류값을 못 정한다(is_confirm_actor 강제). discard 는 이유 필수.
+    물리 삭제 0 — discard 도 분류 기록일 뿐, 노드/엣지는 보존(deprecate 와 동일 철학).
+    같은 item_id 재분류는 갱신(사람이 challenge→keep 등 재판단 가능). 분류 자체는 기록만.
+    """
+    before = db.store_checksum()
+
+    def block(rc):
+        db.audit_append(_audit_actor(ctx), "harvest_classify", item_id, "BLOCK", rc, before, before, ts=ts)
+        return {"applied": False, "reason": rc}
+
+    if not is_confirm_actor(ctx.get("actor")):  # allowlist(==human) — AI 자동 가치판정 차단
+        return block("G4_no_auto")
+    if klass not in HARVEST_CLASSES:
+        return block("klass_invalid")
+    if klass == "discard" and not (reason or "").strip():
+        return block("discard_reason_required")  # 무근거 버림 금지 — 이유 남겨야 함
+    if not (item_id or "").strip():
+        return block("item_id_required")
+    with db.write_lock():
+        db.con.execute(
+            "INSERT INTO harvest_classifications(item_id,klass,reason,actor,ts) VALUES(?,?,?,?,?) "
+            "ON CONFLICT(item_id) DO UPDATE SET klass=excluded.klass, reason=excluded.reason, "
+            "actor=excluded.actor, ts=excluded.ts",
+            (item_id, klass, (reason or "")[:200], "human", _now_iso(ts)))
+        db.con.commit()
+        db.audit_append(_audit_actor(ctx), "harvest_classify", item_id, "ALLOW", klass,
+                        before, db.store_checksum(), ts=ts)
+    return {"applied": True, "reason": None, "klass": klass}
+
+
+def classification_distribution(db):
+    """열린 분류 분포 read-only — keep/challenge/discard 각 건수(에코챔버 진단용)."""
+    rows = db.con.execute(
+        "SELECT klass, count(*) FROM harvest_classifications GROUP BY klass").fetchall()
+    dist = {k: 0 for k in HARVEST_CLASSES}
+    for k, c in rows:
+        if k in dist:
+            dist[k] = c
+    dist["total"] = sum(dist[k] for k in HARVEST_CLASSES)
+    return dist
+
+
+def philosophy_diversity_signals(db, min_total=5, challenge_floor=0.10):
+    """에코챔버 진단 신호(read-only) — 분류가 한쪽으로 쏠렸는지 경보.
+
+    헌법 §2: 닫힌 필터 = 에코챔버 = 발전 정지. challenge 비율이 바닥(challenge_floor)
+      미만이면 "다른 관점을 전부 keep/discard 로만 처리 = 도전 보관 안 함 = 발전 정지 위험"
+      신호. 자동 변경 0 — 사람에게 "열린 분류 하고 있나?" 반문만(신호).
+    total < min_total 이면 표본 부족(신호 없음 — 섣부른 경보 방지).
+    """
+    dist = classification_distribution(db)
+    total = dist["total"]
+    echo_risk = False
+    note = ""
+    challenge_ratio = (dist["challenge"] / total) if total else 0.0
+    if total >= min_total and challenge_ratio < challenge_floor:
+        echo_risk = True
+        note = ("challenge 비율 %.0f%% < %.0f%% — 다른 관점을 '도전 보관' 안 하고 "
+                "keep/discard 로만 처리 = 에코챔버 위험(발전 정지). 열린 분류 점검 권장."
+                % (challenge_ratio * 100, challenge_floor * 100))
+    lines = ["# 철학 다양성 신호 — keep %d / challenge %d / discard %d (총 %d · read-only)"
+             % (dist["keep"], dist["challenge"], dist["discard"], total)]
+    if echo_risk:
+        lines.append("- [ ] ⚠️ 에코챔버 위험: %s (확정·조정은 사람)" % note)
+    elif total < min_total:
+        lines.append("- 표본 부족(총 %d < %d) — 신호 보류" % (total, min_total))
+    else:
+        lines.append("- 분류 다양성 양호(challenge %.0f%% ≥ %.0f%%)"
+                     % (challenge_ratio * 100, challenge_floor * 100))
+    return {"echo_chamber_risk": echo_risk, "challenge_ratio": round(challenge_ratio, 4),
+            "distribution": dist, "note": note, "markdown": "\n".join(lines)}
+
+
 # ---------------- selftest ----------------
 
 def run():
@@ -346,6 +439,57 @@ def run():
     rec(16, "'옳음' 2회(n2) → threshold=3 신호 미발생",
         challenge_outcome_count(db, "n2") == 2
         and all(it["node_id"] != "n2" for it in sig_n2["items"]))
+
+    # --- 열린 분류 (keep / challenge / discard) — 에코챔버 차단 ---
+    before_cls = db.store_checksum()
+    rk = classify_harvest_item(db, "h1", "keep", "내 가치관과 일치", {"actor": "human"}, ts="2026-06-01T00:00:00")
+    rc_ = classify_harvest_item(db, "h2", "challenge", "다르지만 근거 있음 — 도전 보관", {"actor": "human"}, ts="2026-06-01T00:00:00")
+    rd = classify_harvest_item(db, "h3", "discard", "무근거", {"actor": "human"}, ts="2026-06-01T00:00:00")
+    rec(17, "열린 3분류(keep/challenge/discard) 기록 — 사람만",
+        rk["applied"] and rc_["applied"] and rd["applied"])
+
+    # discard 이유 필수 / 잘못된 분류값 차단 / auto 차단
+    rd_noreason = classify_harvest_item(db, "h4", "discard", "  ", {"actor": "human"})
+    r_badklass = classify_harvest_item(db, "h5", "delete", "x", {"actor": "human"})
+    cls_auto = all(not classify_harvest_item(db, "h6", "keep", "x", {"actor": a})["applied"]
+                   for a in [None, "", "auto", "agent", "system", "ai"])
+    cls_nokey = not classify_harvest_item(db, "h6", "keep", "x", {})["applied"]
+    rec(18, "discard 이유 필수 / 잘못된 klass 차단 / 비human 자동 가치판정 0",
+        (not rd_noreason["applied"]) and rd_noreason["reason"] == "discard_reason_required"
+        and (not r_badklass["applied"]) and r_badklass["reason"] == "klass_invalid"
+        and cls_auto and cls_nokey)
+
+    # 재분류(challenge→keep) 갱신 — 같은 item_id 덮어쓰기
+    classify_harvest_item(db, "h2", "keep", "재판단: 결국 맞았음", {"actor": "human"}, ts="2026-06-02T00:00:00")
+    k_h2 = db.con.execute("SELECT klass FROM harvest_classifications WHERE item_id='h2'").fetchone()[0]
+    rec(19, "재분류(challenge→keep) 갱신 — item_id 단일 유지", k_h2 == "keep")
+
+    # 다양성 신호: 표본 부족 → 신호 보류
+    div_small = philosophy_diversity_signals(db, min_total=5)
+    # h2 가 keep 됐으니 현재 keep=2, challenge=0, discard=1 (총 3 < 5) → 표본 부족
+    rec(20, "철학 다양성 신호 표본 부족(총<min_total) → 신호 보류",
+        (not div_small["echo_chamber_risk"]) and "표본 부족" in div_small["markdown"])
+
+    # 에코챔버 위험: keep 만 잔뜩 → challenge 0% → 위험 신호
+    for i in range(5):
+        classify_harvest_item(db, "echo%d" % i, "keep", "전부 keep", {"actor": "human"},
+                              ts="2026-06-03T0%d:00:00" % i)
+    div_echo = philosophy_diversity_signals(db, min_total=5, challenge_floor=0.10)
+    rec(21, "challenge 0% (전부 keep/discard) → 에코챔버 위험 신호(자동 변경 0)",
+        div_echo["echo_chamber_risk"] and div_echo["challenge_ratio"] == 0.0
+        and "에코챔버 위험" in div_echo["markdown"])
+
+    # challenge 충분 → 다양성 양호 (분류 자체는 read-only 신호, 상태 무변)
+    for i in range(3):
+        classify_harvest_item(db, "ch%d" % i, "challenge", "도전 보관", {"actor": "human"},
+                              ts="2026-06-04T0%d:00:00" % i)
+    div_ok = philosophy_diversity_signals(db, min_total=5, challenge_floor=0.10)
+    after_cls = db.store_checksum()  # 신호 자체(diversity_signals)는 read-only
+    div_ok2 = philosophy_diversity_signals(db, min_total=5, challenge_floor=0.10)
+    after_cls2 = db.store_checksum()
+    rec(22, "challenge 비율 충분 → 다양성 양호 + 신호 read-only(상태 무변)",
+        (not div_ok["echo_chamber_risk"]) and div_ok["challenge_ratio"] >= 0.10
+        and after_cls == after_cls2 and "다양성 양호" in div_ok2["markdown"])
 
     # 11. audit chain
     intact = db.verify_chain()

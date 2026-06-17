@@ -125,27 +125,60 @@ def _load_graph(ledger_path):
 
 # ---------------- 선택적 cos 보강(없으면 term-frequency) ----------------
 
-def _semantic_scorer():
-    """Ollama bge-m3 cos 보강 — 사용 가능하면 (embed된 query, node embed) 유사도 함수, 아니면 None.
+# bge-m3 cos 의미 하한: 무관 한국어 문장쌍도 통상 0.3~0.5 cos → floor 미만은 어휘 신호만 쓴다
+# (semantic ON 시 rel<=0 게이트가 무력화돼 거의 모든 노드가 통과하고, risk 매칭에서 무관 작업에
+#  false-positive 반문이 나는 것을 방지). 관련 의미 문장쌍은 통상 0.55+.
+_SEMANTIC_FLOOR = 0.55
 
-    엔진 부재/임베드 실패는 graceful(None 반환) — 회상은 term-frequency 로만 동작.
-    capture 가 쓰는 동일 엔진(binggu_semantic_shadow) 재사용 — 신규 모델 0.
+
+def _semantic_scorer(home=None, embed_fn=None):
+    """bge-m3 cos 보강 — 사용 가능하면 (query, sentence) → cos 유사도 함수, 아니면 None.
+
+    P2 semantic 회상. 활성화는 두 게이트의 AND(어느 하나라도 OFF면 None → term-frequency 만):
+      1) binggu_canonical_semantic.enabled() — opt-in(명시 플래그 OR Ollama bge-m3 자동감지,
+         BINGGU_SEMANTIC_OFF=1 이면 강제 OFF). 도장 제안과 동일한 단일 opt-in 원천 재사용.
+      2) recall_config["semantic_recall_enabled"](기본 False) — 회상에 한정한 owner 추가 스위치.
+    엔진은 capture·도장이 쓰는 동일 bge-m3(binggu_semantic_shadow._embed) 재사용 — 신규 모델 0.
+
+    query 임베딩은 1회만 계산해 클로저에 캐시(노드마다 재임베드 방지 — N+1 → 1+N).
+    엔진 부재/임베드 실패/예외는 전부 graceful(None) — 회상은 term-frequency 로만 동작.
+    read-only — embedding 결과는 메모리에서만 cos 계산에 쓰이고 어디에도 저장하지 않는다.
+    embed_fn= 테스트 주입(결정적 fake embed) — selftest 가 Ollama 없이 의미 회상 로직 검증.
     """
     try:
-        import binggu_semantic_shadow as SH
-        if not SH.DEFAULT_ENABLED:
-            # 기본 비활성 — 자동 활성 0(헌법). owner 가 켰을 때만 보강.
-            return None
-        probe = SH._embed("점검", timeout=3)
-        if probe is None:
-            return None
+        if embed_fn is None:
+            import binggu_canonical_semantic as CS
+            if not CS.enabled():
+                return None  # opt-in OFF — 자동 활성 0(헌법). 사람이 켰을 때만 보강.
+            rc = CFG.recall_config(home)
+            if not rc.get("semantic_recall_enabled", False):
+                return None  # 회상 한정 추가 스위치 OFF
+            import binggu_semantic_shadow as SH
+            embed = SH._embed
+            dot = SH._dot
+            if embed("점검", timeout=3) is None:
+                return None  # 엔진 미응답 → term-frequency fallback
+        else:
+            import binggu_semantic_shadow as SH
+            embed, dot = embed_fn, SH._dot
+
+        _qcache = {}
 
         def score(query, sentence):
-            qe = SH._embed(query, timeout=3)
-            se = SH._embed(sentence, timeout=3)
-            if qe is None or se is None:
+            # PII/secret 선차단(leak_guard) — shadow/canonical 임베드 경로와 동일 패리티(회상 경로 누락 수정).
+            if query not in _qcache:
+                ok_q, _ = SH.leak_guard(query)
+                _qcache[query] = embed(query) if ok_q else None  # query 1회만 임베드(캐시)
+            qe = _qcache[query]
+            if qe is None:
                 return None
-            return SH._dot(qe, se)
+            ok_s, _ = SH.leak_guard(sentence)
+            if not ok_s:
+                return None  # 잔존 PII/secret → semantic 미개입(어휘 fallback)
+            se = embed(sentence)
+            if se is None:
+                return None
+            return dot(qe, se)
         return score
     except Exception:
         return None
@@ -162,6 +195,8 @@ def why_search(ledger_path, query, limit=None, home=None, scorer=None):
     """
     rc = CFG.recall_config(home)
     limit = limit or rc["recall_limit"]
+    if scorer is None:
+        scorer = _semantic_scorer(home=home)  # opt-in 통과 시만 활성, 아니면 None(어휘만)
     g = _load_graph(ledger_path)
     qtok = _tokens(query)
     if not g["nodes"]:
@@ -174,8 +209,8 @@ def why_search(ledger_path, query, limit=None, home=None, scorer=None):
         rel = _relevance(qtok, n["sentence"])
         if scorer is not None and qtok:
             cs = scorer(query, n["sentence"])
-            if cs is not None:
-                rel = max(rel, max(0.0, cs))  # cos 보강(의미 매칭) — 둘 중 강한 신호
+            if cs is not None and cs >= _SEMANTIC_FLOOR:
+                rel = max(rel, cs)  # cos 보강(의미 매칭, floor 이상만 — 무관 cos 잡음 차단)
         if rel <= 0.0:
             continue
         scored.append((rel, n))
@@ -290,8 +325,8 @@ def match_risk_patterns(g, work_text, qtok, home=None, scorer=None):
         rel = _relevance(qtok, n["sentence"])
         if scorer is not None and qtok:
             cs = scorer(work_text, n["sentence"])
-            if cs is not None:
-                rel = max(rel, max(0.0, cs))
+            if cs is not None and cs >= _SEMANTIC_FLOOR:
+                rel = max(rel, cs)  # floor 이상만 — 무관 cos로 인한 false-positive 반문 차단
         if rel <= 0.0:
             continue
         # 위험도 = subtype 가중 × 관련성 [0,1].
@@ -338,6 +373,8 @@ def preflight_context(ledger_path, prompt=None, cwd=None, domain=None,
     빈 그래프 → 전부 빈 리스트 · risk_level=낮음 · needs_question=False(에러 0).
     """
     rc = CFG.recall_config(home)
+    if scorer is None:
+        scorer = _semantic_scorer(home=home)  # opt-in 통과 시 의미 회상·반문 보강
     g = _load_graph(ledger_path)
     # 작업 텍스트 = prompt + cwd 도메인 힌트 + 변경 파일명(거친 1차 신호 — 키워드 prefilter).
     dom = _domain_from_cwd(cwd, domain)
@@ -516,6 +553,78 @@ def _selftest():
         pf_pref = preflight_context(ledger, prompt="배포 작업 백업")
         ck(any(p["node_id"] == "node:CONV:ee05" for p in pf_pref["preferences"]),
            "preflight → 사용자 선호(subtype=선호) 회수")
+
+        # ── P2 의미(semantic) 회상: 어휘 미매칭 query 가 의미로 회상되는가 ──
+        # 별도 temp ledger — 어휘가 전혀 겹치지 않는 동의 개념 쌍을 심는다.
+        sem_ledger = os.path.join(tmp, "sem_ledger.sqlite")
+        scon = sqlite3.connect(sem_ledger)
+        scon.executescript(
+            "CREATE TABLE nodes(node_id TEXT PRIMARY KEY, node_type TEXT, sentence TEXT,"
+            " candidate INT, state TEXT, content_hash TEXT, created_at TEXT,"
+            " semantic_subtype TEXT, use_count INTEGER DEFAULT 0);"
+            "CREATE TABLE evidence(evidence_id TEXT, sentence TEXT, source_pointer_id TEXT, source_hash TEXT);"
+            "CREATE TABLE edges(edge_id TEXT, relation TEXT, source TEXT, target TEXT,"
+            " candidate INT, state TEXT, evidence_refs TEXT);")
+        # 버그패턴: query("프로세스 종료") 와 토큰이 전혀 겹치지 않지만 같은 개념.
+        scon.execute(
+            "INSERT INTO nodes(node_id,node_type,sentence,candidate,state,content_hash,"
+            "created_at,semantic_subtype,use_count) VALUES(?,?,?,?,?,?,?,?,?)",
+            ("node:CONV:ff10", "judgment",
+             "PID 만 죽이면 자식 워커가 좀비로 남아 충돌한다", 0, "active", "h", now, "버그패턴", 3))
+        # 무관 노드(요리) — 의미상으로도 query 와 안 닮음.
+        scon.execute(
+            "INSERT INTO nodes(node_id,node_type,sentence,candidate,state,content_hash,"
+            "created_at,semantic_subtype,use_count) VALUES(?,?,?,?,?,?,?,?,?)",
+            ("node:CONV:gg11", "judgment",
+             "양파는 약불에 갈색이 날 때까지 볶는다", 0, "active", "h", now, "결정", 0))
+        scon.commit()
+        scon.close()
+
+        # 결정적 fake embed(Ollama 비의존) — 개념 축으로 직교 벡터(토큰 무관·의미 매칭 모사).
+        # "프로세스/종료/PID/죽이/좀비/워커/충돌" → 같은 축(프로세스-관리 개념).
+        def _fake_embed(text, timeout=10):
+            v = [0.0, 0.0, 0.0]
+            proc_kw = ["프로세스", "종료", "pid", "죽이", "좀비", "워커", "충돌", "재시작", "kill"]
+            cook_kw = ["양파", "볶", "약불", "갈색", "수프", "간을", "레시피", "요리"]
+            t = text.lower()
+            if any(w in t for w in proc_kw):
+                v[0] = 1.0
+            if any(w in t for w in cook_kw):
+                v[1] = 1.0
+            if sum(v) == 0:
+                v[2] = 1.0  # 미매칭 개념은 직교 축(cos≈0)
+            import math as _m
+            n = _m.sqrt(sum(x * x for x in v)) or 1.0
+            return [x / n for x in v]
+
+        fake_scorer = _semantic_scorer(embed_fn=_fake_embed)
+        ck(fake_scorer is not None, "semantic scorer(주입 embed) 생성")
+
+        # query "프로세스 종료" — 노드 문장과 토큰 0 겹침. 어휘만으로는 회상 실패해야.
+        ws_lex = why_search(sem_ledger, "프로세스 종료 방법")  # scorer 미주입(어휘만)
+        lex_ids = [n["node_id"] for n in ws_lex["relevant_nodes"]]
+        ck("node:CONV:ff10" not in lex_ids,
+           "어휘 회상: '프로세스 종료' → '좀비 워커' 노드 미회상(토큰 0 겹침 — 기존 한계 확인)")
+
+        # 같은 query 에 semantic scorer 주입 → 의미로 회상돼야(설계 §5 L4 목표).
+        ws_sem = why_search(sem_ledger, "프로세스 종료 방법", scorer=fake_scorer)
+        sem_ids = [n["node_id"] for n in ws_sem["relevant_nodes"]]
+        ck("node:CONV:ff10" in sem_ids and "node:CONV:gg11" not in sem_ids,
+           "의미 회상: '프로세스 종료' → '좀비 워커' 노드 회상 O · 무관 요리 X")
+        ck(ws_sem["confidence"] > 0.0 and ws_sem["relevant_nodes"][0]["candidate"] is True,
+           "의미 회상 결과도 candidate 표시(사람 확정 전 참고용 — 헌법)")
+
+        # 반문도 의미 매칭으로 발동(어휘 0 겹침이라 scorer 없으면 위험 미감지).
+        pf_lex = preflight_context(sem_ledger, prompt="서버 죽이고 다시 띄운다")
+        pf_sem = preflight_context(sem_ledger, prompt="서버 죽이고 다시 띄운다", scorer=fake_scorer)
+        # "서버 죽이고 다시 띄운다" → proc_kw('죽이','재시작') 축 → ff10(버그패턴)와 의미 매칭.
+        ck(len(pf_lex["avoid_patterns"]) == 0 and len(pf_sem["avoid_patterns"]) >= 1,
+           "의미 반문: 어휘 미매칭 작업도 semantic scorer 면 버그패턴 매칭(avoid_patterns)")
+
+        # scorer 부재(opt-in OFF 기본) → why_search 가 어휘로 graceful 동작(에러 0).
+        ws_off = why_search(sem_ledger, "양파 볶기")  # _semantic_scorer() 기본 OFF → None
+        ck(isinstance(ws_off["relevant_nodes"], list),
+           "opt-in OFF(기본) → scorer None · 어휘 회상으로 graceful(에러 0)")
 
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

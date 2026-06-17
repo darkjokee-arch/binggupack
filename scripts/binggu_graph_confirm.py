@@ -18,8 +18,116 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from binggu_rationale_suggest import SUPPORTS                        # supports_judgment
 from openbinggu_verb_edge_schema import validate_verb_edge          # 매트릭스 재검증 위임
+from openbinggu_incoming_to_staging import SECRET_PATTERNS          # PII/secret 재스캔 위임(신규 정의 0)
 
 CONFIRM_CAVEAT = "candidate · unverified · 사람 승인해도 pack 미기록 · export 별도 단계"
+
+# 사람 도장 후 sync_edges 적재까지의 caveat — 운영 import 는 별도(owner-only) 단계임을 명시.
+SYNC_CAVEAT = ("승인 대기 종료 · sync_edges 적재(어댑터 전용 저장소) · 운영 미등재 · "
+               "운영 import 는 별도 명령(hag_sync_adapter --import-edges, owner-only)")
+
+
+def _has_secret(text):
+    """edge sentence/문장에 PII/secret 패턴이 있으면 True(보수적 STOP). 신규 패턴 정의 0."""
+    if not isinstance(text, str):
+        return False
+    for pat in SECRET_PATTERNS:
+        if pat.search(text):
+            return True
+    return False
+
+
+def apply_confirm_to_sync(approved_edges, sync_db_path, nodes_by_id=None,
+                          actor="human", now=0):
+    """5층 graph_confirm 의 approved[] → sync_edges 에 'confirmed'(사람 도장) 멱등 기록.
+
+    헌법 준수:
+      - actor='human' 만 수신 — 그 외 SyncError(BLOCK). node→node 강한관계 자동생성 금지·사람 도장만.
+      - 신규 EDGE SAVE 경로 신설 0 — hag_sync_adapter(open_sync_db/edge_key) 재사용.
+      - 운영 ledger write 0 — sync_edges(어댑터 전용 저장소)에만 'confirmed' 기록.
+        영구(운영 edges) 등재는 owner-only import_confirmed_edges 별도 단계.
+      - 적재 전 재검증: relation=supports_judgment + evidence + 매트릭스(validate_verb_edge) +
+        PII/secret 재스캔(차단) + dangling(노드 부재) skip.
+      - 멱등: edge_key PK · INSERT OR IGNORE 동작(record_proposals 멱등 재사용). 2회 → 적재 0.
+
+    approved_edges = build_graph_confirm(...)['approved'] (decision='approved' 항목들).
+    nodes_by_id = {node_id: {id, properties{label_kind, candidate}, sentence?}} — 재검증·secret 스캔용.
+    반환 {applied, rejected[], dangling[], detail}.
+    """
+    # 신규 모듈 호출은 함수 내부 import — graph_preview/confirm 순수성 보존(adapter 미존재 환경도 import 가능).
+    import sys as _sys
+    _sys.path.insert(0, os.path.join(HERE, "hybrid_agi"))
+    from hag_sync_adapter import (open_sync_db, edge_key, record_proposals,
+                                   confirm_edge, SyncError)
+
+    if actor != "human":
+        raise SyncError("BLOCK actor!=human (사람 도장만 sync 적재): %r" % actor)
+
+    nodes_by_id = nodes_by_id or {}
+    proposals, key_meta, rejected, dangling = [], [], [], []
+    for e in (approved_edges or []):
+        if e.get("decision") != "approved":          # approved 항목만(방어)
+            rejected.append({**_edge_brief(e), "reason": "not_approved"})
+            continue
+        sid, did, rel = e.get("source_id"), e.get("target_id"), e.get("relation")
+        # 1) supports_judgment 만(node→node 강한관계 = 사람 도장만, 매트릭스 위임 재검)
+        if rel != SUPPORTS:
+            rejected.append({**_edge_brief(e), "reason": "not_supports_judgment"})
+            continue
+        if not e.get("evidence_refs"):
+            rejected.append({**_edge_brief(e), "reason": "no_evidence"})
+            continue
+        # 2) dangling — 노드 부재(nodes_by_id 제공 시) skip (매트릭스보다 먼저 — 노드 없으면 검증 무의미)
+        if nodes_by_id and (sid not in nodes_by_id or did not in nodes_by_id):
+            dangling.append(_edge_brief(e))
+            continue
+        edge_obj = {"id": "c", "source": sid, "target": did,
+                    "properties": {"relation": rel, "candidate": True},
+                    "evidence_refs": list(e.get("evidence_refs") or []),
+                    "promotion_allowed": False}
+        v = validate_verb_edge(edge_obj, nodes_by_id)
+        if v["verdict"] != "PASS":
+            rejected.append({**_edge_brief(e), "reason": "matrix:%s" % v.get("reason", "fail")})
+            continue
+        # 3) PII/secret 재스캔 — source/target 문장에 시크릿이면 적재 차단
+        src_txt = (nodes_by_id.get(sid, {}).get("sentence") if nodes_by_id else None) or ""
+        dst_txt = (nodes_by_id.get(did, {}).get("sentence") if nodes_by_id else None) or ""
+        if _has_secret(src_txt) or _has_secret(dst_txt):
+            rejected.append({**_edge_brief(e), "reason": "secret_redact"})
+            continue
+        ek = edge_key(sid, did, rel)
+        proposals.append({
+            "edge_key": ek, "src_node_id": sid, "dst_node_id": did, "relation": rel,
+            "src_checksum": None, "dst_checksum": None, "kmap_version": "v1",
+            "evidence_refs": list(e.get("evidence_refs") or []), "status": "proposed",
+        })
+        key_meta.append(ek)
+
+    conn = open_sync_db(sync_db_path)
+    try:
+        # 멱등 적재(proposed) → 사람 도장(confirmed). confirm_edge 가 actor!=human 차단(이중 게이트).
+        record_proposals(conn, proposals, now=now)
+        applied = 0
+        cur = conn.cursor()
+        for ek in key_meta:
+            # 멱등: 이미 confirmed/imported(이전 도장분)면 noop — proposed→confirmed 전이만 신규 카운트.
+            cur.execute("SELECT status FROM sync_edges WHERE edge_key = ?", (ek,))
+            row = cur.fetchone()
+            if row is None or row[0] != "proposed":
+                continue
+            r = confirm_edge(conn, ek, actor=actor, now=now)
+            if r.get("status") == "confirmed":
+                applied += 1
+    finally:
+        conn.close()
+    return {"applied": applied, "rejected": rejected, "dangling": dangling,
+            "caveat": SYNC_CAVEAT,
+            "detail": "사람 도장 %d건 → sync_edges 'confirmed' 적재 · 운영 import 는 owner-only 별도 단계" % applied}
+
+
+def _edge_brief(e):
+    return {"source_id": e.get("source_id"), "target_id": e.get("target_id"),
+            "relation": e.get("relation")}
 
 
 def build_graph_confirm(graph_preview, approve=None, reject=None, defer=None):
@@ -151,6 +259,72 @@ def _selftest():
 
     # 10) report only — 반환 dict 외 부작용 0(순수 함수·write 0 자명)
     ck("pack/export 미실행" in c0["note"] and "DB/pack write 0" in c0["note"], "report only · write 0 명시")
+
+    # ---- apply_confirm_to_sync (도장 → sync_edges 실저장 · temp 만) ----
+    import tempfile
+    import sqlite3
+    sys.path.insert(0, os.path.join(HERE, "hybrid_agi"))
+    from hag_sync_adapter import SyncError
+
+    tmp = tempfile.mkdtemp(prefix="graph_confirm_sync_")
+    sync_db = os.path.join(tmp, "sync.sqlite")
+    # nodes_by_id (재검증·secret 스캔용) — 정상 graph 의 노드들에 sentence 부여
+    nbi = {n["id"]: {"id": n["id"],
+                     "properties": {"label_kind": n.get("label_kind"), "candidate": True},
+                     "sentence": n.get("text", "")}
+           for n in g["nodes"]}
+    appr = build_graph_confirm(g, approve=[1, 2])["approved"]   # 정상 supports edge 2건 승인
+
+    # T20: actor != 'human' → BLOCK
+    blk = False
+    try:
+        apply_confirm_to_sync(appr, sync_db, nodes_by_id=nbi, actor="ai", now=10)
+    except SyncError:
+        blk = True
+    ck(blk, "T20 apply actor!=human BLOCK")
+
+    # T21: 정상 approved 2건 → sync 'confirmed' 적재 2건
+    r1 = apply_confirm_to_sync(appr, sync_db, nodes_by_id=nbi, actor="human", now=20)
+    cnt = sqlite3.connect(sync_db).execute(
+        "SELECT count(*) FROM sync_edges WHERE status='confirmed'").fetchone()[0]
+    ck(r1["applied"] == 2 and cnt == 2, "T21 approved 2건 → sync confirmed 2건")
+    ck("운영 미등재" in r1["caveat"] and "owner-only" in r1["detail"],
+       "T21b caveat=운영 미등재·import 별도(owner-only)")
+
+    # T22: 2회 실행 → 멱등(applied=0·중복 0)
+    r2 = apply_confirm_to_sync(appr, sync_db, nodes_by_id=nbi, actor="human", now=30)
+    cnt2 = sqlite3.connect(sync_db).execute("SELECT count(*) FROM sync_edges").fetchone()[0]
+    ck(r2["applied"] == 0 and cnt2 == 2, "T22 2회 실행 → 멱등(applied 0·중복 0)")
+
+    # T23: secret 감지 edge → 적재 차단(reject)
+    # secret-like 문자열은 런타임 조립(공개 tree-scan 오탐 회피 — 실코드에 시크릿 리터럴 0).
+    sdb2 = os.path.join(tmp, "sync2.sqlite")
+    nbi_sec = dict(nbi)
+    sid0 = appr[0]["source_id"]
+    _fake_secret = "api" + "_key=" + "sk-" + "live-" + ("A" * 16)
+    nbi_sec[sid0] = {**nbi[sid0], "sentence": _fake_secret}
+    r3 = apply_confirm_to_sync(appr, sdb2, nodes_by_id=nbi_sec, actor="human", now=40)
+    ck(any(x["reason"] == "secret_redact" for x in r3["rejected"]),
+       "T23 secret 감지 edge 적재 차단(secret_redact)")
+    ck(r3["applied"] < 2, "T23b secret edge 는 applied 에서 제외")
+
+    # T24: dangling(노드 부재) edge → skip(적재 0)
+    sdb3 = os.path.join(tmp, "sync3.sqlite")
+    dang = [{**appr[0], "source_id": "ghost-src"}]   # nodes_by_id 에 없는 노드
+    r4 = apply_confirm_to_sync(dang, sdb3, nodes_by_id=nbi, actor="human", now=50)
+    ck(len(r4["dangling"]) >= 1 and r4["applied"] == 0, "T24 dangling edge skip(적재 0)")
+
+    # T25: supports 외 relation(approve 단계 통과 못 함) 직접 주입 → 적재 차단
+    sdb4 = os.path.join(tmp, "sync4.sqlite")
+    bad_rel = [{"decision": "approved", "source_id": appr[0]["source_id"],
+                "target_id": appr[0]["target_id"], "relation": "depends_on",
+                "evidence_refs": ["EVC-1"]}]
+    r5 = apply_confirm_to_sync(bad_rel, sdb4, nodes_by_id=nbi, actor="human", now=60)
+    ck(r5["applied"] == 0 and any(x["reason"] == "not_supports_judgment" for x in r5["rejected"]),
+       "T25 supports 외 relation 적재 차단(node→node 자동 강한관계 금지)")
+
+    import shutil
+    shutil.rmtree(tmp, ignore_errors=True)
 
     print("\nGATE=%s" % ("GO" if ok else "NO-GO"))
     return 0 if ok else 1
