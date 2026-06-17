@@ -184,6 +184,21 @@ def run_selftest():
         print("[FAIL] fixture 디렉토리 없음:", FIXTURE_DIR)
         sys.exit(1)
     fixtures = sorted(FIXTURE_DIR.glob("*.diff"))
+    # secret 검출 케이스: 평문 가짜 secret 을 공개 repo 에 커밋하지 않는다(tree scan 자기검출 방지).
+    # repo 관행(키워드 런타임 조립)대로 temp diff 를 만들어 검출 능력은 동일하게 검증 — git 미커밋.
+    import tempfile
+    import shutil as _shutil
+    _sec_dir = Path(tempfile.mkdtemp(prefix="watcher_mvp1_sec_"))
+    _sec_fp = _sec_dir / "secret.diff"
+    _sec_fp.write_text(
+        "diff --git a/config/settings.env b/config/settings.env\n"
+        "index 5555555..6666666 100644\n"
+        "--- a/config/settings.env\n+++ b/config/settings.env\n"
+        "@@ -1,2 +1,4 @@\n DEBUG=true\n LOG_LEVEL=info\n"
+        "+api_key=" + "AKIA" + "IOSFODNN7" + "EXAMPLE\n"
+        "+password=" + "hunter2" + "dummy0123456789abc\n",
+        encoding="utf-8")
+    fixtures = list(fixtures) + [_sec_fp]
     cases = []
     for fp in fixtures:
         diff_text = fp.read_text(encoding="utf-8")
@@ -241,6 +256,7 @@ def run_selftest():
         print("    %s %s" % ("[PASS]" if v else "[FAIL]", k))
     print("\n  temp out:", TMP_OUT)
     print("  report  :", SELFTEST_REPORT)
+    _shutil.rmtree(_sec_dir, ignore_errors=True)  # 런타임 조립 secret 픽스처 정리
     print("\n  GATE:", gate)
     sys.exit(0 if gate == "GO" else 1)
 
