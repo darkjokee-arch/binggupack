@@ -21,6 +21,12 @@ sys.path.insert(0, HERE)
 from openbinggu_verb_edge_schema import validate_verb_edge, VERB_EDGES  # noqa: E402
 
 SUPPORTS = "supports_judgment"          # 기존 predicate (신규 0)
+
+# 데카르트곱(src×판단 전수) 축소용 semantic pre-filter. cos는 근거 판정이 아니라
+# "후보 노출 폭"일 뿐 — 통과=도장 아님. 최종 근거/인과는 사람 도장(4cli 20260618 both_reject 결론).
+# opt-in(canon.enabled)일 때만 적용, OFF면 기존 전수 후보(하위호환).
+_RATIONALE_FLOOR = 0.60   # 검토 큐 진입선(넓게·놓침 방지). 0.55는 노이즈 과다라 제외.
+_DUP_CEIL = 0.85          # 이상은 거의 중복 문장(동어반복=인과 아님·진짜 인과는 0.7대) → near_duplicate 격리(도장 큐 제외).
 SUPPORTS_SRC = VERB_EDGES[SUPPORTS]["src"]   # {증거, 상태, 개념}
 CAVEAT_NODE = "candidate · unverified · 사람 SAVE/승인 전 저장 0"
 CAVEAT_EDGE = "candidate edge · 매트릭스 검증 통과 · evidence 원문 필수 · 사람 승인 전 저장 0"
@@ -45,10 +51,26 @@ def _rationale_text(cand):
     return "%s · canonical=%s%s · %s" % (base, lk, tail, ev)
 
 
-def suggest_rationale(candidates):
+def suggest_rationale(candidates, semantic=None):
     """입력: captured 후보 목록 [{text, label_kind, semantic_subtype?, confidence?, evidence_refs?}].
     출력: {rationale[], suggested_edges[], note}. read-only · write 0.
-    ignored 문장은 호출측(preview)이 미포함(buffer 미저장) — 본 함수는 받은 후보만 처리."""
+    ignored 문장은 호출측(preview)이 미포함(buffer 미저장) — 본 함수는 받은 후보만 처리.
+    semantic: None=opt-in 자동(canon.enabled 시 cos pre-filter로 데카르트곱 축소) / False=강제 OFF(전수)
+              / callable=scorer 주입(테스트). cos 미달 쌍은 후보 제외(근거 판정 아님 — 사람 도장 최종)."""
+    # opt-in semantic pre-filter 준비 (lazy import — 순환 회피). 무관 src-판단 쌍을 후보에서 뺀다.
+    _scorer = None
+    if semantic is False:
+        _scorer = None
+    elif callable(semantic):
+        _scorer = semantic
+    else:
+        try:
+            import binggu_canonical_semantic as _CS
+            if _CS.enabled():
+                import binggu_recall as _R
+                _scorer = _R._semantic_scorer()  # 노드 임베딩 캐시 재사용
+        except Exception:
+            _scorer = None
     nodes, items = {}, []
     for i, c in enumerate(candidates):
         nid = c.get("id") or ("cand_%d" % i)   # 실제 node id 우선(3층 graph화용), 없으면 임시
@@ -63,7 +85,7 @@ def suggest_rationale(candidates):
     } for _, c in items]
 
     tgts = [(nid, c) for nid, c in items if c.get("label_kind") == "판단"]
-    edges, seen = [], set()
+    edges, dup_edges, seen = [], [], set()
     for nid, c in items:
         if c.get("label_kind") not in SUPPORTS_SRC:   # 증거/상태/개념만 src
             continue
@@ -72,6 +94,12 @@ def suggest_rationale(candidates):
         for tnid, t in tgts:
             if tnid == nid:
                 continue
+            # semantic pre-filter — 의미 무관 src→판단 쌍은 데카르트곱 후보에서 제외(opt-in).
+            cs = None
+            if _scorer is not None:
+                cs = _scorer(c.get("text", ""), t.get("text", ""))
+                if cs is not None and cs < _RATIONALE_FLOOR:
+                    continue
             edge = {"id": "%s->%s" % (nid, tnid), "source": nid, "target": tnid,
                     "properties": {"relation": SUPPORTS, "candidate": True},
                     "evidence_refs": list(c["evidence_refs"]), "promotion_allowed": False}
@@ -81,19 +109,26 @@ def suggest_rationale(candidates):
             if ev_key in seen:                        # evidence dedup(설계 §5)
                 continue
             seen.add(ev_key)
-            edges.append({
+            rec = {
                 "source": c["text"][:40], "target": t["text"][:40],
                 "source_id": nid, "target_id": tnid,   # 3층 graph화용 id(없으면 임시 cand_i)
                 "relation": SUPPORTS, "verb": "근거가_된다",
                 "evidence_refs": list(c["evidence_refs"]),
                 "status": "candidate", "promotion_allowed": False, "caveat": CAVEAT_EDGE,
-            })
-    return {"rationale": rationale, "suggested_edges": edges,
+                "cos": round(cs, 3) if cs is not None else None,
+            }
+            if cs is not None and cs >= _DUP_CEIL:
+                dup_edges.append(rec)   # 거의 중복(동어반복=인과 아님) → 도장 큐 제외(near_duplicate)
+            else:
+                edges.append(rec)
+    return {"rationale": rationale, "suggested_edges": edges, "near_duplicates": dup_edges,
             "note": "2층 PoC 추천만 — 자동 저장 0 · 신규 predicate 0 · evidence 없으면 edge 보류 · target(판단) 없으면 edge 0"}
 
 
 # ---------------- selftest (순수 함수 · write 0) ----------------
 def _selftest():
+    # selftest 결정성/속도: semantic pre-filter OFF 강제(전수 후보 검증 · Ollama 비의존).
+    os.environ["BINGGU_SEMANTIC_OFF"] = "1"
     ok = True
 
     def ck(c, m):
