@@ -58,3 +58,20 @@ python scripts/smoke_test.py --home ./_binggu_test_home
 python scripts/install_claude_mcp.py --sandbox --home ./_binggu_test_home --apply
 # Claude Code 재시작 → claude mcp list
 ```
+
+## 7. Merge 상태 — main merge HOLD (2026-06-24)
+
+`v1.10.0-rc.1` 은 **prerelease** 이므로 main 에 merge 하지 않고 release candidate branch 로 유지한다.
+
+- branch: `feat/installable-mcp-v1.10.0-rc.1` (origin/main 대비 **+5 commit / -0**, fast-forward 가능)
+- diff: 7파일 / +346 줄, **전부 신규 추가**(기존 운영 코드 수정 0).
+- prior stable: `v1.9.0` (main 그대로 보존) · new prerelease: `v1.10.0-rc.1`.
+- release: https://github.com/darkjokee-arch/binggupack/releases/tag/v1.10.0-rc.1 (prerelease=true, draft=false).
+
+### stable 승격(`v1.10.0`) 전 남은 조건
+1. WSL Ubuntu / macOS 등 **cross-platform clean install** 1회 이상 (현재 Windows + clean clone PASS).
+2. 재시작 후 실제 MCP 도구 노출 확인(현 세션은 apply→Connected 까지만).
+3. owner 의 stable 승격 결정(이후 main merge + `v1.10.0` tag/release).
+
+### 상태명
+`BINGGUPACK_REPO_RECONCILED` · `MCP_INSTALLABLE_PACKAGE_READY` · `MCP_CLEAN_INSTALL_E2E_PASS` · `G4_NO_AUTO_CONFIRMED` · `REAL_HOME_UNCHANGED` · `V1_10_0_RC1_PRERELEASE_CREATED` · `MAIN_MERGE_HELD_FOR_STABLE_DECISION`.
