@@ -1,0 +1,15 @@
+[project]
+name = "binggupack"
+version = "1.10.0rc1"
+description = "BingguPack — local-first personal ontology AGI core with an installable MCP server (stdio JSON-RPC). Python stdlib only."
+requires-python = ">=3.10"
+dependencies = []   # 외부 의존성 0 (stdlib only). 선택: rapidfuzz(있으면 매칭 향상)·ollama/bge-m3(semantic).
+
+[project.urls]
+Homepage = "https://github.com/darkjokee-arch/binggupack"
+
+# 설치/검증 (clone 직후):
+#   python scripts/smoke_test.py --home ./_binggu_test_home
+#   python scripts/install_claude_mcp.py --sandbox --apply
+# 서버 직접 실행(설정 등록은 owner):
+#   python scripts/openbinggu_mcp_server.py --serve <REPO_ROOT>
