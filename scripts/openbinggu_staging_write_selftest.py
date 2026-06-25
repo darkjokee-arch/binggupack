@@ -40,7 +40,7 @@ class StagingDB:
     CREATE TABLE IF NOT EXISTS nodes(node_id TEXT PRIMARY KEY, node_type TEXT, sentence TEXT,
         candidate INTEGER DEFAULT 1, promotion_allowed INTEGER DEFAULT 0, state TEXT DEFAULT 'active',
         supersedes TEXT, pack_id TEXT, content_hash TEXT, created_at TEXT, semantic_subtype TEXT,
-        use_count INTEGER DEFAULT 0);
+        use_count INTEGER DEFAULT 0, speaker TEXT);
     CREATE TABLE IF NOT EXISTS edges(edge_id TEXT PRIMARY KEY, relation TEXT, source TEXT, target TEXT,
         candidate INTEGER DEFAULT 1, state TEXT DEFAULT 'active', evidence_refs TEXT,
         pack_id TEXT, content_hash TEXT, created_at TEXT);
@@ -52,6 +52,8 @@ class StagingDB:
         action TEXT, pack_id TEXT, result TEXT, reason_code TEXT, before_hash TEXT, after_hash TEXT,
         prev_audit_hash TEXT, entry_hash TEXT, chain_ver TEXT);
     CREATE TABLE IF NOT EXISTS audit_meta(key TEXT PRIMARY KEY, value TEXT);
+    CREATE TABLE IF NOT EXISTS hit_events(event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        node_id TEXT, speaker TEXT, kind TEXT, outcome TEXT, subtype TEXT, ts TEXT);
     """
     def __init__(self, path):
         # 운영 경로 거부 (대상 한정)
@@ -77,6 +79,11 @@ class StagingDB:
         #   use_count 는 로컬 회상 카운터(폰/웹 집계는 worker write 필요 = deferred). DEFAULT 0.
         if "use_count" not in ncols:
             self.con.execute("ALTER TABLE nodes ADD COLUMN use_count INTEGER DEFAULT 0")
+        # 화자 축 — speaker(owner=사장님 발화 / ai=AI 요약·회고). 없으면 추가(기존 ledger 비파괴·기존 행 NULL).
+        #   사용자 AGI화 핵심: 사장님 원문 발화(owner)와 AI 작업회고(ai)를 같은 그래프에 구분 적재.
+        #   기존 291행은 NULL=미상(대부분 conv_save AI 회고) — 소급 라벨은 별도 backfill(비파괴).
+        if "speaker" not in ncols:
+            self.con.execute("ALTER TABLE nodes ADD COLUMN speaker TEXT")
         self.con.commit()
 
     def snapshot(self, snap_dir, name):
@@ -112,10 +119,16 @@ class StagingDB:
             if owner and os.path.exists(lock):
                 os.remove(lock)
 
+    # speaker 컬럼은 checksum 산정에서 제외(위치 비의존 명시 projection). speaker 는 보조 화자
+    # 메타이며, 이를 포함하면 ALTER ADD COLUMN 후 기존 운영 ledger 의 audit after_hash(anchor)와
+    # 어긋나 verify_tail_state 가 정상 노드를 변조로 오판한다 → 재봉인 불필요·옛 checksum 호환 유지.
+    # 실증: state/_ck1 (anchor 210e04611a157877 == speaker 제외 checksum).
     def store_checksum(self):
         h = hashlib.sha256()
         for t in ("nodes", "edges", "evidence"):
-            for row in self.con.execute(f"SELECT * FROM {t} ORDER BY 1"):
+            cols = ",".join(c[1] for c in self.con.execute("PRAGMA table_info(%s)" % t)
+                            if c[1] != "speaker")
+            for row in self.con.execute("SELECT %s FROM %s ORDER BY 1" % (cols, t)):
                 h.update(_canon(json.dumps(row, ensure_ascii=False)))
         return h.hexdigest()[:16]
 
@@ -199,8 +212,9 @@ def staging_apply(db, pack, ctx, snap_dir, ts=None):
         try:
             db.con.execute("BEGIN")
             for n in pack["nodes"]:
-                db.con.execute("INSERT INTO nodes(node_id,node_type,sentence,candidate,promotion_allowed,state,pack_id,content_hash,created_at,semantic_subtype) VALUES(?,?,?,1,0,'active',?,?,?,?)",
-                               (n["id"], n["type"], n["sentence"], pack["pack_id"], ch, now, n.get("semantic_subtype")))
+                # speaker(owner/ai/None)는 pack node dict 에서 일원화해 적재(ctx 아님). 미지정=None(NULL).
+                db.con.execute("INSERT INTO nodes(node_id,node_type,sentence,candidate,promotion_allowed,state,pack_id,content_hash,created_at,semantic_subtype,speaker) VALUES(?,?,?,1,0,'active',?,?,?,?,?)",
+                               (n["id"], n["type"], n["sentence"], pack["pack_id"], ch, now, n.get("semantic_subtype"), n.get("speaker")))
             for e in pack["edges"]:
                 db.con.execute("INSERT INTO edges(edge_id,relation,source,target,candidate,state,evidence_refs,pack_id,content_hash,created_at) VALUES(?,?,?,?,1,'active',?,?,?,?)",
                                (e["id"], e["relation"], e["source"], e["target"], json.dumps(e["evidence_refs"]), pack["pack_id"], ch, now))

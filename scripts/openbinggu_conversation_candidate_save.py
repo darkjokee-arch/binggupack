@@ -51,9 +51,11 @@ def _maybe_promote_actor_by_gate(text, indices, ctx):
     return ctx
 
 
-def save_selected(db, text, indices, ctx, snap_dir, due_date=None):
+def save_selected(db, text, indices, ctx, snap_dir, due_date=None, speaker=None):
     """선택 후보만 staging 저장. 반환 {applied, saved, skipped_existing, rejected, reason, pack_id}.
-    진입 시 사람-발화 게이트로 actor 승격 후 기존 게이트(actor/confirm/A0/PII) 그대로 적용."""
+    진입 시 사람-발화 게이트로 actor 승격 후 기존 게이트(actor/confirm/A0/PII) 그대로 적용.
+    speaker: 화자 축(owner=사용자 발화/ai=AI 요약). None=미지정(기존 호출 후방호환·NULL 적재).
+    owner 직감도 conv-self 자기증빙 evidence 가 붙으므로 A0 REVIEW 거부 없이 저장된다(evidence_refs 보유)."""
     ctx = _maybe_promote_actor_by_gate(text, indices, ctx)
     before = db.store_checksum()
 
@@ -132,7 +134,8 @@ def save_selected(db, text, indices, ctx, snap_dir, due_date=None):
         eid = "EVC-CONV-" + _sent_hash(it["sent"])
         th = _hash(it["sent"])  # capture 시점 동결 — ephemeral 출처(동어반복임을 audit 에 명시)
         nodes.append({"id": it["nid"], "type": ntype, "sentence": it["sent"],
-                      "semantic_subtype": it.get("subtype")})  # 보조 메타(canonical 도장 아님)
+                      "semantic_subtype": it.get("subtype"),  # 보조 메타(canonical 도장 아님)
+                      "speaker": speaker})                    # 화자 축(owner/ai/None) — staging_apply 가 적재
         evidence.append({"id": eid, "sentence": it["sent"],
                          "source_pointer_id": "conv-self:" + _sent_hash(it["sent"]),
                          "source_missing": False, "source_hash": th, "captured_hash": th,
@@ -166,6 +169,118 @@ def save_selected(db, text, indices, ctx, snap_dir, due_date=None):
 
     return {"applied": True, "saved": len(saved_items), "skipped_existing": skipped,
             "rejected": rejected, "reason": None, "pack_id": pack_id,
+            "snapshot": r.get("snapshot"), "due_set": due_set}
+
+
+# ===== 페어 저장 (owner 발화 ↔ ai 요약 독립 노드 + 연결 엣지) =====
+# 화자 축 핵심 경로: owner 직감/지적/원인 노드(speaker=owner)와 AI 수정/수용/반박 노드(speaker=ai)를
+# 각각 독립 저장하되 연결 엣지로 묶는다. 4cli 토론 도출 불변식 반영:
+#   불변식1: ai_text=None → owner 단독(순수 직감 — 억지 ai/엣지 생성 금지)
+#   불변식2: 단일 pack → staging_apply 1회(원자성·부분커밋시 전체 롤백)
+#   불변식3(③): 페어 한쪽이라도 기존재 시 전체 skip(부분 적재·dangling 엣지 방지)
+#   헌법: candidate-only(staging_apply 고정)·사람 confirm 게이트·PII 제외·전 엣지 evidence 증빙
+PAIR_RELATIONS = {"ai_accepts", "ai_refutes", "ai_revises"}  # 수용/반박/수정 (VERB_MAP 매핑은 publish 단계)
+
+
+def _pick_one_node(text, pick, speaker):
+    """text 에서 pick 번째 후보 1건을 A0/PII 게이트 통과 후 node dict 로. 실패 시 에러코드(str)."""
+    cands = capture_preview(text)["candidates"]
+    if not isinstance(pick, int) or pick < 1 or pick > len(cands):
+        return "index_out_of_range"
+    c = cands[pick - 1]
+    sent, kind = c["sentence"], c["label_kind"]
+    verdict = a0.classify_node({"id": "pre:" + _sent_hash(sent), "sentence": sent,
+                                "node_type": lkmap.KO2EN[kind], "evidence_refs": ["pre"]}, status="candidate")
+    if verdict["verdict"] == "FAIL":
+        return "a0_fail"
+    pii = scan_residual_pii(sent) + [k for k, rx in _PREVIEW_PII_EXTRA if rx.search(sent)]
+    if pii or any(p.search(sent) for p in v011.SECRET_PATTERNS):
+        return "pii_or_secret"
+    return {"id": "node:CONV:" + _sent_hash(sent), "type": lkmap.KO2EN[kind],
+            "sentence": sent, "semantic_subtype": c.get("semantic_subtype"), "speaker": speaker}
+
+
+def _self_evidence(node):
+    """노드의 conv-self 자기증빙 evidence + evidence_supports 엣지(헌법: 전 노드 증빙)."""
+    h = _sent_hash(node["sentence"])
+    th = _hash(node["sentence"])
+    eid = "EVC-CONV-" + h
+    ev = {"id": eid, "sentence": node["sentence"], "source_pointer_id": "conv-self:" + h,
+          "source_missing": False, "source_hash": th, "captured_hash": th, "redaction_policy": "v1"}
+    edge = {"id": "edge:CONV:" + h, "relation": "evidence_supports",
+            "source": eid, "target": node["id"], "evidence_refs": [eid]}
+    return ev, edge
+
+
+def save_paired(db, owner_text, ai_text, ctx, snap_dir,
+                relation_kind="ai_accepts", owner_pick=1, ai_pick=1, due_date=None):
+    """owner 발화 + ai 요약을 각각 독립 노드로 저장하고 연결 엣지로 묶는다(ai_text=None → owner 단독)."""
+    before = db.store_checksum()
+
+    def block(reason):
+        db.audit_append(ctx.get("actor", "human"), "conv_save_pair", "conv_pending", "BLOCK",
+                        reason, before, before)
+        return {"applied": False, "saved": 0, "reason": reason}
+
+    if ctx.get("actor", "").strip().lower() != "human":
+        return block("G4_no_auto")
+    paired = bool(ai_text)
+    if paired and relation_kind not in PAIR_RELATIONS:
+        return block("relation_kind_invalid")
+    expected = ("PAIR %s owner:%d ai:%d" % (relation_kind, owner_pick, ai_pick)) if paired \
+        else ("PAIR owner:%d" % owner_pick)
+    if ctx.get("confirm") != expected:
+        return block("confirm_phrase_mismatch")
+
+    own = _pick_one_node(owner_text, owner_pick, "owner")
+    if isinstance(own, str):
+        return block("owner_" + own)
+    nodes_pack, edges_pack, ev_pack = [own], [], []
+    ev, ed = _self_evidence(own)
+    ev_pack.append(ev); edges_pack.append(ed)
+
+    if paired:
+        ain = _pick_one_node(ai_text, ai_pick, "ai")
+        if isinstance(ain, str):
+            return block("ai_" + ain)
+        if ain["id"] == own["id"]:
+            return block("pair_same_node")
+        nodes_pack.append(ain)
+        ev2, ed2 = _self_evidence(ain)
+        ev_pack.append(ev2); edges_pack.append(ed2)
+        # 페어 엣지: ai --(수용/반박/수정)--> owner. 증빙 = ai 자기증빙(헌법: 전 엣지 evidence).
+        edges_pack.append({"id": "edge:PAIR:" + _sent_hash(own["sentence"] + ain["sentence"]),
+                           "relation": relation_kind, "source": ain["id"], "target": own["id"],
+                           "evidence_refs": [ev2["id"]]})
+
+    # ③ 페어 중복검사 — 한쪽이라도 기존재 시 전체 skip(부분 적재·dangling 방지)
+    for nd in nodes_pack:
+        if db.con.execute("SELECT 1 FROM nodes WHERE node_id=?", (nd["id"],)).fetchone():
+            return block("pair_partial_exists")
+
+    pack_content = "\n".join(sorted(nd["sentence"] for nd in nodes_pack))
+    pack = {"pack_id": "pair_" + _hash(pack_content)[:8], "content": pack_content,
+            "nodes": nodes_pack, "edges": edges_pack, "evidence": ev_pack}
+    r = staging_apply(db, pack, {"actor": ctx.get("actor", "human"),
+                                 **{k: v for k, v in ctx.items() if k in ("backup_fail", "wal_abort", "checksum_mismatch")}},
+                      snap_dir)
+    if not r.get("applied"):
+        db.audit_append(ctx.get("actor", "human"), "conv_save_pair", pack["pack_id"], "BLOCK",
+                        "staging_apply:" + str(r.get("reason")), before, db.store_checksum())
+        return {"applied": False, "saved": 0, "reason": r.get("reason"), "pack_id": pack["pack_id"]}
+    db.audit_append(ctx.get("actor", "human"), "conv_save_pair", pack["pack_id"], "ALLOW",
+                    "pair %s saved=%d" % ("owner+ai" if paired else "owner_solo", len(nodes_pack)),
+                    before, db.store_checksum())
+
+    due_set = 0
+    if due_date:
+        for nd in nodes_pack:
+            if nd["type"] == "judgment":
+                rr = set_review_due(db, nd["id"], due_date, {"actor": ctx.get("actor", "human")})
+                if rr.get("applied"):
+                    due_set += 1
+    return {"applied": True, "saved": len(nodes_pack), "reason": None, "pack_id": pack["pack_id"],
+            "paired": paired, "relation": relation_kind if paired else None,
             "snapshot": r.get("snapshot"), "due_set": due_set}
 
 
@@ -265,6 +380,48 @@ def run():
     bad = (db.con.execute("SELECT count(*) FROM nodes WHERE candidate!=1 OR promotion_allowed!=0").fetchone()[0]
            + db.con.execute("SELECT count(*) FROM edges WHERE candidate!=1").fetchone()[0])
     rec(11, "confirmed 0 · promotion 0", bad == 0)
+
+    # ===== 화자 축 + 페어 + 양방향 신뢰도 (speaker 확장 정식 케이스) =====
+    import binggu_hit_stats as _HS
+    db_spk = open_g3(os.path.join(tmp, "s_spk.sqlite"))
+    # 14. speaker 적재(owner) — save_selected speaker 파라미터(후방호환·NULL/owner/ai)
+    save_selected(db_spk, CONVO, [1], {"actor": "human", "confirm": "SAVE 1"}, snap_dir, speaker="owner")
+    _sp = db_spk.con.execute("SELECT speaker FROM nodes").fetchone()
+    rec(14, "speaker 적재(owner)", bool(_sp) and _sp[0] == "owner")
+    # 15. 페어 저장 — owner/ai 독립 노드 + ai_refutes 연결 + dangling 0(불변식2·3)
+    _OWN = "이 입찰은 마진이 낮아 보류하는 것이 낫다."
+    _AI = "백필 작업이 진행 중인 상태이다."
+    rp = save_paired(db_spk, _OWN, _AI, {"actor": "human", "confirm": "PAIR ai_refutes owner:1 ai:1"},
+                     snap_dir, relation_kind="ai_refutes")
+    _spk2 = {r[0] for r in db_spk.con.execute("SELECT speaker FROM nodes WHERE speaker IS NOT NULL")}
+    _rels = [r[0] for r in db_spk.con.execute("SELECT relation FROM edges")]
+    _nids = {r[0] for r in db_spk.con.execute("SELECT node_id FROM nodes")}
+    _evids = {r[0] for r in db_spk.con.execute("SELECT evidence_id FROM evidence")}
+    _valid = _nids | _evids
+    _dang = [1 for s, t in db_spk.con.execute("SELECT source,target FROM edges")
+             if s not in _valid or t not in _valid]
+    rec(15, "페어 저장(owner/ai 독립+ai_refutes+dangling0)",
+        rp["applied"] and rp["saved"] == 2 and {"owner", "ai"} <= _spk2
+        and "ai_refutes" in _rels and not _dang)
+    # 16. owner 단독(ai_text=None) — 억지 ai 노드 금지(불변식1)
+    rs = save_paired(db_spk, "다음에는 이 거래처를 우선 검토하는 것이 낫겠다.", None,
+                     {"actor": "human", "confirm": "PAIR owner:1"}, snap_dir)
+    rec(16, "owner 단독(불변식1·억지 ai 금지)", rs["applied"] and rs["saved"] == 1 and rs["paired"] is False)
+    # 17. 페어 중복 차단(③ 부분적재·dangling 방지)
+    rd = save_paired(db_spk, _OWN, _AI, {"actor": "human", "confirm": "PAIR ai_refutes owner:1 ai:1"},
+                     snap_dir, relation_kind="ai_refutes")
+    rec(17, "페어 중복 차단(pair_partial_exists)", (not rd["applied"]) and rd["reason"] == "pair_partial_exists")
+    # 18. 양방향 신뢰도 — 사람만 기록(불변식6)·페어 relation 으로 ai 입장 도출
+    _onid = db_spk.con.execute("SELECT node_id FROM nodes WHERE speaker='owner' LIMIT 1").fetchone()[0]
+    _hr = _HS.record_resolution(db_spk, _onid, True, {"actor": "human"})
+    _auto = _HS.record_resolution(db_spk, _onid, True, {"actor": "auto"})
+    _ng5 = _HS.get_hit_rate(db_spk, "owner")  # n<5 → enough False(불변식8)
+    rec(18, "신뢰도 record(사람만·표본게이트)",
+        _hr["recorded"] and _hr["events"] >= 1 and _auto.get("reason") == "G4_no_auto"
+        and _ng5["enough"] is False)
+    rec(19, "speaker 확장 후 audit chain + tail anchor 무손상",
+        db_spk.verify_chain() and db_spk.verify_tail_state())
+    db_spk.close()
 
     # 13. 긴 문장(80자 초과) 전체 저장 — 발췌 cut 폐기 검증(저장된 sentence == 입력 문장 전체)
     db_long = open_g3(os.path.join(tmp, "s_long.sqlite"))
