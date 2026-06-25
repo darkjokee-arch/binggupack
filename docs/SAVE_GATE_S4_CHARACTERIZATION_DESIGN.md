@@ -7,6 +7,14 @@
 **판정:** **S4 HOLD 유지.** 본 설계는 owner approval 토큰의 전제 조건(§4 GREEN 정의)을 명문화할 뿐,
 어떤 gate-critical 코드의 이동·변경도 승인하지 않는다.
 
+**갱신 이력(2026-06-25, docs-only):** 본 문서 §2 GAP 중 **A2·E1b·B5·F2~F4·D11**을 tests-only
+characterization 으로 커버.
+- 추가 테스트(production touch 0): `scripts/openbinggu_s4_gap_characterization_selftest.py`
+- 결과: **20/20 PASS · GATE GO · operating_store_unchanged=True · production/gate-critical touch 0**
+- 전체 회귀 GREEN: staging 16/16 · candidate 13/13 · deprecate 23/23 · capture GO · save_gate 28/28 · S4 GAP 20/20
+- **S4 implementation 은 여전히 HOLD.** 본 갱신은 결과 반영(docs-only)일 뿐, actual write core
+  (§4 S4-6: `staging_apply`+`save_selected`+`commit_selected`)는 **마지막/영구 HOLD 유지**.
+
 ---
 
 ## 0. 원칙 재확인 (S3_CLOSURE §5)
@@ -56,7 +64,7 @@
 | id | 입력 조건 | EXP(반환) | 기존 |
 |---|---|---|---|
 | A1 | actor=auto | `"G4_no_auto"` | EX staging#(간접) / candidate#3 |
-| A2 | actor=reader | `"G4_no_auto"` | GAP(reader 직접 케이스 없음) |
+| A2 | actor=reader | `"G4_no_auto"` | **s4gap A2-1** (auto=A2-2·human정상=A2-3) |
 | A3 | edge.evidence_refs 빈/누락 | `"evidence_refs_missing"` | EX staging#4 |
 | A4 | evidence.source_missing=True | `"freshness_source_missing"` | GAP |
 | A5 | source_hash≠captured_hash | `"freshness_source_hash_mismatch"` | EX staging#5 |
@@ -73,7 +81,7 @@
 | B2 | c2_check reason 존재 | `{applied:False, reason, button:"disabled"}` + audit BLOCK + **write 0** | EX staging#2,4,5,6 |
 | B3 | ctx.wal_abort=True | ROLLBACK·`reason:"sqlite_wal_incomplete"`·nodes count 불변 | EX staging#8 |
 | B4 | ctx.checksum_mismatch=True | ROLLBACK·`reason:"sqlite_checksum_mismatch"`·count 0 | EX staging#7 |
-| B5 | INSERT 중 예외 | ROLLBACK·`reason:"exception:<Type>"` | GAP(예외 주입 케이스 없음) |
+| B5 | INSERT 중 예외 | ROLLBACK·`reason:"exception:<Type>"` | **s4gap B5-1~5** (partial write 0·checksum 불변·integrity ok·재투입 정상) |
 | B6 | write_lock 경합(타 pid lock) | `RuntimeError("staging_write_locked…")` raise | EX staging#14 |
 | B7 | candidate=1·promotion_allowed=0 강제 | INSERT 값 고정 | EX staging#1(cand==(1,0)) |
 | B8 | created_at=ts·use_count=0 | 값 고정 | EX staging#15 |
@@ -100,13 +108,13 @@
 | D8 | `verify_tail_state` 우회 직접쓰기 | False | EX staging#13 |
 | D9 | `snapshot` wal_checkpoint(TRUNCATE) 후 copy | 파일 생성 | GAP(파일 단언) |
 | D10 | `store_checksum` nodes/edges/evidence 정렬 해시 | 결정성 | GAP |
-| D11 | **sqlite integrity_check=ok** 보존(이동 전후) | "ok" | GAP(§4 명시 항목) |
+| D11 | **sqlite integrity_check=ok** 보존(이동 전후) | "ok" | **s4gap D11-1~5** (candidate/차단/deprecate/staging 후 ok·save_gate jsonl 무결) |
 
 ### E. `save_selected(db, text, indices, ctx, snap_dir, due_date=None)` — **G4 ① / L68**
 | id | 입력 | EXP | 기존 |
 |---|---|---|---|
 | E1 | actor≠"human"(정규화 후) | `block("G4_no_auto")` | EX cand#3 |
-| E1b | actor=" Human "/"AUTO"/누락/agent/system | 정규화 lower 후 human 외 전부 G4_no_auto | GAP(대소문자/공백 우회 전수) |
+| E1b | actor=" Human "/"AUTO"/누락/agent/system | 정규화 lower 후 human 외 전부 G4_no_auto | **s4gap E1b-1,2,3** (human변형=통과·human외 전수 BLOCK·차단군 write 0) |
 | E2 | confirm≠"SAVE i,j" 정확형 | `block("confirm_phrase_mismatch")` | EX cand#2 |
 | E3 | indices=[] | `block("empty_selection")` | GAP(직접 케이스) |
 | E4 | index 범위 밖 | rejected.index_out_of_range++ | EX cand#7 |
@@ -123,10 +131,10 @@
 ### F. `_maybe_promote_actor_by_gate(text, indices, ctx)` — actor 승격(fail-closed)
 | id | 입력 | EXP | 기존 |
 |---|---|---|---|
-| F1 | actor 이미 human | ctx 그대로 반환 | GAP |
-| F2 | 비human + gate_human_for True | actor→human·actor_promoted_by="save_gate" | GAP(승격 경로 직접) |
-| F3 | 비human + 게이트 미기록/stale | 승격 0(원 ctx 유지) | GAP |
-| F4 | sgate import 실패/예외 | except pass·원 ctx(default-deny) | GAP |
+| F1 | actor 이미 human | ctx 그대로 반환 | **s4gap F1** |
+| F2 | 비human + gate_human_for True | actor→human·actor_promoted_by="save_gate" | **s4gap F2** |
+| F3 | 비human + 게이트 미기록/stale | 승격 0(원 ctx 유지) | **s4gap F3** |
+| F4 | sgate import 실패/예외 | except pass·원 ctx(default-deny) | **s4gap F4** |
 
 > **F는 G4 ① 의 승격 분기 — 약화 절대 금지(§5-2).** 이동 시 fail-closed 4분기 전수 pin 필수.
 
@@ -192,15 +200,16 @@
 
 | §4 선행 의무 | 충족 케이스 | 현 상태 |
 |---|---|---|
-| actual write path(staging INSERT 정상/롤백) | B1·B3·B4·B5 | B5 GAP |
+| actual write path(staging INSERT 정상/롤백) | B1·B3·B4·B5 | **B5 s4gap 커버** |
 | dry_run path(MCP dry_run write 0 PREVIEW) | **별도(MCP 핸들러 계층)** | 본 문서 범위 밖 — §4-주 참조 |
-| G4 block 3중(L68/c2/deprecate 4) | E1·E1b · A1·A2 · HK(H~K) | A2·E1b·H4 GAP |
-| actor/confirm/token path | E1~E3·G3·B7 | E3 GAP |
+| G4 block 3중(L68/c2/deprecate 4) | E1·E1b · A1·A2 · HK(H~K) | **A2·E1b s4gap 커버** · H4 GAP |
+| actor/confirm/token path | E1~E3·G3·B7 | E1b s4gap 커버 · E3 GAP |
 | non-TTY fail-closed(exit2) | **interactive_save**(별도, 인수인계 8/8 GREEN) | 기존 GREEN |
-| ledger write transaction(BEGIN/COMMIT/ROLLBACK) | B3·B4·B5 | B5 GAP |
+| ledger write transaction(BEGIN/COMMIT/ROLLBACK) | B3·B4·B5 | **B5 s4gap 커버** |
 | write_lock(O_EXCL/busy_timeout) | B6·D3·D4 | D3 GAP |
 | snapshot/preview 동반성 | B9·N1 | B9 GAP |
-| sqlite integrity_check=ok | D11 | **GAP(전 대상 공통 단언 신설 권장)** |
+| sqlite integrity_check=ok | D11 | **s4gap D11-1~5 커버** |
+| actor 승격 fail-closed(F2~F4) | F1·F2·F3·F4 | **s4gap F1~F4 커버** |
 | operating home no side effect | 전 selftest mtime 불변 | EX(전 파일) |
 | audit chain/candidate-only/promotion0/원문 미저장 | D5~D8·E13·HK-store | EX |
 
@@ -244,4 +253,8 @@
 구현 0·코드 이동 0·대상 코드 touch 0. GAP 케이스의 테스트 추가와 owner approval 토큰 없이는
 어떤 gate-critical write core 도 이동·변경하지 않는다.
 
-**다음 단계(승인 전제):** §3 GAP 케이스 characterization 추가(테스트만) → 전종 GREEN → owner 토큰 요청.
+**진척(2026-06-25):** A2·E1b·B5·F2~F4·D11 = tests-only characterization 으로 커버 완료
+(`openbinggu_s4_gap_characterization_selftest.py` **20/20 GREEN**). 그러나 **S4 implementation 은 HOLD** —
+테스트 추가는 안전망일 뿐 구현 진입 승인이 아니다. 잔여 GAP: A4·A6·A10·B9·B10·C2·C3·D3·D9·D10·E3·E6·E7·H4·H5·J3·K4·L2·N2·O3·O4.
+
+**다음 단계(승인 전제):** 잔여 GAP characterization 추가(테스트만) → 전종 GREEN → owner 토큰 요청.
