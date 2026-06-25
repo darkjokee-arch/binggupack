@@ -1,4 +1,6 @@
-# Install BingguPack v1.10.0
+# Install BingguPack v1.11.0
+
+> Latest stable: `v1.11.0` (v1.10.0 installable MCP baseline 위 feature implementation). 설치/검증 절차는 v1.10.0과 동일하게 호환됩니다 — 아래 명령 그대로 사용하세요. PyPI publish는 아직 하지 않으므로 `git clone` 설치만 지원합니다.
 
 > `scripts/`·`docs/`의 `openbinggu_`/`OPENBINGGU_` 접두사는 레거시 내부 코드네임입니다(BingguPack과 동일 프로젝트).
 
@@ -93,6 +95,31 @@ AI/reader actor의 실저장은 차단되어야 정상입니다. `save_candidate
 - **`claude` 명령을 못 찾음 (Windows)** — installer가 `claude.cmd` shim을 `shutil.which`로 처리합니다. PATH에 Claude Code가 있는지 확인.
 - **운영 엔트리를 덮어쓰려 함** — installer는 `openbinggu-local`(운영)을 거부합니다. sandbox 이름(`--sandbox`)으로 등록하세요.
 - **selftest 실패** — `python scripts/openbinggu_doctor.py --selftest`로 GATE 상태를 먼저 확인. write는 항상 0이므로 운영 데이터 손상 없이 재시도 가능.
+
+## Interactive save gate (optional, v1.11.0)
+
+기존 explicit confirm 방식은 그대로 유지되고, TTY에서 후보 선택을 돕는 보조 UX가 추가됐습니다.
+
+```bash
+python -m binggupack.cli.interactive_save            # TTY 대화형 (후보 선택 → confirm phrase 구성)
+python -m binggupack.cli.interactive_save --selftest # 비-TTY 검증 (저장 0)
+```
+
+- non-TTY(CI/pipe/AI)에서는 **fail-closed** — 기존 explicit confirm 방식이 강제됩니다.
+- 마지막 human confirmation과 실제 저장 게이트(`G4_no_auto`)는 기존 경로 그대로. interactive는 ledger에 직접 쓰지 않습니다.
+
+## Developer: package build (optional, v1.11.0)
+
+PyPI publish는 **미수행**입니다. 로컬에서 패키지 build만 확인하려면 격리 venv에서:
+
+```bash
+python -m venv .build_venv
+.build_venv/Scripts/python -m pip install build   # WSL/macOS: .build_venv/bin/python
+.build_venv/Scripts/python -m build                # sdist + wheel 생성 (dist/)
+```
+
+- `pyproject.toml`에 `[build-system]` + `binggupack` 패키지 정의가 있습니다.
+- build 산출물(`dist/`, `.build_venv/`)은 `.gitignore` 대상입니다.
 
 ## Uninstall / rollback
 

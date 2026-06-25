@@ -2,16 +2,28 @@
 
 **Installable MCP package for Claude Code — local-first, evidence-backed memory with a human-confirmed save gate.**
 
-> **Latest stable: `v1.10.0`** — installable MCP package · Claude Code sandbox install · **external clean-clone verified ✅**
-> `scripts/smoke_test.py` **10/10 PASS** · **MCP 8 tools** exposed · `save_candidate(dry_run=false)` blocked by **`G4_no_auto`** · 3-OS CI (ubuntu / macos / windows)
-> 🔒 local-first · preview-first · **no AI autosave** · human `SAVE n` gate
-> Release: <https://github.com/darkjokee-arch/binggupack/releases/tag/v1.10.0> · 설치: [INSTALL.md](INSTALL.md) · 종료 기록: [release closure](docs/releases/BINGGUPACK_V1_10_0_RELEASE_CLOSURE.md)
+> **Latest stable: `v1.11.0`** — feature implementation on the v1.10.0 installable MCP baseline · **external clean-clone + isolated build verified ✅**
+> `binggupack/` package modularization · interactive save prototype (non-TTY fail-closed) · pack/workflow examples · sdist/wheel build · `scripts/smoke_test.py` **10/10 PASS** · **MCP 8 tools** · `save_candidate(dry_run=false)` blocked by **`G4_no_auto`**
+> 🔒 local-first · preview-first · **no AI autosave** · human `SAVE n` gate · PyPI publish 0
+> Release: <https://github.com/darkjokee-arch/binggupack/releases/tag/v1.11.0> · 설치: [INSTALL.md](INSTALL.md) · 종료 기록: [v1.11.0 closure](docs/releases/BINGGUPACK_V1_11_0_RELEASE_CLOSURE.md)
+> Previous stable: `v1.10.0` (installable MCP package) — [release](https://github.com/darkjokee-arch/binggupack/releases/tag/v1.10.0) · [closure](docs/releases/BINGGUPACK_V1_10_0_RELEASE_CLOSURE.md)
 
 BingguPack은 AI 대화에서 남길 가치가 있는 판단·상태·개념을 *후보*로 모으고, **사람이 직접 `SAVE n`을 타이핑한 것만** 로컬 장부에 저장하는 local-first 지식 프레임워크입니다. **자동 저장은 없습니다.** v1.10.0부터는 이 전체를 **Claude Code MCP 패키지**로 clone 한 번에 설치할 수 있습니다.
 
 ---
 
-## v1.10.0 — Installable MCP package
+## v1.11.0 — Feature implementation (latest)
+
+v1.10.0 installable MCP stable baseline 위의 feature implementation release입니다.
+
+- **Phase 1 package modularization** — 새 `binggupack/` 패키지(`cli`/`classifier`/`mcp`/`pack`/`safety`/`workspace`). smoke 로직은 `binggupack/pack/smoke.py`로 이관.
+- **backward-compatible** — `scripts/smoke_test.py`·`scripts/install_claude_mcp.py`는 기존대로 동작(wrapper). MCP 8도구 그대로 노출, 기존 명령 무결.
+- **interactive save prototype** — `python -m binggupack.cli.interactive_save`. confirm phrase 유지, **non-TTY fail-closed**, ledger write 0(기존 게이트 우회 0).
+- **pack/workflow examples** — 4 synthetic 시나리오([examples/pack_workflow](examples/pack_workflow/README.md)), 전부 `ingest_performed=false`.
+- **packaging/build readiness** — `pyproject.toml` build-system + 격리 venv sdist/wheel build 검증. (**PyPI publish는 미수행.**)
+- 검증: smoke **10/10** · clean-clone · isolated build PASS · `G4_no_auto` 유지 · production write/OpenCrab ingest/G4 bypass **0**. 상세: [v1.11.0 closure](docs/releases/BINGGUPACK_V1_11_0_RELEASE_CLOSURE.md).
+
+## v1.10.0 — Installable MCP package (previous stable)
 
 `git clone` 만으로 MCP 서버(`scripts/openbinggu_mcp_server.py`)가 포함되고, `scripts/install_claude_mcp.py` 헬퍼로 Claude Code에 sandbox 엔트리로 등록됩니다.
 
