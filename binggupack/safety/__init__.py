@@ -12,5 +12,7 @@ from .path_safety import (  # noqa: F401
 from .gate_text import (  # noqa: F401
     parse_save_indices,
     SAVE_TRIGGER_RE,
+    _norm,
+    sent_hash,
 )
 

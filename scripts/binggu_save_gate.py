@@ -37,7 +37,8 @@ except Exception:  # pragma: no cover - 폴백(외부 의존 없이 동일 경�
 try:
     if _ROOT not in sys.path:
         sys.path.insert(0, _ROOT)
-    from binggupack.safety.gate_text import parse_save_indices, SAVE_TRIGGER_RE  # noqa: E402,F401
+    from binggupack.safety.gate_text import (  # noqa: E402,F401
+        parse_save_indices, SAVE_TRIGGER_RE, _norm, sent_hash)
 except Exception:  # pragma: no cover - 폴백(외부 의존 없이 동일 정의)
     SAVE_TRIGGER_RE = re.compile(
         r"\s*(?:SAVE|저장|세이브)\s*\d+(\s*,\s*\d+)*\s*", re.IGNORECASE)
@@ -46,6 +47,12 @@ except Exception:  # pragma: no cover - 폴백(외부 의존 없이 동일 정�
         if not SAVE_TRIGGER_RE.fullmatch(str(prompt or "")):
             return None
         return [int(x) for x in re.findall(r"\d+", prompt)]
+
+    def _norm(s):
+        return re.sub(r"\s+", " ", str(s)).strip()
+
+    def sent_hash(s):
+        return hashlib.sha256(_norm(s).encode("utf-8")).hexdigest()[:16]
 
 
 def _resolve_home():
@@ -96,12 +103,7 @@ def __getattr__(name):  # noqa: D401 - PEP 562 모듈 레벨 lazy 속성
     raise AttributeError("module %r has no attribute %r" % (__name__, name))
 
 
-def _norm(s):
-    return re.sub(r"\s+", " ", str(s)).strip()
-
-
-def sent_hash(s):
-    return hashlib.sha256(_norm(s).encode("utf-8")).hexdigest()[:16]
+# _norm / sent_hash 정본은 binggupack.safety.gate_text (상단 import·S3-C 이관). 게이트 로직 무관.
 
 
 # 사람-발화 저장 트리거 토큰 — 영문 'SAVE' 외 한글 '저장'/'세이브' 도 동등 인정.
