@@ -11,6 +11,7 @@
   - B5     : staging_apply INSERT 예외 주입 → ROLLBACK(partial write 0)
   - F2~F4  : _maybe_promote_actor_by_gate fail-closed 4분기(승격/미승격/예외)
   - D11    : sqlite integrity_check=ok 공통 사후단언(save/차단 이후)
+  - B-low  : H4/H5/J3/K4(deprecate_g3 가드) + L2/N2/O3/O4(save_gate read/validation) early-return
 
 CLI: python openbinggu_s4_gap_characterization_selftest.py --selftest
 """
@@ -23,11 +24,13 @@ import shutil
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from openbinggu_staging_write_selftest import (
-    StagingDB, c2_check, staging_apply, base_pack, OPERATING_PATHS)
+    StagingDB, c2_check, staging_apply, base_pack, OPERATING_PATHS, tombstone)
 from openbinggu_conversation_candidate_save import (
     save_selected, _maybe_promote_actor_by_gate, CONVO)
 from openbinggu_conversation_capture_preview import capture_preview
-from openbinggu_deprecate_and_remind_g3 import open_g3, deprecate_item
+from openbinggu_deprecate_and_remind_g3 import (
+    open_g3, deprecate_item, resolve_review, classify_harvest_item)
+from binggu_save_gate import gate_record, write_last_preview, gate_record_from_prompt
 
 
 def _integrity_ok(db):
@@ -189,6 +192,54 @@ def run():
                     if line:
                         _json.loads(line)  # 깨지면 예외 → FAIL
         rec("D11-5", "save_gate jsonl 기록장 무결(전 라인 valid json)", jsonl_ok)
+
+        # ============ B-low — 저위험 GAP(deprecate_g3 가드 + save_gate read/validation) ============
+        # H4·H5·J3·K4: deprecate_g3 추가 가드 분기. L2·N2·O3·O4: save_gate read/validation early-return.
+        # 전부 actual write core 미경유 — 현재 동작 그대로 pin.
+        bl_db = open_g3(os.path.join(tmp, "blow.sqlite"))
+        bl_db.con.execute(
+            "INSERT INTO nodes(node_id,node_type,sentence,candidate,promotion_allowed,state,pack_id,content_hash,created_at) "
+            "VALUES('bn1','judgment','보류 판단 문장이다',1,0,'active','bltest','h','2026-06-25T00:00:00Z')")
+        bl_db.con.commit()
+        # H4: tombstoned 노드 deprecate → tombstoned_item
+        tombstone(bl_db, "bn1", {"actor": "human"}, snap_dir)
+        rH4 = deprecate_item(bl_db, "node", "bn1", "기각 사유", {"actor": "human"}, snap_dir)
+        rec("H4", "tombstoned 노드 deprecate → tombstoned_item",
+            (not rH4.get("applied")) and rH4.get("reason") == "tombstoned_item")
+        # H5: kind∉{node,edge} → kind_invalid (row 조회 이전 반환)
+        rH5 = deprecate_item(bl_db, "concept", "whatever", "사유", {"actor": "human"}, snap_dir)
+        rec("H5", "kind=concept → kind_invalid",
+            (not rH5.get("applied")) and rH5.get("reason") == "kind_invalid")
+        # J3: resolve_review reason 공백 → resolve_reason_required (outcome 유효·pending 무관, reason 체크가 먼저)
+        rJ3 = resolve_review(bl_db, "bn1", "성공", "  ", {"actor": "human"})
+        rec("J3", "resolve reason 공백 → resolve_reason_required",
+            (not rJ3.get("applied")) and rJ3.get("reason") == "resolve_reason_required")
+        # K4: classify_harvest_item item_id 공백 → item_id_required
+        rK4 = classify_harvest_item(bl_db, "  ", "keep", "근거", {"actor": "human"})
+        rec("K4", "classify item_id 공백 → item_id_required",
+            (not rK4.get("applied")) and rK4.get("reason") == "item_id_required")
+        bl_db.close()
+
+        # save_gate 저위험(temp 기록장 — BINGGU_HOME 격리 하, 운영 미접촉)
+        gp_bl = os.path.join(tmp, "blow_gate.jsonl")
+        lp_bl = os.path.join(tmp, "blow_preview.json")
+        # L2: gate_record 빈/공백 문장 skip → 유효 1건만 기록
+        nL2 = gate_record(["  ", "", "유효한 사람 발화 문장"], path=gp_bl)
+        rec("L2", "gate_record 빈/공백 skip → 유효 1건만 기록", nL2 == 1)
+        # N2: write_last_preview 빈 sentence 후보 skip → rows 제외
+        nN2 = write_last_preview([{"sentence": ""}, {"sentence": "후보 문장 가나다"}], path=lp_bl)
+        rec("N2", "write_last_preview 빈 sentence skip → rows 1", nN2 == 1)
+        # O3: gate_record_from_prompt preview 파일 부재 → 0 / 파싱 실패 → 0
+        o3a = gate_record_from_prompt("SAVE 1", preview_path=os.path.join(tmp, "no_such.json"), gate_path=gp_bl)
+        broken_pv = os.path.join(tmp, "broken_preview.json")
+        with open(broken_pv, "w", encoding="utf-8") as f:
+            f.write("{ not valid json")
+        o3b = gate_record_from_prompt("SAVE 1", preview_path=broken_pv, gate_path=gp_bl)
+        rec("O3", "preview 파일 부재/파싱실패 → 0", o3a == 0 and o3b == 0)
+        # O4: idx 매칭 0 → 0 (preview엔 idx1만, 'SAVE 9' 요청)
+        write_last_preview([{"sentence": "단일 후보 라마바"}], path=lp_bl)
+        o4 = gate_record_from_prompt("SAVE 9", preview_path=lp_bl, gate_path=gp_bl)
+        rec("O4", "idx 매칭 0 → 0", o4 == 0)
 
     finally:
         if home0 is None:
