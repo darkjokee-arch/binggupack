@@ -44,7 +44,7 @@
 
 `pyproject.toml` **실제 보강 완료** (TOML 파싱 검증 OK):
 - `[build-system]` 추가 — `requires=["setuptools>=61"]`, `build-backend="setuptools.build_meta"` (PEP517 build 가능 상태).
-- `version` `1.10.0rc1` → **`1.11.0.dev0`** (`binggupack/__about__.py`와 일치).
+- `version` `1.10.0rc1` → **`1.11.0`** (`binggupack/__about__.py`와 일치. pre-release 검증 당시에는 `1.11.0.dev0`, release 시 `1.11.0` 확정).
 - `license = {text="MIT"}`, `readme="README.md"`, `authors`, `keywords`, `classifiers` 추가.
 - `[project.scripts]` `binggu-interactive-save = "binggupack.cli.interactive_save:main"` (entry import 검증 OK).
 - `[tool.setuptools.packages.find]` `include=["binggupack*"]` — flat-layout(top-level `binggu.py`/`scripts`) 충돌 회피.

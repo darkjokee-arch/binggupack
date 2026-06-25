@@ -55,7 +55,7 @@ scripts/
 ## 구현 진행 (v1.11.0 groundwork)
 
 **Phase 1 일부 구현 완료** (이번 사이클, branch `feat/v1.11.0-roadmap-ultra`):
-- `binggupack/` 패키지 생성 — `cli/`·`classifier/`·`mcp/`·`pack/`·`safety/`·`workspace/` + `__about__.py`(version 단일 소스 `1.11.0.dev0`).
+- `binggupack/` 패키지 생성 — `cli/`·`classifier/`·`mcp/`·`pack/`·`safety/`·`workspace/` + `__about__.py`(version 단일 소스 `1.11.0`).
 - smoke 핵심 로직을 `binggupack/pack/smoke.py`(`run_smoke`/`run_smoke_cli`)로 이관.
 - `scripts/smoke_test.py`는 **thin wrapper**로 전환 — 명령/출력/exit code byte-identical, smoke **10/10 PASS** 회귀 확인.
 - `scripts/install_claude_mcp.py`는 backward-compat 위해 **무변경 유지**(`--help`·dry-run 정상).
