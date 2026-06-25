@@ -51,6 +51,29 @@ python scripts/openbinggu_doctor.py --selftest          # 15/15 PASS GATE=GO 기
 python scripts/openbinggu_doctor.py --tree examples/toy_project   # CLEAN 기대
 ```
 
+## BingguPack MCP 설치 (Claude Code) / installable MCP package
+
+> v1.10.0-rc.1+ — **clone만으로 MCP 서버가 포함**된다(서버는 `scripts/openbinggu_mcp_server.py`). Claude Code 에 sandbox 엔트리로 등록.
+
+```bash
+# 1) 등록 전 오프라인 검증 (write 0, 운영 ~/.binggupack 미접촉)
+python scripts/smoke_test.py --home ./_binggu_test_home
+#    기대: 10/10 PASS · save_actual_G4_no_auto_BLOCK PASS · operating_ledger_write_0 PASS
+
+# 2) Claude Code 등록 (미리보기 → 실제)
+python scripts/install_claude_mcp.py --sandbox --home ./_binggu_test_home --dry-run
+python scripts/install_claude_mcp.py --sandbox --home ./_binggu_test_home --apply
+
+# 3) Claude Code 재시작 (필수 — MCP 도구는 세션 시작 시 고정) → 확인
+claude mcp list
+claude mcp get openbinggu-local-sandbox
+```
+
+- `BINGGU_HOME` 로 sandbox/운영 home 분리(미설정 시 `~/.binggupack`). installer 가 MCP config `env` 에 주입.
+- AI/reader actor 의 실저장은 `G4_no_auto` 로 차단 — 저장은 사람의 `SAVE n` 승인 게이트에서만.
+- 운영 엔트리 `openbinggu-local` 은 installer 가 건드리지 않음(거부). sandbox 이름만 등록.
+- 상세: `docs/BINGGUPACK_MCP_CLEAN_INSTALL_E2E_TEST_REPORT.md`.
+
 ## AGI memory capture (opt-in) / 자동 후보 수집
 ```bash
 python binggu.py init --agi-memory    # 장부 + capture profile (전역 후보수집 = AGI memory mode, 기본 ON)

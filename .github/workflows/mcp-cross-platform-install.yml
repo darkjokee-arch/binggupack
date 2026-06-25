@@ -1,0 +1,47 @@
+name: MCP Cross-Platform Install
+
+# v1.10.0-rc.1 installable MCP package — clean install smoke를 실제 ubuntu/macos/windows
+# 러너에서 검증. clone → smoke_test(8도구 + save gate 10/10) → installer dry-run.
+# claude CLI 는 러너에 없으므로 apply 는 하지 않음(dry-run 까지). 운영 ~/.binggupack 미접촉(BINGGU_HOME 격리).
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PYTHONUTF8: "1"  # windows 러너 cp1252 콘솔 한국어 출력 UnicodeEncodeError 방지 (posix 무해)
+
+jobs:
+  mcp-install:
+    strategy:
+      fail-fast: false  # 한 OS가 깨져도 나머지 OS 결과를 끝까지 본다
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Smoke test — 8 tools + save gate (10/10 PASS, G4_no_auto, real home 0)
+        run: python scripts/smoke_test.py --home "${{ runner.temp }}/binggu_ci_home"
+
+      - name: Installer dry-run — claude mcp add command synthesis
+        run: python scripts/install_claude_mcp.py --sandbox --home "${{ runner.temp }}/binggu_ci_home" --dry-run
+
+      - name: Operating-name protection (must refuse openbinggu-local)
+        shell: bash
+        run: |
+          if python scripts/install_claude_mcp.py --name openbinggu-local --apply; then
+            echo "FAIL: operating name was not refused"; exit 1
+          else
+            echo "OK: operating name refused (expected)"
+          fi
