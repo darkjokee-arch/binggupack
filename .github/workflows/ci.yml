@@ -27,6 +27,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Version SSOT consistency selftest (3/3, GATE=GO — pyproject==__about__)
+        run: python scripts/version_consistency_selftest.py
+
       - name: Cross-platform policy selftest (40/40, GATE=GO)
         run: python scripts/binggu_platform_selftest.py
 
