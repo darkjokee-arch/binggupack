@@ -9,4 +9,8 @@ from .path_safety import (  # noqa: F401
     _path_id,
     _DENY,
 )
+from .gate_text import (  # noqa: F401
+    parse_save_indices,
+    SAVE_TRIGGER_RE,
+)
 

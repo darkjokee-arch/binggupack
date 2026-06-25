@@ -24,11 +24,28 @@ import time
 # 단일 home resolver 경유 — ledger scope 와 gate scope 가 갈라지지 않도록(split-brain 차단).
 #   binggu_platform.binggu_home() 가 BINGGU_HOME(opt-in)/OS별 홈을 단일 원천으로 해석한다.
 #   import 가 안 되면(독립 실행 등) 동일 정책의 _resolve_home() 폴백으로 byte-identical 산출.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.dirname(_HERE)
 try:
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, _HERE)
     import binggu_platform as _plat  # noqa: E402
 except Exception:  # pragma: no cover - 폴백(외부 의존 없이 동일 경로)
     _plat = None
+
+# v1.11.0 S3-B: 순수 파싱 helper 정본은 binggupack.safety.gate_text (게이트 로직 무관).
+#   import 실패(독립 실행 등) 시 동일 정의 폴백 — byte-identical.
+try:
+    if _ROOT not in sys.path:
+        sys.path.insert(0, _ROOT)
+    from binggupack.safety.gate_text import parse_save_indices, SAVE_TRIGGER_RE  # noqa: E402,F401
+except Exception:  # pragma: no cover - 폴백(외부 의존 없이 동일 정의)
+    SAVE_TRIGGER_RE = re.compile(
+        r"\s*(?:SAVE|저장|세이브)\s*\d+(\s*,\s*\d+)*\s*", re.IGNORECASE)
+
+    def parse_save_indices(prompt):
+        if not SAVE_TRIGGER_RE.fullmatch(str(prompt or "")):
+            return None
+        return [int(x) for x in re.findall(r"\d+", prompt)]
 
 
 def _resolve_home():
@@ -88,11 +105,7 @@ def sent_hash(s):
 
 
 # 사람-발화 저장 트리거 토큰 — 영문 'SAVE' 외 한글 '저장'/'세이브' 도 동등 인정.
-#   결함수정(6/16): 사장님이 '저장 1'·'세이브 1' 처럼 한글로 쳐도 게이트 기록되도록 확장.
-#   0-A 정신 유지 — 발화 전체가 정확히 '<트리거> n' 형태일 때만(부분문자열·인용문 무시),
-#   AI 는 UserPromptSubmit 를 못 거침 → 위조 불가는 그대로.
-SAVE_TRIGGER_RE = re.compile(
-    r"\s*(?:SAVE|저장|세이브)\s*\d+(\s*,\s*\d+)*\s*", re.IGNORECASE)  # 트리거↔숫자 공백 선택적(저장1·저장 1 모두)
+#   SAVE_TRIGGER_RE / parse_save_indices 정본은 binggupack.safety.gate_text (상단 import·S3-B 이관).
 # hook 의 빠른 차단(모듈 로드 전 substring 체크)용 토큰. upper() 비교는 한글에 영향 0.
 TRIGGER_TOKENS = ("SAVE", "저장", "세이브")
 
@@ -101,14 +114,6 @@ def has_trigger_token(prompt):
     """발화에 트리거 토큰(영문/한글)이 substring 으로라도 있나 — hook 빠른 차단용(정밀 판정 아님)."""
     up = str(prompt or "").upper()
     return any(t.upper() in up for t in TRIGGER_TOKENS)
-
-
-def parse_save_indices(prompt):
-    """발화 전체가 정확히 '<트리거> n' / '<트리거> 1,3' 형태일 때만 인덱스 반환.
-    트리거 = SAVE/저장/세이브(대소문자 무시). 부분문자열·인용문·부정문 무시. 아니면 None."""
-    if not SAVE_TRIGGER_RE.fullmatch(str(prompt or "")):
-        return None
-    return [int(x) for x in re.findall(r"\d+", prompt)]
 
 
 def gate_record(sentences, source="user_prompt", ts=None, path=None):
