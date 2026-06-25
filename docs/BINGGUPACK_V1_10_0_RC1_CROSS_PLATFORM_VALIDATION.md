@@ -9,11 +9,12 @@
 | - | - | - | - | - | - |
 | **Windows** (이 머신, MINGW64) | ✅ in-place + clean clone | ✅ PASS | ✅ PASS | ✅ apply → `claude mcp get` **Connected** → remove 원복 | 운영 2개 무손상 |
 | **Linux** (docker `python:3.12`, x86_64) | ✅ `git clone -b v1.10.0-rc.1` | ✅ **PASS** | ✅ PASS | ⏸ NOT_AVAILABLE (컨테이너에 `claude` CLI 없음) | POSIX 실증·image pull 0(로컬 보유) |
-| **WSL Ubuntu** | — | — | — | — | **NOT_AVAILABLE** — Ubuntu 배포판 미설치(docker-desktop만). PASS 처리 안 함 |
-| **macOS** | — | — | — | — | **NOT_AVAILABLE** — Windows 머신. PASS 처리 안 함 |
+| **Linux/WSL** (CI `ubuntu-latest`) | ✅ checkout | ✅ **PASS** | ✅ PASS | ⏸ N/A (runner 에 claude 없음) | **GitHub Actions 실증**(로컬 WSL Ubuntu 미설치 → CI 로 대체) |
+| **macOS** (CI `macos-latest`) | ✅ checkout | ✅ **PASS** | ✅ PASS | ⏸ N/A (runner 에 claude 없음) | **GitHub Actions 실증**(로컬 Windows 머신 → CI 로 대체) |
 
-- Linux 검증으로 POSIX clean install 이 실증됨(WSL Ubuntu 의 직접 대체는 아니나 동일 POSIX 경로·런처 `python3` 동작 확인).
-- 두 환경(Windows/Linux) 모두 `tag v1.10.0-rc.1` checkout → smoke 통과.
+- 로컬에 WSL Ubuntu / macOS 가 없어 **GitHub Actions 러너로 검증**(사장님 지시). workflow: `.github/workflows/mcp-cross-platform-install.yml`.
+- CI run [28138244904](https://github.com/darkjokee-arch/binggupack/actions/runs/28138244904): **ubuntu-latest ✓ · macos-latest ✓ · windows-latest ✓** (3/3 success). 각 job = clone → smoke 10/10 → installer dry-run → 운영이름 보호 거부 확인.
+- 로컬 Windows + docker Linux(python:3.12) 도 별도 PASS. 모든 환경 `tag v1.10.0-rc.1` checkout → smoke 통과.
 
 ## 2. Claude restart 후 MCP tool exposure
 - **HELD (이 세션 불가).** MCP 도구는 세션 시작 시 고정 + AI(현 세션)는 Claude Code 재시작 불가.
@@ -34,16 +35,16 @@
 ## 6. stable(`v1.10.0`) 승격 가능 여부
 | 조건 | 상태 |
 | - | - |
-| Windows clean clone PASS | ✅ |
-| WSL Ubuntu smoke PASS 또는 NOT_AVAILABLE 명확 | ✅ NOT_AVAILABLE 명확 (Linux docker 로 POSIX 보강) |
-| macOS smoke PASS 또는 NOT_AVAILABLE 명확 | ✅ NOT_AVAILABLE 명확 |
-| Claude restart 후 MCP tool exposure PASS | ⏸ **HELD** (owner 재시작 필요) |
-| smoke 10/10 PASS | ✅ (Windows + Linux) |
-| installer dry-run/apply PASS where available | ✅ |
+| Windows clean clone PASS | ✅ (로컬 + CI windows-latest) |
+| WSL Ubuntu smoke PASS 또는 NOT_AVAILABLE 명확 | ✅ **CI ubuntu-latest PASS** (로컬 미설치 → GitHub Actions 대체) |
+| macOS smoke PASS 또는 NOT_AVAILABLE 명확 | ✅ **CI macos-latest PASS** (로컬 Windows → GitHub Actions 대체) |
+| Claude restart 후 MCP tool exposure PASS | ⏸ **HELD** (owner 재시작 필요 — 유일 잔여) |
+| smoke 10/10 PASS | ✅ (3-OS CI + 로컬 Windows/Linux) |
+| installer dry-run/apply PASS where available | ✅ (dry-run 3-OS / apply Windows Connected) |
 | G4_no_auto 유지 / real home 0 / API·fetch·ingest 0 | ✅ |
 
-→ **판정: `V1_10_0_RC1_PARTIAL_VALIDATION_DOCS_UPDATED`**. cross-platform 은 Windows+Linux 실증 + WSL/macOS NOT_AVAILABLE 명확 기록. 유일한 잔여 = **Claude restart 후 실 tool exposure**(구조상 owner 재시작 영역). 이 1건 확인 시 stable 승격 후보.
-- **stable release 는 이번에도 생성하지 않음** (`MAIN_MERGE_HELD_FOR_STABLE_DECISION`).
+→ **판정: `V1_10_0_RC1_CROSS_PLATFORM_VALIDATION_PASS`**. 3-OS(ubuntu/macos/windows) clean install 이 GitHub Actions 로 실증 통과. cross-platform 조건 충족. 유일한 잔여 = **Claude restart 후 실 tool exposure**(구조상 owner 재시작 영역) — 이 1건 확인 시 stable 승격 후보.
+- **stable release / main merge 는 이번에도 하지 않음** (`MAIN_MERGE_HELD_FOR_STABLE_DECISION`).
 
 ## 7. 상태명
-`BINGGUPACK_REPO_RECONCILED` · `MCP_INSTALLABLE_PACKAGE_READY` · `MCP_CLEAN_INSTALL_E2E_PASS` · `G4_NO_AUTO_CONFIRMED` · `REAL_HOME_UNCHANGED` · `V1_10_0_RC1_PRERELEASE_CREATED` · `MAIN_MERGE_HELD_FOR_STABLE_DECISION` · `V1_10_0_RC1_PARTIAL_VALIDATION_DOCS_UPDATED`.
+`BINGGUPACK_REPO_RECONCILED` · `MCP_INSTALLABLE_PACKAGE_READY` · `MCP_CLEAN_INSTALL_E2E_PASS` · `G4_NO_AUTO_CONFIRMED` · `REAL_HOME_UNCHANGED` · `V1_10_0_RC1_PRERELEASE_CREATED` · `MAIN_MERGE_HELD_FOR_STABLE_DECISION` · `V1_10_0_RC1_CROSS_PLATFORM_VALIDATION_PASS`.
