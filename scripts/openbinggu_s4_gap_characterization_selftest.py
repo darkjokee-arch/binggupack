@@ -12,21 +12,26 @@
   - F2~F4  : _maybe_promote_actor_by_gate fail-closed 4분기(승격/미승격/예외)
   - D11    : sqlite integrity_check=ok 공통 사후단언(save/차단 이후)
   - B-low  : H4/H5/J3/K4(deprecate_g3 가드) + L2/N2/O3/O4(save_gate read/validation) early-return
+  - C-high : A4/A6/A10(c2_check) + B9/B10(staging_apply) + C2/C3(tombstone) + D3/D9/D10(StagingDB)
+             + E3/E6/E7(save_selected) — 본체 무수정·외부 호출+단언/monkeypatch만
 
 CLI: python openbinggu_s4_gap_characterization_selftest.py --selftest
 """
 import os
 import sys
 import types
+import sqlite3
 import tempfile
 import shutil
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from openbinggu_staging_write_selftest import (
-    StagingDB, c2_check, staging_apply, base_pack, OPERATING_PATHS, tombstone)
+    StagingDB, c2_check, staging_apply, base_pack, OPERATING_PATHS, tombstone, _hash)
 from openbinggu_conversation_candidate_save import (
     save_selected, _maybe_promote_actor_by_gate, CONVO)
+import openbinggu_conversation_candidate_save as cs_mod  # E7 monkeypatch 대상(scan_residual_pii)
+import openbinggu_a0_node_dryrun as a0mod  # E6 monkeypatch 대상(classify_node)
 from openbinggu_conversation_capture_preview import capture_preview
 from openbinggu_deprecate_and_remind_g3 import (
     open_g3, deprecate_item, resolve_review, classify_harvest_item)
@@ -240,6 +245,159 @@ def run():
         write_last_preview([{"sentence": "단일 후보 라마바"}], path=lp_bl)
         o4 = gate_record_from_prompt("SAVE 9", preview_path=lp_bl, gate_path=gp_bl)
         rec("O4", "idx 매칭 0 → 0", o4 == 0)
+
+        # ============ C-high — 고위험 GAP(actual write core 본체 무수정·외부 호출+단언) ============
+        # 관측 설계: docs/SAVE_GATE_S4_HIGH_RISK_GAP_CHARACTERIZATION_PLAN.md §2.
+        # 본체(staging_apply/save_selected/tombstone/StagingDB/c2_check) 무수정 — import-호출-단언만.
+
+        # --- A4: c2_check evidence.source_missing → freshness_source_missing ---
+        ch_db = StagingDB(os.path.join(tmp, "ch_a.sqlite"))
+        pA4 = base_pack(); pA4["evidence"][0]["source_missing"] = True
+        rec("A4", "c2_check source_missing → freshness_source_missing",
+            c2_check(ch_db, pA4, {"actor": "human"}) == "freshness_source_missing")
+        # --- A6: redaction_policy≠v1 → freshness_redaction_policy_changed (앞 freshness 분기 통과) ---
+        pA6 = base_pack(); pA6["evidence"][0]["redaction_policy"] = "v2"
+        rec("A6", "c2_check redaction≠v1 → freshness_redaction_policy_changed",
+            c2_check(ch_db, pA6, {"actor": "human"}) == "freshness_redaction_policy_changed")
+        # --- A10: 판정 순서 actor→evidence_refs→freshness→duplicate→backup ---
+        # 1) actor=auto + evidence_refs 빈 + freshness 위반 → G4_no_auto(actor 1순위)
+        p1 = base_pack(); p1["edges"][0]["evidence_refs"] = []; p1["evidence"][0]["source_missing"] = True
+        o1 = c2_check(ch_db, p1, {"actor": "auto"}) == "G4_no_auto"
+        # 2) human + evidence_refs 빈 + freshness 위반 → evidence_refs_missing(2순위)
+        p2 = base_pack(); p2["edges"][0]["evidence_refs"] = []; p2["evidence"][0]["source_missing"] = True
+        o2 = c2_check(ch_db, p2, {"actor": "human"}) == "evidence_refs_missing"
+        # 3) human + evidence_refs 정상 + source_missing + duplicate 조건 → freshness_source_missing(freshness>duplicate)
+        p3 = base_pack(pack_id="pA10", content="a10 순서"); p3["evidence"][0]["source_missing"] = True
+        ch_db.con.execute("INSERT OR IGNORE INTO applied_registry VALUES(?,?,?)",
+                          ("pA10", _hash("a10 순서"), "2026-06-25T00:00:00Z")); ch_db.con.commit()
+        o3 = c2_check(ch_db, p3, {"actor": "human"}) == "freshness_source_missing"
+        # 4) human + freshness 정상 + duplicate 선삽입 + backup_fail → duplicate_already_applied(duplicate>backup)
+        p4 = base_pack(pack_id="pA10b", content="a10 dup")
+        ch_db.con.execute("INSERT OR IGNORE INTO applied_registry VALUES(?,?,?)",
+                          ("pA10b", _hash("a10 dup"), "2026-06-25T00:00:00Z")); ch_db.con.commit()
+        o4d = c2_check(ch_db, p4, {"actor": "human", "backup_fail": True}) == "duplicate_already_applied"
+        rec("A10", "c2_check 판정 순서 actor→evidence_refs→freshness→duplicate→backup",
+            o1 and o2 and o3 and o4d)
+        ch_db.close()
+
+        # --- B9: staging_apply 정상 → applied=True + snapshot 파일 존재(snap_dir 하위) ---
+        b9_db = StagingDB(os.path.join(tmp, "ch_b9.sqlite"))
+        rB9 = staging_apply(b9_db, base_pack(), {"actor": "human"}, snap_dir)
+        rec("B9", "staging_apply 정상 → snapshot 파일 존재(snap_dir 하위)",
+            rB9.get("applied") and rB9.get("snapshot")
+            and os.path.exists(rB9["snapshot"]) and os.path.dirname(rB9["snapshot"]) == snap_dir)
+        b9_db.close()
+
+        # --- B10: BLOCK(backup_fail) 시 before==after checksum 불변 + audit before_hash==after_hash ---
+        b10_db = StagingDB(os.path.join(tmp, "ch_b10.sqlite"))
+        before10 = b10_db.store_checksum()
+        rB10 = staging_apply(b10_db, base_pack(pack_id="pB10"), {"actor": "human", "backup_fail": True}, snap_dir)
+        after10 = b10_db.store_checksum()
+        arow = b10_db.con.execute("SELECT before_hash, after_hash FROM audit_log ORDER BY seq DESC LIMIT 1").fetchone()
+        rec("B10", "staging_apply BLOCK → checksum 불변 + audit before==after(write 0)",
+            (not rB10.get("applied")) and before10 == after10 and arow and arow[0] == arow[1])
+        b10_db.close()
+
+        # --- C2: tombstone 미존재 node_id → {state:None, physical_present:False} ---
+        c2_db = StagingDB(os.path.join(tmp, "ch_c2.sqlite"))
+        tC2 = tombstone(c2_db, "nonexistent_node", {"actor": "human"}, snap_dir)
+        rec("C2", "tombstone 미존재 node → {state:None, physical_present:False}",
+            tC2 == {"state": None, "physical_present": False})
+        c2_db.close()
+
+        # --- C3: tombstone 정상 → state=tombstoned + snapshot 파일 + audit ALLOW + lock 해제 ---
+        c3_db = StagingDB(os.path.join(tmp, "ch_c3.sqlite"))
+        staging_apply(c3_db, base_pack(), {"actor": "human"}, snap_dir)
+        before_snaps = set(os.listdir(snap_dir))
+        tC3 = tombstone(c3_db, "n1", {"actor": "human"}, snap_dir)
+        new_snaps = set(os.listdir(snap_dir)) - before_snaps
+        snap_made = any(n.startswith("snap_t_") for n in new_snaps)
+        aud_allow = c3_db.con.execute(
+            "SELECT count(*) FROM audit_log WHERE action='tombstone' AND result='ALLOW' AND reason_code IS NULL").fetchone()[0]
+        lock_released = not os.path.exists(c3_db.path + ".lock")
+        rec("C3", "tombstone 정상 → tombstoned+snapshot+audit ALLOW+lock 해제",
+            tC3.get("state") == "tombstoned" and tC3.get("physical_present")
+            and snap_made and aud_allow == 1 and lock_released)
+        c3_db.close()
+
+        # --- D3: write_lock 같은 pid 재진입 허용 / 타 pid → RuntimeError ---
+        d3_db = StagingDB(os.path.join(tmp, "ch_d3.sqlite"))
+        with open(d3_db.path + ".lock", "w") as f:
+            f.write(str(os.getpid()))
+        entered = False
+        with d3_db.write_lock():
+            entered = True
+        if os.path.exists(d3_db.path + ".lock"):
+            os.remove(d3_db.path + ".lock")
+        # 대조군: 타 pid lock → RuntimeError
+        with open(d3_db.path + ".lock", "w") as f:
+            f.write("999999")
+        other_raised = False
+        try:
+            with d3_db.write_lock():
+                pass
+        except RuntimeError:
+            other_raised = True
+        os.remove(d3_db.path + ".lock")
+        rec("D3", "write_lock 같은 pid 재진입 허용 / 타 pid RuntimeError", entered and other_raised)
+        d3_db.close()
+
+        # --- D9: snapshot wal_checkpoint 후 copy → 파일 생성 + 복사본 nodes count 일치 ---
+        d9_db = StagingDB(os.path.join(tmp, "ch_d9.sqlite"))
+        staging_apply(d9_db, base_pack(), {"actor": "human"}, snap_dir)
+        snap_d9 = d9_db.snapshot(snap_dir, "snap_d9")
+        orig_cnt = d9_db.con.execute("SELECT count(*) FROM nodes").fetchone()[0]
+        sc = sqlite3.connect(snap_d9)
+        snap_cnt = sc.execute("SELECT count(*) FROM nodes").fetchone()[0]
+        sc.close()
+        rec("D9", "snapshot 파일 생성 + 복사본 nodes count 원본 일치",
+            snap_d9 == os.path.join(snap_dir, "snap_d9") and os.path.exists(snap_d9)
+            and snap_cnt == orig_cnt and orig_cnt == 1)
+        d9_db.close()
+
+        # --- D10: store_checksum 결정성(동일 상태 2회 동일·상태 민감·복원) ---
+        d10_db = StagingDB(os.path.join(tmp, "ch_d10.sqlite"))
+        staging_apply(d10_db, base_pack(), {"actor": "human"}, snap_dir)
+        k1 = d10_db.store_checksum(); k2 = d10_db.store_checksum()
+        d10_db.con.execute("INSERT INTO nodes(node_id,node_type,sentence) VALUES('extra10','judgment','추가 노드')")
+        d10_db.con.commit()
+        k3 = d10_db.store_checksum()
+        d10_db.con.execute("DELETE FROM nodes WHERE node_id='extra10'"); d10_db.con.commit()
+        k4 = d10_db.store_checksum()
+        rec("D10", "store_checksum 결정성(2회 동일·변경 감지·삭제 후 복원)",
+            k1 == k2 and k3 != k1 and k4 == k1)
+        d10_db.close()
+
+        # --- E3: save_selected indices=[] → empty_selection (confirm="SAVE " 정합) ---
+        e3_db = open_g3(os.path.join(tmp, "ch_e3.sqlite"))
+        rE3 = save_selected(e3_db, CONVO, [], {"actor": "human", "confirm": "SAVE "}, snap_dir)
+        rec("E3", "save_selected indices=[] → empty_selection",
+            (not rE3.get("applied")) and rE3.get("reason") == "empty_selection")
+        e3_db.close()
+
+        # --- E6: A0 REVIEW & not allow_review → a0_review_needs_explicit_allow (a0.classify_node monkeypatch) ---
+        e6_db = open_g3(os.path.join(tmp, "ch_e6.sqlite"))
+        _orig_classify = a0mod.classify_node
+        a0mod.classify_node = lambda node, status=None: {"verdict": "REVIEW"}
+        try:
+            rE6 = save_selected(e6_db, CONVO, [1], {"actor": "human", "confirm": "SAVE 1"}, snap_dir)
+        finally:
+            a0mod.classify_node = _orig_classify
+        rec("E6", "A0 REVIEW & not allow_review → a0_review_needs_explicit_allow",
+            (not rE6.get("applied")) and rE6.get("rejected", {}).get("a0_review_needs_explicit_allow") == 1)
+        e6_db.close()
+
+        # --- E7: PII/secret 재스캔 hit → pii_or_secret (scan_residual_pii monkeypatch) ---
+        e7_db = open_g3(os.path.join(tmp, "ch_e7.sqlite"))
+        _orig_scan = cs_mod.scan_residual_pii
+        cs_mod.scan_residual_pii = lambda s: ["FAKE_PII_HIT"]
+        try:
+            rE7 = save_selected(e7_db, CONVO, [1], {"actor": "human", "confirm": "SAVE 1"}, snap_dir)
+        finally:
+            cs_mod.scan_residual_pii = _orig_scan
+        rec("E7", "PII/secret 재스캔 hit → pii_or_secret",
+            (not rE7.get("applied")) and rE7.get("rejected", {}).get("pii_or_secret") == 1)
+        e7_db.close()
 
     finally:
         if home0 is None:
