@@ -1,207 +1,104 @@
-# INSTALL — BingguPack
+# Install BingguPack v1.10.0
 
 > `scripts/`·`docs/`의 `openbinggu_`/`OPENBINGGU_` 접두사는 레거시 내부 코드네임입니다(BingguPack과 동일 프로젝트).
 
-> **무엇인가** — **빈 뼈대 프레임워크**. 내 노드·관계·그래프를 내가 채웁니다(빙구팩에 owner 데이터·정답 그래프 0). local-first · evidence-backed context packs · candidate capture/preview · human-confirmed SAVE gate · ontology graph validation. **자동 ledger/confirmed write 없음** — 저장은 preview → `SAVE n`(정확한 confirm) 게이트로만 진행됩니다.
->
-> **3층 구조** — 🔒 안전벨트(코드 고정·전 사용자 공통: AI는 추천만·확정은 사람·직감 보존·자동 가치관 판정 0) / ⚙️ 설정값(각자 조정: `challenge_threshold` 기본 3·랭킹 가중치·외부 소스, `<binggu_home>/binggu_config.json`) / 👤 가치관(각자 user_ontology를 꽂는 자리). 자세히는 `README.md`.
->
-> **Latest release = v1.9.0 — 확정한 판단이 폰·웹까지 자동으로 흐름 + 새 사람도 한 방 셋업.**
-> - `binggu init` → 장부 생성 + 자동 후보 수집(기본 ON) + **환경 점검표**(무엇이 켜지고 무엇을 더 깔면 되는지 안내, 자동 설치는 안 함).
-> - **확정→자동 공유**: PC에서 `SAVE n`으로 확정한 항목을 내 PC 스케줄러가 클라우드 KV(읽기 전용)로 자동 업로드 → 폰·claude.ai·ChatGPT에서 그대로 조회(라이브). 사람 SAVE 기록 없으면 전송 0(이중게이트·fail-closed).
-> - **한 방 셋업**: `binggu setup-cloud --apply` 가 로그인 점검→KV 생성→설정 기입→자동전송 스케줄러 등록까지(기본 dry-run).
-> - **사람-발화 저장 게이트(0-A)**: 키보드로 친 `SAVE n`만 사람 승인. AI는 입력 경로를 못 거쳐 위조 불가.
-> - **똑똑한 뜻 분류(5종)**: Ollama+bge-m3 한 번 설치(또는 폰/claude.ai 사용) 시 자동 감지·자동 ON. 없으면 정규식 분류. 거부 `BINGGU_SEMANTIC_OFF=1`.
-> - **자동 저장은 없음** — 저장은 preview → `SAVE n` 사람 게이트만. cos는 도장 제안에만, PII/secret 선차단.
-> - 사용자가 고른 문장 전체 저장(화면 표시 cap은 별개). 라이브 save-intent는 신형 v2 서명 전용(`SAVE_SIG_V2_ONLY=1`). OpenCrab 로컬 역인제스트 지원, Cloud 업로드는 HOLD.
->
-> OpenCrab 업로드는 **planned**(preflight G1~G7까지 구현·검증, 실 전송은 별도 결정 — 노출 0). "100% 완성판"이 아니며 모든 사용자 환경 동작을 보장하지 않습니다. 전체 로드맵·범위는 `README.md`, 따라하기는 `docs/BINGGUPACK_TUTORIAL.md` 참조.
+이 문서는 **실전 설치 절차** 중심입니다. 개념·설계는 [README.md](README.md), 따라하기는 [docs/BINGGUPACK_TUTORIAL.md](docs/BINGGUPACK_TUTORIAL.md)를 보세요.
 
-## Requirements / 요구사항
-- Python 3.10+ (표준 라이브러리 위주)
-- **git** — 코드 받기용. 없으면 GitHub **Code → Download ZIP**으로 받아 압축 해제해도 됩니다(git clone 대신).
-- OS: Windows / WSL / macOS / Linux — 같은 정책으로 동작
-- python 런처: **Windows `py`(OS 기본 내장)** · **WSL/macOS/Linux `python3`** (대부분 기본 설치됨; 없으면 `sudo apt install -y python3` 또는 `brew install python`). 아래 예시의 `python`을 OS에 맞게 바꿔 쓰면 됩니다.
-- (선택) hosted/MCP·semantic 도장까지 쓰려면: Node.js + `wrangler`(Cloudflare), Ollama `bge-m3`. 로컬 CLI만 쓰면 불필요.
-- 장부 위치: 기본은 OS별 로컬 홈(Windows `%USERPROFILE%\.binggupack`, WSL/macOS `~/.binggupack`). OS 간 같은 장부 공유는 `BINGGU_HOME` 명시(opt-in) — [docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md](docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md)
+설치 흐름: **Requirements → Clone → Verify → MCP sandbox 등록 → 재시작 → 도구 확인 → save gate 확인 → 운영 home 보호 → Troubleshooting**.
 
-## Install / 설치
+---
 
-macOS / WSL / Linux (bash):
+## Requirements
+
+- **Python 3.10+** (표준 라이브러리 위주, 외부 런타임 의존성 0)
+- **git** — 없으면 GitHub **Code → Download ZIP**으로 받아 압축 해제해도 됩니다.
+- **Claude Code** — MCP sandbox 등록을 하려면 필요(`claude` CLI).
+- OS: Windows / WSL / macOS / Linux — 같은 정책으로 동작.
+- python 런처: Windows `py` · WSL/macOS/Linux `python3`. 아래 예시의 `python`을 OS에 맞게 바꿔 쓰세요.
+- (선택) hosted/MCP·semantic 도장: Node.js + `wrangler`, Ollama `bge-m3`. 로컬 CLI만 쓰면 불필요.
+
+## Clone
+
+bash (macOS / WSL / Linux):
 ```bash
 git clone https://github.com/darkjokee-arch/binggupack.git
 cd binggupack
-python3 -m venv .venv
-source .venv/bin/activate   # 선택
-python3 scripts/binggu_platform_selftest.py   # cross-platform 경로·lock 정책 36/36 GATE=GO
 ```
 
-Windows (PowerShell):
+PowerShell (Windows):
 ```powershell
 git clone https://github.com/darkjokee-arch/binggupack.git
 cd binggupack
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1   # 선택
-py scripts\binggu_platform_selftest.py   # cross-platform 경로·lock 정책 36/36 GATE=GO
 ```
 
-## Verify / 동작 확인 (권장 진입점)
-```bash
-python scripts/openbinggu_doctor.py --selftest          # 15/15 PASS GATE=GO 기대
-python scripts/openbinggu_doctor.py --tree examples/toy_project   # CLEAN 기대
-```
+## Verify clean install
 
-## BingguPack MCP 설치 (Claude Code) / installable MCP package
-
-> v1.10.0+ — **clone만으로 MCP 서버가 포함**된다(서버는 `scripts/openbinggu_mcp_server.py`). Claude Code 에 sandbox 엔트리로 등록.
+등록 전에 오프라인으로 검증합니다(write 0, 운영 `~/.binggupack` 미접촉):
 
 ```bash
-# 1) 등록 전 오프라인 검증 (write 0, 운영 ~/.binggupack 미접촉)
 python scripts/smoke_test.py --home ./_binggu_test_home
-#    기대: 10/10 PASS · save_actual_G4_no_auto_BLOCK PASS · operating_ledger_write_0 PASS
+#  기대: 10/10 PASS · save_actual_G4_no_auto_BLOCK PASS · operating_ledger_write_0 PASS
 
-# 2) Claude Code 등록 (미리보기 → 실제)
-python scripts/install_claude_mcp.py --sandbox --home ./_binggu_test_home --dry-run
-python scripts/install_claude_mcp.py --sandbox --home ./_binggu_test_home --apply
+python scripts/openbinggu_doctor.py --selftest                  # GATE=GO (운영 정합, write 0)
+python scripts/openbinggu_doctor.py --tree examples/toy_project # CLEAN
+```
 
-# 3) Claude Code 재시작 (필수 — MCP 도구는 세션 시작 시 고정) → 확인
+> 더 깊은 모듈별 selftest(capture · publish · cross-platform · candidate UX 등) 전체 목록은 [docs/BINGGUPACK_TUTORIAL.md](docs/BINGGUPACK_TUTORIAL.md)와 각 스크립트 `--selftest`를 참고하세요.
+
+## Install Claude Code MCP sandbox entry
+
+v1.10.0부터 **clone만으로 MCP 서버가 포함**됩니다(`scripts/openbinggu_mcp_server.py`). sandbox 엔트리로 등록(미리보기 → 실제):
+
+```bash
+python scripts/install_claude_mcp.py --sandbox --home ./_binggu_test_home --dry-run   # 명령 미리보기
+python scripts/install_claude_mcp.py --sandbox --home ./_binggu_test_home --apply     # 실제 claude mcp add
+```
+
+- `BINGGU_HOME`으로 sandbox/운영 home 분리(미설정 시 `~/.binggupack`). installer가 MCP config `env`에 주입합니다.
+- 운영 엔트리 `openbinggu-local`은 installer가 건드리지 않습니다(거부). sandbox 이름만 등록됩니다.
+
+## Restart Claude Code
+
+MCP 도구는 **세션 시작 시 고정**됩니다. 등록 후 **Claude Code를 반드시 재시작**해야 도구가 노출됩니다.
+
+## Confirm MCP tools
+
+재시작 후 sandbox 서버 연결과 8도구 노출을 확인합니다:
+
+```bash
 claude mcp list
-claude mcp get openbinggu-local-sandbox
+claude mcp get openbinggu-local-sandbox    # Status: Connected · env BINGGU_HOME 확인
 ```
 
-- `BINGGU_HOME` 로 sandbox/운영 home 분리(미설정 시 `~/.binggupack`). installer 가 MCP config `env` 에 주입.
-- AI/reader actor 의 실저장은 `G4_no_auto` 로 차단 — 저장은 사람의 `SAVE n` 승인 게이트에서만.
-- 운영 엔트리 `openbinggu-local` 은 installer 가 건드리지 않음(거부). sandbox 이름만 등록.
-- 상세: `docs/BINGGUPACK_MCP_CLEAN_INSTALL_E2E_TEST_REPORT.md`.
+노출되어야 하는 8 MCP 도구:
+`selftest` · `capture_classify` · `capture_preview` · `pack_build` · `pack_validate` · `publish_guard_dryrun` · `consumer_smoke` · `save_candidate`
 
-## AGI memory capture (opt-in) / 자동 후보 수집
+## Confirm save gate
+
+AI/reader actor의 실저장은 차단되어야 정상입니다. `save_candidate`를 `dry_run=false`로 호출하면:
+
+- **`G4_no_auto` BLOCK** · `executed_write=false` · `ledger=temp_only`
+
+이건 실패가 아니라 PASS입니다. 저장은 오직 사람의 `SAVE n` 승인 게이트에서만 일어납니다.
+
+## Operating home vs sandbox home
+
+- **운영 home** (`~/.binggupack`) — 실제 장부 `ledger.sqlite`. installer/sandbox는 여기를 **건드리지 않습니다**.
+- **sandbox/test home** (`--home` 으로 지정) — preview/cache 흔적만 남습니다.
+- 분리 원칙: `BINGGU_HOME`을 sandbox 경로로 주입하므로, sandbox MCP 호출이 운영 ledger에 durable write를 남기지 않습니다(smoke_test의 `operating_ledger_write_0`이 강제).
+
+## Troubleshooting
+
+- **도구가 안 보임** — Claude Code를 재시작했는지 확인(도구는 세션 시작 시 고정). `claude mcp get openbinggu-local-sandbox`가 Connected인지 확인.
+- **`claude` 명령을 못 찾음 (Windows)** — installer가 `claude.cmd` shim을 `shutil.which`로 처리합니다. PATH에 Claude Code가 있는지 확인.
+- **운영 엔트리를 덮어쓰려 함** — installer는 `openbinggu-local`(운영)을 거부합니다. sandbox 이름(`--sandbox`)으로 등록하세요.
+- **selftest 실패** — `python scripts/openbinggu_doctor.py --selftest`로 GATE 상태를 먼저 확인. write는 항상 0이므로 운영 데이터 손상 없이 재시도 가능.
+
+## Uninstall / rollback
+
 ```bash
-python binggu.py init --agi-memory    # 장부 + capture profile (전역 후보수집 = AGI memory mode, 기본 ON)
-python binggu.py init                 # 현재 위치만(privacy 모드)
-python binggu.py init --global        # --agi-memory 와 동일(작업 전역)
-python binggu.py init --no-capture    # 장부만(capture 생략)
-python binggu.py capture status       # ON/OFF · scope · 버퍼 건수 · hook 등록 여부
-python binggu.py capture pause        # 일시중지
-python binggu.py capture resume       # 재개
-python binggu.py capture preview      # 수집 후보 목록 + 저장 명령 안내 (저장 0)
-python binggu.py capture uninstall    # 완전 제거(rollback) — 장부는 보존
-```
-검증:
-```bash
-python scripts/binggu_capture_persist.py         # 16/16 (영속 버퍼·scope·TTL·pause·global)
-python scripts/binggu_capture_profile.py         # 9/9  (profile·settings hook·pause/resume/uninstall)
-python hooks/binggu_capture_hook.py --selftest   # 8/8  (UserPromptSubmit/Stop 진입점)
-python binggu.py --selftest                      # 26/26 (장부 + capture + hosted 통합)
-```
-> **자동 저장이 아니라 자동 후보 수집입니다.** `binggu init`이 만든 profile 안에서만 동작 — clone 직후엔 수집 0. **AGI memory(`--agi-memory`/`--global`)는 작업 전역**이 기본 경험, privacy(`init`)는 현재 위치만. 어느 scope든 시크릿/PII 발화는 자동 후보 제외 + 시크릿 디렉토리 deny. ledger/active/confirmed write 0. 저장은 preview → `SAVE n` 게이트만. scope·hook·롤백 상세: `docs/BINGGUPACK_CAPTURE_HOOK_SETUP.md`.
-
-## 기존 기록·외부 수확·철학 필터 selftest / P0·P1 검증 (dry-run·temp·후보만)
-```bash
-python scripts/watcher_incoming_folder_adapter.py --selftest   # GATE=GO (P0 기존 기록 폴더→후보, dry-run·마크다운 구조보존·PII STOP)
-python scripts/binggu_harvest.py --selftest                    # 30/30 GATE=GO (P1 외부 수확 3중 게이트, mock fetch·temp)
-python scripts/openbinggu_a0_node_dryrun.py --selftest         # GATE=GO (철학 필터 keep/challenge/discard — AI 추천만)
-python scripts/binggu_p1_ranking.py --selftest                 # 20/20 GATE=GO (P1 랭킹 3축 가중합)
-python scripts/binggu_p1_config.py                             # GATE=GO (3층: 안전벨트·설정값·가치관 로더)
-```
-> **셋 다 후보까지만**(영구는 사람 `SAVE n`). **P0 incoming은 dry-run 전용** — 산출은 temp에만, 운영 장부(`~/.binggupack`)는 read-only stat만(write 0), node→node edge 미생성. **외부 수확은 owner가 소스를 등록**(`harvest_sources.json` 기본 빈 `[]`·deny-by-default)하고 **스케줄러를 등록**(`register_harvest.ps1`)해야 동작하며, 실 네트워크 fetch는 owner 스케줄러 프로세스에서만(Claude tool_use 아님). 긴급 스위치 `~/.binggupack/harvest_disabled`. **철학 필터는 추천만**(`confirmed=False`)이고 확정은 actor=human뿐, 직감 메모는 검열·자동폐기 0. 랭킹의 폰·웹 use_count 집계는 worker write 필요로 deferred.
-
-## Reviewer/confirmed preview selftest / 리뷰·확정 preview 검증 (preview only)
-```bash
-python scripts/openbinggu_phase4_reviewer_confirmed_selftest.py   # 9/9 PASS GATE=GO 기대
-python scripts/openbinggu_reviewer_auth_session_selftest.py       # 20/20 PASS GATE=GO 기대
-```
-> **PREVIEW ONLY** — confirmed_created=0 / applied=0 / promoted=0 / upload=0 을 selftest가 강제합니다. confirmed 생성·적용은 이 RC에 포함되지 않습니다.
-
-## Local persistence selftest / 로컬 저장 검증 (opt-in 기능 검증)
-```bash
-python scripts/openbinggu_phase2_local_persistence_selftest.py   # 11/11 PASS GATE=GO 기대
-python scripts/openbinggu_phase2_staging_reread_e2e.py           # 10/10 PASS GATE=GO 기대(read-only 재독)
-python scripts/openbinggu_batch_pack_loader.py --selftest        # 10/10 PASS GATE=GO 기대(batch pack→staging apply→rollback)
-python scripts/openbinggu_promotion_preview.py --selftest        # 12/12 PASS GATE=GO 기대(read-only promotion preview)
-```
-> 위 selftest는 **temp OPENBINGGU_HOME** 기준입니다(실제 사용자 홈에 write 0). 실제 저장 기능은 **write 기본 OFF**·명시 opt-in·CLI 전용이며, MCP write 도구는 노출되지 않습니다. candidate-only(`promotion_allowed=0`), confirmed/promote/OpenCrab/Neo4j는 HOLD.
-
-## Manual capture selftest / 수동 캡처 검증 (read-only)
-```bash
-python scripts/openbinggu_phase6_manual_capture_selftest.py   # 10/10 PASS GATE=GO 기대
-```
-> **synthetic / temp / read-only** 기준. 사용자가 명시 지정한 경로만 capture(allowlist only, denylist 우선), raw 저장 0·source pointer 공개 미포함. **write opt-in 없으면 staging write 0.** 대화 발화 기반 자동 후보 수집은 별도 opt-in hook입니다(위 §자동 후보 수집 hook 참조 — 기본 OFF, candidate-only).
-
-## Finalize dry-run selftest / finalize 조립 검증 (로컬 생성만)
-```bash
-python scripts/openbinggu_finalize_dryrun.py --selftest   # 10/10 PASS GATE=GO 기대
-```
-> pack v1 레이아웃을 **로컬에 조립만** 합니다 — upload/apply 0, **Neo4j 실행 0**(import.cypher는 파일 생성만, export_status=NOT_RUN). license는 `{scope:"personal", name:"MIT"}`, release_mode/entitlement는 비필드.
-
-## Personal write loop selftest / 개인용 쓰기 루프 검증 (temp-only)
-```bash
-python scripts/openbinggu_v08_real_cycle_once.py --dry-run-temp          # 14/14 PASS GATE=GO 기대 (preview→선택 저장→피드백 통합, temp만)
-python scripts/openbinggu_v08_review_resolve_4values.py --selftest       # 16/16 PASS GATE=GO 기대 (4값 resolve: 성공/실패/불확실/판정불가)
-```
-> 저장은 **로컬 CLI 전용·opt-in·candidate-only**(`promotion_allowed=0`)이며 원문(대화 전문)은 저장되지 않습니다(선택 문장 발췌만). resolve는 **기록만** — `실패`여도 자동 강등 0. hosted(채팅)에서의 저장(save-intent)은 **v1.2.0부터 동작 검증됨** — `README.md` 상태표·`docs/BINGGUPACK_HOSTED_SAVE_INTENT_DESIGN.md` 참조 (이 selftest는 로컬 CLI 경로만 검증).
-
-## Candidate management UX selftest / 후보 관리 UX 검증 (temp-only)
-```bash
-python scripts/openbinggu_candidate_list_view.py --selftest              # 13/13 PASS GATE=GO 기대 (read-only 목록)
-python scripts/openbinggu_candidate_deprecate_ux.py --selftest           # 15/15 PASS GATE=GO 기대 (기각)
-python scripts/openbinggu_candidate_replace_ux.py --selftest             # 16/16 PASS GATE=GO 기대 (수정 transaction)
-python scripts/openbinggu_owner_accept_ux.py --selftest                  # 16/16 PASS GATE=GO 기대 (수용·철회)
-python scripts/openbinggu_v1_candidate_cycle_real_once.py --dry-run-temp # 17/17 PASS GATE=GO 기대 (보기→기각→수정→수용→철회→resolve 통합 사이클)
+claude mcp remove "openbinggu-local-sandbox" -s user   # MCP 엔트리 제거
+python binggu.py capture uninstall                      # capture profile 완전 제거 (장부 ledger.sqlite는 보존)
 ```
 
-### 후보 관리 사용법 (confirm 문구 형식)
-
-모든 변경 작업은 **human confirm 문구 정확 일치** 의무입니다 — 목록 보기에서 행 번호 `<n>` 과 id 칼럼의 `<id8>`(node hash 8자)을 함께 적습니다(인덱스 단독 금지).
-
-1. **목록 보기** (read-only — checksum 불변):
-   `candidate_list` 뷰로 행 번호·id8·상태(pending/resolved/deprecated)·kind를 확인합니다.
-2. **기각** — confirm 문구: `DEPRECATE <n> <id8>` (예: `DEPRECATE 3 a1b2c3d4`)
-   물리 삭제가 아니라 보존형 제외(active 뷰에서만 빠짐).
-3. **수정** — confirm 문구: `REPLACE <n> <id8> WITH <수정문장>`
-   in-place 수정이 아니라 transaction: 전임자는 `replaced_by:` back-link와 함께 deprecate, 신규 문장은 저장 게이트(헌법 재판정·PII 재스캔·중복 검사) 전부 재통과한 새 candidate.
-4. **수용/철회** — confirm 문구: `ACCEPT <n> <id8>` / `UNACCEPT <n> <id8>`
-   append-only event 기록만(후보 row 자체는 byte-identical 보존). deprecated 후보 ACCEPT는 BLOCK, 중복 ACCEPT도 BLOCK.
-5. **피드백 resolve** — 판단 노드의 검증예정일 도래 시 4값(`성공/실패/불확실/판정불가`) + 사유 필수. 기록만이며 노드 상태는 무변.
-
-> `actor=auto`는 전부 BLOCK — 사람 발화 유래 confirm만 허용. 통합 흐름 실연: `docs/OPENBINGGU_V1_CANDIDATE_CYCLE_RESULT.md`.
-
-## PC-mediated read publish pipeline selftest / 퍼블리시 파이프라인 검증 (P1~P8)
-```bash
-py scripts/binggu_publish_run_all_selftests.py    # 9/9 PASS · REGRESSION=GO (P1~P6 + cloud_pack export + local ingest + tree scan)
-```
-> 회귀 검증만 수행합니다 — **Cloud upload / DB insert 0**. 로컬 역인제스트는 `localbinggu_ingest_executor.py` 별도 명령(회귀는 그 selftest만 호출). P3는 실 ledger를 read-only(mode=ro)로만 읽고, active 데이터 없으면 `NO_REAL_LEDGER_DATA`로 BLOCK합니다.
-
-## Cross-platform selftest / 크로스플랫폼 정책 검증 (Windows/WSL/macOS)
-```bash
-py scripts\binggu_platform_selftest.py            # 36/36 GATE=GO (Windows)
-python3 scripts/binggu_platform_selftest.py       # 36/36 GATE=GO (WSL/macOS/Linux)
-```
-> OS별 홈·`BINGGU_HOME` opt-in 공유·경로 변환(표시용)·lock 충돌 fail-closed를 검증합니다. WSL/macOS 경로 규칙은 synthetic(입력 주입)으로, lock 충돌은 temp 장부 실측으로 확인합니다. 자세히: [docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md](docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md).
->
-> **검증 상태**: Windows · WSL · macOS **전부 real verified** (2026-06-14, GitHub Actions 3-OS matrix 자동 검증). 자기 머신에서 재현하는 단계별 절차는 [docs/BINGGUPACK_CROSS_PLATFORM_VERIFICATION_CHECKLIST.md](docs/BINGGUPACK_CROSS_PLATFORM_VERIFICATION_CHECKLIST.md) 를 따르세요.
-
-## 똑똑한 뜻 분류 켜기 (선택 · 한 번만 설치하면 자동)
-
-기본(추가 설치 0)은 정규식 분류로 동작합니다. **Ollama + bge-m3 를 한 번 깔면 빙구팩이 자동 감지해 "뜻 기반 도장 분류"를 자동 ON** 합니다(별도 설정 파일·플래그 불필요). 도장은 **제안**일 뿐 — 저장은 여전히 `SAVE n` 사람 게이트.
-
-설치(한 번, OS별 한 줄):
-```bash
-# Windows
-winget install Ollama.Ollama
-# macOS
-brew install ollama
-# WSL / Linux
-curl -fsSL https://ollama.com/install.sh | sh
-```
-공통(모델 받기):
-```bash
-ollama pull bge-m3
-```
-- 설치 후 빙구팩이 알아서 감지 — 재설정 0. (빙구팩이 Ollama를 **자동 설치하지는 않습니다** — 무거운 모델이라 사용자 동의 하에 직접)
-- **거부/강제 끄기**: 환경변수 `BINGGU_SEMANTIC_OFF=1` (정규식 분류로 고정)
-- 폰/claude.ai(hosted)에서는 클라우드 AI로 분류돼 Ollama 불필요(자기 worker 배포 시).
-
-## MCP / MCP 연결 (선택)
-`mcp.example.json` 참고. read/dry-run 도구만 노출됩니다(write/apply/push 미노출).
-
-> 공개/업로드 전에는 `python scripts/openbinggu_doctor.py --tree <공개_후보_트리>` 가 CLEAN 이어야 하며, owner 수동 승인 후에만 push/upload 하세요. 자세한 절차는 `README.md`·`docs/` 참고.
+장부 자체는 로컬 파일이므로, 제거해도 `~/.binggupack/ledger.sqlite`는 보존됩니다.
