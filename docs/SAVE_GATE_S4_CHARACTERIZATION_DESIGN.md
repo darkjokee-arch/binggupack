@@ -7,12 +7,14 @@
 **판정:** **S4 HOLD 유지.** 본 설계는 owner approval 토큰의 전제 조건(§4 GREEN 정의)을 명문화할 뿐,
 어떤 gate-critical 코드의 이동·변경도 승인하지 않는다.
 
-**갱신 이력(2026-06-25, docs-only):** 본 문서 §2 GAP 중 **A2·E1b·B5·F1~F4·D11**(1차) +
-**H4·H5·J3·K4·L2·N2·O3·O4**(B-low 저위험 2차)를 tests-only characterization 으로 커버.
+**갱신 이력(2026-06-25, docs-only):** 본 문서 §2 GAP 전건을 tests-only characterization 으로 커버.
+- 1차: **A2·E1b·B5·F1~F4·D11** / 2차 저위험: **H4·H5·J3·K4·L2·N2·O3·O4** /
+  3차 고위험: **A4·A6·A10·B9·B10·C2·C3·D3·D9·D10·E3·E6·E7** (C-high, 본체 무수정 외부 호출+단언/monkeypatch)
 - 추가 테스트(production touch 0): `scripts/openbinggu_s4_gap_characterization_selftest.py`
-- 결과: **28/28 PASS · GATE GO · operating_store_unchanged=True · production/gate-critical touch 0**
-- 전체 회귀 GREEN: staging 16/16 · candidate 13/13 · deprecate 23/23 · capture GO · save_gate 28/28 · S4 GAP 28/28
-- **S4 implementation 은 여전히 HOLD.** 본 갱신은 결과 반영(docs-only)일 뿐, actual write core
+- 결과: **41/41 PASS · GATE GO · operating_store_unchanged=True · production/gate-critical touch 0**
+- 전체 회귀 GREEN: staging 16/16 · candidate 13/13 · deprecate 23/23 · capture GO · save_gate 28/28 · S4 GAP 41/41
+- **잔여 GAP 0 — S4 characterization coverage complete.** 그러나 **S4 implementation 은 여전히 HOLD.**
+  본 갱신은 결과 반영(docs-only)일 뿐, actual write core
   (§4 S4-6: `staging_apply`+`save_selected`+`commit_selected`)는 **마지막/영구 HOLD 유지**.
 
 ---
@@ -66,13 +68,13 @@
 | A1 | actor=auto | `"G4_no_auto"` | EX staging#(간접) / candidate#3 |
 | A2 | actor=reader | `"G4_no_auto"` | **s4gap A2-1** (auto=A2-2·human정상=A2-3) |
 | A3 | edge.evidence_refs 빈/누락 | `"evidence_refs_missing"` | EX staging#4 |
-| A4 | evidence.source_missing=True | `"freshness_source_missing"` | GAP |
+| A4 | evidence.source_missing=True | `"freshness_source_missing"` | **s4gap A4** |
 | A5 | source_hash≠captured_hash | `"freshness_source_hash_mismatch"` | EX staging#5 |
-| A6 | redaction_policy≠"v1" | `"freshness_redaction_policy_changed"` | GAP |
+| A6 | redaction_policy≠"v1" | `"freshness_redaction_policy_changed"` | **s4gap A6** |
 | A7 | applied_registry 중복 | `"duplicate_already_applied"` | EX staging#2,3 |
 | A8 | ctx.backup_fail=True | `"backup_create_failed"` | EX staging#6 |
 | A9 | 정상 | `None` | EX staging#1 |
-| A10 | **판정 순서 고정**: actor→evidence_refs→freshness→duplicate→backup | 위 우선순위 그대로 | GAP(순서 명시 테스트) |
+| A10 | **판정 순서 고정**: actor→evidence_refs→freshness→duplicate→backup | 위 우선순위 그대로 | **s4gap A10** (4조합) |
 
 ### B. `staging_apply(db, pack, ctx, snap_dir, ts=None)` — **actual write 본체**
 | id | 입력 | EXP | 기존 |
@@ -85,29 +87,29 @@
 | B6 | write_lock 경합(타 pid lock) | `RuntimeError("staging_write_locked…")` raise | EX staging#14 |
 | B7 | candidate=1·promotion_allowed=0 강제 | INSERT 값 고정 | EX staging#1(cand==(1,0)) |
 | B8 | created_at=ts·use_count=0 | 값 고정 | EX staging#15 |
-| B9 | snapshot 동반(snap_dir 생성) | 반환 snapshot 경로 존재 | GAP(snapshot 파일 존재 단언) |
-| B10 | before==after(BLOCK 시 checksum 불변) | audit before==after | GAP |
+| B9 | snapshot 동반(snap_dir 생성) | 반환 snapshot 경로 존재 | **s4gap B9** |
+| B10 | before==after(BLOCK 시 checksum 불변) | audit before==after | **s4gap B10** |
 
 ### C. `tombstone(db, node_id, ctx, snap_dir, ts=None)`
 | id | 입력 | EXP | 기존 |
 |---|---|---|---|
 | C1 | 존재 노드 | `{state:"tombstoned", physical_present:True}`(논리만, 물리 잔존) | EX staging#9 |
-| C2 | 미존재 node_id | `{state:None, physical_present:False}` | GAP |
-| C3 | write_lock·snapshot·audit ALLOW 동반 | 부작용 고정 | GAP(audit 단언) |
+| C2 | 미존재 node_id | `{state:None, physical_present:False}` | **s4gap C2** |
+| C3 | write_lock·snapshot·audit ALLOW 동반 | 부작용 고정 | **s4gap C3** |
 
 ### D. `StagingDB` 인프라
 | id | 메서드/조건 | EXP | 기존 |
 |---|---|---|---|
 | D1 | `__init__` 운영경로(OPERATING_PATHS) | `PermissionError("operating_store_forbidden")` | EX staging#11 |
 | D2 | `__init__` 구 ledger 마이그레이션(chain_ver/semantic_subtype/use_count 없음) | ALTER 추가·기존 행 보존·NULL/0 | EX staging#16 |
-| D3 | `write_lock` 같은 pid 재진입 | 허용(에러 0) | GAP(명시) |
+| D3 | `write_lock` 같은 pid 재진입 | 허용(에러 0) | **s4gap D3** (타 pid RuntimeError 대조) |
 | D4 | `write_lock` 타 pid lock 잔존 | `RuntimeError` | EX staging#14 |
 | D5 | `audit_append` v2 체인(prev_hash 연결·entry_hash) | 체인 무결 | EX staging#10 |
 | D6 | `verify_chain` 변조 시 False | 변조 BROKEN | EX staging#10 |
 | D7 | `verify_chain` 꼬리 삭제(메타 앵커) | False | EX staging#12 |
 | D8 | `verify_tail_state` 우회 직접쓰기 | False | EX staging#13 |
-| D9 | `snapshot` wal_checkpoint(TRUNCATE) 후 copy | 파일 생성 | GAP(파일 단언) |
-| D10 | `store_checksum` nodes/edges/evidence 정렬 해시 | 결정성 | GAP |
+| D9 | `snapshot` wal_checkpoint(TRUNCATE) 후 copy | 파일 생성 | **s4gap D9** (복사본 count 일치) |
+| D10 | `store_checksum` nodes/edges/evidence 정렬 해시 | 결정성 | **s4gap D10** (변경 감지·복원) |
 | D11 | **sqlite integrity_check=ok** 보존(이동 전후) | "ok" | **s4gap D11-1~5** (candidate/차단/deprecate/staging 후 ok·save_gate jsonl 무결) |
 
 ### E. `save_selected(db, text, indices, ctx, snap_dir, due_date=None)` — **G4 ① / L68**
@@ -116,11 +118,11 @@
 | E1 | actor≠"human"(정규화 후) | `block("G4_no_auto")` | EX cand#3 |
 | E1b | actor=" Human "/"AUTO"/누락/agent/system | 정규화 lower 후 human 외 전부 G4_no_auto | **s4gap E1b-1,2,3** (human변형=통과·human외 전수 BLOCK·차단군 write 0) |
 | E2 | confirm≠"SAVE i,j" 정확형 | `block("confirm_phrase_mismatch")` | EX cand#2 |
-| E3 | indices=[] | `block("empty_selection")` | GAP(직접 케이스) |
+| E3 | indices=[] | `block("empty_selection")` | **s4gap E3** (confirm="SAVE " 정합) |
 | E4 | index 범위 밖 | rejected.index_out_of_range++ | EX cand#7 |
 | E5 | A0 verdict=FAIL | rejected.a0_fail++ | EX cand#8 |
-| E6 | A0 REVIEW & not allow_review | rejected.a0_review_needs_explicit_allow++ | GAP |
-| E7 | PII/secret 재스캔 hit | rejected.pii_or_secret++ | GAP(재실행 경로 PII) |
+| E6 | A0 REVIEW & not allow_review | rejected.a0_review_needs_explicit_allow++ | **s4gap E6** (a0 monkeypatch) |
+| E7 | PII/secret 재스캔 hit | rejected.pii_or_secret++ | **s4gap E7** (scan monkeypatch) |
 | E8 | 기존재 노드 | skipped_existing++ | EX cand#6 |
 | E9 | saved_items 비면 | `nothing_to_save`·skipped 보존 | EX cand#6a |
 | E10 | 정상 | `{applied:True, saved, skipped, due_set}`·node_type∈5종EN·문장전체 저장 | EX cand#1,13 |
@@ -202,12 +204,12 @@
 |---|---|---|
 | actual write path(staging INSERT 정상/롤백) | B1·B3·B4·B5 | **B5 s4gap 커버** |
 | dry_run path(MCP dry_run write 0 PREVIEW) | **별도(MCP 핸들러 계층)** | 본 문서 범위 밖 — §4-주 참조 |
-| G4 block 3중(L68/c2/deprecate 4) | E1·E1b · A1·A2 · HK(H~K) | **A2·E1b s4gap 커버** · H4 GAP |
-| actor/confirm/token path | E1~E3·G3·B7 | E1b s4gap 커버 · E3 GAP |
+| G4 block 3중(L68/c2/deprecate 4) | E1·E1b · A1·A2 · HK(H~K) | **A2·E1b·H4 s4gap 커버** |
+| actor/confirm/token path | E1~E3·G3·B7 | **E1b·E3 s4gap 커버** |
 | non-TTY fail-closed(exit2) | **interactive_save**(별도, 인수인계 8/8 GREEN) | 기존 GREEN |
 | ledger write transaction(BEGIN/COMMIT/ROLLBACK) | B3·B4·B5 | **B5 s4gap 커버** |
-| write_lock(O_EXCL/busy_timeout) | B6·D3·D4 | D3 GAP |
-| snapshot/preview 동반성 | B9·N1 | B9 GAP |
+| write_lock(O_EXCL/busy_timeout) | B6·D3·D4 | **D3 s4gap 커버** |
+| snapshot/preview 동반성 | B9·N1 | **B9 s4gap 커버** |
 | sqlite integrity_check=ok | D11 | **s4gap D11-1~5 커버** |
 | actor 승격 fail-closed(F2~F4) | F1·F2·F3·F4 | **s4gap F1~F4 커버** |
 | operating home no side effect | 전 selftest mtime 불변 | EX(전 파일) |
@@ -253,10 +255,12 @@
 구현 0·코드 이동 0·대상 코드 touch 0. GAP 케이스의 테스트 추가와 owner approval 토큰 없이는
 어떤 gate-critical write core 도 이동·변경하지 않는다.
 
-**진척(2026-06-25):** A2·E1b·B5·F1~F4·D11 (1차) + H4·H5·J3·K4·L2·N2·O3·O4 (B-low 저위험 2차)
-= tests-only characterization 으로 커버 완료 (`openbinggu_s4_gap_characterization_selftest.py` **28/28 GREEN**).
-그러나 **S4 implementation 은 HOLD** — 테스트 추가는 안전망일 뿐 구현 진입 승인이 아니다.
-잔여 GAP(고위험 13건, actual write core 인접): **A4·A6·A10·B9·B10·C2·C3·D3·D9·D10·E3·E6·E7**
-(관측 방식은 `SAVE_GATE_S4_HIGH_RISK_GAP_CHARACTERIZATION_PLAN.md` 참조).
+**진척(2026-06-25): S4 characterization coverage COMPLETE.** §2 전 GAP을 tests-only 로 커버 —
+1차(A2·E1b·B5·F1~F4·D11) + 2차 저위험(H4·H5·J3·K4·L2·N2·O3·O4) +
+3차 고위험(A4·A6·A10·B9·B10·C2·C3·D3·D9·D10·E3·E6·E7)
+= `openbinggu_s4_gap_characterization_selftest.py` **41/41 GREEN**. **잔여 GAP: 0.**
+그러나 **S4 implementation 은 HOLD** — 테스트 커버는 안전망일 뿐 구현 진입 승인이 아니다.
+actual write core(§4 S4-6: `staging_apply`+`save_selected`+`commit_selected`)는 **마지막/영구 HOLD 유지**.
 
-**다음 단계(승인 전제):** 잔여 고위험 13건 characterization 추가(테스트만) → 전종 GREEN → owner 토큰 요청.
+**다음 단계(승인 전제):** characterization 전종 GREEN 충족 → **owner approval/token 요청 자격 발생**
+(요청은 별도 단계 — 본 문서는 미요청). 토큰 후에야 S4-1(저위험 save_gate write) 구현 진입 판단.

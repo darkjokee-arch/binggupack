@@ -6,6 +6,10 @@
 **관측 방식만** 정의한다.
 **상위 설계:** `docs/SAVE_GATE_S4_CHARACTERIZATION_DESIGN.md` §2(케이스 표) · §4(선행 의무) · §5(원칙)
 
+**커버 완료(2026-06-25):** 본 문서가 설계한 13건은 전부 tests-only characterization 으로 커버됨 —
+`scripts/openbinggu_s4_gap_characterization_selftest.py` C-high 섹션, **S4 GAP 41/41 GREEN · 본체 무수정**.
+단 이는 안전망 추가일 뿐 — **S4 implementation HOLD 유지**, actual write core 는 S4-6 마지막/영구 HOLD.
+
 **HOLD 선언:**
 - **S4 implementation HOLD.** 본 문서는 GAP 관측 방식 설계일 뿐, 어떤 코드 이동·변경도 승인하지 않는다.
 - **actual write core(`staging_apply` + `save_selected` + `commit_selected` + `deprecate_g3`)는 S4-6 마지막 / 영구 HOLD 후보.** 본 문서는 이 본체를 **수정 대상으로 다루지 않는다.**
