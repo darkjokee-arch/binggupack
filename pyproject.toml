@@ -1,14 +1,37 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "binggupack"
-version = "1.10.0rc1"
-description = "BingguPack — local-first personal ontology AGI core with an installable MCP server (stdio JSON-RPC). Python stdlib only."
+version = "1.11.0"   # v1.10.0 stable baseline 위 feature implementation release. (pre-release 검증 당시 1.11.0.dev0 → owner 승인으로 1.11.0 확정.)
+description = "BingguPack — local-first, evidence-backed memory/context pack framework with an installable Claude Code MCP server (stdio JSON-RPC). Python stdlib only."
+readme = "README.md"
 requires-python = ">=3.10"
-dependencies = []   # 외부 의존성 0 (stdlib only). 선택: rapidfuzz(있으면 매칭 향상)·ollama/bge-m3(semantic).
+license = { text = "MIT" }
+authors = [{ name = "BingguPack contributors" }]
+keywords = ["mcp", "claude-code", "local-first", "ontology", "context-packs", "agi-memory"]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Operating System :: OS Independent",
+]
+dependencies = []   # 외부 의존성 0 (stdlib only). 선택: rapidfuzz(매칭 향상)·ollama/bge-m3(semantic).
 
 [project.urls]
 Homepage = "https://github.com/darkjokee-arch/binggupack"
+Release = "https://github.com/darkjokee-arch/binggupack/releases/tag/v1.10.0"
 
-# 설치/검증 (clone 직후):
+[project.scripts]
+# v1.11.0 groundwork: 패키지로 노출되는 보조 진입점. 기존 `python binggu.py ...` /
+# `python scripts/smoke_test.py` 는 backward-compatible 하게 그대로 유지된다.
+binggu-interactive-save = "binggupack.cli.interactive_save:main"
+
+[tool.setuptools.packages.find]
+include = ["binggupack*"]   # flat-layout 의 top-level binggu.py / scripts 와 충돌 회피
+
+# 설치/검증 (clone 직후, 패키지 설치 없이도 동작):
 #   python scripts/smoke_test.py --home ./_binggu_test_home
 #   python scripts/install_claude_mcp.py --sandbox --apply
 # 서버 직접 실행(설정 등록은 owner):

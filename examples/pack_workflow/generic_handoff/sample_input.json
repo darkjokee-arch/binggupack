@@ -1,0 +1,24 @@
+{
+  "_note": "SYNTHETIC example data only. Generic OpenCrab-ready handoff manifest illustration.",
+  "goal": "Show a generic OpenCrab-ready handoff manifest shape",
+  "workflow": "generic_handoff",
+  "required_packs": ["generic_pack"],
+  "candidates": [
+    {
+      "pack": "generic_pack",
+      "node_kind": "증거",
+      "text": "Synthetic evidence item backing a generic candidate node",
+      "fields": {"kind": "evidence", "synthetic": true},
+      "evidence": [{"id": "synthetic_evidence#1", "excerpt": "synthetic evidence excerpt", "source": "synthetic"}]
+    }
+  ],
+  "edges": [],
+  "validation": {"pack_build": "dry-run", "pack_validate": "ALLOW(synthetic)", "publish_guard_dryrun": "ALLOW(synthetic)", "consumer_smoke": "read-only(synthetic)"},
+  "handoff": {
+    "target": "opencrab",
+    "mode": "ready_only",
+    "ingest_performed": false,
+    "production_write": false,
+    "note": "This is the boundary BingguPack stops at: a validated, evidence-backed, candidate-first manifest that OpenCrab COULD ingest. Actual ingest/execution is OpenCrab's job and remains HOLD unless owner explicitly approves."
+  }
+}

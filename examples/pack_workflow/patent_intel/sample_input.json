@@ -1,0 +1,33 @@
+{
+  "_note": "SYNTHETIC example data only. No real patents / PII / business data. Pack/workflow lifecycle illustration.",
+  "goal": "Summarize the patent landscape around a synthetic technical topic",
+  "workflow": "patent_intelligence",
+  "required_packs": ["patent_pack", "claim_pack", "applicant_pack"],
+  "candidates": [
+    {
+      "pack": "patent_pack",
+      "node_kind": "문서",
+      "text": "Synthetic Patent SP-0001 — example cooling method (filed: synthetic-year)",
+      "fields": {"id": "SP-0001", "title": "Example cooling method", "status": "synthetic"},
+      "evidence": [{"id": "synthetic_patent#1", "excerpt": "synthetic abstract text", "source": "synthetic"}]
+    },
+    {
+      "pack": "claim_pack",
+      "node_kind": "개념",
+      "text": "Independent claim asserts a synthetic heat-exchange arrangement",
+      "fields": {"claim_no": 1, "type": "independent"},
+      "evidence": [{"id": "synthetic_patent#1", "excerpt": "synthetic claim 1 text", "source": "synthetic"}]
+    },
+    {
+      "pack": "applicant_pack",
+      "node_kind": "상태",
+      "text": "Applicant ExampleCorp holds 3 synthetic related filings",
+      "fields": {"applicant": "ExampleCorp", "related_count": 3},
+      "evidence": [{"id": "synthetic_registry#1", "excerpt": "synthetic registry rollup", "source": "synthetic"}]
+    }
+  ],
+  "edges": [
+    {"from": "Synthetic Patent SP-0001", "to": "Independent claim asserts a synthetic heat-exchange arrangement", "relation": "supports_judgment", "evidence": "synthetic_patent#1"}
+  ],
+  "handoff": {"target": "opencrab", "mode": "ready_only", "ingest_performed": false, "note": "OpenCrab-ready manifest illustration. Ingest is HOLD unless owner explicitly approves."}
+}

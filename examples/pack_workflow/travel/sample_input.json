@@ -1,0 +1,38 @@
+{
+  "_note": "SYNTHETIC example data only. No real PII / business / operational data. For pack/workflow lifecycle illustration.",
+  "goal": "Recommend a 2-night-3-day travel itinerary",
+  "workflow": "itinerary_recommendation",
+  "required_packs": ["lodging_pack", "attraction_pack", "transport_pack"],
+  "candidates": [
+    {
+      "pack": "lodging_pack",
+      "node_kind": "개념",
+      "text": "Synthetic Bay Hotel — mid-range stay near the coast",
+      "fields": {"name": "Synthetic Bay Hotel", "region": "ExampleCoast", "price_tier": "mid"},
+      "evidence": [{"id": "synthetic_source#1", "excerpt": "synthetic listing entry", "source": "synthetic"}]
+    },
+    {
+      "pack": "attraction_pack",
+      "node_kind": "개념",
+      "text": "Example Lighthouse Park — coastal viewpoint",
+      "fields": {"name": "Example Lighthouse Park", "category": "viewpoint"},
+      "evidence": [{"id": "synthetic_source#2", "excerpt": "synthetic attraction entry", "source": "synthetic"}]
+    },
+    {
+      "pack": "transport_pack",
+      "node_kind": "상태",
+      "text": "Synthetic route A->B takes about 40 minutes by local line",
+      "fields": {"from": "A", "to": "B", "minutes": 40},
+      "evidence": [{"id": "synthetic_source#3", "excerpt": "synthetic route entry", "source": "synthetic"}]
+    }
+  ],
+  "edges": [
+    {"from": "Synthetic Bay Hotel", "to": "Example Lighthouse Park", "relation": "supports_judgment", "evidence": "synthetic_source#2"}
+  ],
+  "handoff": {
+    "target": "opencrab",
+    "mode": "ready_only",
+    "ingest_performed": false,
+    "note": "OpenCrab-ready manifest illustration. Actual ingest is HOLD unless owner explicitly approves."
+  }
+}
