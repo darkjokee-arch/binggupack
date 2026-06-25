@@ -52,6 +52,16 @@ scripts/
 - `openbinggu_doctor.py`가 다수 selftest를 경로로 묶어 호출 → 이동 시 일괄 깨짐 가능.
 - 일괄 git mv는 한 commit에 5+ 파일 동시 변경 → 검증 없는 대량 이동 = 사장님 §3-5 위반.
 
+## 구현 진행 (v1.11.0 groundwork)
+
+**Phase 1 일부 구현 완료** (이번 사이클, branch `feat/v1.11.0-roadmap-ultra`):
+- `binggupack/` 패키지 생성 — `cli/`·`classifier/`·`mcp/`·`pack/`·`safety/`·`workspace/` + `__about__.py`(version 단일 소스 `1.11.0.dev0`).
+- smoke 핵심 로직을 `binggupack/pack/smoke.py`(`run_smoke`/`run_smoke_cli`)로 이관.
+- `scripts/smoke_test.py`는 **thin wrapper**로 전환 — 명령/출력/exit code byte-identical, smoke **10/10 PASS** 회귀 확인.
+- `scripts/install_claude_mcp.py`는 backward-compat 위해 **무변경 유지**(`--help`·dry-run 정상).
+
+**여전히 BLOCKED (다음 사이클·승인 필요):** 116개 스크립트의 one-off/dev/fixture 대량 이동, `openbinggu_doctor.py` selftest 묶음 경로 재배치. 분류표 작성 + Phase별 회귀 후 진행.
+
 ## 판정
 
-**Lane B = BLOCKED (설계 문서로 격리).** 실제 이동은 owner 승인 + Phase별 회귀 검증을 전제로 다음 사이클에서 진행 권장.
+**Lane B = Phase 1 부분 구현 + 대량 이동 BLOCKED.** entrypoint 무결(smoke 10/10), 위험 이동은 승인 전 보류.

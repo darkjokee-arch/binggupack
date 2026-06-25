@@ -1,0 +1,33 @@
+{
+  "_note": "SYNTHETIC example data only. No real businesses / PII / operational data. Pack/workflow lifecycle illustration.",
+  "goal": "Develop a restaurant/brand concept workflow from captured ideas",
+  "workflow": "brand_concept",
+  "required_packs": ["concept_pack", "menu_pack", "positioning_pack"],
+  "candidates": [
+    {
+      "pack": "concept_pack",
+      "node_kind": "판단",
+      "text": "Position the synthetic brand around a coastal-casual identity",
+      "fields": {"concept": "coastal-casual", "confidence": "candidate"},
+      "evidence": [{"id": "synthetic_note#1", "excerpt": "synthetic brainstorming note", "source": "synthetic"}]
+    },
+    {
+      "pack": "menu_pack",
+      "node_kind": "개념",
+      "text": "Signature synthetic dish: example seafood bowl",
+      "fields": {"name": "example seafood bowl", "category": "signature"},
+      "evidence": [{"id": "synthetic_note#2", "excerpt": "synthetic menu idea", "source": "synthetic"}]
+    },
+    {
+      "pack": "positioning_pack",
+      "node_kind": "상태",
+      "text": "Target synthetic segment prefers mid-tier pricing",
+      "fields": {"segment": "synthetic-mid", "price_tier": "mid"},
+      "evidence": [{"id": "synthetic_note#3", "excerpt": "synthetic positioning note", "source": "synthetic"}]
+    }
+  ],
+  "edges": [
+    {"from": "Position the synthetic brand around a coastal-casual identity", "to": "Signature synthetic dish: example seafood bowl", "relation": "supports_judgment", "evidence": "synthetic_note#2"}
+  ],
+  "handoff": {"target": "opencrab", "mode": "ready_only", "ingest_performed": false, "note": "OpenCrab-ready manifest illustration. Ingest is HOLD unless owner explicitly approves."}
+}

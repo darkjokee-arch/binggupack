@@ -11,12 +11,12 @@ BingguPack은 OpenCrab(execution/workflow engine)을 **대체하지 않습니다
 
 | # | 예제 | goal | 산출 |
 |---|---|---|---|
-| 1 | `travel/` | 여행 일정 추천 워크플로우용 pack 준비 | required packs/data + candidate nodes/edges + validation |
-| 2 | `patent_intel/` | 특허 인텔리전스 pack 준비 | evidence→candidate→publish guard dry-run |
-| 3 | `restaurant_brand/` | 레스토랑/브랜드 컨셉 workflow pack | consumer smoke 관점 |
-| 4 | `generic_handoff/` | generic OpenCrab-ready handoff | handoff manifest 형식 |
+| 1 | `travel/` | 여행 일정 추천 워크플로우용 pack 준비 | [sample_input.json](travel/sample_input.json) — packs/data + candidate nodes/edges |
+| 2 | `patent_intel/` | 특허 인텔리전스 pack 준비 | [sample_input.json](patent_intel/sample_input.json) — evidence→candidate→handoff |
+| 3 | `restaurant_brand/` | 레스토랑/브랜드 컨셉 workflow pack | [sample_input.json](restaurant_brand/sample_input.json) — concept/menu/positioning |
+| 4 | `generic_handoff/` | generic OpenCrab-ready handoff | [sample_input.json](generic_handoff/sample_input.json) — validation + handoff manifest |
 
-> 이번 사이클에는 대표 예제 1건(`travel/`)을 synthetic으로 포함하고, 나머지(2~4)는 동일 lifecycle 템플릿으로 확장 예정입니다.
+> 4개 예제 전부 synthetic sample을 포함합니다. 모든 sample은 `ingest_performed=false` / `production_write=false`이며, BingguPack이 멈추는 경계(검증된 candidate-first manifest)까지만 보여줍니다. 실제 ingest/실행은 OpenCrab의 몫이며 HOLD입니다.
 
 ## travel/ 예제 흐름 (synthetic)
 

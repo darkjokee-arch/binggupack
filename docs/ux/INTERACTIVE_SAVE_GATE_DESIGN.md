@@ -41,6 +41,17 @@ binggu.py save-candidate --interactive
 
 MCP는 사람 TTY가 없으므로 interactive save를 노출하지 않습니다. `save_candidate`는 현행대로 dry-run preview + write-gated(G4_no_auto BLOCK) 유지. interactive는 로컬 CLI 전용 보조 UX입니다.
 
+## 구현 (v1.11.0 groundwork)
+
+`binggupack/cli/interactive_save.py` **prototype 구현 완료**:
+- `build_confirm_phrase(action, indices, id8, replacement)` — 기존 게이트 phrase를 구성하는 순수 함수(저장 0). SAVE/DEPRECATE/REPLACE/ACCEPT/UNACCEPT 지원.
+- `interactive_main()` — TTY 대화형. 후보 선택 → action → reason → phrase 구성 → **사람이 phrase 직접 재입력**해야 진행. 실제 저장은 기존 `binggu.py save ... --confirm` 게이트로 위임(이 모듈은 ledger write 0).
+- `_require_tty()` — 비-TTY(CI/pipe/AI)면 **fail-closed**(exit 2), 기존 explicit 방식 안내.
+- `--selftest` — 비-TTY 검증: phrase 정확성 5건 + 자동승인/빈선택/id8누락 거부 3건 = **8/8 GATE GO**, ledger_write=0, G4_bypass=0.
+- `pyproject.toml [project.scripts]`에 `binggu-interactive-save` 진입점 등록.
+
+검증: `python -m binggupack.cli.interactive_save --selftest` → 8/8 PASS. non-TTY 호출 시 fail-closed 확인.
+
 ## 판정
 
-**Lane C = 설계 완료, 구현 보류.** 최소 prototype도 save gate 로직에 손대므로, 안전 검증(게이트 우회 0 회귀) 없이는 미구현. owner 승인 + 회귀 테스트 후 Phase 구현 권장.
+**Lane C = prototype 구현 완료.** confirm phrase·G4·human gate 전부 유지, 우회 0. 실 게이트 함수 직접 위임(subprocess)은 다음 단계 확장 항목.

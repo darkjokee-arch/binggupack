@@ -40,6 +40,19 @@
 4. `pip install dist/*.whl` 격리 환경 설치 + `binggu --help` smoke.
 5. (실제 PyPI publish는 그 이후 별도 owner 승인 — 이번 범위 아님.)
 
+## 보강 적용 (v1.11.0 groundwork)
+
+`pyproject.toml` **실제 보강 완료** (TOML 파싱 검증 OK):
+- `[build-system]` 추가 — `requires=["setuptools>=61"]`, `build-backend="setuptools.build_meta"` (PEP517 build 가능 상태).
+- `version` `1.10.0rc1` → **`1.11.0.dev0`** (`binggupack/__about__.py`와 일치).
+- `license = {text="MIT"}`, `readme="README.md"`, `authors`, `keywords`, `classifiers` 추가.
+- `[project.scripts]` `binggu-interactive-save = "binggupack.cli.interactive_save:main"` (entry import 검증 OK).
+- `[tool.setuptools.packages.find]` `include=["binggupack*"]` — flat-layout(top-level `binggu.py`/`scripts`) 충돌 회피.
+
+남은 blocker:
+- 로컬에 `build`/`setuptools`/`wheel` 미설치 → **실 build NOT RUN**(설치 금지 준수). 격리 venv에서 `python -m build` 검증은 다음 단계.
+- Lane B 모듈화 완료도(전 스크립트 이관)에 따라 packages 범위 확정 필요.
+
 ## 판정
 
-**Lane E = readiness 점검 완료, NOT READY.** 실 build/publish 0. pyproject 보강은 기능 코드 변경을 수반하므로 이번 사이클에서는 문서 점검만 수행.
+**Lane E = pyproject 보강 적용, build readiness 크게 개선 / 실 build NOT RUN.** publish/token/secret 0. 격리 venv build 검증은 다음 단계.
