@@ -18,6 +18,11 @@ v1.10.0은 BingguPack을 **설치 가능한 MCP 패키지(installable MCP packag
 - **preview-first / no-autosave safety model** — 모든 후보는 저장 전 미리보기(`nothing_saved=true`)를 거치고, 실제 저장은 사람이 직접 친 `SAVE n`만 인정합니다. AI/reader actor의 실저장은 `G4_no_auto`로 차단됩니다.
 - 기능 자체는 `v1.10.0-rc.1`과 동일하며, cross-platform 검증(3-OS CI)과 MCP tool exposure 게이트를 통과해 stable로 승격했습니다.
 
+**Pack/workflow scope clarification**
+- v1.10.0은 **pack/workflow 준비에 쓰이는 MCP surface**(`capture_preview`·`pack_build`·`pack_validate`·`publish_guard_dryrun`·`consumer_smoke`·`save_candidate`)를 stable화합니다.
+- pack/workflow productization은 **준비·검증 layer로 지원**되며, 자동 production ingest가 아닙니다. 실행은 OpenCrab(execution/workflow engine)의 몫입니다.
+- OpenCrab ingest는 **0 / HOLD** — owner가 명시 승인하기 전까지 동작하지 않습니다.
+
 ## 2. Final commit map
 
 | 단계 | commit | 위치 |

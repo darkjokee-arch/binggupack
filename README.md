@@ -42,6 +42,29 @@ claude mcp get openbinggu-local-sandbox                   # Connected 확인
 
 절차 상세: [INSTALL.md](INSTALL.md) · E2E: [docs/BINGGUPACK_MCP_CLEAN_INSTALL_E2E_TEST_REPORT.md](docs/BINGGUPACK_MCP_CLEAN_INSTALL_E2E_TEST_REPORT.md) · 종료 기록: [release closure](docs/releases/BINGGUPACK_V1_10_0_RELEASE_CLOSURE.md).
 
+## Packs and workflows
+
+BingguPack은 개인 memory skeleton일 뿐 아니라, **evidence 기반 pack과 AI workflow를 위한 local-first 준비(preparation) layer**입니다.
+
+전형적 흐름:
+
+`goal → workflow design → required packs → required data → evidence capture → candidate nodes/edges → pack validation → publish guard dry-run → consumer smoke → OpenCrab-ready handoff`
+
+BingguPack은 OpenCrab을 실행/워크플로우 엔진으로서 **대체하지 않습니다**. 대신 workflow가 필요로 하는 pack 데이터를 **준비·검증·문서화·안전점검**합니다:
+
+- 사용자 목표(goal)에 어떤 pack이 필요한지 정의한다
+- 각 pack이 필요로 하는 evidence·source data를 식별한다
+- 캡처한 evidence를 candidate nodes / edges로 변환한다
+- handoff 전에 pack 구조를 검증한다 (`pack_build` → `pack_validate`)
+- 외부 시스템이 데이터를 받기 전에 publish guard를 돌린다 (`publish_guard_dryrun`)
+- consumer view를 smoke-test해 downstream tool이 안전하게 pack을 쓰게 한다 (`consumer_smoke`)
+
+이 흐름을 지원하는 v1.10.0 MCP 도구: `capture_preview` · `pack_build` · `pack_validate` · `publish_guard_dryrun` · `consumer_smoke` · `save_candidate`. 각 단계는 왜 중요한가 — pack이 production으로 넘어가기 전에 **구조 검증(validate) → 외부 노출 게이트(publish guard) → 소비자 관점 확인(consumer smoke)** 을 거쳐, 깨지거나 증거 없는 pack이 downstream에 도달하지 않게 fail-closed로 막기 때문입니다.
+
+**유료 workflow productization 관점** — pack/workflow는 상품화 가능한 산출물이지만, BingguPack은 **준비·검증·핸드오프 layer**까지만 담당합니다. 실제 실행은 OpenCrab(execution/workflow engine)의 몫입니다. production ingest, OpenCrab Cloud publish, marketplace upload, paid workflow deployment는 **owner가 명시 승인하기 전까지 HOLD**이며, 자동으로 publish·ingest되는 것은 아무것도 없습니다.
+
+모든 pack 데이터는 **candidate-first / evidence-backed**로 유지됩니다.
+
 ## Safety model
 
 빙구팩의 안전 불변식은 약속이 아니라 selftest로 증명됩니다.
