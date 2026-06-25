@@ -10,7 +10,8 @@ v1.11 에서는 import-time 외부 패키지 0 · 네트워크 0 · stdlib-only 
 ────────────────────────────────────────────────────────────────────────
 - **regex 가 정본(canonical)** 이다:
     scripts/openbinggu_label_kind_map.classify_label_kind  (label_kind 5종)
-    scripts/binggu_capture_classifier.classify             (should_capture 게이트)
+    binggupack.classifier.capture_classifier.classify      (should_capture 게이트;
+      scripts/binggu_capture_classifier.py 는 backward-compatible wrapper, v1.11.0 phase4 이관)
   이 두 정규식 모듈은 항상 먼저·항상 최종 결정권을 가진다.
 - **LLM 은 supplement(보조)** 일 뿐이다. AdvisoryClassifier 가 내놓는 것은
   `ClassifierAdvice` = "참고용 추천"이며, regex 의 판정을 override 하지 못한다.
@@ -42,7 +43,11 @@ from __future__ import annotations
 
 from typing import Optional, Protocol, Tuple, runtime_checkable
 
+# regex 정본(should_capture 게이트) — v1.11.0 phase4 이관. 아래 advisory(LLM 보조)와 별개·우선.
+from .capture_classifier import classify  # noqa: F401,E402
+
 __all__ = [
+    "classify",
     "CANONICAL_LABEL_KINDS",
     "ClassifierAdvice",
     "AdvisoryClassifier",
