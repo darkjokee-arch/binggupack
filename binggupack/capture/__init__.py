@@ -6,3 +6,4 @@ on_user_prompt/on_session_end entrypoint). scripts/binggu_capture_buffer.py·bin
 """
 from .buffer import CaptureBuffer  # noqa: F401
 from .session import CaptureSession  # noqa: F401
+from .cli import run_batch  # noqa: F401
