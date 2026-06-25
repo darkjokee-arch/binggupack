@@ -7,11 +7,11 @@
 **판정:** **S4 HOLD 유지.** 본 설계는 owner approval 토큰의 전제 조건(§4 GREEN 정의)을 명문화할 뿐,
 어떤 gate-critical 코드의 이동·변경도 승인하지 않는다.
 
-**갱신 이력(2026-06-25, docs-only):** 본 문서 §2 GAP 중 **A2·E1b·B5·F2~F4·D11**을 tests-only
-characterization 으로 커버.
+**갱신 이력(2026-06-25, docs-only):** 본 문서 §2 GAP 중 **A2·E1b·B5·F1~F4·D11**(1차) +
+**H4·H5·J3·K4·L2·N2·O3·O4**(B-low 저위험 2차)를 tests-only characterization 으로 커버.
 - 추가 테스트(production touch 0): `scripts/openbinggu_s4_gap_characterization_selftest.py`
-- 결과: **20/20 PASS · GATE GO · operating_store_unchanged=True · production/gate-critical touch 0**
-- 전체 회귀 GREEN: staging 16/16 · candidate 13/13 · deprecate 23/23 · capture GO · save_gate 28/28 · S4 GAP 20/20
+- 결과: **28/28 PASS · GATE GO · operating_store_unchanged=True · production/gate-critical touch 0**
+- 전체 회귀 GREEN: staging 16/16 · candidate 13/13 · deprecate 23/23 · capture GO · save_gate 28/28 · S4 GAP 28/28
 - **S4 implementation 은 여전히 HOLD.** 본 갱신은 결과 반영(docs-only)일 뿐, actual write core
   (§4 S4-6: `staging_apply`+`save_selected`+`commit_selected`)는 **마지막/영구 HOLD 유지**.
 
@@ -156,8 +156,8 @@ characterization 으로 커버.
 | H1 | `deprecate_item` 정상 | state→deprecated·물리잔존·deprecations 기록·ALLOW | EX g3#1 |
 | H2 | reason 공백 | `"deprecated_reason_required"` | EX g3#2 |
 | H3 | 이미 deprecated | `"already_deprecated"` | EX g3#3 |
-| H4 | tombstoned 노드 | `"tombstoned_item"` | GAP |
-| H5 | kind∉{node,edge} | `"kind_invalid"` | GAP |
+| H4 | tombstoned 노드 | `"tombstoned_item"` | **s4gap H4** |
+| H5 | kind∉{node,edge} | `"kind_invalid"` | **s4gap H5** |
 | H6 | 미존재 | `"item_not_found"` | EX g3#4 |
 | H7 | edge deprecate | view 제외·물리잔존 | EX g3#5 |
 | I1 | `set_review_due` 정상 | judgment_reviews pending INSERT·ALLOW | EX g3#6 |
@@ -166,12 +166,12 @@ characterization 으로 커버.
 | I4 | pending 중복 | `"pending_review_exists"` | EX g3#6 |
 | J1 | `resolve_review` 정상 | status→resolved·노드 state/candidate 무변 | EX g3#9 |
 | J2 | outcome∉OUTCOMES | `"outcome_invalid"` | EX g3#10b |
-| J3 | reason 공백 | `"resolve_reason_required"` | GAP |
+| J3 | reason 공백 | `"resolve_reason_required"` | **s4gap J3** |
 | J4 | pending 없음 | `"no_pending_review"` | EX g3#10a |
 | K1 | `classify_harvest_item` 정상 3종 | keep/challenge/discard 기록·ALLOW | EX g3#17 |
 | K2 | klass∉HARVEST_CLASSES | `"klass_invalid"` | EX g3#18 |
 | K3 | discard & reason 공백 | `"discard_reason_required"` | EX g3#18 |
-| K4 | item_id 공백 | `"item_id_required"` | GAP |
+| K4 | item_id 공백 | `"item_id_required"` | **s4gap K4** |
 | K5 | 재분류(같은 item_id) | UPSERT 갱신 | EX g3#19 |
 | HK-audit | 4함수 BLOCK 중 audit 위장 human 0 | forged_audit==0 | EX g3#40 |
 | HK-store | confirmed0·promotion0·운영 store 불변 | 전수 0 | EX g3#12, mtime |
@@ -180,18 +180,18 @@ characterization 으로 커버.
 | id | 함수/입력 | EXP | 기존 |
 |---|---|---|---|
 | L1 | `gate_record` 정상 | append-only 기록·건수 반환·파일 생성 | EX gate T3 |
-| L2 | `gate_record` 빈/공백 문장 skip | `_norm` 빈 → 미기록 | GAP(직접) |
+| L2 | `gate_record` 빈/공백 문장 skip | `_norm` 빈 → 미기록 | **s4gap L2** |
 | M1 | `gate_human_for` 전부 기록+신선 | True | EX gate T3,T11 |
 | M2 | 일부 미기록 | False(all 요구) | EX gate T5 |
 | M3 | stale(창 밖) | False | EX gate T6 |
 | M4 | 빈 입력/공백 | False | EX gate T8 |
 | M5 | append-only 재대조 | 여전히 True | EX gate T7 |
 | N1 | `write_last_preview` atomic(.tmp→replace) | hash-only·원문 미저장·건수 | EX gate T9 |
-| N2 | 빈 sentence 후보 skip | rows 제외 | GAP(직접) |
+| N2 | 빈 sentence 후보 skip | rows 제외 | **s4gap N2** |
 | O1 | `gate_record_from_prompt` 'SAVE n' | 해당 idx hash 기록·건수 | EX gate T10 |
 | O2 | 비SAVE 발화 | 0 | EX gate T13 |
-| O3 | preview 파일 부재/파싱실패 | 0 | GAP |
-| O4 | idx 매칭 0 | 0 | GAP |
+| O3 | preview 파일 부재/파싱실패 | 0 | **s4gap O3** |
+| O4 | idx 매칭 0 | 0 | **s4gap O4** |
 | LO-home | gate_path/last_preview_path == gate_home 단일 resolver | split-brain 0 | EX gate T14~T18 |
 
 ---
@@ -253,8 +253,10 @@ characterization 으로 커버.
 구현 0·코드 이동 0·대상 코드 touch 0. GAP 케이스의 테스트 추가와 owner approval 토큰 없이는
 어떤 gate-critical write core 도 이동·변경하지 않는다.
 
-**진척(2026-06-25):** A2·E1b·B5·F2~F4·D11 = tests-only characterization 으로 커버 완료
-(`openbinggu_s4_gap_characterization_selftest.py` **20/20 GREEN**). 그러나 **S4 implementation 은 HOLD** —
-테스트 추가는 안전망일 뿐 구현 진입 승인이 아니다. 잔여 GAP: A4·A6·A10·B9·B10·C2·C3·D3·D9·D10·E3·E6·E7·H4·H5·J3·K4·L2·N2·O3·O4.
+**진척(2026-06-25):** A2·E1b·B5·F1~F4·D11 (1차) + H4·H5·J3·K4·L2·N2·O3·O4 (B-low 저위험 2차)
+= tests-only characterization 으로 커버 완료 (`openbinggu_s4_gap_characterization_selftest.py` **28/28 GREEN**).
+그러나 **S4 implementation 은 HOLD** — 테스트 추가는 안전망일 뿐 구현 진입 승인이 아니다.
+잔여 GAP(고위험 13건, actual write core 인접): **A4·A6·A10·B9·B10·C2·C3·D3·D9·D10·E3·E6·E7**
+(관측 방식은 `SAVE_GATE_S4_HIGH_RISK_GAP_CHARACTERIZATION_PLAN.md` 참조).
 
-**다음 단계(승인 전제):** 잔여 GAP characterization 추가(테스트만) → 전종 GREEN → owner 토큰 요청.
+**다음 단계(승인 전제):** 잔여 고위험 13건 characterization 추가(테스트만) → 전종 GREEN → owner 토큰 요청.
