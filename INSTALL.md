@@ -53,7 +53,7 @@ python scripts/openbinggu_doctor.py --tree examples/toy_project   # CLEAN 기대
 
 ## BingguPack MCP 설치 (Claude Code) / installable MCP package
 
-> v1.10.0-rc.1+ — **clone만으로 MCP 서버가 포함**된다(서버는 `scripts/openbinggu_mcp_server.py`). Claude Code 에 sandbox 엔트리로 등록.
+> v1.10.0+ — **clone만으로 MCP 서버가 포함**된다(서버는 `scripts/openbinggu_mcp_server.py`). Claude Code 에 sandbox 엔트리로 등록.
 
 ```bash
 # 1) 등록 전 오프라인 검증 (write 0, 운영 ~/.binggupack 미접촉)

@@ -8,8 +8,8 @@ AI와의 대화·내 기록에서 건질 판단·상태·개념을 **후보로 �
 
 > **빈 장부엔 채울 게 없다** — 그래서 빙구팩은 ① 내 기존 기록(박제·메모·md)을 읽어 후보로 채우고 ② 사람이 등록한 외부 소스를 후보로 수확하고 ③ AI가 keep/challenge/discard를 **추천만** 하고, 확정은 늘 사람이 합니다. 자세히는 [기존 기록·외부 수확·철학 필터](#기존-기록--외부-수확--철학-필터-p0p1) 참조.
 
-- **Latest release: v1.9.0** — <https://github.com/darkjokee-arch/binggupack/releases/tag/v1.9.0>
-- **v1.10.0-rc.1 (prerelease) — installable MCP package**: `git clone` 만으로 BingguPack MCP 서버가 포함됩니다. `python scripts/smoke_test.py` 로 검증 후 `python scripts/install_claude_mcp.py --sandbox --apply` 로 Claude Code 에 등록(재시작 필요). AI 실저장은 `G4_no_auto` 로 차단. 설치: [INSTALL.md](INSTALL.md#binggupack-mcp-설치-claude-code--installable-mcp-package) · 검증: [docs/BINGGUPACK_MCP_CLEAN_INSTALL_E2E_TEST_REPORT.md](docs/BINGGUPACK_MCP_CLEAN_INSTALL_E2E_TEST_REPORT.md).
+- **Latest release: v1.10.0 (stable)** — <https://github.com/darkjokee-arch/binggupack/releases/tag/v1.10.0>
+- **v1.10.0 — installable MCP package**: `git clone` 만으로 BingguPack MCP 서버가 포함됩니다. `python scripts/smoke_test.py` 로 검증 후 `python scripts/install_claude_mcp.py --sandbox --apply` 로 Claude Code 에 등록(재시작 필요). AI 실저장은 `G4_no_auto` 로 차단. 설치: [INSTALL.md](INSTALL.md#binggupack-mcp-설치-claude-code--installable-mcp-package) · 검증: [docs/BINGGUPACK_MCP_CLEAN_INSTALL_E2E_TEST_REPORT.md](docs/BINGGUPACK_MCP_CLEAN_INSTALL_E2E_TEST_REPORT.md).
 - **v1.9.0 핵심 — 내가 확정한 판단이 폰·웹까지 "물 흐르듯" 자동으로 갑니다.**
   - **확정→자동 공유**: PC에서 `SAVE n`으로 확정한 항목이, 내 PC 스케줄러를 통해 클라우드 KV(읽기 전용 저장소)로 **자동 업로드**됩니다. 그러면 폰·claude.ai·ChatGPT 어디서든 "내 확정 판단"을 그대로 봅니다. (실제 폰/웹 양쪽에서 라이브 확인됨.)
   - **새 사람도 한 방 설치**: `binggu setup-cloud --apply` 하나로 로그인 점검 → 저장소 생성 → 설정 기입 → 자동 전송 스케줄러 등록 → 점검까지 끝냅니다.
