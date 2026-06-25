@@ -1,7 +1,7 @@
 # BingguPack v1.10.0 — Release Closure
 
 > 이 문서는 v1.10.0 stable 사이클을 **완료된 릴리즈로 닫는** closure / handoff 기록입니다.
-> 상태: `BINGGUPACK_V1_10_0_STABLE_RELEASED` · `..._AFTERCARE_PASS` · `..._DOCS_HYGIENE_PASS` · `..._PUBLIC_LANDING_REWRITE_PASS`
+> 상태: `BINGGUPACK_V1_10_0_STABLE_RELEASED` · `..._AFTERCARE_PASS` · `..._DOCS_HYGIENE_PASS` · `..._PUBLIC_LANDING_REWRITE_PASS` · `..._RELEASE_CLOSURE_PASS` · `..._EXTERNAL_CLEAN_CLONE_VERIFY_PASS`
 
 - Repo: `darkjokee-arch/binggupack`
 - Release: <https://github.com/darkjokee-arch/binggupack/releases/tag/v1.10.0> (Latest · prerelease=false · draft=false)
@@ -44,6 +44,22 @@ v1.10.0은 BingguPack을 **설치 가능한 MCP 패키지(installable MCP packag
 | operating ledger durable write | **0** (`ledger.sqlite`/`-wal` 불변) |
 
 3-OS cross-platform CI(ubuntu / macos / windows)도 PASS — 각 job은 tag clone → smoke 10/10 → installer dry-run → operating-name protection refusal을 검증합니다.
+
+### External clean-clone verification (PASS)
+
+릴리즈 종료 후, 외부 사용자 관점에서 깨끗한 새 환경(격리 temp)에서 재현 검증을 추가로 수행했습니다 — `BINGGUPACK_V1_10_0_EXTERNAL_CLEAN_CLONE_VERIFY_PASS`.
+
+| 단계 | 결과 |
+|---|---|
+| clean clone → `v1.10.0` tag checkout | commit `d15e6d6` MATCH |
+| `scripts/smoke_test.py` | 10/10 PASS (`real_home_changed=0`) |
+| MCP sandbox install (dry-run → apply) | PASS · sandbox 이름 `openbinggu-local-sandbox-v110-clean` · 운영 `openbinggu-local` 미변경 |
+| MCP tools exposure | 8/8 (forbidden leak 0) |
+| `save_candidate(dry_run=false)` actual save | BLOCK / `G4_no_auto` / executed_write=false / ledger=temp_only |
+| 운영 home durable write · OpenCrab ingest · production write · G4 bypass | 전부 0 |
+| 임시 디렉터리 정리 · 운영 repo 작업트리 오염 | 정리 완료 · 오염 0 |
+
+설치 절차 정합성(README/INSTALL이 안내하는 명령 ↔ 실제 파일)도 clean clone에서 일치 확인됐습니다.
 
 ## 4. Public landing cleanup
 
