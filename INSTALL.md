@@ -121,13 +121,17 @@ python -m venv .build_venv
 - `pyproject.toml`에 `[build-system]` + `binggupack` 패키지 정의가 있습니다.
 - build 산출물(`dist/`, `.build_venv/`)은 `.gitignore` 대상입니다.
 
-## 화자 축 사용 (v1.12.0)
+## 화자 축 사용 (v1.12.0+ · 양방향 페어 v1.14.0)
 
-설치 후 내 말(owner)과 AI 요약(ai)을 따로 쌓는 화자 축은 로컬 CLI로 씁니다:
+설치 후 내 말(owner)과 AI 요약(ai)을 따로 쌓는 화자 축은 로컬 CLI로 씁니다. 페어는 **노드 2 + 엣지 1을 한 번에** 만들고(따로 저장 금지), `--by`로 누가 반응했는지(엣지 방향)를 정합니다. 인자 순서는 항상 (owner 발화, ai 발화)이고 owner는 **자연어 원문 그대로**:
 
 ```bash
-python binggu.py pair "<내 직감>" "<AI 요약>" --relation refutes --confirm "PAIR ai_refutes owner:1 ai:1"
+# 내가 먼저 말하고 AI가 반응 → --by ai (기본)
+python binggu.py pair "<owner 발화>" "<ai 발화>" --by ai --relation refutes --confirm "PAIR ai_refutes owner:1 ai:1"
+# AI가 먼저 말하고 내가 반응 → --by owner
+python binggu.py pair "<owner 발화>" "<ai 발화>" --by owner --relation revises --confirm "PAIR owner_revises owner:1 ai:1"
 python binggu.py pair "<내 직감만>" --confirm "PAIR owner:1"   # 순수 직감 단독
+python binggu.py save "<문장>" --speaker owner   # 단건 저장 + 화자 칸
 python binggu.py trust          # 양방향 신뢰도 (누가 더 잘 맞나)
 python binggu.py route "<발화>"  # 신규/수정/결과 안내
 ```

@@ -22,28 +22,31 @@
 두 노드를 **각각 독립 저장**하되, 둘 사이를 **동사형 엣지**로 연결한다:
 
 ```
-[owner 직감 노드]  ←(evidence_supports)─ [owner 자기증거]
-       ▲
-       │ (ai_refutes)            ← 페어 엣지 (수용/반박/수정)
-       │
-[ai 요약 노드]     ←(evidence_supports)─ [ai 자기증거]
+[owner 발화 노드]  ←(evidence_supports)─ [owner 자기증거]
+       ▲   │
+ (owner_*)│   │ (ai_*)          ← 페어 엣지 (수용/반박/수정), 방향 = 누가 반응했나
+       │   ▼
+[ai 발화 노드]     ←(evidence_supports)─ [ai 자기증거]
 ```
 
+- **양방향 엣지**: 엣지 방향은 **반응 주체**다. AI가 사용자 발화에 반응 → `ai_*`(ai→owner), 사용자가 AI 발화에 반응 → `owner_*`(owner→ai). [먼저 말한 사람]→[반응한 사람] 시간 순서·관계 방향이 보존된다.
+- **owner 발화는 자연어 원문 그대로**: 사용자가 친 말을 요약·번역·재구성하지 않고 그대로 owner 노드에 담는다(정리하면 화자축 의미 상실).
 - **owner만/ai만/연결** 3중 활용: 사용자 발화만 모아보기, AI 회고만 모아보기, 맥락 타고 "이 상황에서 사용자는 이렇게" 보기.
 - 기존 5종 노드 + conv-self evidence + evidence_supports 골격은 **그대로(additive)** — 화자 칸과 페어 엣지만 위에 얹힌다.
 
 ## 3. 데이터 모델 (비파괴 확장)
 
 - `nodes.speaker` (`owner`/`ai`/`NULL`) — 기존 노드는 NULL(소급 안 건드림). `semantic_subtype`·`use_count`와 동일한 비파괴 `ALTER ADD COLUMN` 패턴.
-- 페어 엣지 relation: `ai_accepts`(수용) / `ai_refutes`(반박) / `ai_revises`(수정). 전 엣지 evidence 증빙 의무 충족(ai 자기증거 참조).
+- 페어 엣지 relation (양방향): AI가 반응 = `ai_accepts`/`ai_refutes`/`ai_revises`(수용/반박/수정), 사용자가 반응 = `owner_accepts`/`owner_refutes`/`owner_revises`. relation prefix가 source(반응 주체) 노드를 가리킨다. 전 엣지 evidence 증빙 의무 충족(반응 주체 노드의 자기증거 참조).
 - `hit_events` 테이블 — 양방향 신뢰도 이벤트 로그(append-only). 조회 시 산정.
 
 > ⚠️ **store_checksum 함정 주의**: `store_checksum`은 `speaker` 컬럼을 **제외**(명시 컬럼 projection)한다. 포함하면 `ALTER` 후 기존 운영 ledger의 audit anchor(after_hash)와 어긋나 `verify_tail_state`가 정상 노드를 변조로 오판한다. `verify_chain`(audit_log 기반)만으론 못 잡고 `verify_tail_state`(checksum anchor 기반)로 잡힌다.
 
 ## 4. 페어 저장 (`save_paired`)
 
-한 번의 저장이 만드는 것:
+한 번의 저장이 만드는 것 (**노드 2 + 엣지 1을 한 번에** — 따로 저장하면 연결이 빠진다):
 - owner 노드(speaker=owner) + ai 노드(speaker=ai) 각각 독립 + 각 자기증거 + 페어 엣지
+- **인자 순서 고정**: `save_paired(owner_text, ai_text, …)` — 첫 인자는 항상 owner 발화(원문 그대로), 둘째는 ai 발화. `--by`(`owner`/`ai`, 기본 ai)가 엣지 방향(반응 주체)을 정한다.
 - **owner 단독 허용**: `ai_text`가 없으면 owner 노드 1개만(순수 직감 — 억지 ai 노드/엣지 생성 금지).
 - **원자성**: 단일 pack → `staging_apply` 1회(부분커밋 시 전체 롤백).
 - **dangling 방지**: 페어 중 한쪽이라도 기존재면 전체 skip(`pair_partial_exists`).
@@ -62,8 +65,11 @@
 ## 6. CLI
 
 ```bash
-# 페어 저장 — 내 직감 + AI 요약, 수용/반박/수정으로 연결
-binggu pair "<내 직감>" "<AI 요약>" --relation refutes --confirm "PAIR ai_refutes owner:1 ai:1"
+# 페어 저장 — owner 발화 + ai 발화를 한 번에(노드2+엣지1), 수용/반박/수정으로 연결
+# 내가 먼저 말하고 AI가 반응 → --by ai (기본)
+binggu pair "<owner 발화>" "<ai 발화>" --by ai --relation refutes --confirm "PAIR ai_refutes owner:1 ai:1"
+# AI가 먼저 말하고 내가 반응 → --by owner
+binggu pair "<owner 발화>" "<ai 발화>" --by owner --relation revises --confirm "PAIR owner_revises owner:1 ai:1"
 # 순수 직감 단독 (AI 노드 안 만듦)
 binggu pair "<내 직감만>" --confirm "PAIR owner:1"
 # 양방향 신뢰도 보기 (read-only)

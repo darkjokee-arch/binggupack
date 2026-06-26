@@ -125,14 +125,18 @@ python binggu.py preview "오늘 정리할 문장들"
 
 자세한 명령은 README의 후보 관리 표 참조.
 
-### 화자 축 — 내 발화와 AI 요약 따로 쌓기 (v1.12.0)
+### 화자 축 — 내 발화와 AI 요약 따로 쌓기 (v1.12.0 · 양방향 페어 v1.14.0)
 
-빙구팩이 "AI 작업일지"가 아니라 **나 자신**을 쌓게 하는 흐름입니다. 내 발화(owner)와 AI 요약(ai)을 각각 독립 노드로 저장하고 수용/반박/수정 엣지로 연결합니다.
+빙구팩이 "AI 작업일지"가 아니라 **나 자신**을 쌓게 하는 흐름입니다. 내 발화(owner)와 AI 요약(ai)을 각각 독립 노드로 저장하고 수용/반박/수정 엣지로 연결합니다. 페어는 **노드 2 + 엣지 1을 한 번에**(따로 저장하면 연결이 빠짐), `--by`로 **누가 먼저 말하고 누가 반응했는지**(시간 순서·방향)를 정합니다. 인자 순서는 항상 (owner 발화, ai 발화)이고, owner는 **내가 친 자연어 원문 그대로**(요약 금지).
 
 ```bash
-# 내 직감 + AI 요약을 페어로 — relation: accepts(수용)/refutes(반박)/revises(수정)
+# 내가 먼저 판단 → AI가 반박 (반응 주체=AI) → --by ai (기본)
 python binggu.py pair "이 입찰은 마진이 낮아 보류한다" "데이터가 부족해 보수적 접근이 맞다" \
-    --relation refutes --confirm "PAIR ai_refutes owner:1 ai:1"
+    --by ai --relation refutes --confirm "PAIR ai_refutes owner:1 ai:1"
+
+# AI가 먼저 권고 → 내가 뒤집음 (반응 주체=나) → --by owner
+python binggu.py pair "그래도 이 건은 응찰한다" "데이터가 부족해 보수적 접근이 맞다" \
+    --by owner --relation revises --confirm "PAIR owner_revises owner:1 ai:1"
 
 # 순수 직감만 (AI 노드 안 만듦)
 python binggu.py pair "다음엔 이 거래처를 우선 검토하자" --confirm "PAIR owner:1"

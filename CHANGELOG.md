@@ -1,5 +1,22 @@
 # Changelog — BingguPack
 
+## v1.14.0 — 화자 페어 양방향 + MCP 크래시 수정 (2026-06-26)
+
+화자 축을 **대화 주고받음**으로 완성 — 누가 먼저 말했고 누가 반응했는지(시간 순서·관계 방향)를 페어 엣지에 담는다. `save --speaker` CLI로 "빙구팩 저장해" 흐름에 화자 칸 연동.
+
+### Added
+- **양방향 페어 엣지**: 기존 `ai_*`(AI가 사용자 발화에 반응)에 더해 `owner_*`(사용자가 AI 발화에 반응) 추가 — `owner_accepts`/`owner_refutes`/`owner_revises`. `binggu pair … --by <ai|owner>`로 선택. relation prefix가 **반응 주체(source)** = [먼저 말한 사람]→[반응한 사람] 시간 순서·방향이 엣지에 보존된다.
+- `binggu save … --speaker <owner|ai>` — 단건 저장에도 화자 칸 연동. owner는 **사용자 자연어 원문 그대로**(요약·번역 금지), ai는 AI 요약.
+
+### Fixed
+- MCP `save_candidate` 실 write 크래시 — `snap_dir` 미생성으로 `snapshot→copy2` FileNotFoundError가 stdio 루프를 죽이던 문제(`os.makedirs` 1줄). dry-run/조기 BLOCK 경로는 영향 없었음.
+
+### Safety
+- 양방향이어도 헌법 불변: `G4_no_auto`(actor=human) 게이트·candidate-only·PII 제외·원자성(단일 pack)·dangling 방지. 자동 저장 0.
+
+### Verified
+- selftest 전수 GO: binggu 40/40·candidate_save 양방향 페어 e2e(`owner_revises` 실저장 PASS)·운영 ledger 무손상.
+
 ## v1.13.0 — 자기진화 거버넌스 (2026-06-26)
 
 빙구팩 학습과 기존 규칙(강제조항) 충돌 시 — 빙구팩은 제안·기록만, 규칙 변경은 사람. **self-modifying 0**(거버넌스 자산 write 0).
