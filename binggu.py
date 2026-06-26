@@ -592,6 +592,38 @@ def cmd_trust(a):
     return 0
 
 
+def cmd_route(a):
+    """저장 의도 라우팅 — 발화를 신규/수정/결과로 추정해 해당 명령을 안내(read-only).
+    추정일 뿐 실행·번호선택·confirm 합성은 하지 않는다(owner 손에 잔류·게이트 무수정).
+    자기수정(replace)·결과확정(resolve)을 '저장해' 흐름에 자연스럽게 잇는 안내 계층."""
+    import re as _re
+    text = a.text or ""
+    revise = _re.compile(r"틀렸|틀린|바꿔|바꾸|수정|아니야|아니라|다시|고쳐|잘못|정정")
+    result = _re.compile(r"결과|낙찰|유찰|성공했|실패했|맞았|판명|드러났|됐다|밝혀")
+    if revise.search(text):
+        kind = "수정(자기수정)"
+        guide = ['기존 판단을 고치려면:',
+                 '  binggu list                                   # 번호·id8 확인',
+                 '  binggu replace <n> <id8> --with "<수정문장>" --reason "..." --confirm "REPLACE <n> <id8> WITH <수정문장>"']
+    elif result.search(text):
+        kind = "결과확정(예측→실측)"
+        guide = ['예측 결과를 기록하면 양방향 신뢰도에 누적됩니다:',
+                 '  binggu list                                   # 번호·id8 확인',
+                 '  binggu resolve <n> <id8> --outcome 성공/실패 --reason "..."',
+                 '  binggu trust                                  # 누적된 적중률 보기']
+    else:
+        kind = "신규 저장"
+        guide = ['새로 남기려면:',
+                 '  binggu preview "<텍스트>"  →  binggu save ... (단일)',
+                 '  binggu pair "<내 발화/직감>" "<AI 요약>" --relation accepts/refutes/revises --confirm "PAIR ..."  (페어)',
+                 '  binggu pair "<내 직감만>" --confirm "PAIR owner:1"  (순수 직감 단독)']
+    print("# 저장 라우팅 — 추정: %s  (추정일 뿐, 최종 선택은 직접)" % kind)
+    for g in guide:
+        print(g)
+    print("(의도가 다르면 위 안내를 무시하고 맞는 명령을 직접 쓰세요 — 이 명령은 아무것도 실행하지 않습니다.)")
+    return 0
+
+
 def cmd_list(a):
     db, _ = _open(a.ledger)
     v = list_candidates(db, a.status or "all", a.kind)
@@ -1101,6 +1133,7 @@ def main():
     pp.add_argument("--ai-pick", type=int, default=1, dest="ai_pick")
     pp.add_argument("--confirm", required=True); pp.add_argument("--due", default=None)
     tp = sub.add_parser("trust"); tp.add_argument("--subtype", default=None)  # 양방향 신뢰도(read-only)
+    rtp = sub.add_parser("route"); rtp.add_argument("text")  # 저장 의도 라우팅(신규/수정/결과 read-only 안내)
     sp = sub.add_parser("reminders"); sp.add_argument("--today", default=None)
     cp = sub.add_parser("capture"); cp.add_argument("--settings", default=None)
     csub = cp.add_subparsers(dest="capture_cmd", required=True)
@@ -1140,7 +1173,8 @@ def main():
           "resolve": cmd_resolve, "reminders": cmd_reminders, "capture": cmd_capture,
           "recall": cmd_recall, "why": cmd_recall, "trace": cmd_trace, "preflight": cmd_preflight,
           "hosted": cmd_hosted, "harvest": cmd_harvest, "setup-cloud": cmd_setup_cloud,
-          "confirm-edges": cmd_confirm_edges, "pair": cmd_pair, "trust": cmd_trust}[a.cmd]
+          "confirm-edges": cmd_confirm_edges, "pair": cmd_pair, "trust": cmd_trust,
+          "route": cmd_route}[a.cmd]
     sys.exit(fn(a))
 
 
