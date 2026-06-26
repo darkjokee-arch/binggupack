@@ -203,6 +203,49 @@ def check_save_gate_resolver():
 
 
 # ---------------------------------------------------------------------------
+# (e) gate_log canonical wrapper identity — S4-1 정본화(binggupack.safety.gate_log)
+#     4함수가 package import vs scripts wrapper 양형태에서 동일 객체 + __module__ 정본 확인.
+#     S4-1 문서 §3 의 "__module__ 보증" 을 자동 회귀로 고정(read-only, write 0).
+# ---------------------------------------------------------------------------
+def check_gate_log_canonical():
+    try:
+        from binggupack.safety.gate_log import (
+            gate_record, gate_human_for, write_last_preview, gate_record_from_prompt,
+        )
+    except Exception as e:  # noqa: BLE001
+        chk(False, "(e) gate_log package import", repr(e))
+        return
+    chk(True, "(e) gate_log package import", "ok")
+
+    try:
+        import binggu_save_gate as sg  # scripts wrapper
+    except Exception as e:  # noqa: BLE001
+        chk(False, "(e) binggu_save_gate import", repr(e))
+        return
+    chk(True, "(e) binggu_save_gate import", "ok")
+
+    # 동일 객체(identity) — S4-1 wrapper 가 정본을 re-export.
+    chk(sg.gate_record is gate_record, "(e) gate_record identical fn", "")
+    chk(sg.gate_human_for is gate_human_for, "(e) gate_human_for identical fn", "")
+    chk(sg.write_last_preview is write_last_preview, "(e) write_last_preview identical fn", "")
+    chk(sg.gate_record_from_prompt is gate_record_from_prompt,
+        "(e) gate_record_from_prompt identical fn", "")
+
+    # __module__ 정본 경로 == binggupack.safety.gate_log (S4-1 정본화 회귀 고정).
+    CANON = "binggupack.safety.gate_log"
+    for name, fn in (("gate_record", gate_record), ("gate_human_for", gate_human_for),
+                     ("write_last_preview", write_last_preview),
+                     ("gate_record_from_prompt", gate_record_from_prompt)):
+        chk(fn.__module__ == CANON, "(e) %s __module__ canonical" % name,
+            "got %s" % fn.__module__)
+
+    # has_trigger_token 은 미이관 확정(S3-CLOSURE §2-1) — scripts 잔류 확인(정본화 역행 방지).
+    chk(sg.has_trigger_token.__module__ == "binggu_save_gate",
+        "(e) has_trigger_token stays in scripts (미이관 확정)",
+        "got %s" % sg.has_trigger_token.__module__)
+
+
+# ---------------------------------------------------------------------------
 # 운영 ~/.binggupack mtime 전후 동일 확인 (미접촉 보증)
 # ---------------------------------------------------------------------------
 def _op_home():
@@ -220,6 +263,7 @@ def main():
     check_match_policy()
     check_entrypoints()
     check_save_gate_resolver()
+    check_gate_log_canonical()
 
     op_mtime_after = os.path.getmtime(op) if os.path.isdir(op) else None
     chk(op_mtime_before == op_mtime_after,
