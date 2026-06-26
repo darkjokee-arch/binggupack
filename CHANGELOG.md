@@ -1,5 +1,28 @@
 # Changelog — BingguPack
 
+## v1.12.0 — Personal speaker axis (2026-06-26)
+
+사용자 발화(owner)와 AI 요약(ai)을 따로 저장하고 연결하는 화자 축. 빙구팩이 "AI 작업일지"가 아니라 **사용자 본체**를 쌓게 하는 핵심.
+
+### Added
+- `nodes.speaker`(owner/ai/NULL) 비파괴 `ALTER` — 사용자 발화와 AI 요약을 독립 노드로 구분 저장. 기존 노드 NULL 보존.
+- `save_paired(owner_text, ai_text, relation_kind)` — owner/ai 페어 저장 + 동사형 엣지(`ai_accepts`/`ai_refutes`/`ai_revises`). owner 단독(순수 직감) 허용. 단일 pack `staging_apply`(원자성), 페어 dangling 방지(`pair_partial_exists`).
+- `binggu_hit_stats.py` + `hit_events` 테이블 — 양방향 신뢰도(owner 직감/ai 반박 적중률 별도 분모·시간감쇠 반감기 30일·표본게이트 N<5·`both_sides` 균형). 맹종 아닌 참고 가중치.
+- CLI: `binggu pair` / `binggu trust`(read-only) / `binggu route`(저장 의도 신규/수정/결과 안내) + `binggu resolve` 신뢰도 연동.
+- `docs/BINGGUPACK_SPEAKER_AXIS_DESIGN.md` — 화자 축 설계 문서.
+
+### Fixed
+- `store_checksum` 위치 비의존화(speaker 컬럼 제외 명시 projection) — `ALTER` 후 기존 운영 ledger audit anchor와 어긋나 `verify_tail_state`가 정상 노드를 변조로 오판하던 함정 해소. `verify_chain`만으론 미검출.
+
+### Verified
+- selftest 전수 GO: binggu 40/40 · candidate_save 19/19 · staging 16/16 · deprecate 23/23 · replace 19/19 · promote 17/17.
+- 운영 ledger 마이그레이션: speaker/hit_events 추가 후 **291노드 무손상** · `verify_tail_state`/`verify_chain` True · 백업 동반.
+- 헌법 5항(candidate-only/`G4_no_auto`/PII/사람 confirm/전 엣지 evidence) **위반 0** — 최종 검증 워크플로우 확인.
+
+### Notes
+- 4cli 토론(방향 채택 + 9불변식) + 6축 충돌분석(STOP→선결과제 해소) 거쳐 구현.
+- publish 게이트(SUPPORTS→`ALLOWED_RELATIONS`·cloud export 단계)·기존 노드 speaker backfill은 선택 사항으로 남김.
+
 ## v1.10.0 — Installable MCP Package (stable) (2026-06-25)
 
 `v1.10.0-rc.1` 을 stable 로 승격. RC 기능은 그대로이며 cross-platform 검증과 MCP tool exposure 검증을 통과해 stable line(main)으로 병합했다.

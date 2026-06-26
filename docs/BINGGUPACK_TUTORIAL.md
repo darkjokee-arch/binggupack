@@ -125,6 +125,32 @@ python binggu.py preview "오늘 정리할 문장들"
 
 자세한 명령은 README의 후보 관리 표 참조.
 
+### 화자 축 — 내 발화와 AI 요약 따로 쌓기 (v1.12.0)
+
+빙구팩이 "AI 작업일지"가 아니라 **나 자신**을 쌓게 하는 흐름입니다. 내 발화(owner)와 AI 요약(ai)을 각각 독립 노드로 저장하고 수용/반박/수정 엣지로 연결합니다.
+
+```bash
+# 내 직감 + AI 요약을 페어로 — relation: accepts(수용)/refutes(반박)/revises(수정)
+python binggu.py pair "이 입찰은 마진이 낮아 보류한다" "데이터가 부족해 보수적 접근이 맞다" \
+    --relation refutes --confirm "PAIR ai_refutes owner:1 ai:1"
+
+# 순수 직감만 (AI 노드 안 만듦)
+python binggu.py pair "다음엔 이 거래처를 우선 검토하자" --confirm "PAIR owner:1"
+
+# 양방향 신뢰도 — 내 직감 적중률 + AI 반박 적중률 (참고 가중치, 맹종 아님)
+python binggu.py trust
+
+# 예측 결과 기록 → 적중률 누적
+python binggu.py resolve <n> <id8> --outcome 성공
+
+# 무엇을 할지 헷갈리면 — 신규/수정/결과 안내
+python binggu.py route "아까 그 판단 틀렸어"
+```
+
+- 저장은 여전히 사람 confirm 게이트(`PAIR ...` 정확 일치)·`actor=auto` BLOCK·PII 제외. 자동 저장 0.
+- 신뢰도는 표본 N<5면 미산정(편향 차단), 시간감쇠(반감기 30일)로 최근 결과를 더 반영.
+- 상세: [화자 축 설계](BINGGUPACK_SPEAKER_AXIS_DESIGN.md).
+
 ## 7. 다음 단계
 
 - **여러 AI에 pack 넘기기**: [Multi-agent handoff guide](OPENBINGGU_PHASE3_MULTI_AGENT_HANDOFF_GUIDE.md)

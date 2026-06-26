@@ -2,6 +2,8 @@
 
 **Installable MCP package for Claude Code — local-first, evidence-backed memory with a human-confirmed save gate.**
 
+> **Latest (main): `v1.12.0` — Personal speaker axis 🗣️** · 사용자 발화(owner)와 AI 요약(ai)을 **따로 저장**하고 **수용/반박/수정 엣지**로 연결, **양방향 신뢰도**(내 직감·AI 반박 적중률)까지. CLI `binggu pair`/`trust`/`route` · 운영 ledger 마이그레이션 무손상(`verify_tail_state`) · 헌법 5항 위반 0 → [화자 축 설계](docs/BINGGUPACK_SPEAKER_AXIS_DESIGN.md)
+>
 > **Latest stable: `v1.11.0`** — feature implementation on the v1.10.0 installable MCP baseline · **external clean-clone + isolated build verified ✅**
 > `binggupack/` package modularization · interactive save prototype (non-TTY fail-closed) · pack/workflow examples · sdist/wheel build · `scripts/smoke_test.py` **10/10 PASS** · **MCP 8 tools** · `save_candidate(dry_run=false)` blocked by **`G4_no_auto`**
 > 🔒 local-first · preview-first · **no AI autosave** · human `SAVE n` gate · PyPI publish 0
@@ -12,7 +14,19 @@ BingguPack은 AI 대화에서 남길 가치가 있는 판단·상태·개념을 
 
 ---
 
-## v1.11.0 — Feature implementation (latest)
+## v1.12.0 — Personal speaker axis (latest, main)
+
+사용자 AGI화의 핵심 갭을 메우는 화자 축. 빙구팩이 "AI 작업일지"가 아니라 **사용자 본체**를 쌓게 합니다.
+
+- **화자 구분(speaker)** — owner(사용자 발화: 직감·지적·원인) / ai(AI 요약: 수정·수용·반박)를 각각 **독립 노드**로 저장. 기존 노드는 NULL(비파괴 `ALTER`).
+- **페어 + 동사형 엣지** — `binggu pair`로 owner/ai 노드를 한 번에 저장하고 `ai_accepts`/`ai_refutes`/`ai_revises`로 연결. **owner 단독(순수 직감)도 허용** — 억지 AI 노드 안 만듦.
+- **양방향 신뢰도** — `binggu trust`. 내 직감 적중률과 AI 반박 적중률을 **별도 분모·시간감쇠(반감기 30일)·표본게이트(N<5 미산정)**로 산정해 함께 표시. 참고 가중치이지 맹종 아님(사용자도 AI도 틀릴 수 있다).
+- **자기수정 라우팅** — `binggu route`로 "저장해" 발화를 신규/수정(`replace`)/결과(`resolve`)로 추정해 안내(read-only).
+- 검증: selftest 전수 GO · 운영 ledger 마이그레이션 **291노드 무손상**(`verify_tail_state`/`verify_chain` True) · 헌법 5항 위반 0. 상세: [화자 축 설계](docs/BINGGUPACK_SPEAKER_AXIS_DESIGN.md).
+
+> ⚠️ 구현 노트: `store_checksum`은 `speaker` 컬럼을 제외(명시 projection)한다 — 포함하면 `ALTER` 후 기존 audit anchor와 어긋나 `verify_tail_state`가 정상 노드를 변조로 오판. `verify_chain`만으론 못 잡힌다.
+
+## v1.11.0 — Feature implementation
 
 v1.10.0 installable MCP stable baseline 위의 feature implementation release입니다.
 
@@ -97,6 +111,12 @@ MCP 없이 로컬 CLI로 후보 수집·저장을 쓸 수도 있습니다.
 python scripts/openbinggu_doctor.py --selftest      # GATE=GO (write 0)
 python binggu.py init --agi-memory                  # 장부 + 전역 후보수집(기본 ON)
 python binggu.py capture preview                     # 모인 후보 미리보기 (저장 0)
+
+# 화자 축 (v1.12.0) — 내 발화와 AI 요약을 따로 쌓고 연결
+python binggu.py pair "<내 직감>" "<AI 요약>" --relation refutes --confirm "PAIR ai_refutes owner:1 ai:1"
+python binggu.py pair "<내 직감만>" --confirm "PAIR owner:1"   # 순수 직감 단독
+python binggu.py trust                               # 양방향 신뢰도 보기 (read-only)
+python binggu.py route "<발화>"                       # 신규/수정/결과 안내 (read-only)
 ```
 
 > python 런처는 OS별로: Windows `py` · WSL/macOS/Linux `python3`. 전체 절차는 [INSTALL.md](INSTALL.md).
@@ -108,6 +128,7 @@ python binggu.py capture preview                     # 모인 후보 미리보�
 - **Human-confirmed SAVE gate** — 키보드로 직접 친 `SAVE n`만 저장.
 - **No AI autosave** — AI/reader는 `G4_no_auto`로 차단.
 - **Evidence-backed graph grammar** — 5종 노드(문서·증거·개념·상태·판단), 모든 연결에 원문 근거 의무. 검증기가 fail-closed로 강제.
+- **Personal speaker axis (v1.12.0)** — 사용자 발화(owner)와 AI 요약(ai)을 따로 저장하고 수용/반박/수정 엣지로 연결. 양방향 신뢰도는 한쪽 편들지 않는 참고 가중치(맹종 아님).
 - **OpenCrab Cloud ingest remains HOLD** — owner가 명시 승인하기 전엔 동작하지 않습니다.
 
 ## Verification
@@ -141,6 +162,7 @@ AI와 대화하다 보면 정작 남기고 싶은 것 — 내 판단, 배운 점
 - [docs/releases/BINGGUPACK_V1_10_0_RELEASE_CLOSURE.md](docs/releases/BINGGUPACK_V1_10_0_RELEASE_CLOSURE.md) — v1.10.0 release closure 기록
 - [docs/BINGGUPACK_CAPTURE_HOOK_SETUP.md](docs/BINGGUPACK_CAPTURE_HOOK_SETUP.md) — AGI memory capture 설치/scope/롤백
 - [docs/BINGGUPACK_GRAPH_GRAMMAR_SPEC.md](docs/BINGGUPACK_GRAPH_GRAMMAR_SPEC.md) — 증거 기반 그래프 문법
+- [docs/BINGGUPACK_SPEAKER_AXIS_DESIGN.md](docs/BINGGUPACK_SPEAKER_AXIS_DESIGN.md) — 화자 축(owner/ai)·페어 엣지·양방향 신뢰도 (v1.12.0)
 - [docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md](docs/BINGGUPACK_CROSS_PLATFORM_SUPPORT.md) — Windows/WSL/macOS 가이드
 - [docs/BINGGUPACK_CROSSDEVICE_PUBLISH_PIPELINE_DESIGN.md](docs/BINGGUPACK_CROSSDEVICE_PUBLISH_PIPELINE_DESIGN.md) — PC-mediated read 공유 파이프라인
 - [docs/BINGGUPACK_TUTORIAL.md](docs/BINGGUPACK_TUTORIAL.md) — 단계별 따라하기
