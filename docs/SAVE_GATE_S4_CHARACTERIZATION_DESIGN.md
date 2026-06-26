@@ -256,9 +256,9 @@
 | S4-1 | L·M·N·O (save_gate write/판정) | gate-log·hash-only·운영 ledger 별개 파일 | **✅ DONE(2026-06-26)** — `binggupack/safety/gate_log.py` 정본화·byte-identical·semantic change 0. 상세 = `SAVE_GATE_S4_1_GATE_LOG_CANONICALIZATION.md` |
 | S4-2 | F (`_maybe_promote_actor_by_gate`) | 순수 함수·G4① 승격 | **HOLD(2026-06-26)** — characterization F1~F4 GREEN(s4gap)이나 `capture_preview`(scripts 전용·package 등가물 0) 의존으로 binggupack 정본 이관 시 **strangler 단방향 위반·import cycle 위험** → byte-identical 이관 불가. owner token 발급됐으나 기술적 STOP. 상세 = `SAVE_GATE_S4_2_ACTOR_PROMOTION_CANONICALIZATION.md` |
 | S4-3 | H·I·J·K (deprecate_g3 4함수) | sqlite write·G4③ | **HOLD(2026-06-26)** — 실측: 4함수 전부 `StagingDB`(scripts·write 인프라) 결합 + `write_lock`/`BEGIN`/`UPDATE`/`INSERT`/`audit_append`/`store_checksum`로 **actual sqlite write 직접 수행** + scripts-only 의존(`_hash`/`_now_iso`/`is_confirm_actor`/`open_staging`). binggupack 정본화 시 strangler 위반 + **actual write core 접촉**. characterization H4·H5·J3·K4 GREEN(s4gap)이나 이관 불가. 상세 = `SAVE_GATE_S4_3_DEPRECATE_G3_CANONICALIZATION.md` |
-| S4-4 | C·D 인프라(write_lock/snapshot/audit/verify) | write 본체 의존 | store_checksum 결정성 보존 |
-| S4-5 | A (`c2_check`) | G4② 판정·순수 | B와 강결합 — 함께 검토 |
-| **S4-6(마지막/HOLD)** | **B `staging_apply` + E `save_selected` + G `commit_selected`** | **actual write core + G4①** | **owner 명시 승인 필수·영구 HOLD 후보** |
+| S4-4 | C·D 인프라(write_lock/snapshot/audit/verify) | write 본체 의존 | **HOLD(2026-06-26)** — 실측: `StagingDB` write 인프라 본체(`write_lock` O_EXCL·`audit_append`·`store_checksum`·`snapshot`)+`tombstone` UPDATE = **actual write 토대**. candidate_save/deprecate_g3/capture_to_save 전부 의존. actual write core 접촉. 상세 = `SAVE_GATE_S4_FINAL_CLOSURE.md` |
+| S4-5 | A (`c2_check`) | G4② 판정·순수 | **HOLD(2026-06-26)** — `staging_apply`(B)와 **같은 파일·강결합**(B가 c2_check 호출), scripts 의존(`_hash`). actual write core 게이트. 상세 = `SAVE_GATE_S4_FINAL_CLOSURE.md` |
+| **S4-6(마지막/HOLD)** | **B `staging_apply` + E `save_selected` + G `commit_selected`** | **actual write core + G4①** | **FINAL HOLD(2026-06-26)** — actual write core 본체. **어떤 token 으로도 미접촉**(영구/마지막 HOLD). 상세 = `SAVE_GATE_S4_FINAL_CLOSURE.md` |
 
 **이동 불변식(전 순번 공통):**
 - semantic change 0 / byte-identical 위치 이동만.
