@@ -553,7 +553,7 @@ def cmd_save(a):
     db, snap_dir = _open(a.ledger)
     idx = [int(x) for x in a.pick.split(",") if x.strip()]
     r = save_selected(db, a.text, idx, {"actor": "human", "confirm": a.confirm},
-                      snap_dir, due_date=a.due)
+                      snap_dir, due_date=a.due, speaker=getattr(a, "speaker", None))
     db.close()
     return _show(r)
 
@@ -1094,6 +1094,7 @@ def main():
     sp.add_argument("--preview-id", required=True, dest="preview_id")
     sp.add_argument("--pick", required=True); sp.add_argument("--confirm", required=True)
     sp.add_argument("--due", default=None)
+    sp.add_argument("--speaker", choices=["owner", "ai"], default=None)  # 화자 칸(owner=사용자 발화/ai=AI 요약)
     sp = sub.add_parser("list"); sp.add_argument("--status", default=None)
     sp.add_argument("--kind", default=None)
     # 회상(L4~L6 · read-only) — recall(why_search) / trace(judgment_trace) / preflight
