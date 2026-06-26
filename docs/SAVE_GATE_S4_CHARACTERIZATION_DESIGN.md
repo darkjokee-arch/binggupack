@@ -253,7 +253,7 @@
 
 | 순번 | 대상 | 사유 | 비고 |
 |---|---|---|---|
-| S4-1 | L·M·N·O (save_gate write/판정) | gate-log·hash-only·운영 ledger 별개 파일 | 가장 격리됨 |
+| S4-1 | L·M·N·O (save_gate write/판정) | gate-log·hash-only·운영 ledger 별개 파일 | **✅ DONE(2026-06-26)** — `binggupack/safety/gate_log.py` 정본화·byte-identical·semantic change 0. 상세 = `SAVE_GATE_S4_1_GATE_LOG_CANONICALIZATION.md` |
 | S4-2 | F (`_maybe_promote_actor_by_gate`) | 순수 함수·G4① 승격 | fail-closed 4분기 전수 pin 전제 |
 | S4-3 | H·I·J·K (deprecate_g3 4함수) | sqlite write·G4③ | 4함수 동시(③ 분리 금지) |
 | S4-4 | C·D 인프라(write_lock/snapshot/audit/verify) | write 본체 의존 | store_checksum 결정성 보존 |
