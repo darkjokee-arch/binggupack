@@ -291,7 +291,16 @@ PUBLIC_IGNORE = ["*.sqlite", "*.db", "*_graph.yaml", "reports/", "reviews/", "ca
                  "*/node_modules/*", "node_modules/*",
                  # watcher selftest 합성 PII fixture(가짜 AWS예시키·가짜 주민/전화) — 자기 코드 아닌 테스트 자료.
                  # ensure_fixtures()가 selftest 시 디스크 생성. gitignore 대상. (e6cd94a secret.diff 패턴)
-                 "tests/fixtures/watcher_m1_batch/", "*/watcher_m1_batch/*"]
+                 "tests/fixtures/watcher_m1_batch/", "*/watcher_m1_batch/*",
+                 # scripts/ selftest 합성 PII fixture(가짜 전화/주민번호) — PII 탐지기 검증용 테스트 자료(자기 코드 아님).
+                 # owner 승인(2026-06-26): 아래 7개 파일만 명시 allowlist. 전체 scripts/ 제외 아님·탐지 패턴 불변.
+                 "scripts/binggu_capture_buffer_selftest.py",
+                 "scripts/binggu_capture_classifier_selftest.py",
+                 "scripts/binggu_capture_cli_selftest.py",
+                 "scripts/binggu_capture_session_selftest.py",
+                 "scripts/binggu_save_gate_hash_characterization_selftest.py",
+                 "scripts/binggu_save_gate_parse_characterization_selftest.py",
+                 "scripts/examples_synthetic_guard_selftest.py"]
 
 
 def main():

@@ -1,13 +1,13 @@
-# Release Notes (DRAFT) — BingguPack v1.13.x
+# Release Notes — BingguPack v1.14.0
 
-> 상태: **초안(DRAFT)**. GitHub release 는 생성하지 않았다(owner 영역). 아래 텍스트는 release 본문에 붙여 쓸 초안이다.
-> baseline `HEAD == origin/main == 407656c` · version `1.13.0`.
+> 실제 태깅 릴리스 = **v1.14.0** (v1.13.0 자기진화 거버넌스 위에 MCP save 크래시 수정 + `save --speaker` CLI + post-S4 release docs). `feat(cli)` 포함이라 semver minor 범프.
+> version `1.14.0` · PyPI publish 는 자격 확보 후 별도(이번 릴리스는 git tag + GitHub release 까지).
 
 ---
 
 ## 사용자용 한 줄 요약
 
-빙구팩 v1.13.0 — 내 학습과 기존 규칙이 충돌하면 양쪽을 보여주고 **내가** 선택. 규칙 변경은 사람 손, 안전 규칙은 빙구팩이 못 바꿈(자기진화 거버넌스). 여기에 더해 **Claude Code MCP 저장 도구의 크래시(연결 끊김)를 수정**했다.
+빙구팩 v1.14.0 — (v1.13.0 자기진화 거버넌스: 내 학습과 기존 규칙이 충돌하면 양쪽을 보여주고 **내가** 선택, 규칙 변경은 사람 손, 안전 규칙은 빙구팩이 못 바꿈) 위에 **Claude Code MCP 저장 도구의 크래시(연결 끊김)를 수정**하고 `save --speaker`(내 말/AI 요약 화자 칸)를 추가했다.
 
 ---
 
