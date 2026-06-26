@@ -563,7 +563,7 @@ def cmd_pair(a):
     ai_text 생략 = owner 단독(순수 직감·억지 ai 금지). relation: accepts/refutes/revises."""
     from openbinggu_conversation_candidate_save import save_paired
     db, snap_dir = _open(a.ledger)
-    rel = "ai_" + a.relation
+    rel = getattr(a, "by", "ai") + "_" + a.relation  # 반응 주체: ai(AI가 사용자 발화를) / owner(사용자가 AI 발화를)
     r = save_paired(db, a.owner_text, a.ai_text, {"actor": "human", "confirm": a.confirm},
                     snap_dir, relation_kind=rel, owner_pick=a.owner_pick, ai_pick=a.ai_pick, due_date=a.due)
     db.close()
@@ -1130,6 +1130,7 @@ def main():
     pp = sub.add_parser("pair")              # owner 발화 + ai 요약 페어 저장(화자 축)
     pp.add_argument("owner_text"); pp.add_argument("ai_text", nargs="?", default=None)
     pp.add_argument("--relation", choices=["accepts", "refutes", "revises"], default="accepts")
+    pp.add_argument("--by", choices=["ai", "owner"], default="ai")  # 반응 주체(누가 누구를 수용/반박/수정)
     pp.add_argument("--owner-pick", type=int, default=1, dest="owner_pick")
     pp.add_argument("--ai-pick", type=int, default=1, dest="ai_pick")
     pp.add_argument("--confirm", required=True); pp.add_argument("--due", default=None)

@@ -179,7 +179,12 @@ def save_selected(db, text, indices, ctx, snap_dir, due_date=None, speaker=None)
 #   불변식2: 단일 pack → staging_apply 1회(원자성·부분커밋시 전체 롤백)
 #   불변식3(③): 페어 한쪽이라도 기존재 시 전체 skip(부분 적재·dangling 엣지 방지)
 #   헌법: candidate-only(staging_apply 고정)·사람 confirm 게이트·PII 제외·전 엣지 evidence 증빙
-PAIR_RELATIONS = {"ai_accepts", "ai_refutes", "ai_revises"}  # 수용/반박/수정 (VERB_MAP 매핑은 publish 단계)
+# 양방향 — 누가 누구에게 반응했나(대화 시간 순서·관계 방향).
+#   ai_*    = AI가 사용자 발화를 수용/반박/수정 (사용자 발화가 먼저, AI가 반응)
+#   owner_* = 사용자가 AI 발화를 수용/반박/수정 (AI 발화가 먼저, 사용자가 반응)
+# 페어 엣지 방향: relation prefix 가 source(반응 주체), 대상이 target.
+PAIR_RELATIONS = {"ai_accepts", "ai_refutes", "ai_revises",
+                  "owner_accepts", "owner_refutes", "owner_revises"}
 
 
 def _pick_one_node(text, pick, speaker):
@@ -248,10 +253,14 @@ def save_paired(db, owner_text, ai_text, ctx, snap_dir,
         nodes_pack.append(ain)
         ev2, ed2 = _self_evidence(ain)
         ev_pack.append(ev2); edges_pack.append(ed2)
-        # 페어 엣지: ai --(수용/반박/수정)--> owner. 증빙 = ai 자기증빙(헌법: 전 엣지 evidence).
+        # 페어 엣지 방향: relation prefix 가 반응 주체(source). 증빙 = source 노드 자기증빙(헌법: 전 엣지 evidence).
+        if relation_kind.startswith("owner_"):
+            _src, _tgt, _ev = own["id"], ain["id"], ev["id"]    # 사용자가 AI 발화를 수용/반박/수정
+        else:
+            _src, _tgt, _ev = ain["id"], own["id"], ev2["id"]   # AI가 사용자 발화를 수용/반박/수정
         edges_pack.append({"id": "edge:PAIR:" + _sent_hash(own["sentence"] + ain["sentence"]),
-                           "relation": relation_kind, "source": ain["id"], "target": own["id"],
-                           "evidence_refs": [ev2["id"]]})
+                           "relation": relation_kind, "source": _src, "target": _tgt,
+                           "evidence_refs": [_ev]})
 
     # ③ 페어 중복검사 — 한쪽이라도 기존재 시 전체 skip(부분 적재·dangling 방지)
     for nd in nodes_pack:
