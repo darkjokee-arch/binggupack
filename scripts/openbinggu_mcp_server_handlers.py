@@ -125,6 +125,7 @@ def _u_save_candidate(params=None):
     # ledger_path 등 외부 경로 입력 무시 — MCP는 temp staging 전용(default-deny). 운영 ledger 경로 주입 불가.
     db_path = os.path.join(work, "s.sqlite")
     snap_dir = os.path.join(work, "snap")
+    os.makedirs(snap_dir, exist_ok=True)  # staging_apply snapshot 복사 대상 폴더 보장(없으면 FileNotFoundError로 stdio 루프 사망)
     db = open_g3(db_path)
     try:
         r = save_selected(db, text, indices, {"actor": actor, "confirm": confirm},
