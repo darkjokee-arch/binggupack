@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "binggupack"
-version = "1.12.0"   # v1.12.0 Personal speaker axis (화자 축 owner/ai + 페어 동사형 엣지 + 양방향 신뢰도). main 반영·운영 ledger 마이그레이션 무손상.
+version = "1.13.0"   # v1.13.0 자기진화 거버넌스 (대비/검증/진화 + 세션 마무리·self-modifying 회피·가드 5). 그 위 v1.12.0 화자 축.
 description = "BingguPack — local-first, evidence-backed memory/context pack framework with an installable Claude Code MCP server (stdio JSON-RPC). Python stdlib only."
 readme = "README.md"
 requires-python = ">=3.10"

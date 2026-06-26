@@ -1,5 +1,26 @@
 # Changelog — BingguPack
 
+## v1.13.0 — 자기진화 거버넌스 (2026-06-26)
+
+빙구팩 학습과 기존 규칙(강제조항) 충돌 시 — 빙구팩은 제안·기록만, 규칙 변경은 사람. **self-modifying 0**(거버넌스 자산 write 0).
+
+### Added
+- 1단 대비(`binggu_contrast_protocol.py`): 학습↔규칙 충돌→중립 대비표·원문 본문 봉인(contrast_snapshot)·사람 선택·자동결정 0.
+- 2단 적중률(`binggu_hit_stats.py` 확장): 비인과 불변식(assert_not_ranking_input)·domain 분리·signal_only.
+- 2단 무결성(`binggu_merkle_anchor.py`): atomic 봉인·full64·외부 raw 재계산·누락 fail-closed.
+- 2단 정책(`binggu_policy.py`+`policies/binggu_policy.json`): REQUIRED_IMMUTABLE 안전 화이트리스트·pin fail-closed·style-disguise 차단.
+- 3단 분리(`binggu_hit_export.py`): capability-removal·realpath 물리가드·raw export만(규칙 write 0).
+- 세션 마무리(`binggu_session_close.py`): 모델 의미감지(키워드X)·사용자 등록 opt-in·저장 preview(저장 0).
+- `docs/BINGGUPACK_GOVERNANCE_DESIGN.md` 신규 — 거버넌스 설계.
+
+### Safety
+- 5개 가드 코드 강제·통과: self-modifying write 0·대비표 원문봉인·적중률 비인과·Merkle atomic·정책 REQUIRED_IMMUTABLE.
+- 3라운드 4cli 토론 결론(빙구팩이 거버넌스 진화에 같은 런타임 관여 시 메모리 격리 없이 무결성 불가) → self-modifying 회피.
+
+### Verified
+- selftest 전수 GO: hit_stats 12/12·merkle 13/13·hit_export 8/8·staging 17/17·binggu 40/40·contrast·policy·session_close.
+- 운영 ledger 마이그레이션 무손상(291노드·verify_tail_state/chain True·백업)·governance_write_zero.
+
 ## v1.12.0 — Personal speaker axis (2026-06-26)
 
 사용자 발화(owner)와 AI 요약(ai)을 따로 저장하고 연결하는 화자 축. 빙구팩이 "AI 작업일지"가 아니라 **사용자 본체**를 쌓게 하는 핵심.
