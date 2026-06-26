@@ -109,6 +109,14 @@ DEFAULT_CONFIG = {
         "recall_limit": 5,
         "semantic_recall_enabled": False,
     },
+    # 대비 규약(1단 · binggu_contrast_protocol) 설정 — preflight 신호 vs 강제조항 충돌 대비표.
+    #   match_relevance_min: 빙구팩 claim ↔ mandate clause_text 토큰 _relevance 가 이 값 이상이어야
+    #                        같은 directive 충돌로 본다(false positive 무관 충돌 억제 · [0,1]).
+    #   max_rows           : 한 번에 띄울 대비표 최대 행 수(과잉표시 억제 · 양의 정수).
+    "contrast_config": {
+        "match_relevance_min": 0.5,
+        "max_rows": 5,
+    },
 }
 
 _RECALL_KEYS = ("risk_mid_score", "risk_high_score", "preflight_max", "recall_limit",
@@ -164,6 +172,7 @@ def load_user_config(home=None):
         "external_sources": list(DEFAULT_CONFIG["external_sources"]),
         "ontology_path": DEFAULT_CONFIG["ontology_path"],
         "recall_config": dict(DEFAULT_CONFIG["recall_config"]),
+        "contrast_config": dict(DEFAULT_CONFIG["contrast_config"]),
     }
     p = config_path(home)
     if not p.exists():
@@ -188,7 +197,29 @@ def load_user_config(home=None):
     op = d.get("ontology_path", cfg["ontology_path"])
     cfg["ontology_path"] = str(op) if op else None
     cfg["recall_config"] = _coerce_recall(d.get("recall_config"))
+    cfg["contrast_config"] = _coerce_contrast(d.get("contrast_config"))
     return cfg
+
+
+def _coerce_contrast(raw):
+    """대비 규약 설정 강제 정규화 — 키 누락/비-숫자는 기본값.
+
+    match_relevance_min 은 [0,1] 클램프(매칭 임계 — 범위 밖이면 무의미). max_rows 는 양의
+    정수 클램프(최소 1 · 과잉표시 상한). 어떤 손상도 예외 0(기본값 유지).
+    """
+    base = dict(DEFAULT_CONFIG["contrast_config"])
+    if isinstance(raw, dict):
+        try:
+            v = float(raw.get("match_relevance_min", base["match_relevance_min"]))
+            base["match_relevance_min"] = min(1.0, max(0.0, v))
+        except (TypeError, ValueError):
+            pass
+        try:
+            v = int(raw.get("max_rows", base["max_rows"]))
+            base["max_rows"] = max(1, v)
+        except (TypeError, ValueError):
+            pass
+    return base
 
 
 def _coerce_recall(raw):
@@ -227,6 +258,11 @@ def _coerce_recall(raw):
 def recall_config(home=None):
     """편의 접근자 — 회상/반문 설정 dict(risk_mid_score/risk_high_score/preflight_max/recall_limit)."""
     return load_user_config(home)["recall_config"]
+
+
+def contrast_config(home=None):
+    """편의 접근자 — 대비 규약 설정 dict(match_relevance_min/max_rows)."""
+    return load_user_config(home)["contrast_config"]
 
 
 def save_user_config(cfg, home=None):
@@ -381,6 +417,25 @@ def _selftest():
         config_path(home).unlink()
         check(challenge_threshold(home) == 3 and ranking_weights(home)["utility"] == 1.0,
               "T2e 편의 접근자 기본값")
+
+        # --- 2층 contrast_config(대비 규약 1단) ---
+        cc0 = load_user_config(home)["contrast_config"]
+        check(cc0 == {"match_relevance_min": 0.5, "max_rows": 5},
+              "T2e2 기본 contrast_config(match_relevance_min 0.5 · max_rows 5)")
+        save_user_config({"contrast_config": {"match_relevance_min": 0.7, "max_rows": 3}}, home=home)
+        cc1 = contrast_config(home)
+        check(cc1["match_relevance_min"] == 0.7 and cc1["max_rows"] == 3,
+              "T2e3 contrast_config override 반영")
+        # 범위 밖/잘못된 타입 클램프·폴백
+        save_user_config({"contrast_config": {"match_relevance_min": 5.0, "max_rows": 0}}, home=home)
+        cc2 = contrast_config(home)
+        check(cc2["match_relevance_min"] == 1.0 and cc2["max_rows"] == 1,
+              "T2e4 contrast_config 클램프(rel>1→1 · max_rows<1→1)")
+        save_user_config({"contrast_config": {"match_relevance_min": "x", "max_rows": "y"}}, home=home)
+        cc3 = contrast_config(home)
+        check(cc3 == {"match_relevance_min": 0.5, "max_rows": 5},
+              "T2e5 잘못된 타입 → 기본값 유지(예외 0)")
+        config_path(home).unlink()
 
         # --- 2층 설정값: 있을 때 override ---
         save_user_config({

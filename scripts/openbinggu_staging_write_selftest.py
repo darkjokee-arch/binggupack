@@ -53,7 +53,13 @@ class StagingDB:
         prev_audit_hash TEXT, entry_hash TEXT, chain_ver TEXT);
     CREATE TABLE IF NOT EXISTS audit_meta(key TEXT PRIMARY KEY, value TEXT);
     CREATE TABLE IF NOT EXISTS hit_events(event_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        node_id TEXT, speaker TEXT, kind TEXT, outcome TEXT, subtype TEXT, ts TEXT);
+        node_id TEXT, speaker TEXT, kind TEXT, outcome TEXT, subtype TEXT, ts TEXT,
+        domain TEXT, context_hash TEXT, decision_id TEXT);
+    CREATE TABLE IF NOT EXISTS hit_event_chain(sequence_no INTEGER PRIMARY KEY,
+        event_id INTEGER NOT NULL, raw_json TEXT NOT NULL, snapshot_hash TEXT NOT NULL,
+        external_ts TEXT NOT NULL, prev_hash TEXT NOT NULL, entry_hash TEXT NOT NULL,
+        chain_ver TEXT DEFAULT 'm1');
+    CREATE TABLE IF NOT EXISTS hit_event_anchor(key TEXT PRIMARY KEY, value TEXT);
     """
     def __init__(self, path):
         # 운영 경로 거부 (대상 한정)
@@ -84,6 +90,18 @@ class StagingDB:
         #   기존 291행은 NULL=미상(대부분 conv_save AI 회고) — 소급 라벨은 별도 backfill(비파괴).
         if "speaker" not in ncols:
             self.con.execute("ALTER TABLE nodes ADD COLUMN speaker TEXT")
+        # comp4 적중률 추적(2단) — hit_events 비파괴 ALTER(전부 NULL 허용·기존 행 보존).
+        #   domain        : 선택이 일어난 도메인(분모 분리 키). _domain_from_cwd 정규화로 채워짐.
+        #   context_hash  : 선택 시점 근거 스냅샷 sha256[:16](상관≠인과 봉인·PII 제외).
+        #   decision_id   : 1단 대비 선택 1건 식별자(owner/ai 묶음 + 이중계상 방지 키).
+        #   hit_events 는 store_checksum projection(nodes,edges,evidence) 밖이라 audit anchor 무손상.
+        hcols = [c[1] for c in self.con.execute("PRAGMA table_info(hit_events)")]
+        if "domain" not in hcols:
+            self.con.execute("ALTER TABLE hit_events ADD COLUMN domain TEXT")
+        if "context_hash" not in hcols:
+            self.con.execute("ALTER TABLE hit_events ADD COLUMN context_hash TEXT")
+        if "decision_id" not in hcols:
+            self.con.execute("ALTER TABLE hit_events ADD COLUMN decision_id TEXT")
         self.con.commit()
 
     def snapshot(self, snap_dir, name):
@@ -369,6 +387,27 @@ def run():
     old_row = db.con.execute("SELECT sentence, use_count FROM nodes WHERE node_id='old1'").fetchone()
     rec(16,"use_count ALTER 비파괴(기존 행 보존·신규 컬럼 0/NULL)",
         "use_count" in cols16 and old_row[0]=="옛 노드" and old_row[1] in (0, None)); db.close()
+
+    # 17. comp4 hit_events ALTER 비파괴 — 구 ledger(3 신규 컬럼 없음) 보존 + 컬럼 추가 + store_checksum 불변
+    legacy17 = os.path.join(tmp,"legacy17.sqlite")
+    lc = sqlite3.connect(legacy17)
+    lc.executescript(
+        "CREATE TABLE hit_events(event_id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        " node_id TEXT, speaker TEXT, kind TEXT, outcome TEXT, subtype TEXT, ts TEXT);")
+    lc.execute("INSERT INTO hit_events(node_id,speaker,kind,outcome,subtype,ts) "
+               "VALUES('old1','owner','직감','hit','J','2026-06-17T00:00:00Z')")
+    lc.commit(); lc.close()
+    db = StagingDB(legacy17)  # __init__ 마이그레이션이 domain/context_hash/decision_id 추가해야
+    hcols17 = [c[1] for c in db.con.execute("PRAGMA table_info(hit_events)")]
+    old_he = db.con.execute("SELECT outcome,domain,context_hash,decision_id FROM hit_events WHERE node_id='old1'").fetchone()
+    ck_before = db.store_checksum()
+    db.con.execute("INSERT INTO hit_events(node_id,speaker,kind,outcome,subtype,ts,domain,context_hash,decision_id) "
+                   "VALUES('n2','owner','직감','hit','J','2026-06-18T00:00:00Z','bid','abc123','d1')")
+    db.con.commit()
+    ck_after = db.store_checksum()
+    rec(17,"comp4 hit_events ALTER 비파괴(기존 행 보존·신규 NULL) + store_checksum 불변(audit anchor)",
+        all(c in hcols17 for c in ("domain","context_hash","decision_id"))
+        and old_he==("hit", None, None, None) and ck_before==ck_after); db.close()
 
     after_mtime = {p:(os.path.getmtime(p) if os.path.exists(p) else None) for p in OPERATING_PATHS}
     store_unchanged = before_mtime == after_mtime

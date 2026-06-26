@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0",
+  "policy_id": "binggu.governance.clauses",
+  "revision": "2026-06-26.1",
+  "immutable_whitelist": [
+    {"id": "SAFE-DB", "rule": "운영 store write/connect 금지(read-only ro)", "category": "안전"},
+    {"id": "SAFE-SECRET", "rule": "시크릿/PII 평문 출력·임베드·로깅 금지", "category": "안전"},
+    {"id": "SAFE-DESTROY", "rule": "파괴작업(rm -rf·DROP·force push) 사람 명시승인 전 금지", "category": "안전"},
+    {"id": "SAFE-VERIFY", "rule": "검증의무(selftest GO·audit chain·store_checksum) 생략 금지", "category": "안전"}
+  ],
+  "clauses": [
+    {"id": "STY-01", "text": "결론부터 3줄 이내", "category": "스타일", "mutable": true},
+    {"id": "MET-01", "text": "50% 직감 실행 후 수정", "category": "방법론", "mutable": true},
+    {"id": "JDG-01", "text": "마진 확보 시 참여", "category": "판단", "mutable": true}
+  ],
+  "categories": ["안전", "스타일", "방법론", "판단"],
+  "constitution": {
+    "candidate_only": true,
+    "human_approval_gate": true,
+    "pii_excluded": true,
+    "audit_chain": true,
+    "ai_recommend_only": true,
+    "auto_decision": false,
+    "stdlib_only": true
+  }
+}
