@@ -10,6 +10,11 @@
 `scripts/openbinggu_s4_gap_characterization_selftest.py` C-high 섹션, **S4 GAP 41/41 GREEN · 본체 무수정**.
 단 이는 안전망 추가일 뿐 — **S4 implementation HOLD 유지**, actual write core 는 S4-6 마지막/영구 HOLD.
 
+**재기준선(2026-06-26):** S4-1 entry baseline = **`807dc7d`**(코드 = `10df67c`, v1.12.0 speaker axis 반영).
+speaker 는 additive metadata 축으로 본 문서 13건 관측에 영향 없음 — `c2_check`(A4·A6·A10)/`tombstone`(C2·C3)/
+`StagingDB`(D3·D9·D10)/`save_selected`(E3·E6·E7) 전부 `807dc7d` 기준 재실행 **41/41 GREEN**.
+`store_checksum` 은 speaker 를 projection 제외하므로 D10 결정성·anchor 불변(상세 = `SAVE_GATE_S4_CHARACTERIZATION_DESIGN.md` 재기준선 블록).
+
 **HOLD 선언:**
 - **S4 implementation HOLD.** 본 문서는 GAP 관측 방식 설계일 뿐, 어떤 코드 이동·변경도 승인하지 않는다.
 - **actual write core(`staging_apply` + `save_selected` + `commit_selected` + `deprecate_g3`)는 S4-6 마지막 / 영구 HOLD 후보.** 본 문서는 이 본체를 **수정 대상으로 다루지 않는다.**

@@ -1,6 +1,7 @@
 # save-gate S4 — gate-critical write core characterization 설계 (design-only)
 
-**기준:** main/origin = 978394f
+**기준(원 설계):** main/origin = 978394f
+**S4-1 entry baseline (재기준선 2026-06-26):** **`807dc7d`** (코드 = `10df67c`와 동일, 807dc7d는 README docs만 추가) — v1.12.0 speaker axis 반영. 이전 characterization closure baseline 은 `919e2ae`.
 **선행 문서:** `docs/SAVE_GATE_S3_CLOSURE_S4_HOLD.md` §4(선행 의무) · §5(원칙)
 **성격:** **design-only.** 구현 0 · 코드 이동 0 · semantic change 0. 본 문서는 S4 진입 전
 "무엇을 pin 해야 byte-identical 이동이 안전한가"의 characterization 케이스 목록만 정리한다.
@@ -16,6 +17,25 @@
 - **잔여 GAP 0 — S4 characterization coverage complete.** 그러나 **S4 implementation 은 여전히 HOLD.**
   본 갱신은 결과 반영(docs-only)일 뿐, actual write core
   (§4 S4-6: `staging_apply`+`save_selected`+`commit_selected`)는 **마지막/영구 HOLD 유지**.
+
+**재기준선(2026-06-26, docs-only) — v1.12.0 speaker axis 반영:**
+- **이전 closure baseline** `919e2ae` → **현재 S4-1 entry baseline** `807dc7d`(코드 = `10df67c`).
+  그 사이 머지된 v1.12.0 speaker axis(`285f006`~`378f560`)가 gate-critical 본체 파일을 **additive 변경**했다.
+- **speaker = 화자 축 metadata(owner/ai/None).** actor/confirm/token 흐름을 **대체·우회하지 않는다**(독립 메타 축).
+  speaker audit 판정: **SPEAKER_AXIS_REBASELINE_GO · G4_no_auto 약화 0.**
+- **변경 성격(전부 additive, gate/write 로직 무변):**
+  - `save_selected(... , speaker=None)` 파라미터 추가 — actor/confirm/A0/PII 게이트 흐름 무변.
+  - `staging_apply` INSERT 에 `speaker` 컬럼 1개 추가(`n.get("speaker")`) — BEGIN/COMMIT/ROLLBACK·c2_check·write_lock·audit 무변.
+  - **base SCHEMA `nodes` 에 `speaker TEXT` 컬럼 추가** + ALTER migration(기존 ledger 비파괴·기존 행 NULL) + 신뢰도 테이블 신설.
+  - `store_checksum` 은 **`speaker` 컬럼을 projection 에서 제외**(anchor `210e04611a157877` 유지) → B5·D10·D11 무결성 호환.
+  - `commit_selected` / `deprecate_g3` 변경 **0**.
+- **신규 6케이스(candidate_save selftest 13/13 → 19/19):**
+  14 speaker 적재(owner) · 15 paired save(owner/ai) · 16 owner-only invariant ·
+  17 pair duplicate block(`pair_partial_exists`) · 18 trust record(사람만·`actor=auto → G4_no_auto`) · 19 audit chain/tail anchor 무손상.
+- **회귀 GREEN(`807dc7d` 기준):** staging 16/16 · candidate **19/19** · deprecate 23/23 · capture GO · save_gate 28/28 · **S4 GAP 41/41** · version SSOT 3/3 v1.12.0. **잔여 GAP 0.**
+- **owner token request: ELIGIBLE(807dc7d 기준 재확정).** 단 **S4 implementation HOLD 유지**,
+  actual write core(§4 S4-6: `staging_apply`+`save_selected`+`commit_selected`)는 **마지막/영구 HOLD**.
+- **S4-1 착수 시:** byte-identical 이동 기준선은 **`807dc7d`**(919e2ae 아님). 대상(save_gate write/판정 L·M·N·O)은 speaker axis 미접촉.
 
 ---
 
@@ -101,7 +121,7 @@
 | id | 메서드/조건 | EXP | 기존 |
 |---|---|---|---|
 | D1 | `__init__` 운영경로(OPERATING_PATHS) | `PermissionError("operating_store_forbidden")` | EX staging#11 |
-| D2 | `__init__` 구 ledger 마이그레이션(chain_ver/semantic_subtype/use_count 없음) | ALTER 추가·기존 행 보존·NULL/0 | EX staging#16 |
+| D2 | `__init__` 구 ledger 마이그레이션(chain_ver/semantic_subtype/use_count/**speaker** 없음) | ALTER 추가·기존 행 보존·NULL/0 | EX staging#16 |
 | D3 | `write_lock` 같은 pid 재진입 | 허용(에러 0) | **s4gap D3** (타 pid RuntimeError 대조) |
 | D4 | `write_lock` 타 pid lock 잔존 | `RuntimeError` | EX staging#14 |
 | D5 | `audit_append` v2 체인(prev_hash 연결·entry_hash) | 체인 무결 | EX staging#10 |
@@ -109,7 +129,7 @@
 | D7 | `verify_chain` 꼬리 삭제(메타 앵커) | False | EX staging#12 |
 | D8 | `verify_tail_state` 우회 직접쓰기 | False | EX staging#13 |
 | D9 | `snapshot` wal_checkpoint(TRUNCATE) 후 copy | 파일 생성 | **s4gap D9** (복사본 count 일치) |
-| D10 | `store_checksum` nodes/edges/evidence 정렬 해시 | 결정성 | **s4gap D10** (변경 감지·복원) |
+| D10 | `store_checksum` nodes/edges/evidence 정렬 해시(**speaker 컬럼 projection 제외·anchor 유지**) | 결정성 | **s4gap D10** (변경 감지·복원) |
 | D11 | **sqlite integrity_check=ok** 보존(이동 전후) | "ok" | **s4gap D11-1~5** (candidate/차단/deprecate/staging 후 ok·save_gate jsonl 무결) |
 
 ### E. `save_selected(db, text, indices, ctx, snap_dir, due_date=None)` — **G4 ① / L68**
