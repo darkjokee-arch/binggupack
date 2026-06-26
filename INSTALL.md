@@ -1,6 +1,6 @@
-# Install BingguPack v1.11.0
+# Install BingguPack v1.12.0
 
-> Latest stable: `v1.11.0` (v1.10.0 installable MCP baseline 위 feature implementation). 설치/검증 절차는 v1.10.0과 동일하게 호환됩니다 — 아래 명령 그대로 사용하세요. PyPI publish는 아직 하지 않으므로 `git clone` 설치만 지원합니다.
+> 최신: `v1.12.0` (화자 축 — 내 말/AI 요약 따로 쌓기 + 양방향 신뢰도). 아래 명령 그대로 사용하세요. PyPI publish는 아직 하지 않으므로 `git clone` 설치만 지원합니다.
 
 > `scripts/`·`docs/`의 `openbinggu_`/`OPENBINGGU_` 접두사는 레거시 내부 코드네임입니다(BingguPack과 동일 프로젝트).
 
@@ -49,7 +49,7 @@ python scripts/openbinggu_doctor.py --tree examples/toy_project # CLEAN
 
 ## Install Claude Code MCP sandbox entry
 
-v1.10.0부터 **clone만으로 MCP 서버가 포함**됩니다(`scripts/openbinggu_mcp_server.py`). sandbox 엔트리로 등록(미리보기 → 실제):
+**clone만으로 MCP 서버가 포함**됩니다(`scripts/openbinggu_mcp_server.py`). sandbox 엔트리로 등록(미리보기 → 실제):
 
 ```bash
 python scripts/install_claude_mcp.py --sandbox --home ./_binggu_test_home --dry-run   # 명령 미리보기
@@ -96,7 +96,7 @@ AI/reader actor의 실저장은 차단되어야 정상입니다. `save_candidate
 - **운영 엔트리를 덮어쓰려 함** — installer는 `openbinggu-local`(운영)을 거부합니다. sandbox 이름(`--sandbox`)으로 등록하세요.
 - **selftest 실패** — `python scripts/openbinggu_doctor.py --selftest`로 GATE 상태를 먼저 확인. write는 항상 0이므로 운영 데이터 손상 없이 재시도 가능.
 
-## Interactive save gate (optional, v1.11.0)
+## Interactive save gate (optional)
 
 기존 explicit confirm 방식은 그대로 유지되고, TTY에서 후보 선택을 돕는 보조 UX가 추가됐습니다.
 
@@ -108,7 +108,7 @@ python -m binggupack.cli.interactive_save --selftest # 비-TTY 검증 (저장 0)
 - non-TTY(CI/pipe/AI)에서는 **fail-closed** — 기존 explicit confirm 방식이 강제됩니다.
 - 마지막 human confirmation과 실제 저장 게이트(`G4_no_auto`)는 기존 경로 그대로. interactive는 ledger에 직접 쓰지 않습니다.
 
-## Developer: package build (optional, v1.11.0)
+## Developer: package build (optional)
 
 PyPI publish는 **미수행**입니다. 로컬에서 패키지 build만 확인하려면 격리 venv에서:
 
@@ -120,6 +120,19 @@ python -m venv .build_venv
 
 - `pyproject.toml`에 `[build-system]` + `binggupack` 패키지 정의가 있습니다.
 - build 산출물(`dist/`, `.build_venv/`)은 `.gitignore` 대상입니다.
+
+## 화자 축 사용 (v1.12.0)
+
+설치 후 내 말(owner)과 AI 요약(ai)을 따로 쌓는 화자 축은 로컬 CLI로 씁니다:
+
+```bash
+python binggu.py pair "<내 직감>" "<AI 요약>" --relation refutes --confirm "PAIR ai_refutes owner:1 ai:1"
+python binggu.py pair "<내 직감만>" --confirm "PAIR owner:1"   # 순수 직감 단독
+python binggu.py trust          # 양방향 신뢰도 (누가 더 잘 맞나)
+python binggu.py route "<발화>"  # 신규/수정/결과 안내
+```
+
+상세: [화자 축 설계](docs/BINGGUPACK_SPEAKER_AXIS_DESIGN.md) · [튜토리얼](docs/BINGGUPACK_TUTORIAL.md).
 
 ## Uninstall / rollback
 
