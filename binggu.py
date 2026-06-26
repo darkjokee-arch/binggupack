@@ -558,6 +558,40 @@ def cmd_save(a):
     return _show(r)
 
 
+def cmd_pair(a):
+    """owner 발화 + ai 요약을 각각 독립 노드(speaker=owner/ai)로 저장하고 연결 엣지로 묶는다.
+    ai_text 생략 = owner 단독(순수 직감·억지 ai 금지). relation: accepts/refutes/revises."""
+    from openbinggu_conversation_candidate_save import save_paired
+    db, snap_dir = _open(a.ledger)
+    rel = "ai_" + a.relation
+    r = save_paired(db, a.owner_text, a.ai_text, {"actor": "human", "confirm": a.confirm},
+                    snap_dir, relation_kind=rel, owner_pick=a.owner_pick, ai_pick=a.ai_pick, due_date=a.due)
+    db.close()
+    if r.get("applied"):
+        tail = (" (%s 연결)" % r["relation"]) if r.get("paired") else " (owner 단독)"
+        print("OK: 저장 %d건%s · pack=%s" % (r["saved"], tail, r.get("pack_id")))
+        return 0
+    return _show(r)
+
+
+def cmd_trust(a):
+    """양방향 신뢰도 표시(read-only) — 내 직감 적중률 + AI 반박·수용 적중률.
+    참고 가중치이지 맹종 스위치가 아니다(헌법). 최종 판단은 사람+근거."""
+    import binggu_hit_stats as HS
+    db, _ = _open(a.ledger)
+    bs = HS.both_sides(db, subtype=a.subtype)
+    db.close()
+    print("# 양방향 신뢰도%s (참고 가중치 · 맹종 아님 · 최종 판단은 사람+근거)"
+          % ((" [%s]" % a.subtype) if a.subtype else ""))
+    for side, label in (("owner", "내 직감(owner)"), ("ai", "AI 반박·수용(ai)")):
+        s = bs[side]
+        if s["enough"]:
+            print("  %s: 적중률 %.0f%% (표본 %d · 시간감쇠 반영)" % (label, s["rate"] * 100, s["n"]))
+        else:
+            print("  %s: 표본 부족 (%d/%d) — 신뢰도 미산정" % (label, s["n"], HS.N_MIN))
+    return 0
+
+
 def cmd_list(a):
     db, _ = _open(a.ledger)
     v = list_candidates(db, a.status or "all", a.kind)
@@ -621,6 +655,10 @@ def cmd_resolve(a):
         print("BLOCK: node_hash_mismatch (목록을 다시 확인하세요: binggu.py list)")
         return 1
     r = resolve_review(db, nid, a.outcome, a.reason, {"actor": "human"})
+    # 양방향 신뢰도 연동 — 성공/실패만 hit_events 기록(불확실/판정불가 skip). 사람 resolve 한정(불변식6).
+    if r.get("applied") and a.outcome in ("성공", "실패"):
+        import binggu_hit_stats as _HS
+        _HS.record_resolution(db, nid, a.outcome == "성공", {"actor": "human"})
     db.close()
     return _show(r)
 
@@ -1056,6 +1094,13 @@ def main():
     sp = sub.add_parser("resolve"); sp.add_argument("n", type=int); sp.add_argument("id8")
     sp.add_argument("--outcome", required=True, choices=OUTCOMES)
     sp.add_argument("--reason", required=True)
+    pp = sub.add_parser("pair")              # owner 발화 + ai 요약 페어 저장(화자 축)
+    pp.add_argument("owner_text"); pp.add_argument("ai_text", nargs="?", default=None)
+    pp.add_argument("--relation", choices=["accepts", "refutes", "revises"], default="accepts")
+    pp.add_argument("--owner-pick", type=int, default=1, dest="owner_pick")
+    pp.add_argument("--ai-pick", type=int, default=1, dest="ai_pick")
+    pp.add_argument("--confirm", required=True); pp.add_argument("--due", default=None)
+    tp = sub.add_parser("trust"); tp.add_argument("--subtype", default=None)  # 양방향 신뢰도(read-only)
     sp = sub.add_parser("reminders"); sp.add_argument("--today", default=None)
     cp = sub.add_parser("capture"); cp.add_argument("--settings", default=None)
     csub = cp.add_subparsers(dest="capture_cmd", required=True)
@@ -1095,7 +1140,7 @@ def main():
           "resolve": cmd_resolve, "reminders": cmd_reminders, "capture": cmd_capture,
           "recall": cmd_recall, "why": cmd_recall, "trace": cmd_trace, "preflight": cmd_preflight,
           "hosted": cmd_hosted, "harvest": cmd_harvest, "setup-cloud": cmd_setup_cloud,
-          "confirm-edges": cmd_confirm_edges}[a.cmd]
+          "confirm-edges": cmd_confirm_edges, "pair": cmd_pair, "trust": cmd_trust}[a.cmd]
     sys.exit(fn(a))
 
 
