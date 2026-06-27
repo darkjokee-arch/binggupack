@@ -23,6 +23,9 @@ if _SCRIPTS not in sys.path:
 
 from openbinggu_conversation_candidate_save import save_selected, save_paired
 from binggu_capture_to_save import commit_selected
-from openbinggu_deprecate_and_remind_g3 import open_g3, set_review_due
+from openbinggu_deprecate_and_remind_g3 import (
+    open_g3, set_review_due, resolve_review, list_due_reminders)
+from openbinggu_staging_write_selftest import OPERATING_PATHS
 
-__all__ = ["save_selected", "save_paired", "commit_selected", "open_g3", "set_review_due"]
+__all__ = ["save_selected", "save_paired", "commit_selected", "open_g3",
+           "set_review_due", "resolve_review", "list_due_reminders", "OPERATING_PATHS"]

@@ -35,9 +35,9 @@ import tempfile
 BASE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(BASE, "scripts"))
 
-from openbinggu_staging_write_selftest import OPERATING_PATHS  # noqa: E402
-from openbinggu_deprecate_and_remind_g3 import (  # noqa: E402
-    set_review_due, resolve_review, list_due_reminders)
+# 트랙 C(C3): storage 진입점은 facade 경유로 정리(호출 경계). scripts 직접 import 도 호환 유지.
+from binggupack.storage import (  # noqa: E402
+    OPERATING_PATHS, set_review_due, resolve_review, list_due_reminders)
 from openbinggu_candidate_list_view import list_candidates  # noqa: E402
 from binggupack.storage import save_selected  # noqa: E402  (트랙 C: scripts 직접 import → storage facade)
 from openbinggu_conversation_capture_preview import capture_preview  # noqa: E402
