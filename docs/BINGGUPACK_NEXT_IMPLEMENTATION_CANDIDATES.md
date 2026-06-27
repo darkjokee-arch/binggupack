@@ -1,3 +1,14 @@
+## 🚧 Next milestone blocker: Phase 2 canonicalization (2026-06-27)
+
+> 트랙 C(C0~C4)에서 `binggupack.storage` / `binggupack.mcp` facade(strangler 1단계)를 만들었다. 정본 로직은 호환·안정성을 위해 아직 `scripts/`에 있다. 릴리스 차단은 아니지만 **다음 마일스톤의 필수(blocker)** 로 고정한다.
+
+- Move storage and MCP implementation logic from `scripts/` into `binggupack/` modules incrementally.
+- Keep existing scripts as compatibility shims until one full release cycle passes.
+- No behavior change per move; each module migration must pass **doctor, CLI, smoke, golden, and explicit-path tests**.
+- Do not start broad new features before Phase 2 storage/MCP logic migration has at least one completed module.
+
+---
+
 # BingguPack 다음 구현 후보 3종 — 위험도/선행조건/추천순위 (2026-06-10)
 
 > P1~P6 실측(`BINGGUPACK_APP_P1P6_FINDINGS.md`) 직후 작성. **본 문서는 정리만 — 구현 착수는 후보별 별도 owner GO.**

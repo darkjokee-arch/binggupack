@@ -1,5 +1,12 @@
 # Changelog — BingguPack
 
+## Unreleased — 분류 SSOT 통합 + explicit 경로 + storage/MCP facade (2026-06-27)
+
+preview/capture 분류를 단일 SSOT 게이트로 통합(자동 preview는 판단/교훈/선호/규칙만 후보), 명시 입력(`remember`/`pair`)은 판단-veto 면제(안전 게이트 유지), 100문장 golden 하네스 + doctor 회귀망 확장, `binggupack.storage`/`binggupack.mcp` facade(strangler 1단계).
+
+### Known follow-up
+The current release introduces `binggupack.storage` and `binggupack.mcp` facades as the first strangler step. Implementation logic still remains in `scripts/` for compatibility and release stability. Phase 2 will migrate storage/MCP logic into package modules incrementally while keeping script shims. (마일스톤 blocker: `docs/BINGGUPACK_NEXT_IMPLEMENTATION_CANDIDATES.md`)
+
 ## v1.15.0 — owner 발화 a0 형식게이트 면제 (2026-06-27)
 
 owner(사용자 본인) 발화는 구어체·짧은 직감이어도 자연어 원문 그대로 보존한다. a0 형식 게이트(`node_1_word`/`node_1_meaning` = 단어·비종결·짧음)는 "owner 직감 검열·자동폐기 금지" 원칙으로 면제한다.
