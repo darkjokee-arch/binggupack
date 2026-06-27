@@ -1,7 +1,7 @@
-# Release Notes — BingguPack v1.14.0
+# Release Notes — BingguPack v1.14.0 → v1.15.0
 
-> 실제 태깅 릴리스 = **v1.14.0** (v1.13.0 자기진화 거버넌스 위에 MCP save 크래시 수정 + `save --speaker` CLI + post-S4 release docs). `feat(cli)` 포함이라 semver minor 범프.
-> version `1.14.0` · PyPI publish 는 자격 확보 후 별도(이번 릴리스는 git tag + GitHub release 까지).
+> **갱신**: v1.14.0은 GitHub release + PyPI(https://pypi.org/project/binggupack/1.14.0/) LIVE. 그 위 **v1.15.0** = owner 발화 a0 형식게이트 면제(7d48b39). 최신 release note는 CHANGELOG.md §v1.15.0 참조.
+> 이 문서는 post-S4 v1.14.0 라인 readiness 기록(보존). 아래는 v1.14.0 시점 초안.
 
 ---
 

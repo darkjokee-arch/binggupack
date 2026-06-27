@@ -1,5 +1,16 @@
 # Changelog — BingguPack
 
+## v1.15.0 — owner 발화 a0 형식게이트 면제 (2026-06-27)
+
+owner(사용자 본인) 발화는 구어체·짧은 직감이어도 자연어 원문 그대로 보존한다. a0 형식 게이트(`node_1_word`/`node_1_meaning` = 단어·비종결·짧음)는 "owner 직감 검열·자동폐기 금지" 원칙으로 면제한다.
+
+### Changed
+- `_pick_one_node`: a0 형식 FAIL(`node_1_word`/`node_1_meaning`)을 **speaker=owner일 때만** 면제(요약/번역 없이 원문 저장). ai/reader/None은 기존대로 `a0_fail`.
+
+### Safety (불변 — 회귀로 고정)
+- PII/secret 거부, `G4_no_auto` BLOCK, actor/confirm 게이트, temp_only/ledger 경계 전부 미변경.
+- 신규 characterization test `binggu_speaker_owner_a0_exempt_characterization_selftest.py`(7/7): owner 면제 발동 · owner-scoped(ai/reader/None 비면제) · 정상문장 무관 고정.
+
 ## v1.14.0 — 화자 페어 양방향 + MCP 크래시 수정 (2026-06-26)
 
 화자 축을 **대화 주고받음**으로 완성 — 누가 먼저 말했고 누가 반응했는지(시간 순서·관계 방향)를 페어 엣지에 담는다. `save --speaker` CLI로 "빙구팩 저장해" 흐름에 화자 칸 연동.

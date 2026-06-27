@@ -2,10 +2,10 @@
 
 **내가 일할수록 나를 알아가는, 내 PC 안의 개인 지식 노트.**
 
-> 최신: **v1.14.0 — 화자 페어 양방향** 🔁 · 누가 먼저 말했고 누가 반응했는지(시간 순서·관계 방향)를 페어 엣지에 담음 + `save --speaker` 화자 칸 연동 + **구어체·짧은 말도 원문 그대로 저장**(owner 형식게이트 면제) + MCP 저장 크래시 수정.
-> 이전: v1.13.0 자기진화 거버넌스 🧭 (학습↔규칙 충돌 → 양쪽 제시·사람 선택) · v1.12.0 화자 축 🗣️ (내 말/AI 요약 따로 쌓기 + 양방향 신뢰도)
+> 최신: **v1.15.0 — owner 발화 a0 형식게이트 면제** ✍️ · 구어체·짧은 직감도 **원문 그대로 저장**(speaker=owner 형식게이트 면제, PII/G4 안전게이트 불변).
+> 이전: v1.14.0 화자 페어 양방향 🔁 (누가 먼저 말했고 누가 반응했는지 + `save --speaker` + MCP 저장 크래시 수정) · v1.13.0 자기진화 거버넌스 🧭 · v1.12.0 화자 축 🗣️
 > 🔒 로컬 우선 · 자동 저장 없음 · 내가 고른 것만 저장 · MIT License
-> Release: <https://github.com/darkjokee-arch/binggupack/releases/tag/v1.14.0>
+> Release: <https://github.com/darkjokee-arch/binggupack/releases/tag/v1.15.0> · PyPI: <https://pypi.org/project/binggupack/>
 
 ---
 

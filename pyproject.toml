@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "binggupack"
-version = "1.14.0"   # v1.14.0 — v1.13.0(거버넌스) 위 crash fix(MCP save snap_dir) + speaker CLI(save --speaker) + release docs.
+version = "1.15.0"   # v1.15.0 — v1.14.0 위 owner 발화 a0 형식게이트 면제(speaker=owner 구어체 원문 보존·안전게이트 불변).
 description = "BingguPack — local-first, evidence-backed memory/context pack framework with an installable Claude Code MCP server (stdio JSON-RPC). Python stdlib only."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -21,7 +21,7 @@ dependencies = []   # 외부 의존성 0 (stdlib only). 선택: rapidfuzz(매칭
 
 [project.urls]
 Homepage = "https://github.com/darkjokee-arch/binggupack"
-Release = "https://github.com/darkjokee-arch/binggupack/releases/tag/v1.14.0"
+Release = "https://github.com/darkjokee-arch/binggupack/releases/tag/v1.15.0"
 
 [project.scripts]
 # v1.11.0 groundwork: 패키지로 노출되는 보조 진입점. 기존 `python binggu.py ...` /

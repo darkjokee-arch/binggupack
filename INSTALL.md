@@ -1,6 +1,6 @@
-# Install BingguPack v1.14.0
+# Install BingguPack v1.15.0
 
-> 최신: `v1.14.0` (자기진화 거버넌스 + `save_candidate` 크래시 수정(snap_dir) + `save --speaker` CLI). 아래 명령 그대로 사용하세요. PyPI publish는 아직 하지 않으므로 `git clone` 설치만 지원합니다.
+> 최신: `v1.15.0` (owner 발화 a0 형식게이트 면제 — 구어체·짧은 직감 원문 보존). 설치: `pip install binggupack` (PyPI) 또는 아래 `git clone`.
 
 > `scripts/`·`docs/`의 `openbinggu_`/`OPENBINGGU_` 접두사는 레거시 내부 코드네임입니다(BingguPack과 동일 프로젝트).
 
