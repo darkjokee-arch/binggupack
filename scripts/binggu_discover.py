@@ -49,22 +49,36 @@ class SearchProvider:
 
 
 class DDGProvider(SearchProvider):
-    """DuckDuckGo 무키 HTML endpoint. urllib 표준만(서드파티 0). MVP 첫 그물."""
+    """DuckDuckGo 무키 HTML endpoint. urllib 표준만(서드파티 0). MVP 첫 그물.
+
+    검색엔진은 봇 UA(harvest 의 binggupack-harvest/1.0)를 anomaly 페이지로 차단하므로
+    discover 전용 브라우저 UA 로 GET 한다(harvest fetch 와 분리). runner 주입 시 selftest mock.
+    참고: DDG 무키 endpoint 는 비공식·차단/구조변경 위험 → 운영은 공식 API/Brave 권장(provider 교체).
+    """
     name = "ddg"
     ENDPOINT = "https://html.duckduckgo.com/html/"
+    UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+          "(KHTML, like Gecko) Chrome/120.0 Safari/537.36")
 
     def __init__(self, runner=None):
-        # runner(url)->{"ok","text"} 주입 가능(selftest mock). 기본은 harvest 실 fetch 재사용.
-        self._runner = runner
+        self._runner = runner  # runner(url)->{"ok","text"} 주입(selftest mock)
 
     def search(self, query, limit=10):
-        run = self._runner or HV._real_fetch_runner
         from urllib.parse import urlencode
         url = self.ENDPOINT + "?" + urlencode({"q": query})
-        r = run(url)
-        if not isinstance(r, dict) or not r.get("ok") or not r.get("text"):
+        if self._runner is not None:
+            r = self._runner(url)
+            html = r.get("text") if isinstance(r, dict) and r.get("ok") else None
+        else:
+            import urllib.request
+            req = urllib.request.Request(url, headers={"User-Agent": self.UA})
+            try:
+                html = urllib.request.urlopen(req, timeout=20).read().decode("utf-8", "replace")
+            except Exception:
+                return []
+        if not html:
             return []
-        return _parse_ddg_html(r["text"], limit)
+        return _parse_ddg_html(html, limit)
 
 
 def _parse_ddg_html(html, limit=10):

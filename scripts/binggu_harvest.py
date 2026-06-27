@@ -46,6 +46,15 @@ import binggu_platform as _plat
 import watcher_capture_mvp1 as mvp1                  # redact_text/_has_secret/SCOPE 재사용(capture 미사용)
 import watcher_candidate_mvp2 as mvp2                # to_nodes (candidate 불변식 단일 글루)
 import openbinggu_scope_envelope_dryrun as SP        # classify_source_pointer (게이트 마스킹)
+import watcher_batch_m1 as bm1                       # B3: secret+PII 복합 redaction(batch_redact)+잔존 scanner
+
+
+def _redact_all(text):
+    """secret(mvp1) + PII(전화/이메일/주민/카드 — batch_redact) 통합 마스킹 + 독립 잔존 scan.
+    반환 (redacted, residual_kinds). residual 비어 있어야 안전(있으면 호출부가 STOP).
+    import 게이트(batch_pack_loader.residual_scan)와 동일 scanner 라 수확 단계서 미리 차단."""
+    red, _hits, _review = bm1.batch_redact(text)
+    return red, bm1.scan_residual_pii(red)
 
 
 # ── 경로 (BINGGU_HOME 우선 — cross-platform 정합) ──────────────────
@@ -241,9 +250,9 @@ def _content_chunks(text, source_ref):
     반환: (chunks, stops). chunk 는 to_nodes 호환(item_id·text 필수)."""
     chunks, stops = [], []
     for i, seg in enumerate(_split_segments(text)):
-        red, _hits = mvp1.redact_text(seg)            # 마스킹만 — 의미 변형 아님(§1 안전벨트)
-        if mvp1._has_secret(red):                      # 마스킹 후 잔존 → STOP(누출 차단·후보 0)
-            stops.append({"seg": i, "reason": "secret residual after redaction"})
+        red, resid = _redact_all(seg)                 # secret+PII 마스킹 — 의미 변형 아님(§1 안전벨트)
+        if resid:                                      # 마스킹 후 secret/PII 잔존 → STOP(누출 차단·후보 0)
+            stops.append({"seg": i, "reason": "secret/PII residual after redaction", "kinds": resid})
             continue
         # item_id = source_ref + 본문 해시(멱등·결정적). text = 마스킹된 원문(잘림/요약 0).
         item_id = "EVC-HV-" + hashlib.sha256(
@@ -308,9 +317,9 @@ def _derived_chunks(derived_text, source_ref, pr):
     (derivative=True / parser / raw_sha256). 원문 raw 는 _store_raw 가 별도 보관."""
     chunks, stops = [], []
     for i, seg in enumerate(_split_segments(derived_text)):
-        red, _hits = mvp1.redact_text(seg)
-        if mvp1._has_secret(red):
-            stops.append({"seg": i, "reason": "secret residual after redaction"})
+        red, resid = _redact_all(seg)                 # secret+PII 마스킹(파생 텍스트도 동일 게이트)
+        if resid:
+            stops.append({"seg": i, "reason": "secret/PII residual after redaction", "kinds": resid})
             continue
         item_id = "EVC-HVP-" + hashlib.sha256(
             (source_ref + "::" + red).encode("utf-8")).hexdigest()[:12]
@@ -368,6 +377,7 @@ def harvest_one(source, runner=None, sources_path_=None, parse=True, home=None):
                 "source_id": fr["source_id"]}
     return {"status": "OK", "source_id": fr["source_id"], "url": fr.get("url"),
             "kind": fr.get("kind"), "nodes": nodes, "evidence_index": ev_index,
+            "evidence_chunks": chunks,  # 원본 chunk(evidence_meta: source/raw_pointer/raw_sha256/parser/derivative)
             "stops": ev_stops + node_stops, "parse_artifacts": parse_artifacts,
             "candidate_all_true": cand_ok if nodes else True,
             "promotion_all_false": promo_ok if nodes else True}
@@ -770,6 +780,21 @@ def _selftest():
         one3["status"] == "OK" and not one3.get("parse_artifacts"))
     chk("T15b 평문 segment 1:1 보존(파생 경로 미적용)",
         set(SAMPLE_SEGS) <= set(n["properties"]["sentence"] for n in one3["nodes"]))
+
+    # T16 — B3 PII redaction(전화/이메일). PII 포함 텍스트 수확 → 노드/chunk 잔존 0.
+    add_source("url", "https://example.org/pii.txt", path=sp)
+    src_pii = {"url": "https://example.org/pii.txt", "kind": "url",
+               "source_id": source_id_for("https://example.org/pii.txt")}
+    pii_text = "문의는 010-1234-5678 또는 hong@example.com 으로 연락 바랍니다 자세한 본문 내용."
+    onep = harvest_one(src_pii, runner=raw_runner(pii_text.encode("utf-8"), "text/plain"),
+                       sources_path_=sp, home=home)
+    chk("T16 PII 포함 수확 OK(STOP 아님)", onep["status"] == "OK" and len(onep["nodes"]) > 0)
+    _allsent = " ".join(n["properties"]["sentence"] for n in onep["nodes"])
+    _allchunk = " ".join(c["text"] for c in onep.get("evidence_chunks", []))
+    chk("T16b 노드 sentence PII/secret 잔존 0", not bm1.scan_residual_pii(_allsent))
+    chk("T16c evidence_chunk PII/secret 잔존 0", not bm1.scan_residual_pii(_allchunk))
+    chk("T16d 전화/이메일 원문 미노출",
+        "010-1234-5678" not in _allsent and "hong@example.com" not in _allsent)
 
     print("\nRESULT: %d/%d %s" % (ok, tot, "PASS" if ok == tot else "FAIL"))
     print("GATE: %s" % ("GO" if ok == tot else "BLOCK"))

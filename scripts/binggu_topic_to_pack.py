@@ -19,8 +19,10 @@ import binggu_pack_factory as FAC    # noqa: E402
 
 
 def topic_to_pack(topic, provider=None, fetch_runner=None, home=None, out_dir=None,
-                  min_score=0.0, max_sources=10):
-    """주제 → pack 전체 파이프라인. 반환 dict(status/discovered/promoted/harvested/skipped/verdict/pack)."""
+                  min_score=0.0, max_sources=10, opencrab_export=False,
+                  recommend_workflow=False, execute=False):
+    """주제 → pack → (opencrab export) → (workflow 추천) 전체 파이프라인.
+    반환 dict(status/discovered/promoted/harvested/skipped/verdict/pack/opencrab_import/workflow)."""
     home = home or HV._home()
     sp = HV.sources_path(home)
     dp = DISC.discover_path(home)
@@ -44,24 +46,56 @@ def topic_to_pack(topic, provider=None, fetch_runner=None, home=None, out_dir=No
     for s in HV.load_sources(sp):
         one = HV.harvest_one(s, runner=fetch_runner, sources_path_=sp, home=home)
         if one["status"] == "OK":
-            # evidence_chunk 는 노드 sentence(redacted)에서 재구성 — harvest 추가 수정 0.
-            chunks = [{"item_id": ref, "text": n["properties"]["sentence"]}
-                      for n in one["nodes"] for ref in n.get("evidence_refs", [])]
+            # 원본 evidence_chunks 사용 — evidence_meta(source/raw_pointer/raw_sha256/parser/derivative) 보존.
             documents.append({"nodes": one["nodes"], "evidence_index": one["evidence_index"],
-                              "evidence_chunks": chunks,
+                              "evidence_chunks": one.get("evidence_chunks", []),
                               "parse_artifacts": one.get("parse_artifacts", [])})
         else:
+            # B4 — parse 실패는 parse_error.type, fetch 실패는 reason(FETCH_ERROR 등)로 typed 보장(null 0).
+            etype = (one.get("parse_error") or {}).get("type") or one.get("reason") or one["status"]
             skipped.append({"source_id": s.get("source_id"), "status": one["status"],
-                            "error": (one.get("parse_error") or {}).get("type")})
+                            "error": etype, "detail": one.get("detail")})
 
     # ④ 팩 생성 + ⑤ validate(완료 기준)
     res = FAC.build_pack(topic, documents, out_dir=out_dir)
+
+    # ⑥ OpenCrab export/import — pack dir 이 곧 import artifact(opencrab-pack-v1). dry-run/real 분리.
+    oc = None
+    if opencrab_export and res["status"] == "OK" and res.get("written"):
+        import openbinggu_batch_pack_loader as BPL
+        try:
+            loaded = BPL.load_batch_pack(res["written"])         # read-only 검증(import 가능성)
+            residual = BPL.residual_scan(loaded)                  # import 전 PII/secret 잔존 게이트
+            oc = {"mode": "real" if execute else "dry-run",
+                  "importable": not residual, "pack_id": loaded["pack_id"],
+                  "nodes": len(loaded["nodes"]), "evidence": len(loaded["evidence"]),
+                  "residual_pii": residual, "artifact_dir": res["written"]}
+            if residual:
+                oc["reason"] = "RESIDUAL_PII_BLOCK"
+            elif execute:
+                # real apply — temp staging 에 실제 write→read-back→rollback(운영 store 미접촉).
+                import tempfile as _tf
+                shome = os.path.join(_tf.mkdtemp(prefix="oc_apply_"), ".binggupack"); os.makedirs(shome)
+                ap = BPL.apply_with_rollback(shome, "owner", loaded, keep=False)
+                oc["apply"] = {"applied": ap.get("applied"), "reason": ap.get("reason"),
+                               "rolled_back": ap.get("rolled_back", True)}
+            oc["import_cmd"] = ("load_batch_pack('%s') → residual_scan → "
+                                "apply_with_rollback(home, user, pack, keep=True)  # real staging" % res["written"])
+        except Exception as e:
+            oc = {"mode": "dry-run", "importable": False, "error": str(e)[:200]}
+
+    # ⑦ workflow 추천 — pack 내용 기반 spec(추천만, 실행 0)
+    wf = None
+    if recommend_workflow and res["status"] == "OK":
+        import binggu_workflow_recommend as WR
+        wf = WR.recommend(res["pack"])
 
     return {"status": res["status"], "topic": topic,
             "discovered": disc["n_found"], "promoted": len(promoted),
             "harvested_docs": len(documents), "skipped": skipped,
             "verdict": res["verdict"]["verdict"], "counts": res["counts"],
-            "pack": res["pack"], "written": res.get("written")}
+            "pack": res["pack"], "written": res.get("written"),
+            "opencrab_import": oc, "workflow": wf}
 
 
 # ── selftest (provider/fetch 전부 mock · 실 네트워크 0 · temp 만) ──────
@@ -134,7 +168,33 @@ def _selftest():
     return passed == total
 
 
+def _main(argv):
+    import argparse
+    import json
+    ap = argparse.ArgumentParser(description="주제→발견→수확→파싱→pack→OpenCrab export→workflow 추천 (E2E)")
+    ap.add_argument("--topic", help="수집 주제 (예: '입찰 가격 예측')")
+    ap.add_argument("--out", default=None, help="pack 출력 디렉토리(없으면 미기록)")
+    ap.add_argument("--max-sources", type=int, default=5, help="승급/수확할 최대 소스 수")
+    ap.add_argument("--opencrab-export", action="store_true", help="OpenCrab import 가능성 검증/export")
+    ap.add_argument("--recommend-workflow", action="store_true", help="pack 기반 workflow 추천")
+    ap.add_argument("--execute", action="store_true", help="OpenCrab real apply(temp staging·rollback). 기본 dry-run")
+    ap.add_argument("--selftest", action="store_true")
+    args = ap.parse_args(argv)
+
+    if args.selftest:
+        return 0 if _selftest() else 1
+    if not args.topic:
+        ap.error("--topic 필요 (또는 --selftest)")
+
+    r = topic_to_pack(args.topic, out_dir=args.out, max_sources=args.max_sources,
+                      opencrab_export=args.opencrab_export,
+                      recommend_workflow=args.recommend_workflow, execute=args.execute)
+    # 요약 출력(pack 본문 제외 — 큰 nodes 배열 생략)
+    summary = {k: v for k, v in r.items() if k != "pack"}
+    summary["pack_counts"] = r["counts"]
+    print(json.dumps(summary, ensure_ascii=False, indent=2, default=str))
+    return 0 if r["status"] == "OK" else 1
+
+
 if __name__ == "__main__":
-    if "--selftest" in sys.argv:
-        sys.exit(0 if _selftest() else 1)
-    print("binggu_topic_to_pack — use --selftest, or import topic_to_pack(topic, provider, fetch_runner)")
+    sys.exit(_main(sys.argv[1:]))
