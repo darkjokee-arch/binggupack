@@ -42,6 +42,21 @@ binggu doctor                         # = status  노트 상태 + 무결성 점�
 
 > `remember` 는 내가 직접 친 **명시 입력**이라, "다음엔 …" 같은 약한 직감도 후보로 보여줍니다(자동 수집은 이런 잡담성 문장을 거릅니다 — 책임 분리). 단 **바로 저장하지는 않습니다.** 후보만 보여주고, 안내해 주는 `save … --explicit --confirm "SAVE n"` 으로 내가 한 번 더 도장 찍습니다. 비밀번호·개인정보는 명시 입력이어도 차단됩니다. (`binggu` 는 `python binggu.py` 로 읽으세요)
 
+### 회상이 쓸모 있었는지 기록하기 (선택 · opt-in)
+
+빙구팩이 작업 전에 떠올려준 기억이 **실제로 도움이 됐는지**를 모아 두면, 다음에 더 잘 떠올리도록 골든셋을 다듬을 수 있습니다. 기본은 꺼져 있고, 켤 때만 작업 전 자동 회상(preflight)에서 메타가 쌓입니다.
+
+```bash
+binggu trace enable                              # 기록 켜기(opt-in · 끄기: binggu trace disable)
+binggu trace review                              # 떠올린 기억 중 아직 판정 안 한 것 목록
+binggu trace mark 1 used                         # 1번이 도움됐다
+binggu trace mark 2 ignored   --note not_relevant   # 안 썼다(사유 코드)
+binggu trace mark 3 corrected --note stale          # 틀려서 고쳤다(사유 코드)
+```
+
+- 사유 코드(`--note`)는 정해진 값만 받습니다 — `ignored`: `not_relevant`·`already_known`·`low_signal` / `corrected`: `stale`·`wrong_context`·`superseded`·`false_match` (`used` 는 사유 불필요).
+- **trace 는 메타데이터(node_id·분류·점수)만 저장합니다 — 문장 원문은 저장하지 않고, 효용 판정은 내가 직접 `binggu trace mark` 명령으로만 표시합니다(자동 판정 0).**
+
 ## 꼭 알아야 할 용어 5개
 
 | 용어 | 쉬운 뜻 |
