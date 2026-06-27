@@ -8,6 +8,7 @@
 
 공개 API:
   - save_selected(db, text, indices, ctx, snap_dir, due_date=None, speaker=None)
+  - save_paired(...)         화자 축 페어 저장(owner/ai)
   - commit_selected(db, text, preview_id, picks, confirm, snap_dir, ...)
   - open_g3(path)            장부(ledger) 열기
   - set_review_due(...)      검증 예정일 설정
@@ -20,8 +21,8 @@ _SCRIPTS = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.
 if _SCRIPTS not in sys.path:
     sys.path.insert(0, _SCRIPTS)
 
-from openbinggu_conversation_candidate_save import save_selected
+from openbinggu_conversation_candidate_save import save_selected, save_paired
 from binggu_capture_to_save import commit_selected
 from openbinggu_deprecate_and_remind_g3 import open_g3, set_review_due
 
-__all__ = ["save_selected", "commit_selected", "open_g3", "set_review_due"]
+__all__ = ["save_selected", "save_paired", "commit_selected", "open_g3", "set_review_due"]

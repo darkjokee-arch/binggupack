@@ -39,7 +39,7 @@ from openbinggu_staging_write_selftest import OPERATING_PATHS  # noqa: E402
 from openbinggu_deprecate_and_remind_g3 import (  # noqa: E402
     set_review_due, resolve_review, list_due_reminders)
 from openbinggu_candidate_list_view import list_candidates  # noqa: E402
-from openbinggu_conversation_candidate_save import save_selected  # noqa: E402
+from binggupack.storage import save_selected  # noqa: E402  (트랙 C: scripts 직접 import → storage facade)
 from openbinggu_conversation_capture_preview import capture_preview  # noqa: E402
 from openbinggu_candidate_deprecate_ux import deprecate_from_list  # noqa: E402
 from openbinggu_candidate_replace_ux import replace_from_list  # noqa: E402
@@ -561,7 +561,7 @@ def cmd_save(a):
 def cmd_pair(a):
     """owner 발화 + ai 요약을 각각 독립 노드(speaker=owner/ai)로 저장하고 연결 엣지로 묶는다.
     ai_text 생략 = owner 단독(순수 직감·억지 ai 금지). relation: accepts/refutes/revises."""
-    from openbinggu_conversation_candidate_save import save_paired
+    from binggupack.storage import save_paired   # 트랙 C: storage facade 경유
     db, snap_dir = _open(a.ledger)
     rel = getattr(a, "by", "ai") + "_" + a.relation  # 반응 주체: ai(AI가 사용자 발화를) / owner(사용자가 AI 발화를)
     r = save_paired(db, a.owner_text, a.ai_text, {"actor": "human", "confirm": a.confirm},
