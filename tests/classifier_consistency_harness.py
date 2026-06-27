@@ -28,6 +28,7 @@ import sys
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
 _FIXTURE = os.path.join(_HERE, "fixtures", "classifier_consistency", "sentences_100.json")
+_GOLDEN = os.path.join(_HERE, "fixtures", "classifier_consistency", "golden_100.json")
 
 
 def _load_paths():
@@ -52,7 +53,8 @@ def evaluate(semantic_off=True):
     rows = []
     for c in cases:
         text = c["text"]
-        cap_state = classify(text)["state"]
+        cap = classify(text)
+        cap_state = cap["state"]
         cap_cand = cap_state == "captured_candidate"
         p = prev.capture_preview(text)
         prev_cand = len(p["candidates"]) >= 1
@@ -60,7 +62,9 @@ def evaluate(semantic_off=True):
             "id": c["id"], "category": c["category"], "text": text,
             "expected": c["should_capture"],
             "capture": cap_cand, "cap_state": cap_state,
+            "cap_signals": cap["signals"],
             "preview": prev_cand,
+            "prev_label": p["candidates"][0]["label_kind"] if p["candidates"] else None,
             "prev_excl": sorted(p["excluded_counts"].keys()),
             "agree": cap_cand == prev_cand,
             "cap_correct": cap_cand == c["should_capture"],
@@ -86,6 +90,42 @@ def evaluate(semantic_off=True):
         "_lists": {"disagree": disagree, "prev_fp": prev_fp, "prev_fn": prev_fn,
                    "cap_fp": cap_fp, "cap_fn": cap_fn},
     }
+
+
+def check_golden(res):
+    """구현 산출(res.rows)을 golden 사람 기준과 대조. 어떤 문장이 어떤 필드에서 왜 달라졌는지 반환."""
+    golden = {g["id"]: g for g in json.load(open(_GOLDEN, encoding="utf-8"))["cases"]}
+    diffs = []
+    for r in res["rows"]:
+        g = golden.get(r["id"])
+        if g is None:
+            diffs.append({"id": r["id"], "field": "golden", "expected": "present", "actual": "missing",
+                          "text": r["text"]})
+            continue
+        if r["capture"] != g["expected_capture"]:
+            diffs.append({"id": r["id"], "field": "capture", "expected": g["expected_capture"],
+                          "actual": r["capture"], "text": r["text"]})
+        if g["expected_capture"]:
+            if r["prev_label"] != g["expected_label"]:
+                diffs.append({"id": r["id"], "field": "label", "expected": g["expected_label"],
+                              "actual": r["prev_label"], "text": r["text"]})
+            if g["expected_signal"] not in r["cap_signals"]:
+                diffs.append({"id": r["id"], "field": "signal", "expected": "∋ " + str(g["expected_signal"]),
+                              "actual": r["cap_signals"], "text": r["text"]})
+    return diffs
+
+
+def _print_golden(diffs, n):
+    print("=" * 78)
+    print("golden 대조 — 사람 기준(should_capture/category/label) vs 구현 (n=%d)" % n)
+    print("=" * 78)
+    if not diffs:
+        print("  GOLDEN GATE: GO   불일치 0 — 구현이 사람 기준과 일치")
+        return
+    print("  GOLDEN GATE: NO-GO   불일치 %d건 — 무엇이 왜 달라졌는지:" % len(diffs))
+    for d in diffs:
+        print("  #%-3d [%s] expected=%s  actual=%s  | %r"
+              % (d["id"], d["field"], d["expected"], d["actual"], d["text"]))
 
 
 def _print_report(res, semantic_off):
@@ -126,6 +166,12 @@ def main():
     args = sys.argv[1:]
     semantic_off = "--semantic-on" not in args
     res = evaluate(semantic_off=semantic_off)
+
+    if "--golden" in args:
+        diffs = check_golden(res)
+        _print_golden(diffs, res["n"])
+        sys.exit(0 if not diffs else 1)
+
     if "--json" in args:
         out = {k: v for k, v in res.items() if k not in ("rows", "_lists")}
         print(json.dumps(out, ensure_ascii=False, indent=2))

@@ -1,0 +1,610 @@
+{
+  "_meta": {
+    "basis": "fixture 의 사람 라벨(should_capture, category)에서 규칙 파생 — 구현 출력 스냅샷 아님",
+    "expected_label_rule": "판단류 카테고리는 전부 '판단' 도장(2026-06-27 44/44 검토 승인)",
+    "expected_signal_rule": "classify signals 가 fixture.category(사람 의도)를 포함해야 함",
+    "regenerate": "python tests/build_golden.py"
+  },
+  "cases": [
+    {
+      "id": 1,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 2,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 3,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 4,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 5,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 6,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 7,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 8,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 9,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 10,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 11,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 12,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 13,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 14,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 15,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 16,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 17,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 18,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 19,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 20,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 21,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 22,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 23,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 24,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 25,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 26,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 27,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 28,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 29,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 30,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 31,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 32,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 33,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 34,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 35,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 36,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 37,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 38,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 39,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 40,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 41,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 42,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 43,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 44,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 45,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 46,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 47,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 48,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 49,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 50,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 51,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 52,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 53,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "방향결정"
+    },
+    {
+      "id": 54,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "방향결정"
+    },
+    {
+      "id": 55,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "방향결정"
+    },
+    {
+      "id": 56,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "방향결정"
+    },
+    {
+      "id": 57,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "방향결정"
+    },
+    {
+      "id": 58,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "방향결정"
+    },
+    {
+      "id": 59,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "방향결정"
+    },
+    {
+      "id": 60,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "방향결정"
+    },
+    {
+      "id": 61,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "선택판단"
+    },
+    {
+      "id": 62,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "선택판단"
+    },
+    {
+      "id": 63,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "선택판단"
+    },
+    {
+      "id": 64,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "선택판단"
+    },
+    {
+      "id": 65,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "선택판단"
+    },
+    {
+      "id": 66,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "선택판단"
+    },
+    {
+      "id": 67,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "리스크감지"
+    },
+    {
+      "id": 68,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "리스크감지"
+    },
+    {
+      "id": 69,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "리스크감지"
+    },
+    {
+      "id": 70,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "리스크감지"
+    },
+    {
+      "id": 71,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "리스크감지"
+    },
+    {
+      "id": 72,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "리스크감지"
+    },
+    {
+      "id": 73,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "선호스타일"
+    },
+    {
+      "id": 74,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "선호스타일"
+    },
+    {
+      "id": 75,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "반복기준"
+    },
+    {
+      "id": 76,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "반복기준"
+    },
+    {
+      "id": 77,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "반복기준"
+    },
+    {
+      "id": 78,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "반복기준"
+    },
+    {
+      "id": 79,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "반복기준"
+    },
+    {
+      "id": 80,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "반복기준"
+    },
+    {
+      "id": 81,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "교훈규범"
+    },
+    {
+      "id": 82,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "교훈규범"
+    },
+    {
+      "id": 83,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "교훈규범"
+    },
+    {
+      "id": 84,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "교훈규범"
+    },
+    {
+      "id": 85,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "교훈규범"
+    },
+    {
+      "id": 86,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "교훈규범"
+    },
+    {
+      "id": 87,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "교훈규범"
+    },
+    {
+      "id": 88,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "교훈규범"
+    },
+    {
+      "id": 89,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "장기의도"
+    },
+    {
+      "id": 90,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "장기의도"
+    },
+    {
+      "id": 91,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "장기의도"
+    },
+    {
+      "id": 92,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "장기의도"
+    },
+    {
+      "id": 93,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "AI교정"
+    },
+    {
+      "id": 94,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "AI교정"
+    },
+    {
+      "id": 95,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "AI교정"
+    },
+    {
+      "id": 96,
+      "expected_capture": true,
+      "expected_label": "판단",
+      "expected_signal": "AI교정"
+    },
+    {
+      "id": 97,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 98,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 99,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    },
+    {
+      "id": 100,
+      "expected_capture": false,
+      "expected_label": null,
+      "expected_signal": null
+    }
+  ]
+}
