@@ -19,6 +19,7 @@ import openbinggu_a0_node_dryrun as a0
 import openbinggu_incoming_to_staging as v011        # SECRET_PATTERNS
 from watcher_batch_m1 import scan_residual_pii       # PII kind 검출 (무수정 재사용)
 import binggu_canonical_semantic as canon            # 도장 semantic 제안 (opt-in, 영구금지26 개정)
+import binggu_capture_classifier as capclf           # SSOT 후보 게이트 (capture 와 동일 분류기)
 
 INPUT_CAP = 20000
 DEFAULT_MAX = 10
@@ -105,6 +106,14 @@ def capture_preview(text, max_candidates=DEFAULT_MAX):
         if any(p.search(sent) for p in v011.SECRET_PATTERNS):
             excl("secret_pattern")
             continue
+        # SSOT 후보 게이트: capture 와 동일한 분류기(should_capture)로 거른다. 판단/교훈/선호/
+        # 영구규칙(captured_candidate)만 후보로 통과. 단순조회·일회성지시·운영보고·메타확인·잡담·
+        # 순수지식(ignored/preview_trigger)은 제외 — preview/capture 후보 기준 불일치(노이즈) 제거.
+        # 안전(PII/secret)은 이 게이트보다 앞서 항상 제외되므로 게이트 결과와 무관하게 보호된다.
+        cap = capclf.classify(sent)
+        if cap["state"] != "captured_candidate":
+            excl("not_judgment:" + (cap["vetoes"][0] if cap["vetoes"] else cap["state"]))
+            continue
         h = _norm_hash(sent)
         if h in seen:
             excl("duplicate")
@@ -176,19 +185,19 @@ def run_selftest():
     def rec(cid, desc, ok):
         results.append((cid, desc, "PASS" if ok else "FAIL"))
 
-    # 1. 정상 대화 — 5종 섞임
-    convo = ("이 문서는 배포 절차를 정의한다. 테스트 로그에 통과 결과가 기록되어 있다. "
-             "낙찰하한율은 기초금액 대비 최저 투찰 비율을 말한다. 백필 작업이 진행 중이다. "
-             "이 입찰은 마진이 낮아 보류한다.")
+    # 1. 정상 대화 — 판단/결정/규칙/교훈/리스크 5문장(전부 SSOT captured). 순수 사실/개념/상태는
+    #    SSOT 게이트(should_capture)에서 제외되므로 후보 문장은 사용자 판단류로 구성한다.
+    convo = ("이 입찰은 마진이 낮아 보류하기로 결정했다. 캐시 전략은 이걸로 확정한다. "
+             "백업은 항상 작업 전에 먼저 해 둔다. 다음부터는 로그를 먼저 본다. "
+             "이 변경은 회귀 위험이 커서 조심해야 한다.")
     r1 = capture_preview(convo)
-    kinds = sorted({c["label_kind"] for c in r1["candidates"]})
-    rec(1, "정상 대화 5종 분류 후보", len(r1["candidates"]) == 5 and kinds == ["개념", "문서", "상태", "증거", "판단"]
-        and r1["nothing_saved"] is True)
+    rec(1, "정상 대화 판단 5문장 후보(SSOT 통과)",
+        len(r1["candidates"]) == 5 and r1["nothing_saved"] is True)
 
     # 2. secret 포함 — 해당 문장 후보 제외 + raw 미출력
     # 키워드·접두사 런타임 조립 — 공개 트리 스캐너 자기검출 회피 (6/10 박제)
     sec_line = "배포 키는 to" + "ken = 'gh" + "p_" + "EXAMPLE000000000000000000' 이다."
-    r2 = capture_preview("이 입찰은 보류한다. " + sec_line)
+    r2 = capture_preview("이 입찰은 보류하기로 결정했다. " + sec_line)
     no_leak = ("ghp_" not in r2["preview_markdown"]) and all("ghp_" not in c["sentence"] for c in r2["candidates"])
     # secret 은 PII 스캐너(scan_kv)와 SECRET_PATTERNS 2중 레이어 중 먼저 잡는 쪽이 제외 — 어느 쪽이든 안전 동일
     sec_excluded = any(k == "secret_pattern" or k.startswith("pii_") for k in r2["excluded_counts"])
@@ -196,13 +205,13 @@ def run_selftest():
 
     # 3. PII 포함 — 제외 + kind 카운트만
     pii_line = "담당자 연락처는 010-" + "1234-5678 입니다."
-    r3 = capture_preview("백필 작업이 진행 중이다. " + pii_line)
+    r3 = capture_preview("이 입찰은 보류하기로 결정했다. " + pii_line)
     rec(3, "PII 문장 후보 제외(kind 카운트만)", len(r3["candidates"]) == 1
         and any(k.startswith("pii_") for k in r3["excluded_counts"])
         and "1234" not in r3["preview_markdown"])
 
     # 3b. 사업자번호(형식/bare) — preview 전용 제외 (owner (a))
-    r3b = capture_preview("이 입찰은 보류한다. 협력사 사업자등록번호는 123-45-" + "67890 입니다. "
+    r3b = capture_preview("이 입찰은 보류하기로 결정했다. 협력사 사업자등록번호는 123-45-" + "67890 입니다. "
                           "구계좌 사업자번호 12345" + "67890 등록 확인이 필요하다.")
     rec(11, "bizno 형식/bare 후보 제외(카운트만)", len(r3b["candidates"]) == 1
         and r3b["excluded_counts"].get("pii_scan_bizno_fmt", 0) >= 1
@@ -221,7 +230,7 @@ def run_selftest():
         and r5a["nothing_saved"] is True)
 
     # 6. 중복 후보 dedup
-    r6 = capture_preview("이 입찰은 보류한다. 이 입찰은  보류한다.\n이 입찰은 보류한다.")
+    r6 = capture_preview("이 입찰은 보류하기로 결정했다. 이 입찰은  보류하기로 결정했다.\n이 입찰은 보류하기로 결정했다.")
     rec(6, "중복 후보 dedup(1건+duplicate 집계)", len(r6["candidates"]) == 1
         and r6["excluded_counts"].get("duplicate", 0) == 2)
 
@@ -238,7 +247,7 @@ def run_selftest():
     rec(9, "멱등(2회 동일)", capture_preview(convo) == capture_preview(convo))
 
     # 12. 긴 문장(80자 초과·MAX 이내) 전체 저장 + preview 전체 표시(본 것 = 저장된 것)
-    long_sent = "이 입찰은 " + "매우 " * 30 + "신중하게 검토한 끝에 보류한다."  # 한 문장, ~110자
+    long_sent = "이 입찰은 " + "매우 " * 30 + "신중하게 검토한 끝에 보류하기로 결정했다."  # 한 문장, ~110자
     r12 = capture_preview(long_sent)
     rec(12, "긴 문장 전체 보존(발췌 cut 0) + preview 전체 표시",
         len(r12["candidates"]) == 1 and r12["candidates"][0]["sentence"] == long_sent

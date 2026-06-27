@@ -758,8 +758,9 @@ def selftest():
     ck("1g_preview(저장0)", cmd_capture(args(capture_cmd="preview", settings=cap_settings, capture_cwd=cap_cwd)) == 0)
     ck("1h_uninstall", cmd_capture(args(capture_cmd="uninstall", settings=cap_settings, capture_cwd=cap_cwd)) == 0
        and not cap_status(cap_home, cap_cwd, cap_settings)["enabled"])
-    TEXT = ("이 입찰은 마진이 낮아 보류한다. 백필 작업이 진행 중이다. "
-            "낙찰하한율은 기초금액 대비 최저 투찰 비율을 말한다.")
+    # SSOT 후보 게이트(should_capture) 도입 후 — 순수 사실/상태 문장은 제외되므로 판단 3문장으로 구성.
+    TEXT = ("이 입찰은 마진이 낮아 보류하기로 결정했다. 백업은 항상 작업 전에 먼저 해 둔다. "
+            "이 변경은 회귀 위험이 커서 조심해야 한다.")
     ck("2_preview(저장0)", cmd_preview(args(text=TEXT)) == 0)
     ck("2c_reflect(회고→후보·저장0)", cmd_reflect(args(text=TEXT, from_file=None)) == 0)
     ck("2d_reflect_빈입력_안내", cmd_reflect(args(text=None, from_file=None)) == 1)
@@ -810,7 +811,8 @@ def selftest():
         is not None for r in rows)
     db.close()
     ck("R5_회상_도장문장_불변(read-only)", _stamp_intact)
-    i_state = next(i for i, r in enumerate(rows, 1) if r["kind"] == "상태")
+    # SSOT 게이트 후 후보가 모두 '판단' 도장일 수 있어 '상태' 미존재 시 첫 후보로 fallback(흐름 검증용).
+    i_state = next((i for i, r in enumerate(rows, 1) if r["kind"] == "상태"), 1)
     h_state = rows[i_state - 1]["id8"]
     ck("5_deprecate", cmd_deprecate(args(n=i_state, id8=h_state, reason="셀프테스트 기각",
                                          confirm="DEPRECATE %s %s" % (i_state, h_state))) == 0)
@@ -877,8 +879,8 @@ def selftest():
         with open(os.path.join(h_staging, it["intent_id"] + ".json"), "w", encoding="utf-8") as f:
             _json.dump(it, f, ensure_ascii=False)
 
-    _mk("이 입찰은 마진이 낮아 보류한다.", [1])
-    _mk("백필 작업이 진행 중이다.", [1])
+    _mk("이 입찰은 마진이 낮아 보류하기로 결정했다.", [1])
+    _mk("백업은 항상 작업 전에 먼저 해 둔다.", [1])
     ck("13_hosted_inbox_요약(저장0·worker미접촉)",
        cmd_hosted(args(ledger=h_ledger, hosted_cmd="inbox", no_fetch=True, since=None)) == 0)
     ck("14_hosted_pull_select없음_안내(실행0)",
