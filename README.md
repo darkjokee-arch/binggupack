@@ -1,6 +1,6 @@
 # BingguPack
 
-**AI와 일하면서 생긴 내 판단·교훈·선호를 내 PC에 저장하고, 다음 작업 전에 다시 떠올려주는 개인 기억 엔진입니다.**
+**AI와 일하면서 생긴 내 판단·교훈·선호를 내 PC에 저장하고, 다음 작업 전에 다시 떠올려주는 로컬 우선 기억·맥락 엔진입니다.**
 
 > 현재 `main`: 분류 기준 통합, `remember`/`pair` 명시 입력 경로, 회상 효용 trace, `storage`/`mcp` facade까지 반영.
 > 최신 배포판: **v1.15.0** · [Release](https://github.com/darkjokee-arch/binggupack/releases/tag/v1.15.0) · [PyPI](https://pypi.org/project/binggupack/)
@@ -24,6 +24,28 @@ AI와 대화하다 보면 "이건 다음에도 기억해야겠다" 싶은 말이
 
 BingguPack은 이런 문장을 **후보로 보여주고**, 내가 직접 고른 것만 **내 PC의 장부(`ledger.sqlite`)** 에 저장합니다.
 나중에 비슷한 일을 시작하면 관련 기억과 과거 실수 패턴을 먼저 보여줍니다.
+
+## 무엇까지 들어 있나요
+
+1차 목표는 "내 판단을 내가 승인해서 저장하고 다시 꺼내 쓰는 것"입니다.
+그 목표를 실제 작업 흐름에 붙이기 위해 아래 기능들이 같이 들어 있습니다.
+
+| 영역 | 기능 | 쉬운 설명 |
+|---|---|---|
+| 저장 후보 선별 | `remember` / `preview` | 문장을 바로 저장하지 않고, 판단·교훈·선호·규칙 후보인지 먼저 보여줍니다. |
+| 사람 승인 저장 | `save --confirm "SAVE n"` | 번호 선택과 confirm 문구가 맞을 때만 로컬 장부에 저장합니다. |
+| 작업 전 회상 | `ask` / `preflight` | 비슷한 과거 기억, 실수 패턴, 조심할 점을 작업 전에 꺼냅니다. |
+| Claude Code 연결 | capture / preflight hook | 원하면 발화 후보 수집과 작업 전 회상을 Claude Code 흐름에 붙일 수 있습니다. 기본은 opt-in입니다. |
+| 내 말과 AI 말 분리 | `pair` / `trust` | owner 발화와 AI 의견을 따로 저장하고, 나중에 어느 쪽 판단이 맞았는지 비교합니다. |
+| 회상 품질 기록 | `trace review` / `trace mark` | 떠올린 기억이 실제로 도움됐는지 사람이 `used`, `ignored`, `corrected`로 표시합니다. |
+| 기억 정리 | `replace` / `deprecate` / `due` / `resolve` | 오래된 기억을 교체·폐기하거나, 나중에 다시 볼 항목으로 남깁니다. |
+| MCP/패키지 통합 | stdio MCP server / PyPI CLI | Claude Code MCP 서버와 `binggu` CLI로 설치해서 쓸 수 있습니다. |
+| 선택형 cloud inbox | `hosted inbox` / `hosted pull` | 다른 기기에서 저장 의도만 잠깐 받아두고, 내 PC에서 고른 항목만 로컬 장부로 가져옵니다. |
+| 외부 소스 후보화 | `harvest` | 사람이 등록한 소스만 읽어 후보로 올립니다. 영구 저장은 여전히 `SAVE n` 게이트를 통과해야 합니다. |
+| 점검·검증 | `doctor`, smoke/selftest | 장부, hook, MCP, hosted 경계가 깨졌는지 빠르게 확인합니다. |
+
+공통 원칙은 같습니다.
+**자동 영구 저장 없음, 민감정보 차단, 로컬 장부가 정본, 클라우드와 hook은 보조 경로**입니다.
 
 ## 빙구팩이 아닌 것
 
