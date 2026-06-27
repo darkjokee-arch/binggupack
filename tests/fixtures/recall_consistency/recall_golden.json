@@ -1,0 +1,105 @@
+{
+  "_meta": {
+    "purpose": "회상 유용성 측정 Phase 1 — offline golden recall score (네트워크 0 · BINGGU_SEMANTIC_OFF=1 결정적)",
+    "basis": "기대치는 어휘 겹침(_relevance: 쿼리 토큰의 부분문자열 포함 비율)으로 사람이 직접 산정한 승인 기준 — 구현 출력 스냅샷 아님",
+    "determinism": "semantic OFF 시 회상=term-frequency 어휘 매칭만. corpus 문장은 토큰 겹침이 명백히 갈리도록 설계(동점 top1 회피).",
+    "risk_rule": "위험 매칭은 node_type=judgment + semantic_subtype∈{버그패턴(가중1.0),교훈(0.7)}만. score=가중×관련성. >=0.55 높음(needs_question) · >=0.30 중간 · 미만 낮음. avoid_patterns=버그패턴 subtype만.",
+    "metrics": "hit_rate(기대 hit 회수율) · top1(1순위 정확) · exclusion(무관 노드 미회수) · top_k_precision(회수 중 기대 비율) · risk accuracy(risk_level/needs_question/avoid).",
+    "regenerate": "사람 승인 기준이므로 자동 재생성 없음. corpus/cases 무결성은 python tests/recall_consistency_harness.py --validate-fixture 로 점검.",
+    "harness": "python tests/recall_consistency_harness.py"
+  },
+  "corpus": {
+    "nodes": [
+      {"node_id": "node:CONV:rg01", "node_type": "judgment", "sentence": "검증 없이 바로 배포하면 endpoint 가 실패한다 selftest 누락", "semantic_subtype": "버그패턴", "use_count": 5},
+      {"node_id": "node:CONV:rg02", "node_type": "judgment", "sentence": "배포 전에 로컬 selftest 와 live endpoint 응답을 먼저 확인한다", "semantic_subtype": "교훈", "use_count": 3},
+      {"node_id": "node:CONV:rg03", "node_type": "judgment", "sentence": "배포 작업은 항상 git 백업 커밋을 먼저 한다", "semantic_subtype": "선호", "use_count": 2},
+      {"node_id": "node:CONV:rg04", "node_type": "judgment", "sentence": "PID 만 죽이면 자식 워커 프로세스가 좀비로 남아 충돌한다", "semantic_subtype": "버그패턴", "use_count": 4},
+      {"node_id": "node:CONV:rg05", "node_type": "judgment", "sentence": "프로세스 종료는 자식 트리 전체를 정리하고 재시작한다", "semantic_subtype": "교훈", "use_count": 2},
+      {"node_id": "node:CONV:rg06", "node_type": "judgment", "sentence": "데이터베이스 비밀번호를 스크립트에 하드코딩하면 야간 백업이 실패한다", "semantic_subtype": "버그패턴", "use_count": 3},
+      {"node_id": "node:CONV:rg07", "node_type": "judgment", "sentence": "야간 데이터베이스 백업은 환경변수로 비밀번호를 주입한다", "semantic_subtype": "교훈", "use_count": 2},
+      {"node_id": "node:CONV:rg08", "node_type": "judgment", "sentence": "데이터베이스 연결은 연결 풀을 재사용한다", "semantic_subtype": "선호", "use_count": 1},
+      {"node_id": "node:CONV:rg09", "node_type": "judgment", "sentence": "공동인증서 로그인은 카카오 간편인증으로 진행한다", "semantic_subtype": "선호", "use_count": 1},
+      {"node_id": "node:CONV:rg10", "node_type": "judgment", "sentence": "토마토 수프는 마지막에 간을 맞춘다", "semantic_subtype": "결정", "use_count": 0},
+      {"node_id": "node:CONV:rg11", "node_type": "judgment", "sentence": "양파는 약불에 갈색이 날 때까지 볶는다", "semantic_subtype": "결정", "use_count": 0},
+      {"node_id": "node:CONV:rg12", "node_type": "evidence", "sentence": "지난주 배포에서 endpoint 응답 500 로그가 찍혔다", "semantic_subtype": "사실", "use_count": 0}
+    ],
+    "edges": [
+      {"edge_id": "edge:rg1", "relation": "supports_judgment", "source": "node:CONV:rg12", "target": "node:CONV:rg01"}
+    ]
+  },
+  "cases": [
+    {
+      "id": 1, "kind": "why_search", "query": "배포 endpoint 검증",
+      "note": "배포 도메인 어휘 매칭. rg01 단독 1.0(검증·배포·endpoint 전부 포함).",
+      "expected_top1": "node:CONV:rg01",
+      "expected_hits": ["node:CONV:rg01", "node:CONV:rg02", "node:CONV:rg03", "node:CONV:rg12"],
+      "expected_excluded": ["node:CONV:rg04", "node:CONV:rg05", "node:CONV:rg06", "node:CONV:rg07", "node:CONV:rg08", "node:CONV:rg09", "node:CONV:rg10", "node:CONV:rg11"]
+    },
+    {
+      "id": 2, "kind": "why_search", "query": "비밀번호 하드코딩 백업",
+      "note": "DB 보안 도메인. rg06 단독 1.0. rg07(0.667)·rg03(0.333 백업) 포함.",
+      "expected_top1": "node:CONV:rg06",
+      "expected_hits": ["node:CONV:rg06", "node:CONV:rg07", "node:CONV:rg03"],
+      "expected_excluded": ["node:CONV:rg01", "node:CONV:rg04", "node:CONV:rg08", "node:CONV:rg09", "node:CONV:rg10", "node:CONV:rg11"]
+    },
+    {
+      "id": 3, "kind": "why_search", "query": "프로세스 워커 좀비",
+      "note": "프로세스 관리 도메인. rg04 단독 1.0. rg05(0.333 프로세스).",
+      "expected_top1": "node:CONV:rg04",
+      "expected_hits": ["node:CONV:rg04", "node:CONV:rg05"],
+      "expected_excluded": ["node:CONV:rg01", "node:CONV:rg02", "node:CONV:rg06", "node:CONV:rg08", "node:CONV:rg09", "node:CONV:rg10", "node:CONV:rg11", "node:CONV:rg12"]
+    },
+    {
+      "id": 4, "kind": "why_search", "query": "토마토 양파 수프",
+      "note": "무관(요리) 쿼리도 어휘 매칭으로 회상은 된다 — 단 기술 노드는 전부 제외. rg10 단독 0.667(토마토·수프).",
+      "expected_top1": "node:CONV:rg10",
+      "expected_hits": ["node:CONV:rg10", "node:CONV:rg11"],
+      "expected_excluded": ["node:CONV:rg01", "node:CONV:rg02", "node:CONV:rg03", "node:CONV:rg04", "node:CONV:rg05", "node:CONV:rg06", "node:CONV:rg07", "node:CONV:rg08", "node:CONV:rg09", "node:CONV:rg12"]
+    },
+    {
+      "id": 5, "kind": "preflight", "prompt": "검증 없이 바로 배포한다 endpoint selftest",
+      "note": "버그패턴 rg01 score 1.0×0.833=0.833 → 높음. needs_question True. avoid 포함 rg01.",
+      "expected_risk_level": "높음", "expected_needs_question": true,
+      "expected_avoid_contains": ["node:CONV:rg01"]
+    },
+    {
+      "id": 6, "kind": "preflight", "prompt": "프로세스 죽이고 워커 좀비 충돌",
+      "note": "버그패턴 rg04 score 1.0×0.8=0.8 → 높음. avoid 포함 rg04.",
+      "expected_risk_level": "높음", "expected_needs_question": true,
+      "expected_avoid_contains": ["node:CONV:rg04"]
+    },
+    {
+      "id": 7, "kind": "preflight", "prompt": "야간 데이터베이스 백업 비밀번호 하드코딩",
+      "note": "버그패턴 rg06 score 1.0 → 높음. avoid 버그패턴만(rg06). rg07 교훈은 avoid 제외.",
+      "expected_risk_level": "높음", "expected_needs_question": true,
+      "expected_avoid_contains": ["node:CONV:rg06"]
+    },
+    {
+      "id": 8, "kind": "preflight", "prompt": "워커 관리",
+      "note": "버그패턴 rg04 score 1.0×0.5=0.5 → 중간. needs_question False(과잉반문 방지). avoid 포함 rg04.",
+      "expected_risk_level": "중간", "expected_needs_question": false,
+      "expected_avoid_contains": ["node:CONV:rg04"]
+    },
+    {
+      "id": 9, "kind": "preflight", "prompt": "토마토 수프 레시피 정리",
+      "note": "요리=결정 subtype은 위험 후보 아님. 교훈 rg05 '정리' 0.7×0.25=0.175 → 낮음. avoid 0(버그패턴 무매칭).",
+      "expected_risk_level": "낮음", "expected_needs_question": false,
+      "expected_avoid_contains": []
+    },
+    {
+      "id": 10, "kind": "judgment_trace", "node_id": "node:CONV:rg01",
+      "note": "증거 rg12 → 판단 rg01 supports_judgment 사슬.",
+      "expected_found": true, "expected_min_chain": 1
+    },
+    {
+      "id": 11, "kind": "judgment_trace", "node_id": "node:CONV:rg08",
+      "note": "고립 노드(엣지 0) → found True · 빈 사슬.",
+      "expected_found": true, "expected_min_chain": 0
+    },
+    {
+      "id": 12, "kind": "judgment_trace", "node_id": "node:CONV:rgZZ",
+      "note": "dangling(미저장) → found False graceful.",
+      "expected_found": false, "expected_min_chain": 0
+    }
+  ]
+}

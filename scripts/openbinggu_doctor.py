@@ -67,6 +67,8 @@ _CHECKS = [
     ("explicit_save_path", "../tests/explicit_save_path.py"),
     # 저장 본체(save_selected) 동작 — SSOT/explicit 변경의 회귀를 게이트에서 직접 포착(이전엔 미연결).
     ("conversation_candidate_save", "openbinggu_conversation_candidate_save.py"),
+    # 회상 유용성 Phase 1 — offline golden recall score(hit_rate/top-k/위험 트리거). semantic OFF 결정적·temp DB·운영 write 0.
+    ("recall_consistency", "../tests/recall_consistency_harness.py"),
 ]
 
 # 하위 selftest 의 "GATE: GO" / "RESULT: n/n  GATE=GO" 양식 모두 수용
