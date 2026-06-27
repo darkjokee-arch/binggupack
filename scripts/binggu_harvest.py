@@ -169,8 +169,11 @@ def _real_fetch_runner(url, timeout=30):
     with opener.open(req, timeout=timeout) as resp:  # noqa: S310 (owner 등록 소스만·redirect 차단)
         final_url = resp.geturl()
         raw = resp.read()
+        ctype = resp.headers.get("Content-Type", "")
+    # raw_bytes/content_type 동봉 — 전방위 파싱(parser adapter)용. text(decode)는 기존 호환 유지.
     return {"ok": True, "text": raw.decode("utf-8", errors="replace"),
-            "url": url, "final_url": final_url}
+            "url": url, "final_url": final_url,
+            "raw_bytes": raw, "content_type": ctype}
 
 
 def fetch_source(source, runner=None, sources_path_=None):
@@ -206,7 +209,8 @@ def fetch_source(source, runner=None, sources_path_=None):
         return {"status": "BLOCK", "reason": "REDIRECT_NOT_PUBLIC",
                 "source_id": sid, "final_label": SP.classify_source_pointer(final_url)}
     return {"status": "OK", "source_id": sid, "url": url,
-            "kind": source.get("kind"), "text": r["text"]}
+            "kind": source.get("kind"), "text": r["text"],
+            "raw_bytes": r.get("raw_bytes"), "content_type": r.get("content_type")}
 
 
 # ── ③ harvest 글루 — fetch 텍스트 → 후보(candidate only). 원문 변형 0 ──────────
@@ -260,16 +264,100 @@ def _content_chunks(text, source_ref):
     return chunks, stops
 
 
-def harvest_one(source, runner=None, sources_path_=None):
+# ── 전방위 파싱 2층(원문보존 + 파생) — owner 조건부 GO 반영 ───────────────
+#   §1(원문 1:1)은 text/plain·미상 소스에 그대로 유지(기존 _content_chunks 경로).
+#   바이너리/HTML 은 parser adapter 로 derived_text(가공본) 생성 — 원문(raw)은 그대로 보관 +
+#   fingerprint(raw_sha256) 동봉. 즉 §1 을 '원문(raw) 보존 + 파생(parsed) 명시' 2층으로 확장.
+def harvest_raw_dir(home=None):
+    return os.path.join(home or _home(), "harvest_raw")
+
+
+def _store_raw(raw_bytes, home):
+    """raw 원문을 그대로 보관(조건1) — <home>/harvest_raw/<sha256>.bin (멱등). sha256 반환.
+    home 미지정(selftest 등)이면 보관 skip 하고 fingerprint 만 반환."""
+    if not raw_bytes:
+        return None
+    sha = hashlib.sha256(raw_bytes).hexdigest()
+    if home:
+        d = harvest_raw_dir(home)
+        os.makedirs(d, exist_ok=True)
+        p = os.path.join(d, sha + ".bin")
+        if not os.path.exists(p):
+            tmp = p + ".tmp"
+            with open(tmp, "wb") as f:
+                f.write(raw_bytes)
+            os.replace(tmp, p)
+    return sha
+
+
+def _maybe_parse(fr):
+    """파싱 필요 판정 + parser adapter 호출. 텍스트류/미상이거나 raw_bytes 없으면 None
+    (→ 기존 §1 원문보존 경로 유지). mock fetch(raw_bytes 미제공)는 항상 None = 기존 동작 불변."""
+    raw = fr.get("raw_bytes")
+    if not raw:
+        return None
+    import binggu_parser_adapter as PA  # lazy(서드파티 미노출·부재해도 harvest 로드 OK)
+    fmt = PA.detect_format(fr.get("content_type"), fr.get("url"))
+    if fmt in ("text", "unknown"):
+        return None  # 평문/미상 → 기존 1:1 경로
+    return PA.parse_document(raw, content_type=fr.get("content_type"), filename=fr.get("url"))
+
+
+def _derived_chunks(derived_text, source_ref, pr):
+    """파생 텍스트(가공본) → evidence_chunk[]. text 는 derived 임을 evidence_meta 로 명시
+    (derivative=True / parser / raw_sha256). 원문 raw 는 _store_raw 가 별도 보관."""
+    chunks, stops = [], []
+    for i, seg in enumerate(_split_segments(derived_text)):
+        red, _hits = mvp1.redact_text(seg)
+        if mvp1._has_secret(red):
+            stops.append({"seg": i, "reason": "secret residual after redaction"})
+            continue
+        item_id = "EVC-HVP-" + hashlib.sha256(
+            (source_ref + "::" + red).encode("utf-8")).hexdigest()[:12]
+        chunks.append({
+            "item_id": item_id,
+            "text": red,
+            "source": source_ref,
+            "evidence_meta": {
+                "confidence": 0.5,
+                "source_kind": "harvest_parsed",
+                "timestamp": "(deterministic-harvest)",
+                "scope": mvp1.SCOPE,
+                "raw_pointer": source_ref,
+                "redaction_applied": True,
+                "derivative": True,                      # 파생(원문 아님)
+                "parser": pr.get("parser"),
+                "raw_sha256": pr.get("raw_sha256"),       # 원문 fingerprint
+            },
+        })
+    return chunks, stops
+
+
+def harvest_one(source, runner=None, sources_path_=None, parse=True, home=None):
     """단일 소스 1건 수확 → 후보 노드(candidate=true). 운영 ledger 미접촉(dict 반환만).
 
-    글루: fetch(게이트①) → capture → to_evidence → to_nodes(게이트② candidate 불변식).
+    글루: fetch(게이트①) → [2층: 파싱 필요시 parser adapter / 아니면 §1 원문보존] →
+          to_nodes(게이트② candidate 불변식). 파싱 실패는 이 소스만 PARSE_SKIP(전체 안 죽음·조건3).
     """
     fr = fetch_source(source, runner=runner, sources_path_=sources_path_)
     if fr["status"] != "OK":
         return fr
     src_ref = "harvest :: %s :: %s" % (fr.get("kind"), fr.get("source_id"))
-    chunks, ev_stops = _content_chunks(fr["text"], src_ref)
+    parse_artifacts = []
+    pr = _maybe_parse(fr) if parse else None
+    if pr is not None:
+        raw_sha = _store_raw(fr.get("raw_bytes"), home)  # 조건1 — raw 보관(성패 무관)
+        if not pr["ok"]:
+            # 조건3 — 이 소스만 typed error 로 skip. run_harvest 가 다음 소스 계속 진행.
+            return {"status": "PARSE_SKIP", "source_id": fr["source_id"], "url": fr.get("url"),
+                    "kind": fr.get("kind"), "parse_error": pr["error"],
+                    "raw_sha256": raw_sha, "nodes": []}
+        chunks, ev_stops = _derived_chunks(pr["derived_text"], src_ref, pr)
+        parse_artifacts.append({"parser": pr.get("parser"), "fmt": pr.get("fmt"),
+                                "raw_sha256": pr.get("raw_sha256"), "derivative": True,
+                                "n_chunks": len(chunks)})
+    else:
+        chunks, ev_stops = _content_chunks(fr["text"], src_ref)  # 기존 §1 1:1 경로(불변)
     nodes, ev_index, node_stops = mvp2.to_nodes(chunks)
     # 게이트② 코드 불변식 — to_nodes 가 candidate=true/promotion_allowed=false 를 강제하지만,
     # 본 모듈에서도 명시 검증(헌법 §6 ②). 위반 시 STOP(적재 0).
@@ -280,7 +368,7 @@ def harvest_one(source, runner=None, sources_path_=None):
                 "source_id": fr["source_id"]}
     return {"status": "OK", "source_id": fr["source_id"], "url": fr.get("url"),
             "kind": fr.get("kind"), "nodes": nodes, "evidence_index": ev_index,
-            "stops": ev_stops + node_stops,
+            "stops": ev_stops + node_stops, "parse_artifacts": parse_artifacts,
             "candidate_all_true": cand_ok if nodes else True,
             "promotion_all_false": promo_ok if nodes else True}
 
@@ -391,9 +479,10 @@ def run_harvest(ledger_path=None, home=None, runner=None, sources_path_=None, pe
     cursor = read_cursor(harvest_cursor_path(home))
     all_new_nodes, fetched, src_results = [], 0, []
     for s in sources:
-        one = harvest_one(s, runner=runner, sources_path_=sources_path_)
+        one = harvest_one(s, runner=runner, sources_path_=sources_path_, home=home)
         src_results.append({"source_id": s.get("source_id"), "status": one["status"],
                             "reason": one.get("reason"),
+                            "parse_error": (one.get("parse_error") or {}).get("type"),
                             "n_nodes": len(one.get("nodes", []))})
         if one["status"] != "OK":
             continue
@@ -634,6 +723,53 @@ def _selftest():
     chk("T12 서드파티 import 0 + urllib 사용",
         not any(any(t in ln for t in third) for ln in import_lines)
         and "urllib.request" in open(os.path.abspath(__file__), encoding="utf-8").read())
+
+    # ── T13~T15 전방위 파싱 2층(원문보존 + 파생) — raw_bytes 주는 mock 으로 harvest_one 직접 검증 ──
+    def raw_runner(raw_bytes, ctype):
+        def _run(url, timeout=30):
+            return {"ok": True, "text": raw_bytes.decode("utf-8", "replace"),
+                    "url": url, "final_url": url, "raw_bytes": raw_bytes, "content_type": ctype}
+        return _run
+
+    add_source("url", "https://example.org/doc.html", path=sp)
+    src = {"url": "https://example.org/doc.html", "kind": "url",
+           "source_id": source_id_for("https://example.org/doc.html")}
+    html_raw = (b"<html><body><p>" + SEG1.encode("utf-8") + b"</p><p>"
+                + SEG4.encode("utf-8") + b"</p></body></html>")
+    one = harvest_one(src, runner=raw_runner(html_raw, "text/html"), sources_path_=sp, home=home)
+    chk("T13 HTML derived 수확 OK", one["status"] == "OK" and len(one["nodes"]) > 0)
+    chk("T13b parse_artifacts derivative=True",
+        bool(one.get("parse_artifacts")) and one["parse_artifacts"][0]["derivative"] is True)
+    raw_sha = hashlib.sha256(html_raw).hexdigest()
+    raw_p = os.path.join(harvest_raw_dir(home), raw_sha + ".bin")
+    chk("T13c raw 원문 그대로 보관(조건1)", os.path.exists(raw_p))
+    chk("T13d 보관 raw == 원본 bytes(무변형)",
+        os.path.exists(raw_p) and open(raw_p, "rb").read() == html_raw)
+    chk("T13e derived 노드도 candidate=1/promotion=0",
+        all(n["properties"]["candidate"] is True and n["promotion_allowed"] is False
+            for n in one["nodes"]))
+
+    add_source("url", "https://example.org/report.pdf", path=sp)
+    src_pdf = {"url": "https://example.org/report.pdf", "kind": "url",
+               "source_id": source_id_for("https://example.org/report.pdf")}
+    pdf_raw = b"%PDF-1.4 broken-not-a-real-pdf"
+    one2 = harvest_one(src_pdf, runner=raw_runner(pdf_raw, "application/pdf"), sources_path_=sp, home=home)
+    chk("T14 파싱 실패 → 이 소스만 PARSE_SKIP(전체 안 죽음·조건3)", one2["status"] == "PARSE_SKIP")
+    chk("T14b PARSE_SKIP 도 raw 보관(fingerprint)",
+        one2.get("raw_sha256") == hashlib.sha256(pdf_raw).hexdigest())
+    chk("T14c typed error 동봉",
+        (one2.get("parse_error") or {}).get("type") in
+        ("PARSER_MISSING", "UNSUPPORTED_FORMAT", "PARSER_FAILED", "EMPTY_RESULT", "CORRUPT_DOCUMENT"))
+
+    add_source("url", "https://example.org/feed.txt", path=sp)
+    src_txt = {"url": "https://example.org/feed.txt", "kind": "url",
+               "source_id": source_id_for("https://example.org/feed.txt")}
+    plain_raw = SAMPLE.encode("utf-8")
+    one3 = harvest_one(src_txt, runner=raw_runner(plain_raw, "text/plain"), sources_path_=sp, home=home)
+    chk("T15 text/plain → §1 원문보존 경로(파생 아님)",
+        one3["status"] == "OK" and not one3.get("parse_artifacts"))
+    chk("T15b 평문 segment 1:1 보존(파생 경로 미적용)",
+        set(SAMPLE_SEGS) <= set(n["properties"]["sentence"] for n in one3["nodes"]))
 
     print("\nRESULT: %d/%d %s" % (ok, tot, "PASS" if ok == tot else "FAIL"))
     print("GATE: %s" % ("GO" if ok == tot else "BLOCK"))
