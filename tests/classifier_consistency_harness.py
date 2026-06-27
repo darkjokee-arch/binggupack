@@ -116,7 +116,10 @@ def _print_report(res, semantic_off):
     _dump("preview 누락 (false negative)", res["_lists"]["prev_fn"])
     _dump("capture 오탐 (false positive)", res["_lists"]["cap_fp"])
     _dump("capture 누락 (false negative)", res["_lists"]["cap_fn"])
-    print("\n주: Step 0(통합 전)에서는 불일치/노이즈가 존재하는 게 정상 — 이 숫자를 baseline으로 고정한다.")
+    if res["disagreement"] == 0 and res["preview_false_pos"] == 0:
+        print("\n주: SSOT 통합 완료 상태 — 불일치/노이즈 0. --assert-consistent 로 회귀를 막는다.")
+    else:
+        print("\n주: 불일치/노이즈가 남아 있다 — SSOT 게이트/분류기 보정으로 0 을 목표로 한다.")
 
 
 def main():
