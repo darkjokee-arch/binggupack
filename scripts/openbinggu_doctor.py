@@ -69,6 +69,8 @@ _CHECKS = [
     ("conversation_candidate_save", "openbinggu_conversation_candidate_save.py"),
     # 회상 유용성 Phase 1 — offline golden recall score(hit_rate/top-k/위험 트리거). semantic OFF 결정적·temp DB·운영 write 0.
     ("recall_consistency", "../tests/recall_consistency_harness.py"),
+    # 회상 효용 trace Phase 2 — opt-in 기록·PII 0·used/ignored/corrected 집계·golden_drift 후보. temp store·운영 write 0.
+    ("recall_trace", "binggu_recall_trace.py"),
 ]
 
 # 하위 selftest 의 "GATE: GO" / "RESULT: n/n  GATE=GO" 양식 모두 수용

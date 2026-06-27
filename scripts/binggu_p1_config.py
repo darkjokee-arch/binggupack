@@ -102,12 +102,16 @@ DEFAULT_CONFIG = {
     # 위험도 점수 = subtype 가중(버그패턴>교훈) × 관련성(term-frequency 정규화) — 0~1 정규.
     #   semantic_recall_enabled: 의미(bge-m3 cos) 회상 보강 스위치(기본 False — 어휘 회상만).
     #     실제 활성은 이 값 AND binggu_canonical_semantic.enabled()(opt-in) 둘 다 켜져야 한다.
+    #   trace_enabled: 회상 효용 trace 기록 opt-in(Phase 2, 기본 False — 끄면 기록 0·no-op).
+    #     켜야만 binggu_recall_trace.record_trace 가 회상 결과(node_id/category/hash, 원문 0)를
+    #     별도 store(recall_trace.sqlite)에 적재. 세션 한정은 env BINGGU_RECALL_TRACE=1 로도 가능.
     "recall_config": {
         "risk_mid_score": 0.30,
         "risk_high_score": 0.55,
         "preflight_max": 5,
         "recall_limit": 5,
         "semantic_recall_enabled": False,
+        "trace_enabled": False,
     },
     # 대비 규약(1단 · binggu_contrast_protocol) 설정 — preflight 신호 vs 강제조항 충돌 대비표.
     #   match_relevance_min: 빙구팩 claim ↔ mandate clause_text 토큰 _relevance 가 이 값 이상이어야
@@ -120,7 +124,7 @@ DEFAULT_CONFIG = {
 }
 
 _RECALL_KEYS = ("risk_mid_score", "risk_high_score", "preflight_max", "recall_limit",
-                "semantic_recall_enabled")
+                "semantic_recall_enabled", "trace_enabled")
 
 _RANKING_KEYS = ("freshness", "relevance", "utility")
 
@@ -242,10 +246,11 @@ def _coerce_recall(raw):
             except (TypeError, ValueError):
                 continue
             base[k] = max(1, v)
-        # semantic_recall_enabled — 불리언만 채택(잘못된 타입은 기본 False 유지).
-        sv = raw.get("semantic_recall_enabled", base["semantic_recall_enabled"])
-        if isinstance(sv, bool):
-            base["semantic_recall_enabled"] = sv
+        # semantic_recall_enabled / trace_enabled — 불리언만 채택(잘못된 타입은 기본 False 유지).
+        for bk in ("semantic_recall_enabled", "trace_enabled"):
+            bv = raw.get(bk, base[bk])
+            if isinstance(bv, bool):
+                base[bk] = bv
     if base["risk_high_score"] < base["risk_mid_score"]:
         warnings.warn(
             "recall_config: risk_high_score(%r) < risk_mid_score(%r) 역전 → 기본값 폴백."
@@ -398,6 +403,16 @@ def _selftest():
         save_user_config({"recall_config": {"semantic_recall_enabled": "yes"}}, home=home)
         check(load_user_config(home)["recall_config"]["semantic_recall_enabled"] is False,
               "T2d2c 잘못된 타입(문자열) → 기본 False 유지")
+        config_path(home).unlink()
+        # trace_enabled(Phase 2 opt-in) — 기본 False · bool override · 잘못된 타입 폴백
+        check(load_user_config(home)["recall_config"]["trace_enabled"] is False,
+              "T2d2d 기본 trace_enabled False(opt-in 미통과 → 기록 0)")
+        save_user_config({"recall_config": {"trace_enabled": True}}, home=home)
+        check(load_user_config(home)["recall_config"]["trace_enabled"] is True,
+              "T2d2e trace_enabled True override 반영")
+        save_user_config({"recall_config": {"trace_enabled": 1}}, home=home)
+        check(load_user_config(home)["recall_config"]["trace_enabled"] is False,
+              "T2d2f 잘못된 타입(int) → 기본 False 유지")
         config_path(home).unlink()
         # recall_config override + 역전 방어
         save_user_config({"recall_config": {"risk_mid_score": 0.4, "risk_high_score": 0.7,

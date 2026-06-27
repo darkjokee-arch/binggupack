@@ -32,6 +32,7 @@ GATES = [
     ("p1 ranking",        "binggu_p1_ranking.py",                      ["--selftest"], "GATE: GO"),
     ("p1 config",         "binggu_p1_config.py",                       [], "GATE=GO"),
     ("recall engine",     "binggu_recall.py",                          ["--selftest"], "GATE=GO"),
+    ("recall trace P2",   "binggu_recall_trace.py",                    ["--selftest"], "GATE=GO"),
     ("hit_stats comp4",   "binggu_hit_stats.py",                       ["--selftest"], "GATE: GO"),
     ("merkle anchor comp3","binggu_merkle_anchor.py",                  ["--selftest"], "GATE=GO"),
     ("hit_export comp5",  "binggu_hit_export_selftest.py",            [], "GATE=GO"),
