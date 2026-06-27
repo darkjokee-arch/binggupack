@@ -37,6 +37,18 @@ import binggu_p1_config as CFG  # recall_config["trace_enabled"] opt-in  # noqa:
 
 VALID_VERDICTS = ("used", "ignored", "corrected")
 
+# reason_code 화이트리스트 — note 는 자유 원문 금지(PII 차단), verdict 별 enum 만 허용.
+# golden_drift 분석에 그대로 쓰이는 구조화 신호(왜 무시/교정됐나 → fixture 보정 방향).
+#   ignored : not_relevant(무관) · already_known(이미 앎) · low_signal(약한 신호)
+#   corrected: stale(낡음/경로 바뀜) · wrong_context(맥락 어긋남) · superseded(더 최신 판단) ·
+#              false_match(무관한데 회상됨 — golden 에서 제외 후보)
+#   used     : note 불필요(빈 값만). 명시하면 거부(used 사유는 효용 측정에 불요).
+REASON_CODES = {
+    "used": (),
+    "ignored": ("not_relevant", "already_known", "low_signal"),
+    "corrected": ("stale", "wrong_context", "superseded", "false_match"),
+}
+
 # signal_only 라벨 — 집계 반환이 golden set 을 자동수정하는 입력으로 쓰이지 못하게 명시(헌법).
 _SIGNAL_NOTE = ("이 수치는 표시 신호일 뿐 — golden set/fixture 자동수정 근거 아님. "
                 "사람이 후보를 보고 recall_golden.json 을 직접 보정한다(자동결정 0).")
@@ -67,20 +79,51 @@ def _open_store(home=None):
         " needs_question INTEGER, ts TEXT);"
         "CREATE TABLE IF NOT EXISTS recall_outcomes("
         " outcome_id TEXT PRIMARY KEY, trace_id TEXT, node_id TEXT, verdict TEXT,"
-        " actor TEXT, ts TEXT, UNIQUE(trace_id, node_id));")
+        " reason_code TEXT, actor TEXT, ts TEXT, UNIQUE(trace_id, node_id));")
     return con
+
+
+def review_snapshot_path(home=None):
+    """review 번호→(trace_id,node_id) 매핑 스냅샷 경로. 메타만(원문 0). mark 의 N shift 방지."""
+    base = home or os.path.join(os.path.expanduser("~"), ".binggupack")
+    return os.path.join(base, "recall_trace_review.json")
 
 
 # ---------------- opt-in 판정 ----------------
 
+def _flag_path(home=None):
+    """opt-in 파일플래그 경로 — preflight_enabled 와 동일 패턴(파일 존재=ON). UX 통일."""
+    base = home or os.path.join(os.path.expanduser("~"), ".binggupack")
+    return os.path.join(base, "recall_trace_enabled")
+
+
 def trace_enabled(home=None):
-    """기록 opt-in 여부 — config trace_enabled(영구) OR env BINGGU_RECALL_TRACE=1(세션). 기본 False."""
+    """기록 opt-in 여부 — 3원천 OR(어느 하나라도 ON). 기본 False.
+      1) 파일플래그 <home>/recall_trace_enabled (binggu trace enable, preflight 패턴 통일)
+      2) env BINGGU_RECALL_TRACE=1 (세션 한정 토글)
+      3) config recall_config.trace_enabled (binggu_config.json · 영구)."""
+    if os.path.exists(_flag_path(home)):
+        return True
     if os.environ.get("BINGGU_RECALL_TRACE") == "1":
         return True
     try:
         return bool(CFG.recall_config(home).get("trace_enabled", False))
     except Exception:
         return False  # config 손상도 graceful — 기본 미기록(보수)
+
+
+def set_trace_flag(enable, home=None):
+    """파일플래그 ON/OFF(binggu trace enable/disable). 반환 {enabled, flag_path}."""
+    p = _flag_path(home)
+    if enable:
+        d = os.path.dirname(p)
+        if d:
+            os.makedirs(d, exist_ok=True)
+        with open(p, "w", encoding="utf-8") as f:
+            f.write("1")
+    elif os.path.exists(p):
+        os.remove(p)
+    return {"enabled": enable, "flag_path": p}
 
 
 # ---------------- PII 차단 정규화 ----------------
@@ -155,15 +198,19 @@ def trace_from_preflight(query, result, ts, *, domain=None, home=None):
 
 # ---------------- 기록: 사후 효용 판정 (actor=human 게이트) ----------------
 
-def record_outcome(trace_id, node_id, verdict, ctx, ts, *, home=None):
+def record_outcome(trace_id, node_id, verdict, ctx, ts, *, reason_code=None, home=None):
     """회상 노드 1개에 대한 사후 효용 판정. actor=human 만(헌법). verdict∈used/ignored/corrected.
 
+    reason_code: note 대용 — 자유 원문 금지(PII 차단), REASON_CODES[verdict] 화이트리스트만.
+      None 은 항상 허용. used 에 코드 명시는 거부(used 사유 불요).
     node_id='*' 는 trace 전체에 대한 판정(개별 노드 미지정). 같은 (trace_id,node_id)는
     UNIQUE — 재판정은 갱신(REPLACE)이 아니라 무시(이중계상 차단 · 첫 판정 보존)."""
     if (ctx or {}).get("actor", "").strip().lower() != "human":
         return {"recorded": False, "reason": "G4_no_auto"}
     if verdict not in VALID_VERDICTS:
         return {"recorded": False, "reason": "invalid_verdict"}
+    if reason_code is not None and reason_code not in REASON_CODES.get(verdict, ()):
+        return {"recorded": False, "reason": "invalid_reason_code"}  # 원문/오타 차단
     oid = "rto-" + hashlib.sha256(
         ("%s|%s|%s" % (trace_id, node_id, ts)).encode("utf-8", "replace")).hexdigest()[:16]
     con = _open_store(home)
@@ -175,12 +222,99 @@ def record_outcome(trace_id, node_id, verdict, ctx, ts, *, home=None):
                        (trace_id, node_id)).fetchone():
             return {"recorded": False, "reason": "dup_outcome"}
         con.execute(
-            "INSERT INTO recall_outcomes(outcome_id,trace_id,node_id,verdict,actor,ts)"
-            " VALUES(?,?,?,?,?,?)", (oid, trace_id, node_id, verdict, "human", ts))
+            "INSERT INTO recall_outcomes(outcome_id,trace_id,node_id,verdict,reason_code,actor,ts)"
+            " VALUES(?,?,?,?,?,?,?)", (oid, trace_id, node_id, verdict, reason_code, "human", ts))
         con.commit()
     finally:
         con.close()
-    return {"recorded": True, "outcome_id": oid}
+    return {"recorded": True, "outcome_id": oid, "reason_code": reason_code}
+
+
+# ---------------- review / mark (수동 outcome 명령 — binggu trace) ----------------
+
+def list_pending(home=None, ledger_path=None):
+    """미판정 (trace,node) 펼침 목록 + ledger claim join(표시용 · store 원문 0 유지).
+
+    claim 은 ledger(read-only)에서 node_id 로 조회한 표시 텍스트일 뿐 — trace store 엔
+    여전히 미저장(PII 0). ledger 부재/노드 부재면 claim=None(graceful).
+    정렬: ts asc → trace_id → node_id (결정적 · 새 trace 는 뒤에 붙어 앞 순번 불변).
+    반환 [{idx, trace_id, node_id, category, rank, kind, claim}] (idx=1부터)."""
+    if not os.path.exists(trace_store_path(home)):
+        return []
+    con = _open_store(home)
+    try:
+        judged = set(con.execute("SELECT trace_id, node_id FROM recall_outcomes").fetchall())
+        rows = con.execute(
+            "SELECT trace_id, kind, recalled_json, ts FROM recall_traces ORDER BY ts, trace_id").fetchall()
+    finally:
+        con.close()
+
+    # ledger claim 조회(read-only · 표시용) — binggu_recall._load_graph 재사용.
+    by_id = {}
+    if ledger_path and os.path.exists(ledger_path):
+        try:
+            import binggu_recall as RC
+            by_id = RC._load_graph(ledger_path).get("by_id", {})
+        except Exception:
+            by_id = {}
+
+    pending = []
+    for trace_id, kind, rj, _ts in rows:
+        try:
+            nodes = json.loads(rj)
+        except Exception:
+            nodes = []
+        for n in nodes:
+            nid = n.get("node_id")
+            if not nid or (trace_id, nid) in judged:
+                continue
+            node = by_id.get(nid)
+            claim = (node["sentence"][:100] if node else None)
+            pending.append({"trace_id": trace_id, "node_id": nid,
+                            "category": n.get("category"), "rank": n.get("rank"),
+                            "kind": kind, "claim": claim})
+    # 결정적 정렬 후 idx 부여
+    for i, p in enumerate(pending, 1):
+        p["idx"] = i
+    return pending
+
+
+def save_review_snapshot(pending, home=None):
+    """review 번호→(trace_id,node_id) 매핑만 저장(원문 0). mark 가 N 을 안전 역참조."""
+    snap = [{"idx": p["idx"], "trace_id": p["trace_id"], "node_id": p["node_id"]}
+            for p in pending]
+    p = review_snapshot_path(home)
+    d = os.path.dirname(p)
+    if d:
+        os.makedirs(d, exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(snap, f, ensure_ascii=False)
+    return p
+
+
+def _load_review_snapshot(home=None):
+    p = review_snapshot_path(home)
+    if not os.path.exists(p):
+        return None
+    try:
+        with open(p, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def mark_by_index(n, verdict, ctx, ts, *, reason_code=None, home=None):
+    """review 스냅샷의 N 번 항목을 판정(binggu trace mark N verdict). N shift 방지.
+
+    스냅샷 부재 → need_review(먼저 binggu trace review). N 범위 밖 → bad_index."""
+    snap = _load_review_snapshot(home)
+    if not snap:
+        return {"recorded": False, "reason": "need_review"}
+    hit = next((s for s in snap if s.get("idx") == n), None)
+    if not hit:
+        return {"recorded": False, "reason": "bad_index"}
+    return record_outcome(hit["trace_id"], hit["node_id"], verdict, ctx, ts,
+                          reason_code=reason_code, home=home)
 
 
 # ---------------- 집계 (signal_only — golden set 자동수정 0) ----------------
@@ -201,29 +335,34 @@ def aggregate(home=None):
     con = _open_store(home)
     try:
         n_traces = con.execute("SELECT COUNT(*) FROM recall_traces").fetchone()[0]
-        rows = con.execute("SELECT node_id, verdict FROM recall_outcomes").fetchall()
+        rows = con.execute("SELECT node_id, verdict, reason_code FROM recall_outcomes").fetchall()
     finally:
         con.close()
 
     per = {}
     tot = {"used": 0, "ignored": 0, "corrected": 0}
-    for node_id, verdict in rows:
+    for node_id, verdict, reason in rows:
         if verdict not in VALID_VERDICTS:
             continue
         tot[verdict] += 1
-        d = per.setdefault(node_id, {"used": 0, "ignored": 0, "corrected": 0})
+        d = per.setdefault(node_id, {"used": 0, "ignored": 0, "corrected": 0, "reasons": {}})
         d[verdict] += 1
+        if reason:
+            d["reasons"][reason] = d["reasons"].get(reason, 0) + 1
 
     per_node = {}
     drift = []
     for node_id, d in per.items():
         total = d["used"] + d["ignored"] + d["corrected"]
         rate = round(d["used"] / total, 4) if total else None
-        per_node[node_id] = {**d, "total": total, "usefulness_rate": rate}
+        per_node[node_id] = {"used": d["used"], "ignored": d["ignored"],
+                             "corrected": d["corrected"], "reasons": d["reasons"],
+                             "total": total, "usefulness_rate": rate}
         bad = d["ignored"] + d["corrected"]
         if total >= _DRIFT_N_MIN and total and (bad / total) >= _DRIFT_RATIO:
             drift.append({"node_id": node_id, "total": total,
                           "ignored": d["ignored"], "corrected": d["corrected"],
+                          "reasons": d["reasons"],  # 보정 방향(false_match→제외·superseded→갱신)
                           "bad_ratio": round(bad / total, 4)})
     drift.sort(key=lambda x: (-x["bad_ratio"], -x["total"], x["node_id"]))
 
@@ -380,6 +519,86 @@ def _selftest():
         ck(agg_empty["overall"]["traces"] == 0 and agg_empty["golden_drift_candidates"] == []
            and agg_empty["overall"]["usefulness_rate"] is None,
            "빈 store → 집계 0·후보 0(에러 0)")
+
+        # ── 파일플래그 opt-in(preflight 패턴 통일) ──
+        home4 = os.path.join(tmp, ".binggupack4")
+        os.makedirs(home4, exist_ok=True)
+        CFG.save_user_config({"recall_config": {"trace_enabled": False}}, home=home4)
+        ck(trace_enabled(home4) is False, "파일플래그/env/config 전부 OFF → trace_enabled False")
+        set_trace_flag(True, home=home4)
+        ck(trace_enabled(home4) is True and os.path.exists(_flag_path(home4)),
+           "set_trace_flag(True) → 파일 생성·trace_enabled True(config OFF여도)")
+        set_trace_flag(False, home=home4)
+        ck(trace_enabled(home4) is False and not os.path.exists(_flag_path(home4)),
+           "set_trace_flag(False) → 파일 삭제·OFF 복귀")
+
+        # ── reason_code 화이트리스트(PII 차단) ──
+        set_trace_flag(True, home=home4)
+        rc4 = record_trace("리뷰 작업", "why_search", recalled, TS, home=home4)
+        tid4 = rc4["trace_id"]
+        ck(record_outcome(tid4, "node:CONV:aa01", "ignored", {"actor": "human"}, TS,
+                          reason_code="not_relevant", home=home4)["recorded"],
+           "reason_code 화이트리스트(ignored:not_relevant) → 기록")
+        ck(record_outcome(tid4, "node:CONV:bb02", "corrected", {"actor": "human"}, TS,
+                          reason_code="zzz_freeform", home=home4)["reason"] == "invalid_reason_code",
+           "reason_code 화이트리스트 외(원문/오타) → invalid_reason_code(PII 차단)")
+        ck(record_outcome(tid4, "node:CONV:bb02", "used", {"actor": "human"}, TS,
+                          reason_code="not_relevant", home=home4)["reason"] == "invalid_reason_code",
+           "used 에 reason_code 명시 → 거부(used 사유 불요)")
+
+        # ── list_pending + ledger claim join(표시용·store 원문 0) ──
+        # 별 home5 + ledger(node sentence) — review/mark/N-shift 안전 검증.
+        home5 = os.path.join(tmp, ".binggupack5")
+        os.makedirs(home5, exist_ok=True)
+        set_trace_flag(True, home=home5)
+        led5 = os.path.join(home5, "ledger.sqlite")
+        lcon = sqlite3.connect(led5)
+        lcon.executescript(
+            "CREATE TABLE nodes(node_id TEXT PRIMARY KEY, node_type TEXT, sentence TEXT,"
+            " candidate INT, state TEXT, content_hash TEXT, created_at TEXT,"
+            " semantic_subtype TEXT, use_count INTEGER DEFAULT 0);"
+            "CREATE TABLE evidence(evidence_id TEXT, sentence TEXT, source_pointer_id TEXT, source_hash TEXT);"
+            "CREATE TABLE edges(edge_id TEXT, relation TEXT, source TEXT, target TEXT,"
+            " candidate INT, state TEXT, evidence_refs TEXT);")
+        lcon.execute("INSERT INTO nodes(node_id,node_type,sentence,candidate,state,content_hash,"
+                     "created_at,semantic_subtype,use_count) VALUES"
+                     "('node:CONV:p1','judgment','배포 전 live endpoint 확인',0,'active','h',?, '교훈',2)", (TS,))
+        lcon.execute("INSERT INTO nodes(node_id,node_type,sentence,candidate,state,content_hash,"
+                     "created_at,semantic_subtype,use_count) VALUES"
+                     "('node:CONV:p2','judgment','오래된 인증서 경로 확인',0,'active','h',?, '버그패턴',3)", (TS,))
+        lcon.commit()
+        lcon.close()
+        rev_recalled = [
+            {"node_id": "node:CONV:p1", "semantic_subtype": "교훈", "rank_score": 0.82, "relevance": 0.7},
+            {"node_id": "node:CONV:p2", "semantic_subtype": "버그패턴", "rank_score": 0.74, "relevance": 0.6},
+        ]
+        record_trace("배포 점검", "preflight", rev_recalled, TS, home=home5)
+        pend = list_pending(home=home5, ledger_path=led5)
+        ck(len(pend) == 2 and pend[0]["idx"] == 1 and pend[0]["claim"] == "배포 전 live endpoint 확인"
+           and pend[0]["category"] == "교훈",
+           "list_pending → 미판정 2건·ledger claim join(표시용)·idx 부여")
+        # claim 은 ledger 표시용일 뿐 — trace store 바이트엔 원문 0
+        with open(trace_store_path(home5), "rb") as f:
+            blob5 = f.read()
+        ck("배포 전 live endpoint 확인".encode("utf-8") not in blob5,
+           "claim 은 ledger join 표시용 — trace store 엔 미저장(PII 0 유지)")
+
+        # ── review 스냅샷 + mark_by_index N-shift 안전 ──
+        ck(mark_by_index(1, "used", {"actor": "human"}, TS, home=home5)["reason"] == "need_review",
+           "스냅샷 없이 mark → need_review")
+        save_review_snapshot(pend, home=home5)
+        ck(mark_by_index(1, "used", {"actor": "human"}, TS, home=home5)["recorded"],
+           "review 후 mark 1 used → 기록")
+        # mark 1 로 p1 판정됨 → 미판정 재계산하면 p2 가 1번이 되지만, 스냅샷 기준 mark 2 는 여전히 p2
+        m2 = mark_by_index(2, "corrected", {"actor": "human"}, TS, reason_code="stale", home=home5)
+        ck(m2["recorded"] and m2["reason_code"] == "stale",
+           "mark 2 corrected(--note stale) → p2 판정(N-shift 안전: 스냅샷 역참조)")
+        ck(mark_by_index(9, "used", {"actor": "human"}, TS, home=home5)["reason"] == "bad_index",
+           "범위 밖 mark → bad_index")
+        # 집계 reasons 분포
+        agg5 = aggregate(home=home5)
+        ck(agg5["per_node"]["node:CONV:p2"]["reasons"].get("stale") == 1,
+           "aggregate per_node reasons 분포(p2: stale 1) — golden 보정 방향")
 
         # ── 운영 ledger sentinel 미접촉 ──
         ck(os.path.exists(ledger) and os.path.getmtime(ledger) == ledger_mt0,

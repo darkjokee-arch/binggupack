@@ -120,9 +120,27 @@ def _run(data):
         prompt = data.get("prompt", "") or ""
         cwd = data.get("cwd") or os.getcwd()
         res = RC.preflight_context(str(ledger), prompt=prompt, cwd=cwd)
+        _maybe_record_trace(prompt, res)  # Phase 2: opt-in 일 때만 회상 메타 기록(원문 0·실패 흡수)
         return render_block(res)
     except Exception:
         return None
+
+
+def _maybe_record_trace(prompt, res):
+    """회상 효용 trace 기록(Phase 2) — opt-in(binggu trace enable / env / config)일 때만.
+
+    ledger 회상은 read-only 그대로 — trace 는 별도 store(recall_trace.sqlite)에만 write.
+    어떤 예외도 흡수(hook 무방해 · 항상 정상 진행). 기본 OFF 면 즉시 반환(부담 0)."""
+    try:
+        import binggu_recall_trace as RT
+        h = str(_home())
+        if not RT.trace_enabled(home=h):
+            return
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        RT.trace_from_preflight(prompt, res, ts, home=h)
+    except Exception:
+        return
 
 
 def main():
@@ -270,6 +288,35 @@ def _selftest():
         blk = render_block(rich)
         check(blk and "자동 적용 0" in blk and "사람" in blk and "위험도 0.70" in blk,
               "T11 render_block 위험 결과 → 안전벨트 + 위험도 표기")
+
+        # ── T12/T13 Phase 2: record_trace 배선(opt-in 일 때만 · read-only 원칙 유지) ──
+        build_ledger()  # T9 에서 지웠으니 재생성
+        sys.path.insert(0, scripts)
+        import binggu_recall_trace as RT
+        store = RT.trace_store_path(str(home))
+        if os.path.exists(store):
+            os.remove(store)
+        # T12 opt-in OFF(기본) → preflight 호출해도 trace store 미생성(no-op)
+        call({"hook_event_name": "UserPromptSubmit",
+              "prompt": "검증 없이 바로 배포 endpoint", "cwd": repo_cwd})
+        check(not os.path.exists(store),
+              "T12 trace opt-in OFF(기본) → preflight 호출해도 trace store 미생성")
+        # ledger 는 여전히 read-only(회상만) — preflight 회상이 ledger 를 건드리지 않음
+        mled = (ledger.stat().st_mtime_ns, ledger.stat().st_size)
+        # T13 opt-in ON(파일플래그) → 호출 후 trace store 에 회상 메타 기록(원문 0)
+        RT.set_trace_flag(True, home=str(home))
+        call({"hook_event_name": "UserPromptSubmit",
+              "prompt": "검증 없이 바로 배포 endpoint", "cwd": repo_cwd})
+        pend = RT.list_pending(home=str(home), ledger_path=str(ledger))
+        check(os.path.exists(store) and len(pend) >= 1,
+              "T13 trace opt-in ON → preflight 후 미판정 회상 기록(record_trace 배선)")
+        check((ledger.stat().st_mtime_ns, ledger.stat().st_size) == mled,
+              "T13b trace 기록돼도 ledger 는 불변(별도 store · 회상 read-only)")
+        with open(store, "rb") as f:
+            tb = f.read()
+        check("검증 없이 바로 배포하면 실패한다".encode("utf-8") not in tb,
+              "T13c 회상 노드 원문이 trace store 에 미저장(PII 0)")
+        RT.set_trace_flag(False, home=str(home))
 
         print(f"\nGATE={'GO' if ok else 'NO-GO'}")
         return 0 if ok else 1

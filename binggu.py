@@ -355,16 +355,20 @@ def cmd_recall(a):
     return 0
 
 
-def cmd_trace(a):
-    """trace — judgment_trace: 판단 노드에서 근거 엣지를 따라 사슬(다홉). read-only."""
+def _reason_hint(verdict):
+    import binggu_recall_trace as RT
+    return ", ".join(RT.REASON_CODES.get(verdict, ())) or "(없음)"
+
+
+def _judgment_trace_show(ledger, node_id):
+    """기존 judgment_trace — 판단 노드 근거 사슬(다홉). read-only."""
     import binggu_recall as RC
-    ledger, _ = _ledger_paths(a.ledger)
     if not os.path.exists(ledger):
         print("장부가 없습니다: %s · 먼저 python binggu.py init" % ledger)
         return 0
-    res = RC.judgment_trace(ledger, a.node_id)
+    res = RC.judgment_trace(ledger, node_id)
     if not res["found"]:
-        print("노드를 찾을 수 없습니다: %s (binggu.py list 로 node_id 확인)" % a.node_id)
+        print("노드를 찾을 수 없습니다: %s (binggu.py list 로 node_id 확인)" % node_id)
         return 0
     r = res["root"]
     print("# 근거 사슬 — %s" % r["claim"])
@@ -379,6 +383,82 @@ def cmd_trace(a):
             print("      %s" % peer)
     print("\n%s (신뢰도 %.2f)" % (res["summary"], res["confidence"]))
     return 0
+
+
+def _trace_review(RT, ledger, home):
+    """미판정 회상 목록 + 번호→(trace,node) 스냅샷 저장(원문 0). 효용 판정 대기."""
+    pend = RT.list_pending(home=home, ledger_path=ledger)
+    if not pend:
+        print("미판정 회상이 없습니다.")
+        print("(preflight 자동주입이 일어나고 opt-in 이 켜져 있어야 쌓입니다 — binggu trace enable)")
+        return 0
+    RT.save_review_snapshot(pend, home=home)
+    print("# 미판정 회상 %d건 — 효용 판정 대기 (candidate · 사람 판정만)" % len(pend))
+    for p in pend:
+        cat = (" [%s]" % p["category"]) if p["category"] else ""
+        rank = (" score=%.2f" % p["rank"]) if isinstance(p["rank"], (int, float)) else ""
+        claim = p["claim"] or ("(원문 미상 · node_id %s)" % p["node_id"])
+        print("  %d. %s%s%s" % (p["idx"], claim, cat, rank))
+        print("     판정: binggu trace mark %d used|ignored|corrected [--note <code>]" % p["idx"])
+    print("\nreason_code(--note): ignored→%s · corrected→%s"
+          % (_reason_hint("ignored"), _reason_hint("corrected")))
+    return 0
+
+
+def cmd_trace(a):
+    """trace — 회상 효용 trace(review/mark/enable/disable) + 근거 사슬(show/<node_id>).
+
+    binggu trace [review]          : 미판정 회상 목록(효용 판정 대기)
+    binggu trace mark N <verdict>  : N 번 회상 판정 used|ignored|corrected (--note <reason_code>)
+    binggu trace enable | disable  : 효용 trace 기록 opt-in 파일플래그(preflight 패턴 통일)
+    binggu trace show <node_id>    : (기존) 판단 노드 근거 사슬
+    binggu trace <node:CONV:...>   : (하위호환) show 와 동일
+    """
+    import binggu_recall_trace as RT
+    from datetime import datetime, timezone
+    ledger, _ = _ledger_paths(a.ledger)
+    home = os.path.dirname(os.path.abspath(ledger))
+    a1 = getattr(a, "a1", None)
+
+    if a1 == "enable":
+        r = RT.set_trace_flag(True, home=home)
+        print("회상 효용 trace 기록 ON (opt-in): %s" % r["flag_path"])
+        print("preflight 자동주입 시 회상 메타가 기록됩니다(원문 0). 끄기: binggu trace disable")
+        return 0
+    if a1 == "disable":
+        RT.set_trace_flag(False, home=home)
+        print("회상 효용 trace 기록 OFF (기록 0)")
+        return 0
+    if a1 == "mark":
+        try:
+            n = int(a.a2)
+        except (TypeError, ValueError):
+            print("사용법: binggu trace mark <N> <used|ignored|corrected> [--note <reason_code>]")
+            return 2
+        verdict = a.a3
+        if verdict not in RT.VALID_VERDICTS:
+            print("verdict 는 used|ignored|corrected (받음: %r)" % verdict)
+            return 2
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        res = RT.mark_by_index(n, verdict, {"actor": "human"}, ts,
+                               reason_code=getattr(a, "note", None), home=home)
+        if res["recorded"]:
+            note = (" · note=%s" % res["reason_code"]) if res.get("reason_code") else ""
+            print("판정 기록: #%d → %s%s (actor=human)" % (n, verdict, note))
+            return 0
+        hint = {"need_review": "먼저 binggu trace review 로 목록을 보세요.",
+                "bad_index": "그 번호의 회상이 없습니다(review 재실행).",
+                "dup_outcome": "이미 판정된 회상(첫 판정 보존).",
+                "invalid_reason_code": "note 는 정해진 코드만: %s" % _reason_hint(verdict),
+                "trace_not_found": "trace 를 찾을 수 없습니다.",
+                "G4_no_auto": "actor=human 만 판정 가능(헌법)."}.get(res["reason"], res["reason"])
+        print("판정 안 됨(%s): %s" % (res["reason"], hint))
+        return 0
+    if a1 in (None, "review"):
+        return _trace_review(RT, ledger, home)
+    # show <node_id> | <node:CONV:...> (judgment_trace · 하위호환)
+    node_id = a.a2 if a1 == "show" else a1
+    return _judgment_trace_show(ledger, node_id)
 
 
 def cmd_preflight(a):
@@ -1112,7 +1192,12 @@ def main():
     wp_ = sub.add_parser("why"); wp_.add_argument("query")                  # recall 별칭
     wp_.add_argument("--limit", type=int, default=None)
     wp_.add_argument("--record", action="store_true", dest="record")  # use_count++ (기본 read-only)
-    tp = sub.add_parser("trace"); tp.add_argument("node_id")
+    # trace: 효용 trace(review/mark/enable/disable) + judgment_trace(show/<node_id> 하위호환)
+    tp = sub.add_parser("trace")
+    tp.add_argument("a1", nargs="?", default=None)   # review|mark|enable|disable|show|<node_id>
+    tp.add_argument("a2", nargs="?", default=None)   # mark:N | show:node_id
+    tp.add_argument("a3", nargs="?", default=None)   # mark:verdict
+    tp.add_argument("--note", default=None)          # reason_code(화이트리스트)
     pfp = sub.add_parser("preflight")
     pfp.add_argument("--prompt", default=None)
     pfp.add_argument("--cwd", default=None)

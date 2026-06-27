@@ -7,6 +7,16 @@ owner 지시(2026-06-14 GO-P8): 회귀 묶음 명령 추가만.
 
 금지: 실 ledger write 0 / cloud upload·DB insert·tag/release·ingest 0 / OpenCrab Cloud 확인 0.
   (각 selftest는 temp 전용이거나 실 ledger read-only — 이 러너는 호출만)
+
+★ FLAKY(transient) 항목 판정 절차 (회귀 단정 전 필수 3중 확증):
+  이 러너는 selftest 들을 한 프로세스에서 잇따라 호출하므로, 일부 항목이 파일쓰기·
+  tree-scan·임시 home 공유 등으로 1회성 transient FAIL 을 낼 수 있다(예: P4 label,
+  tree scan — 백그라운드 에이전트 파일쓰기 레이스 선례). FAIL 을 곧바로 "내 변경의 회귀"로
+  단정하지 말고 다음 3개를 모두 확인한 뒤에만 회귀로 결론낸다:
+    1) 단독 실행 GO  : python scripts/<해당>.py --selftest  → 단독으로 GATE=GO 인가
+    2) 무관 grep     : 해당 selftest 가 내 변경 심볼을 0 참조(grep)하는가
+    3) 1회 재실행 GO : 이 러너를 한 번 더 돌려 그 항목이 PASS 로 돌아오는가
+  셋 다 통과면 transient(무관) — 통과 못 하면 진짜 회귀로 조사한다.
 """
 from __future__ import annotations
 
@@ -33,6 +43,7 @@ GATES = [
     ("p1 config",         "binggu_p1_config.py",                       [], "GATE=GO"),
     ("recall engine",     "binggu_recall.py",                          ["--selftest"], "GATE=GO"),
     ("recall trace P2",   "binggu_recall_trace.py",                    ["--selftest"], "GATE=GO"),
+    ("preflight hook",    os.path.join("..", "hooks", "binggu_preflight_hook.py"), ["--selftest"], "GATE=GO"),
     ("hit_stats comp4",   "binggu_hit_stats.py",                       ["--selftest"], "GATE: GO"),
     ("merkle anchor comp3","binggu_merkle_anchor.py",                  ["--selftest"], "GATE=GO"),
     ("hit_export comp5",  "binggu_hit_export_selftest.py",            [], "GATE=GO"),
