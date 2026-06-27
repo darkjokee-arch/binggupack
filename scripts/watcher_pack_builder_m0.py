@@ -22,6 +22,7 @@ CLI:
 """
 import hashlib
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -313,6 +314,10 @@ def run_rationale_link_check():
 
 
 def run_selftest():
+    # selftest 결정성: semantic pre-filter OFF 강제(binggu_rationale_suggest._selftest 와 동일 패턴).
+    # 합성 fixture 의 cos 유사도가 머신마다(Ollama/임베딩 캐시 유무) 달라 edge 추천이 비결정적이 되는
+    # 것을 막는다 — 운영 _build_rationale_layer2/build_pack 경로는 불변(semantic ON 그대로).
+    os.environ["BINGGU_SEMANTIC_OFF"] = "1"
     if not FIXTURE_DIR.is_dir():
         print("[FAIL] fixture 디렉토리 없음:", FIXTURE_DIR)
         sys.exit(1)
