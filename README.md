@@ -1,122 +1,145 @@
 # BingguPack
 
-**내가 일할수록 나를 알아가는, 내 PC 안의 개인 지식 노트.**
+**AI와 일하면서 생긴 내 판단·교훈·선호를 내 PC에 저장하고, 다음 작업 전에 다시 떠올려주는 개인 기억 엔진입니다.**
 
-> 최신: **v1.15.0 — owner 발화 a0 형식게이트 면제** ✍️ · 구어체·짧은 직감도 **원문 그대로 저장**(speaker=owner 형식게이트 면제, PII/G4 안전게이트 불변).
-> 이전: v1.14.0 화자 페어 양방향 🔁 (누가 먼저 말했고 누가 반응했는지 + `save --speaker` + MCP 저장 크래시 수정) · v1.13.0 자기진화 거버넌스 🧭 · v1.12.0 화자 축 🗣️
-> 🔒 로컬 우선 · 자동 저장 없음 · 내가 고른 것만 저장 · MIT License
-> Release: <https://github.com/darkjokee-arch/binggupack/releases/tag/v1.15.0> · PyPI: <https://pypi.org/project/binggupack/>
+> 현재 `main`: 분류 기준 통합, `remember`/`pair` 명시 입력 경로, 회상 효용 trace, `storage`/`mcp` facade까지 반영.
+> 최신 배포판: **v1.15.0** · [Release](https://github.com/darkjokee-arch/binggupack/releases/tag/v1.15.0) · [PyPI](https://pypi.org/project/binggupack/)
+> 로컬 우선 · 자동 저장 없음 · 내가 고른 것만 저장 · MIT License
 
-### 👉 처음이세요? **[여기서 시작 → docs/START_HERE.md](docs/START_HERE.md)** — 5분이면 첫 사용까지 갑니다.
+### 처음이라면 여기부터
+
+**[docs/START_HERE.md](docs/START_HERE.md)** 에서 5분 흐름만 따라가면 됩니다.
 
 ---
 
-## 빙구팩이 뭔가요?
+## 한 줄로 말하면
 
-AI와 대화하다 보면 정작 남기고 싶은 것 — **내 판단, 배운 점, 정한 방침** — 이 수십 개 대화창에 흩어져 사라집니다. 그렇다고 전부 자동 저장하면 잡음과 민감정보가 쌓이고 통제권을 잃죠.
+AI와 대화하다 보면 "이건 다음에도 기억해야겠다" 싶은 말이 생깁니다.
+예를 들면 이런 것들입니다.
 
-빙구팩은 **넓게 줍고, 내가 고른 것만 저장하는** 개인 노트입니다.
+- "배포 전에 live endpoint를 먼저 확인한다."
+- "이 거래처는 다음에 우선 검토한다."
+- "이 방식은 위험하니 기본값으로 쓰지 않는다."
+- "AI가 제안했지만, 이번엔 내 판단이 더 맞았다."
 
-- 원본은 전부 내 PC 안 파일 하나(`ledger.sqlite`)에 있습니다. 클라우드가 원본을 갖지 않습니다.
-- **자동으로 저장되는 건 아무것도 없습니다.** 내가 직접 고른 것만 저장됩니다.
-- **아무 문장이나 모으지 않습니다.** 개인 판단·교훈·선호·규칙만 후보로 올립니다 — 단순 조회·일회성 지시·운영 보고·잡담·순수 지식은 후보도 아닙니다(미리보기와 자동 캡처가 같은 기준).
-- 쓸수록 빙구팩은 "나"를 알아갑니다 — 내가 어떻게 판단하고, 뭘 선호하고, 어떤 실수를 했는지가 쌓여서, 다음에 비슷한 일이 오면 먼저 짚어줍니다.
+BingguPack은 이런 문장을 **후보로 보여주고**, 내가 직접 고른 것만 **내 PC의 장부(`ledger.sqlite`)** 에 저장합니다.
+나중에 비슷한 일을 시작하면 관련 기억과 과거 실수 패턴을 먼저 보여줍니다.
 
-> 빙구팩은 **개인 기억 엔진**입니다 — RAG·팀 위키·자동 지식 수집·클라우드 메모리가 아닙니다. 처음이라면 **[docs/START_HERE.md](docs/START_HERE.md)** 부터.
+## 빙구팩이 아닌 것
 
-## 무엇을 할 수 있나요
+범위를 일부러 좁게 잡았습니다.
 
-| 능력 | 한 줄 설명 |
-|---|---|
-| 🧹 **넓게 수집** | 어느 AI(Claude·ChatGPT·폰·웹)에서 일하든 남길 문장을 후보로 모음 |
-| 👀 **미리보기** | 모은 후보를 먼저 보여줌 — 이 단계에선 저장 0 |
-| ✍️ **내가 골라 저장** | 내가 직접 고른 것만 저장. AI는 저장 못 함 |
-| 🗣️ **화자 축** | 내 말(직감·지적)과 AI 요약(수정·수용·반박)을 **따로** 쌓고, **누가 먼저 말하고 누가 반응했는지**(시간 순서·방향)까지 수용/반박/수정 엣지로 연결 |
-| ⚖️ **양방향 신뢰도** | 내 직감과 AI 반박, **누가 더 잘 맞았나**를 기억. 한쪽 편 안 듦 — 나도 AI도 틀릴 수 있으니까 |
-| 🔁 **자기수정** | 틀린 판단은 고치고, 예측은 결과로 검증해 다음 판단이 똑똑해짐 |
-| 🧭 **충돌 조정(거버넌스)** | 내 학습과 기존 규칙이 부딪치면 양쪽 보여주고 내가 선택 — 규칙 변경은 사람 손(빙구팩은 제안만)·안전 규칙은 못 바꿈 |
-| 🧠 **회상·반문** | 일 시작 전 관련 기억과 과거 실수 패턴을 먼저 떠올려줌 |
-| 📦 **팩 만들기·검증** | 모은 지식을 다른 도구가 쓸 "꾸러미(팩)"로 묶고 구조를 검증 |
-| 🔀 **워크플로우 추천** | "이 목표엔 이런 팩·데이터가 필요해요"를 자동 제안(추천만 — 실행은 사람) |
-| ☁️ **안전하게 내보내기** | 외부 실행 도구로 보내기 전 안전점검·업로드 준비. 실제 전송은 내가 승인할 때만 |
-| 🔌 **Claude Code 연결** | `clone` 한 번으로 MCP 패키지 설치(도구 8개) |
-| 💻 **어디서나** | Windows · WSL · macOS · Linux |
+- 문서 검색용 RAG가 아닙니다.
+- 팀 위키가 아닙니다.
+- 모든 대화를 자동으로 수집하는 도구가 아닙니다.
+- 클라우드에 원본 기억을 맡기는 서비스가 아닙니다.
 
-## 빠른 시작
+핵심은 **내 판단을 내가 승인해서 남기고, 다음 작업 전에 꺼내 쓰는 것**입니다.
+
+## 5분 사용법
+
+clone해서 바로 쓸 수 있습니다. 아래에서 `binggu`라고 부르는 명령은 clone한 폴더에서는 `python binggu.py`로 실행하면 됩니다.
 
 ```bash
 git clone https://github.com/darkjokee-arch/binggupack.git
 cd binggupack
-python binggu.py init                         # 내 노트 만들기
+python binggu.py start
 ```
 
-**내 말과 AI 요약을 따로 쌓고 연결하기 (화자 축)**
+내가 기억하고 싶은 말을 미리 봅니다. 이 단계에서는 저장되지 않습니다.
 
 ```bash
-# 페어 = 노드 2 + 연결 엣지 1을 한 번에 (따로 저장하면 연결이 빠짐)
-# 인자 순서는 항상 (owner 발화, ai 발화). --by 는 "반응한 쪽"(=엣지 방향)만 정함
-# 방향: [먼저 말한 사람]→[반응한 사람] 시간 순서가 엣지에 남음
-# relation: accepts(수용) / refutes(반박) / revises(수정)
-
-# ① AI가 먼저 권고 → 내가 그걸 뒤집음(반응 주체=나)  → --by owner (owner_*)
-python binggu.py pair "그래도 이 건은 응찰한다" "데이터가 부족해 보수적 접근이 맞다" \
-    --by owner --relation revises --confirm "PAIR owner_revises owner:1 ai:1"
-
-# ② 내가 먼저 판단 → AI가 그걸 반박(반응 주체=AI)  → --by ai (ai_*)
-python binggu.py pair "이 입찰은 보류한다" "데이터가 부족해 보수적 접근이 맞다" \
-    --by ai --relation refutes --confirm "PAIR ai_refutes owner:1 ai:1"
-# (--by 생략 시 ai 기본. owner 발화는 내가 친 자연어 원문 그대로 — 요약·번역 금지)
-
-python binggu.py pair "다음엔 이 거래처 우선 검토" --confirm "PAIR owner:1"   # 내 직감만
-
-python binggu.py trust          # 누가 더 잘 맞나 (양방향 신뢰도)
-python binggu.py resolve <n> <id8> --outcome 성공   # 결과 기록 → 적중률 누적
-python binggu.py route "..."    # 뭘 할지 헷갈리면 안내해줌
+python binggu.py remember "배포 전에 live endpoint를 먼저 확인한다"
 ```
 
-> 더 자세히: [10분 튜토리얼](docs/BINGGUPACK_TUTORIAL.md) · [설치 가이드](INSTALL.md)
+출력에 저장 명령이 같이 나옵니다. 그 명령을 보고 내가 고른 번호만 저장합니다.
 
-## 팩과 워크플로우 (외부 도구로 연결)
-
-빙구팩은 모은 지식을 **혼자만 쓰는 게 아니라**, 다른 실행 도구(여기서는 **OpenCrab** — 팩을 받아 실행하는 외부 도구)가 받아 쓸 수 있게 **준비·검증·안전점검**까지 해줍니다.
-
-```
-목표 → 필요한 팩 추천 → 근거 모으기 → 팩 만들기 → 검증 → 발행 안전점검 → 내보내기 준비
+```bash
+python binggu.py save "배포 전에 live endpoint를 먼저 확인한다" \
+  --preview-id <화면에 나온 id> --pick 1 --explicit --confirm "SAVE 1"
 ```
 
-- 각 단계가 fail-closed로 막혀, **깨지거나 근거 없는 팩은 외부로 못 나갑니다.**
-- 관계·워크플로우는 **추천만** 합니다 — 무엇을 만들고 내보낼지는 사람이 정합니다.
-- 실제 외부 업로드·클라우드 전송은 **내가 명시 승인하기 전까지 멈춤(HOLD)**. 자동으로 나가는 건 없습니다.
+다음 작업 전에 관련 기억을 불러옵니다.
 
-> 흐름 상세: [팩 계약](docs/OPENBINGGU_PACK_CONTRACT.md) · [업로드 흐름](docs/OPENBINGGU_USER_DRIVEN_OPENCRAB_UPLOAD_FLOW.md) · [개인/팀 두 트랙](docs/OPENBINGGU_PRODUCT_DIRECTION_TWO_TRACK.md)
+```bash
+python binggu.py ask "배포 전에 조심할 것?"
+```
 
-## 자기진화 거버넌스 (충돌 조정)
+상태 점검은 이렇게 합니다.
 
-빙구팩 학습과 기존 규칙이 충돌할 때 — 빙구팩은 **양쪽을 보여주고 제안만**, 규칙 변경의 마지막 손은 **사람**입니다.
+```bash
+python binggu.py doctor
+```
 
-- **충돌하면 양쪽 펼쳐 보여줌** → 내가 선택 (자동 결정 0)
-- **누가 더 잘 맞았나 기록** → 단 "참고 신호"일 뿐 결정 근거 아님
-- **규칙 진화는 사람 손** → 빙구팩이 제안 → 내가 진짜(raw) 확인 → 승인 → 변경(되돌리기 가능). 빙구팩은 규칙 파일에 손 못 댐
-- **안전 규칙은 불변** → DB삭제·시크릿 같은 안전 조항은 빙구팩이 무슨 학습을 해도 못 바꿈
-- **세션 마무리 한마디** → "오늘 끝"(말투 자유) 하면 저장 목록 + 정리를 자동 표시(저장은 내가)
+## 자주 쓰는 명령
 
-> 빙구팩은 똑똑한 비서처럼 조언하고 충돌 시 양쪽을 펼치지만, **도장은 항상 사람이** 찍습니다. 상세: [거버넌스 설계](docs/BINGGUPACK_GOVERNANCE_DESIGN.md).
+| 하고 싶은 일 | 명령 | 뜻 |
+|---|---|---|
+| 처음 시작 | `python binggu.py start` | 내 장부 만들기 |
+| 기억 후보 보기 | `python binggu.py remember "..."` | 저장 전 미리보기 |
+| 관련 기억 찾기 | `python binggu.py ask "..."` | 회상 |
+| 상태 점검 | `python binggu.py doctor` | 장부·환경 확인 |
+| 내 말과 AI 의견 묶기 | `python binggu.py pair "내 말" "AI 말" ...` | 누가 맞았는지 나중에 비교 |
+| 회상이 도움됐는지 표시 | `python binggu.py trace review` / `trace mark` | 효용 기록(opt-in) |
+
+## 무엇이 저장 후보가 되나요
+
+자동 캡처와 미리보기는 같은 기준을 씁니다.
+아무 문장이나 저장 후보로 올리지 않습니다.
+
+| 후보가 됨 | 후보가 안 됨 |
+|---|---|
+| 판단: "이건 B안으로 간다" | 조회: "상태 보여줘" |
+| 교훈: "다음부터 백업 먼저" | 일회성 지시: "지금 이거 고쳐" |
+| 선호: "나는 짧은 답을 선호한다" | 운영 보고: "커밋 완료" |
+| 규칙: "배포는 두 번 확인" | 잡담: "오늘 수고했어" |
+| 위험 감지: "이 방식은 터질 수 있다" | 순수 지식: "토큰 버킷은 ..." |
+
+`remember`와 `pair`처럼 사용자가 직접 "이걸 기억하라"고 입력한 경로는 조금 더 넓게 받습니다.
+그래도 비밀번호·개인정보·자동 저장 차단 같은 안전 게이트는 그대로 유지됩니다.
+
+## 어떻게 데이터가 움직이나요
+
+```text
+내 문장
+  -> preview/remember 에서 후보 확인
+  -> 내가 번호를 골라 confirm
+  -> 내 PC의 ledger.sqlite 에 저장
+  -> ask/preflight 가 다음 작업 전에 다시 보여줌
+```
+
+원본 기억의 기준점은 로컬 장부입니다.
+외부 도구나 hosted inbox는 보조 경로이고, 원본을 대신하지 않습니다.
 
 ## 안전 약속
 
-빙구팩의 안전은 말이 아니라 **자동 테스트로 증명**됩니다.
+- **자동 저장 없음**: AI나 자동 경로는 durable 저장을 못 합니다.
+- **사람 승인 필요**: 저장은 내가 번호를 고르고 confirm할 때만 됩니다.
+- **민감정보 차단**: 비밀번호·개인정보는 후보 단계에서 제외합니다.
+- **원본은 내 PC**: 기본 장부는 로컬 `ledger.sqlite`입니다.
+- **되돌릴 수 있음**: 저장 전 snapshot과 audit log를 남깁니다.
+- **회상 효용 trace도 opt-in**: 켜야만 기록되고, 원문 대신 node_id·분류·점수 같은 메타데이터만 저장합니다.
 
-- **자동 저장 없음** — 내가 직접 고른 것만 저장. AI/자동 경로는 차단.
-- **민감정보 차단** — 비밀번호·개인정보는 후보 단계에서 자동 제외.
-- **언제든 되돌리기** — 모든 변경 전 백업 + 되돌리기 가능.
-- **원본은 내 PC** — 클라우드가 내 원본을 갖지 않음. 외부 업로드는 내가 승인하기 전까지 멈춤.
+## 조금 더 깊게 쓰기
 
-## 더 알아보기
+| 주제 | 문서 |
+|---|---|
+| 처음 따라하기 | [START_HERE](docs/START_HERE.md) |
+| 10분 튜토리얼 | [BINGGUPACK_TUTORIAL](docs/BINGGUPACK_TUTORIAL.md) |
+| 설치 | [INSTALL](INSTALL.md) |
+| 내 말 / AI 말 따로 저장 | [BINGGUPACK_SPEAKER_AXIS_DESIGN](docs/BINGGUPACK_SPEAKER_AXIS_DESIGN.md) |
+| 사람 승인과 안전 경계 | [BINGGUPACK_GOVERNANCE_DESIGN](docs/BINGGUPACK_GOVERNANCE_DESIGN.md) |
+| hosted inbox 경계 | [BINGGUPACK_HOSTED_BOUNDARY](docs/BINGGUPACK_HOSTED_BOUNDARY.md) |
+| 팩 형식 | [OPENBINGGU_PACK_CONTRACT](docs/OPENBINGGU_PACK_CONTRACT.md) |
+| 전체 문서 색인 | [docs/INDEX.md](docs/INDEX.md) |
 
-- [자기진화 거버넌스 설계](docs/BINGGUPACK_GOVERNANCE_DESIGN.md) — 학습↔규칙 충돌 조정, self-modifying 회피 (v1.13.0)
-- [화자 축 설계](docs/BINGGUPACK_SPEAKER_AXIS_DESIGN.md) — 내 말/AI 요약 따로 쌓기, 양방향 신뢰도
-- [10분 튜토리얼](docs/BINGGUPACK_TUTORIAL.md) · [설치 가이드](INSTALL.md) · [변경 이력](CHANGELOG.md)
-- [📑 문서 전체 색인](docs/INDEX.md) — 정본 문서와 설계·작업 기록 구분
+## 개발자용 짧은 점검
+
+```bash
+python scripts/openbinggu_doctor.py --selftest
+python scripts/smoke_test.py --home ./_binggu_smoke_home
+python binggu.py --selftest
+```
 
 ## License
 

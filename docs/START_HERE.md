@@ -1,107 +1,127 @@
-# 여기서 시작하세요 (START HERE)
+# 여기서 시작하세요
 
-> 처음 오셨나요? 이 한 장이면 빙구팩이 뭔지 알고, **5분 안에 첫 사용**까지 갈 수 있습니다.
+처음이라면 이 문서만 보면 됩니다.
+BingguPack은 **내 판단·교훈·선호를 내 PC에 저장하고, 다음 작업 전에 다시 떠올려주는 개인 기억 엔진**입니다.
 
-## 빙구팩이 뭔가요? (한 문단)
+## 1. 무엇을 해주나요
 
-AI와 대화하다 보면 정작 남기고 싶은 것 — **내 판단, 배운 점, 정한 방침** — 이 수십 개 대화창에 흩어져 사라집니다. 빙구팩은 그걸 **넓게 줍고, 내가 직접 고른 것만** 내 PC 안 파일 하나에 저장하는 개인 지식 노트입니다. 자동으로 저장되는 건 아무것도 없고, 쓸수록 "내가 어떻게 판단하는지"가 쌓여 다음에 비슷한 일이 오면 먼저 짚어줍니다.
+AI와 일하다 보면 다음에도 기억해야 할 말이 생깁니다.
 
-## 5분 사용법
+- "배포 전에 live endpoint를 먼저 확인한다."
+- "다음엔 이 거래처를 먼저 검토한다."
+- "이 방식은 위험하니 기본값으로 쓰지 않는다."
+- "이번엔 AI 제안보다 내 판단이 맞았다."
+
+BingguPack은 이런 말을 후보로 보여주고, **내가 직접 고른 것만** 저장합니다.
+저장된 기억은 다음 작업 전에 `ask`나 `preflight`로 다시 꺼내 쓸 수 있습니다.
+
+## 2. 5분 사용법
+
+clone한 폴더에서는 `binggu` 대신 `python binggu.py`로 실행하면 됩니다.
 
 ```bash
-# 1) 받아서 내 노트 만들기
+# 1) 내 장부 만들기
 git clone https://github.com/darkjokee-arch/binggupack.git
 cd binggupack
-python binggu.py init
+python binggu.py start
 
-# 2) 내 직감 한 줄 저장하기
-python binggu.py pair "다음엔 이 거래처 먼저 검토" --confirm "PAIR owner:1"
+# 2) 저장 후보 보기. 아직 저장되지 않습니다.
+python binggu.py remember "배포 전에 live endpoint를 먼저 확인한다"
 
-# 3) 내 말 ↔ AI 의견을 한 번에 묶어 저장하기
-#    인자 순서는 항상 (내 말, AI 말). --by 는 "반응한 쪽"을 가리킴
+# 3) 화면에 나온 save 명령을 보고, 내가 고른 번호만 저장합니다.
+python binggu.py save "배포 전에 live endpoint를 먼저 확인한다" \
+  --preview-id <화면에 나온 id> --pick 1 --explicit --confirm "SAVE 1"
+
+# 4) 다음 작업 전에 관련 기억을 물어봅니다.
+python binggu.py ask "배포 전에 조심할 것?"
+
+# 5) 상태 점검
+python binggu.py doctor
+```
+
+핵심은 하나입니다.
+**미리보기는 저장이 아니고, 저장은 내가 confirm할 때만 일어납니다.**
+
+## 3. 자주 쓰는 명령 4개
+
+| 명령 | 쉬운 뜻 |
+|---|---|
+| `python binggu.py start` | 내 장부를 만듭니다 |
+| `python binggu.py remember "..."` | 기억할 만한 문장인지 미리 봅니다 |
+| `python binggu.py ask "..."` | 관련 기억과 과거 실수 패턴을 찾습니다 |
+| `python binggu.py doctor` | 장부와 환경이 정상인지 점검합니다 |
+
+## 4. 어떤 문장이 후보가 되나요
+
+BingguPack은 아무 말이나 모으지 않습니다.
+**판단·교훈·선호·규칙**처럼 다음에도 쓸 만한 것만 후보로 올립니다.
+
+| 후보가 됨 | 후보가 안 됨 |
+|---|---|
+| "이건 B안으로 간다" | "상태 보여줘" |
+| "다음부터 백업 먼저" | "지금 이거 고쳐" |
+| "짧은 답을 선호한다" | "커밋 완료" |
+| "배포는 두 번 확인한다" | "오늘 수고했어" |
+| "이 방식은 위험하다" | "토큰 버킷은 이런 뜻이다" |
+
+`remember`와 `pair`처럼 내가 직접 입력한 문장은 조금 더 넓게 후보로 보여줍니다.
+그래도 비밀번호·개인정보는 차단되고, 바로 저장되지 않습니다.
+
+## 5. 내 말과 AI 의견을 같이 남기기
+
+내 판단과 AI 의견을 함께 저장하면, 나중에 누가 더 잘 맞았는지도 볼 수 있습니다.
+
+```bash
 python binggu.py pair "이 건은 보류한다" "데이터가 부족하니 보수적 접근이 맞다" \
-    --by ai --relation refutes --confirm "PAIR ai_refutes owner:1 ai:1"
+  --by ai --relation refutes --confirm "PAIR ai_refutes owner:1 ai:1"
 
-# 4) 누가 더 잘 맞았는지 보기 / 뭘 할지 헷갈리면 안내받기
 python binggu.py trust
-python binggu.py route "..."
 ```
 
-이게 전부입니다. 저장은 항상 **내가 `--confirm` 으로 직접 도장 찍을 때만** 일어납니다.
-
-### 외우기 쉬운 명령 (별칭)
-
-긴 명령 대신 이 4개만 기억해도 됩니다 — 동작·안전 게이트는 본명령과 똑같습니다.
+혼자 떠오른 직감만 남길 수도 있습니다.
 
 ```bash
-binggu start                          # = init   내 노트 시작
-binggu remember "다음엔 이 거래처 먼저 검토"  # = preview  내가 친 직감은 약해도 후보로 보여줌(미저장)
-binggu ask "이번 작업 전에 조심할 것?"      # = recall   관련 기억·과거 실수 회상
-binggu doctor                         # = status  노트 상태 + 무결성 점검
+python binggu.py pair "다음엔 이 거래처 먼저 검토" --confirm "PAIR owner:1"
 ```
 
-> `remember` 는 내가 직접 친 **명시 입력**이라, "다음엔 …" 같은 약한 직감도 후보로 보여줍니다(자동 수집은 이런 잡담성 문장을 거릅니다 — 책임 분리). 단 **바로 저장하지는 않습니다.** 후보만 보여주고, 안내해 주는 `save … --explicit --confirm "SAVE n"` 으로 내가 한 번 더 도장 찍습니다. 비밀번호·개인정보는 명시 입력이어도 차단됩니다. (`binggu` 는 `python binggu.py` 로 읽으세요)
+## 6. 회상이 도움이 됐는지 기록하기
 
-### 회상이 쓸모 있었는지 기록하기 (선택 · opt-in)
-
-빙구팩이 작업 전에 떠올려준 기억이 **실제로 도움이 됐는지**를 모아 두면, 다음에 더 잘 떠올리도록 골든셋을 다듬을 수 있습니다. 기본은 꺼져 있고, 켤 때만 작업 전 자동 회상(preflight)에서 메타가 쌓입니다.
+선택 기능입니다. 기본은 꺼져 있습니다.
+켜면 BingguPack이 떠올린 기억이 실제로 도움이 됐는지 나중에 표시할 수 있습니다.
 
 ```bash
-binggu trace enable                              # 기록 켜기(opt-in · 끄기: binggu trace disable)
-binggu trace review                              # 떠올린 기억 중 아직 판정 안 한 것 목록
-binggu trace mark 1 used                         # 1번이 도움됐다
-binggu trace mark 2 ignored   --note not_relevant   # 안 썼다(사유 코드)
-binggu trace mark 3 corrected --note stale          # 틀려서 고쳤다(사유 코드)
+python binggu.py trace enable
+python binggu.py trace review
+python binggu.py trace mark 1 used
+python binggu.py trace mark 2 ignored --note not_relevant
+python binggu.py trace mark 3 corrected --note stale
 ```
 
-- 사유 코드(`--note`)는 정해진 값만 받습니다 — `ignored`: `not_relevant`·`already_known`·`low_signal` / `corrected`: `stale`·`wrong_context`·`superseded`·`false_match` (`used` 는 사유 불필요).
-- **trace 는 메타데이터(node_id·분류·점수)만 저장합니다 — 문장 원문은 저장하지 않고, 효용 판정은 내가 직접 `binggu trace mark` 명령으로만 표시합니다(자동 판정 0).**
+trace는 문장 원문을 저장하지 않습니다.
+node_id, 분류, 점수 같은 메타데이터만 저장하고, `used/ignored/corrected` 판정은 사람이 직접 표시합니다.
 
-## 꼭 알아야 할 용어 5개
+## 7. 꼭 알아야 할 말
 
-| 용어 | 쉬운 뜻 |
+| 용어 | 뜻 |
 |---|---|
-| **노트(ledger)** | 내 PC 안에 저장이 모이는 파일 하나(`ledger.sqlite`). 원본은 여기에만 있음 |
-| **화자 축(owner / ai)** | 내가 한 말(owner)과 AI가 한 말(ai)을 **따로** 쌓아 누가 말했는지 구분 |
-| **페어(pair)** | 내 말 + AI 말 + 둘의 관계(수용/반박/수정)를 **한 번에** 묶어 저장하는 단위 |
-| **팩(pack)** | 모은 지식을 다른 도구에 넘길 수 있게 묶은 **지식 꾸러미** |
-| **HOLD** | "내가 승인하기 전까지 멈춤" 상태. 외부로 나가는 일은 기본이 HOLD |
+| 장부 / ledger | 내 기억이 저장되는 로컬 파일 `ledger.sqlite` |
+| owner | 내가 한 말 |
+| ai | AI가 한 말 |
+| pair | 내 말과 AI 말을 관계까지 묶어 저장하는 것 |
+| HOLD | 내가 승인하기 전까지 외부로 내보내지 않는 상태 |
 
-## 무엇이 후보가 되나 (스코프)
+## 8. BingguPack이 아닌 것
 
-빙구팩은 **아무 문장이나 모으지 않습니다.** "개인 판단/교훈/선호/규칙"만 후보로 올립니다 — 같은 기준을 미리보기와 자동 캡처가 **똑같이** 적용합니다.
+- RAG 문서 검색 엔진이 아닙니다.
+- 팀 위키가 아닙니다.
+- 자동 지식 수집기가 아닙니다.
+- 클라우드 메모리 서비스가 아닙니다.
 
-| 후보가 됨 ✅ | 후보도 안 됨 ❌ |
-|---|---|
-| 방향 결정 ("이건 B안으로 가자") | 단순 조회 ("상태 보여줘") |
-| 선택 판단 ("이게 더 안전해서 낫다") | 일회성 지시 ("지금 이거 고쳐") |
-| 리스크 감지 ("이건 터질 수 있어 조심") | 운영 보고 ("커밋 완료했다") |
-| 선호·규칙 ("배포는 항상 두 번 확인") | 진행 확인 ("이대로 해도 될까?") |
-| 교훈 ("다음부턴 백업 먼저") | 잡담·인사 ("오늘 수고했어") |
-| 장기 의도 ("나중에 제품으로") | 순수 지식·사실 ("토큰 버킷은 …다") |
+## 9. 다음 문서
 
-> 미리보기는 후보마다 **왜 후보인지**(예: `방향결정`)와 빠진 것은 **왜 빠졌는지**(예: `운영보고(판단아님)`)를 같이 보여줍니다.
-
-## 빙구팩이 아닌 것
-
-방향을 좁게 잡았습니다. 빙구팩은 **개인 기억 엔진**이지, 아래가 아닙니다.
-
-- ❌ RAG·문서 검색 엔진 · ❌ 팀 위키 · ❌ 자동 지식 수집기 · ❌ 클라우드 메모리
-
-## 아직 안 되는 것 / HOLD 상태
-
-빙구팩은 안전을 위해 **위험한 동작은 기본적으로 멈춰** 둡니다.
-
-- **외부 업로드는 멈춤(HOLD)** — 다른 실행 도구로 내보내기·클라우드 전송은 내가 명시 승인하기 전까지 자동으로 나가지 않습니다.
-- **AI 자동 저장은 아예 없음** — AI나 자동 경로는 저장 못 합니다. 저장은 내가 고른 것만.
-- **AI가 직접 판단을 떠올려 쓰는 기능(LLM 연동)은 시제품 단계** — 아직 실험용이며 기본 기능은 LLM 없이 동작합니다.
-- **민감정보는 후보 단계에서 자동 제외** — 비밀번호·개인정보는 저장 후보에도 오르지 않습니다.
-
-## 다음에 볼 문서
-
-- [README](../README.md) — 전체 기능 한눈에 보기
+- [README](../README.md) — 전체 소개
 - [10분 튜토리얼](BINGGUPACK_TUTORIAL.md) — 단계별 따라하기
-- [설치 가이드](../INSTALL.md) — OS별 설치(Windows · WSL · macOS · Linux)
-- [화자 축 설계](BINGGUPACK_SPEAKER_AXIS_DESIGN.md) — 내 말 / AI 말 따로 쌓기
-- [거버넌스 설계](BINGGUPACK_GOVERNANCE_DESIGN.md) — 사람 승인 저장·안전 경계
-- [📑 문서 전체 색인](INDEX.md) — 정본 문서와 설계·기록 구분
+- [설치 가이드](../INSTALL.md) — OS별 설치
+- [화자 축 설계](BINGGUPACK_SPEAKER_AXIS_DESIGN.md) — 내 말 / AI 말 따로 저장
+- [거버넌스 설계](BINGGUPACK_GOVERNANCE_DESIGN.md) — 사람 승인 저장과 안전 경계
+- [문서 전체 색인](INDEX.md) — 정본 문서와 기록 구분

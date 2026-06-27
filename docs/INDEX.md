@@ -1,11 +1,13 @@
-# 📑 docs 색인 (INDEX)
+# docs 색인 (INDEX)
 
-> 이 폴더에는 설계 문서·작업 기록이 함께 쌓여 있습니다. **처음 오신 분은 아래 “시작·정본”만 보시면 됩니다.**
+> 이 폴더에는 사용자 안내, 설계 문서, 과거 작업 기록이 함께 있습니다.
+> **처음 오신 분은 “1. 시작·정본”만 보시면 됩니다.**
 > 나머지는 개발/설계 참고와 과거 진행 기록(아카이브 성격)입니다.
 >
 > 빠른 설치는 저장소 루트의 [README](../README.md) · [INSTALL](../INSTALL.md) · [CHANGELOG](../CHANGELOG.md) 를 먼저 보세요.
 
 ## 1. 시작·정본 (공개 사용자 필독)
+- [START_HERE](START_HERE.md) — 처음 온 사람을 위한 5분 시작 문서
 - [OPENBINGGU_OVERALL_GOAL](OPENBINGGU_OVERALL_GOAL.md) — 제품이 무엇이고 왜 만드는가 — 전체 목표
 - [OPENBINGGU_PRODUCT_DIRECTION_TWO_TRACK](OPENBINGGU_PRODUCT_DIRECTION_TWO_TRACK.md) — 개인 트랙 / 공개 트랙 두 갈래 방향
 - [BINGGUPACK_TUTORIAL](BINGGUPACK_TUTORIAL.md) — 처음 쓰는 사람을 위한 단계별 따라하기
