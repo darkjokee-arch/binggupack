@@ -81,6 +81,83 @@ class DDGProvider(SearchProvider):
         return _parse_ddg_html(html, limit)
 
 
+class SearxngProvider(SearchProvider):
+    """SearXNG self-host 메타서치(70+ 엔진 집계·봇차단 헤지). JSON API → SearchProvider 1:1.
+    의존은 외부 도커(SEARXNG_URL). 빙구팩 코드는 순수 urllib GET(서드파티 0). 4-CLI 측정 본진."""
+    name = "searxng"
+
+    def __init__(self, base=None, runner=None):
+        self.base = (base or os.environ.get("SEARXNG_URL") or "http://localhost:8888").rstrip("/")
+        self._runner = runner
+
+    def search(self, query, limit=10):
+        from urllib.parse import urlencode
+        url = self.base + "/search?" + urlencode({"q": query, "format": "json"})
+        if self._runner is not None:
+            r = self._runner(url)
+            data = r if isinstance(r, dict) else {}
+        else:
+            import urllib.request
+            req = urllib.request.Request(url, headers={"User-Agent": DDGProvider.UA})
+            try:
+                data = json.loads(urllib.request.urlopen(req, timeout=20).read())
+            except Exception:
+                return []
+        return [{"url": x.get("url"), "title": x.get("title"), "snippet": x.get("content")}
+                for x in (data.get("results") or [])][:limit]
+
+
+class DdgsProvider(SearchProvider):
+    """ddgs 라이브러리(다중엔진·primp 봇차단우회). 현 DDG 스크래핑 MVP 의 무료 후계(폴백)."""
+    name = "ddgs"
+
+    def __init__(self, runner=None):
+        self._runner = runner
+
+    def search(self, query, limit=10):
+        if self._runner is not None:
+            return list(self._runner(query, limit) or [])[:limit]
+        from ddgs import DDGS  # lazy — 미설치여도 모듈 로드 OK
+        with DDGS() as d:
+            res = d.text(query, max_results=limit)
+        return [{"url": r.get("href"), "title": r.get("title"), "snippet": r.get("body")} for r in res]
+
+
+class FallbackProvider(SearchProvider):
+    """provider 체인 — 앞에서부터 시도, 결과 있으면 채택(빈 결과/예외는 다음으로). 본진 다운 시 폴백."""
+    name = "fallback"
+
+    def __init__(self, providers):
+        self.providers = [p for p in providers if p is not None]
+
+    def search(self, query, limit=10):
+        for p in self.providers:
+            try:
+                res = p.search(query, limit)
+            except Exception:
+                continue
+            if res:
+                self.name = "fallback:" + p.name
+                return res
+        self.name = "fallback:none"
+        return []
+
+
+def default_provider():
+    """4-CLI 측정 결정 — SearXNG(본진·빠름·공식출처·봇차단헤지) → ddgs(폴백) → DDG 스크래핑(최후).
+    SEARXNG_URL 설정 시 SearXNG 우선. ddgs 미설치면 자동 제외. 항상 DDGProvider 최후 폴백."""
+    chain = []
+    if os.environ.get("SEARXNG_URL"):
+        chain.append(SearxngProvider())
+    try:
+        import ddgs  # noqa: F401
+        chain.append(DdgsProvider())
+    except Exception:
+        pass
+    chain.append(DDGProvider())  # 최후 폴백(키/인프라 0)
+    return FallbackProvider(chain) if len(chain) > 1 else chain[0]
+
+
 def _parse_ddg_html(html, limit=10):
     """DDG HTML → [{"url","title","snippet"}]. 정규식만(bs4 금지). uddg redirect 디코드."""
     from urllib.parse import unquote, urlparse, parse_qs
@@ -211,7 +288,7 @@ def discover(topic, provider=None, limit=10, home=None, persist=True, merge=True
 
     반환 dict(status/topic/candidates/rejected/provider). 후보는 vet 통과(clean)분만.
     """
-    provider = provider or DDGProvider()
+    provider = provider or default_provider()
     raw = provider.search(topic, limit=limit) or []
     cands, rejected, seen = [], [], set()
     for i, hit in enumerate(raw):
@@ -322,6 +399,29 @@ def _selftest():
     # IDNA homograph
     okv, _ = vet_url("https://аррӏе.com")  # 키릴 위장(non-ascii) → IDNA 정규화는 되나 공개 도메인
     chk("D10 IDNA 정규화 동작(예외 없이 bool)", isinstance(okv, bool))
+
+    # D11~ — provider 추가(SearXNG/ddgs/Fallback) mock 검증(실 네트워크 0)
+    sx = SearxngProvider(runner=lambda url: {"results": [
+        {"url": "https://law.go.kr/x", "title": "법령", "content": "공식 출처"}]})
+    chk("D11 SearXNG json→계약 매핑", sx.search("q")[0]["url"] == "https://law.go.kr/x")
+    dg = DdgsProvider(runner=lambda q, n: [{"url": "https://a.com", "title": "t", "snippet": "s"}])
+    chk("D11b ddgs→계약 매핑", dg.search("q")[0]["snippet"] == "s")
+    # FallbackProvider — 첫 provider 빈결과/예외 → 다음으로
+    class _Empty(SearchProvider):
+        name = "empty"
+        def search(self, q, limit=10): return []
+    class _Boom(SearchProvider):
+        name = "boom"
+        def search(self, q, limit=10): raise RuntimeError("down")
+    fb = FallbackProvider([_Boom(), _Empty(), dg])
+    chk("D12 폴백 체인 — 예외/빈결과 건너뛰고 ddgs 채택", fb.search("q")[0]["url"] == "https://a.com")
+    chk("D12b 채택 provider 라벨", fb.name == "fallback:ddgs")
+    fb2 = FallbackProvider([_Empty(), _Boom()])
+    chk("D12c 전부 실패 → 빈 결과(예외 전파 0)", fb2.search("q") == [] and fb2.name == "fallback:none")
+    # discover 가 mock provider 로 SearXNG 결과를 후보화
+    rsx = discover("공동주택 하자보수", provider=sx, home=home, persist=False)
+    chk("D13 SearXNG provider 로 discover 후보 생성",
+        rsx["n_found"] == 1 and rsx["candidates"][0]["provider"] == "searxng")
 
     total, passed = len(ok), sum(ok)
     print("\nRESULT: %d/%d PASS" % (passed, total))
