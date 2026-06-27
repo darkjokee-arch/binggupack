@@ -20,8 +20,13 @@ import binggu_pack_factory as FAC    # noqa: E402
 
 def topic_to_pack(topic, provider=None, fetch_runner=None, home=None, out_dir=None,
                   min_score=0.0, max_sources=10, opencrab_export=False,
-                  recommend_workflow=False, execute=False):
+                  recommend_workflow=False, execute=False, confirm=False, staging_home=None):
     """주제 → pack → (opencrab export) → (workflow 추천) 전체 파이프라인.
+
+    OpenCrab import 2모드(제품 설계):
+      - dry-run(기본): import 가능성 자동 검증(read-only, 저장소 미변경)
+      - real import(execute=True AND confirm=True): 사용자 명시 확정 → 실제 staging 저장소 write(commit).
+        execute=True 라도 confirm 없으면 dry-run 유지(실수 방지). real 전 pack_validate+PII gate+importable 강제.
     반환 dict(status/discovered/promoted/harvested/skipped/verdict/pack/opencrab_import/workflow)."""
     home = home or HV._home()
     sp = HV.sources_path(home)
@@ -66,21 +71,29 @@ def topic_to_pack(topic, provider=None, fetch_runner=None, home=None, out_dir=No
         try:
             loaded = BPL.load_batch_pack(res["written"])         # read-only 검증(import 가능성)
             residual = BPL.residual_scan(loaded)                  # import 전 PII/secret 잔존 게이트
-            oc = {"mode": "real" if execute else "dry-run",
+            oc = {"mode": "real" if (execute and confirm) else "dry-run",
                   "importable": not residual, "pack_id": loaded["pack_id"],
                   "nodes": len(loaded["nodes"]), "evidence": len(loaded["evidence"]),
                   "residual_pii": residual, "artifact_dir": res["written"]}
             if residual:
-                oc["reason"] = "RESIDUAL_PII_BLOCK"
-            elif execute:
-                # real apply — temp staging 에 실제 write→read-back→rollback(운영 store 미접촉).
+                oc["reason"] = "RESIDUAL_PII_BLOCK"          # PII gate — real import 강제 차단
+            elif execute and not confirm:
+                # real import 의도지만 확정(--yes) 없음 → dry-run 유지(실수 방지). 저장소 미변경.
+                oc["blocked"] = "real import 는 --yes(confirm) 명시 필요(실제 저장소 write)"
+            elif execute and confirm:
+                # real import — 사용자 명시 확정(--execute --yes). 여기 도달 = pack_validate PASS +
+                # PII gate(residual 0) + importable 통과. apply_with_rollback 이 적재 전 snapshot 백업 후 commit.
+                # staging_home 미지정 시 temp(데모) — 운영 저장소 write 는 실제 staging home 지정 시에만.
                 import tempfile as _tf
-                shome = os.path.join(_tf.mkdtemp(prefix="oc_apply_"), ".binggupack"); os.makedirs(shome)
-                ap = BPL.apply_with_rollback(shome, "owner", loaded, keep=False)
-                oc["apply"] = {"applied": ap.get("applied"), "reason": ap.get("reason"),
-                               "rolled_back": ap.get("rolled_back", True)}
-            oc["import_cmd"] = ("load_batch_pack('%s') → residual_scan → "
-                                "apply_with_rollback(home, user, pack, keep=True)  # real staging" % res["written"])
+                shome = staging_home or os.path.join(_tf.mkdtemp(prefix="oc_apply_"), ".binggupack")
+                os.makedirs(shome, exist_ok=True)
+                ap = BPL.apply_with_rollback(shome, "owner", loaded, keep=True)
+                oc["apply"] = {"committed": bool(ap.get("applied")), "reason": ap.get("reason"),
+                               "staging_home": shome}
+            else:
+                oc["next"] = "real import(실제 저장소 write)는 --execute --yes 로 사용자 최종 확정 시 수행"
+            oc["import_cmd"] = ("load_batch_pack('%s') → residual_scan(PII gate) → "
+                                "[dry-run 검증] / --execute 시 apply_with_rollback(keep=True) commit" % res["written"])
         except Exception as e:
             oc = {"mode": "dry-run", "importable": False, "error": str(e)[:200]}
 
@@ -178,7 +191,11 @@ def _main(argv):
     ap.add_argument("--max-sources", type=int, default=5, help="승급/수확할 최대 소스 수")
     ap.add_argument("--opencrab-export", action="store_true", help="OpenCrab import 가능성 검증/export")
     ap.add_argument("--recommend-workflow", action="store_true", help="pack 기반 workflow 추천")
-    ap.add_argument("--execute", action="store_true", help="OpenCrab real apply(temp staging·rollback). 기본 dry-run")
+    ap.add_argument("--execute", action="store_true",
+                    help="real import 의도(실제 저장소 write). --yes 와 함께여야 실제 commit, 미지정 시 dry-run")
+    ap.add_argument("--yes", action="store_true",
+                    help="real import 최종 확정(--execute 와 함께·실제 저장소 write 동의)")
+    ap.add_argument("--staging-home", default=None, help="real import 대상 staging home(미지정 시 temp 데모)")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args(argv)
 
@@ -189,7 +206,8 @@ def _main(argv):
 
     r = topic_to_pack(args.topic, out_dir=args.out, max_sources=args.max_sources,
                       opencrab_export=args.opencrab_export,
-                      recommend_workflow=args.recommend_workflow, execute=args.execute)
+                      recommend_workflow=args.recommend_workflow, execute=args.execute,
+                      confirm=args.yes, staging_home=args.staging_home)
     # 요약 출력(pack 본문 제외 — 큰 nodes 배열 생략)
     summary = {k: v for k, v in r.items() if k != "pack"}
     summary["pack_counts"] = r["counts"]

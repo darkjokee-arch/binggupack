@@ -166,15 +166,35 @@ class _NoRedirect(__import__("urllib.request", fromlist=["HTTPRedirectHandler"])
             req.full_url, code, "redirect blocked (harvest gate — no auto-redirect)", headers, fp)
 
 
+def _encode_fetch_url(url):
+    """비ASCII URL 안전 인코딩 — host=IDNA(punycode), path/query=percent-quote. ASCII URL 은 무변경.
+    urllib 이 비ASCII 문자에서 내는 UnicodeEncodeError(ascii codec) 방지. 게이트 판정은 원본 url 로 별도 수행."""
+    from urllib.parse import urlsplit, urlunsplit, quote
+    sp = urlsplit(url)
+    try:
+        host = sp.hostname.encode("idna").decode("ascii") if sp.hostname else ""
+    except Exception:
+        host = sp.hostname or ""
+    netloc = host + (":%d" % sp.port if sp.port else "")
+    if sp.username:
+        cred = sp.username + ((":" + sp.password) if sp.password else "")
+        netloc = cred + "@" + netloc
+    # 이미 percent-encoded 된 부분(%)은 safe 에 포함해 이중 인코딩 방지.
+    path = quote(sp.path, safe="/%:@!$&'()*+,;=~-._")
+    query = quote(sp.query, safe="=&%:@!$'()*+,;/?~-._")
+    return urlunsplit((sp.scheme, netloc, path, query, ""))
+
+
 def _real_fetch_runner(url, timeout=30):
     """실제 외부 fetch — owner ScheduledTask 에서만 실행됨. selftest 는 이 함수를 호출하지 않음.
 
     표준 urllib 만 사용(자동 업데이트 정책 — 서드파티 추가 금지). 텍스트 raw 그대로 반환(무가공).
     redirect 자동 추종 금지(A4) — 3xx 응답이면 추종하지 않고 ERROR(게이트 우회 차단).
+    비ASCII URL 은 _encode_fetch_url 로 인코딩(ascii codec 에러 방지). final_url/source_id 게이트는 원본 기준.
     """
     import urllib.request
     opener = urllib.request.build_opener(_NoRedirect)
-    req = urllib.request.Request(url, headers={"User-Agent": "binggupack-harvest/1.0"})
+    req = urllib.request.Request(_encode_fetch_url(url), headers={"User-Agent": "binggupack-harvest/1.0"})
     with opener.open(req, timeout=timeout) as resp:  # noqa: S310 (owner 등록 소스만·redirect 차단)
         final_url = resp.geturl()
         raw = resp.read()
@@ -797,6 +817,13 @@ def _selftest():
     chk("T16c evidence_chunk PII/secret 잔존 0", not bm1.scan_residual_pii(_allchunk))
     chk("T16d 전화/이메일 원문 미노출",
         "010-1234-5678" not in _allsent and "hong@example.com" not in _allsent)
+
+    # T17 — B: 비ASCII URL 인코딩(urllib ascii codec 에러 방지). 게이트는 원본 기준 불변.
+    enc = _encode_fetch_url("https://example.org/한글 경로?q=가격")
+    chk("T17 비ASCII URL → ascii 인코딩", enc.isascii() and enc.startswith("https://example.org/"))
+    chk("T17b ASCII URL 무변경",
+        _encode_fetch_url("https://example.org/path?q=1") == "https://example.org/path?q=1")
+    chk("T17c IDNA host 인코딩", _encode_fetch_url("https://한국.kr/x").startswith("https://xn--"))
 
     print("\nRESULT: %d/%d %s" % (ok, tot, "PASS" if ok == tot else "FAIL"))
     print("GATE: %s" % ("GO" if ok == tot else "BLOCK"))
