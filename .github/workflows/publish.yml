@@ -1,0 +1,89 @@
+name: Publish to PyPI
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PyPI Trusted Publishing (OIDC) — 토큰/시크릿 0
+#
+# 이 워크플로는 API 토큰을 전혀 사용하지 않는다. PyPI Trusted Publishing(OIDC)으로
+# GitHub Actions가 발급하는 단기 OIDC 토큰을 PyPI가 검증/교환하여 업로드한다.
+#
+# ⚠️ 선행 조건 (owner 수동, 자동화 불가):
+#   PyPI 프로젝트(binggupack) → Manage → Publishing → "Add a new publisher" 에서
+#   Trusted Publisher 를 먼저 등록해야 한다. 등록 전에는 이 워크플로를 실행해도
+#   PyPI 업로드 단계에서 인증이 거부되어 동작하지 않는다.
+#     Owner:        darkjokee-arch
+#     Repository:   binggupack
+#     Workflow:     publish.yml
+#     Environment:  pypi   (아래 environment 와 일치, 선택)
+#   자세한 절차는 docs/TRUSTED_PUBLISHING_PLAN.md 참조.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  # 기본: 수동 트리거만. 의도치 않은 자동 publish 방지.
+  workflow_dispatch:
+
+  # (옵션) GitHub Release 가 published 될 때 자동 publish 하고 싶으면 아래 주석 해제.
+  #   Trusted Publisher 등록 + 1회 수동(workflow_dispatch) 검증을 마친 뒤에만 활성화 권장.
+  # release:
+  #   types: [published]
+
+permissions:
+  contents: read       # 소스 체크아웃만
+  id-token: write      # OIDC 토큰 발급 (Trusted Publishing 핵심) — 시크릿 아님
+
+jobs:
+  publish:
+    name: Build and publish (OIDC)
+    runs-on: ubuntu-latest
+
+    # (옵션) GitHub Environment. Trusted Publisher 등록 시 Environment=pypi 로 지정했다면
+    # 아래 environment 도 같은 이름이어야 한다. Environment 보호 규칙(필수 리뷰어 등)으로
+    # publish 전 수동 승인 게이트를 둘 수 있다. 등록 시 Environment 를 비웠다면 이 블록은 제거.
+    environment:
+      name: pypi
+      url: https://pypi.org/p/binggupack
+
+    steps:
+      - name: Checkout (tag/ref 체크아웃)
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install build tooling (build + twine, no project deps)
+        run: python -m pip install --upgrade build twine
+
+      - name: Tag / version 정합 확인
+        # git tag 로 트리거된 경우 태그(vX.Y.Z) 와 pyproject version 이 일치하는지 검증.
+        # workflow_dispatch(태그 없음)면 검증을 건너뛴다.
+        run: |
+          PYPROJECT_VERSION="$(python -c 'import tomllib,sys; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
+          echo "pyproject version: ${PYPROJECT_VERSION}"
+          REF="${GITHUB_REF}"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            TAG_VERSION="${GITHUB_REF_NAME#v}"
+            echo "git tag version:  ${TAG_VERSION}"
+            if [ "${TAG_VERSION}" != "${PYPROJECT_VERSION}" ]; then
+              echo "::error::Tag(${TAG_VERSION}) != pyproject version(${PYPROJECT_VERSION}). 정합 불일치로 중단."
+              exit 1
+            fi
+            echo "OK: tag 와 pyproject version 일치."
+          else
+            echo "수동(workflow_dispatch) 실행 — 태그 정합 검증 생략. pyproject version=${PYPROJECT_VERSION} 으로 업로드됨."
+          fi
+
+      - name: Build sdist + wheel
+        run: python -m build
+
+      - name: Twine check (메타데이터 검증)
+        run: python -m twine check dist/*
+
+      - name: Publish to PyPI (Trusted Publishing / OIDC)
+        # 토큰/시크릿 없음. id-token: write 권한으로 OIDC 교환만 사용.
+        # Trusted Publisher 미등록 시 이 단계에서 인증 거부됨(정상 — owner 수동 선행 필요).
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # with:
+        #   # 기본값이 PyPI 이므로 별도 설정 불필요. TestPyPI 로 먼저 시험하려면 아래 주석 해제
+        #   # (TestPyPI 에도 동일하게 Trusted Publisher 를 별도 등록해야 함).
+        #   repository-url: https://test.pypi.org/legacy/
