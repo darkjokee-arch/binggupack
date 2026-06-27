@@ -29,20 +29,117 @@ AI와 작업하다가 "이건 다음에도 기억해야겠다"는 말이 생김
   -> 다음 작업 시작 전에 관련 기억과 과거 실수 패턴을 다시 보여줌
 ```
 
-## 이런 일을 해줍니다
+## 기능 전체 지도
 
-| 내가 원하는 것 | BingguPack이 해주는 일 | 관련 기능 |
+아래는 현재 저장소 기준으로 BingguPack이 가진 기능 표면입니다.
+일반 사용자는 위에서부터 보면 되고, 아래로 갈수록 Claude Code 연결·폰/클라우드·개발자 검증 기능입니다.
+
+### 1. 개인 기억 장부
+
+| 기능 | 무엇을 해주나 | 명령·구성 |
 |---|---|---|
-| 기억할 만한 말만 골라내기 | 잡담이나 일회성 지시는 버리고, 다음에도 쓸 판단·교훈·선호·규칙만 후보로 보여줍니다. | `remember`, `preview`, `capture` |
-| 내 허락 없이 저장되지 않기 | 번호 선택과 confirm 문구가 맞을 때만 저장합니다. 자동 경로도 바로 영구 저장하지 못합니다. | `save --confirm "SAVE n"` |
-| 작업 전에 과거 실수 떠올리기 | 비슷한 작업을 시작하면 관련 기억, 위험 신호, 예전 판단을 먼저 보여줍니다. | `ask`, `preflight` |
-| Claude Code 작업 흐름에 붙이기 | 원하면 대화 중 후보 수집과 작업 전 회상을 hook으로 연결합니다. 켜지 않으면 동작하지 않습니다. | capture hook, preflight hook |
-| 내 판단과 AI 의견 따로 보기 | "내 말"과 "AI 말"을 분리해서 저장하고, 나중에 어느 쪽 판단이 맞았는지 비교합니다. | `pair`, `trust` |
-| 기억의 품질을 키우기 | 떠올린 기억이 실제로 도움됐는지 표시하고, 틀린 기억은 교체하거나 폐기합니다. | `trace`, `replace`, `deprecate` |
-| 나중에 다시 검토하기 | 아직 확실하지 않은 판단에 날짜를 붙이고, 결과가 나온 뒤 성공·실패·불확실로 정리합니다. | `due`, `reminders`, `resolve` |
-| 다른 도구와 연결하기 | CLI, Python 모듈 실행, Claude Code MCP 서버로 같은 장부를 사용할 수 있습니다. | PyPI CLI, stdio MCP |
-| 다른 기기에서 이어 쓰기 | 클라우드는 원본 장부가 아니라 임시 inbox입니다. 내 PC에서 고른 항목만 pull해서 저장합니다. | `hosted inbox`, `hosted pull` |
-| 외부 소스를 후보로만 모으기 | 사람이 등록한 소스만 읽고 후보로 올립니다. 영구 저장은 여전히 사람 승인 후에만 됩니다. | `harvest` |
+| 장부 만들기 | 내 PC에 로컬 기억 장부와 snapshot 폴더를 만듭니다. | `start`, `init` |
+| 상태 점검 | 장부, 환경, 저장 게이트, 선택 기능 상태를 확인합니다. | `doctor`, `status` |
+| 저장 후보 보기 | 문장을 바로 저장하지 않고 후보로만 보여줍니다. | `remember`, `preview` |
+| 회고를 지식 후보로 바꾸기 | 자가평가·회고·작업 후 교훈을 다음에 쓸 기억 후보로 바꿉니다. | `reflect`, `reflect --from-file` |
+| 사람 승인 저장 | preview를 본 뒤 고른 번호만 저장합니다. | `save --preview-id ... --pick ... --confirm "SAVE n"` |
+| 대화 화자 보존 | 내 말(owner)과 AI 말(ai)을 구분해 저장합니다. | `save --speaker owner/ai`, `pair` |
+| 목록 보기 | 저장된 후보·active 기억을 상태와 종류별로 봅니다. | `list --status`, `list --kind` |
+
+### 2. 작업 전 회상과 설명
+
+| 기능 | 무엇을 해주나 | 명령·구성 |
+|---|---|---|
+| 관련 기억 찾기 | 지금 질문과 비슷한 과거 판단·교훈을 찾아줍니다. | `ask`, `recall`, `why` |
+| 작업 시작 전 경고 | 작업 전에 관련 기억, 위험 패턴, 조심할 점을 먼저 보여줍니다. | `preflight --prompt ...` |
+| 자동 preflight | Claude Code 발화 전에 preflight를 자동으로 띄웁니다. | `preflight --install`, `--enable`, `--disable` |
+| 회상 근거 보기 | 왜 이 기억이 떠올랐는지 근거 사슬을 봅니다. | `trace show <node_id>` |
+| 회상 품질 기록 | 떠올린 기억이 실제로 도움이 됐는지 표시합니다. | `trace enable`, `trace review`, `trace mark used/ignored/corrected` |
+
+### 3. 기억 정리와 생명주기
+
+| 기능 | 무엇을 해주나 | 명령·구성 |
+|---|---|---|
+| 오래된 기억 폐기 | 틀렸거나 더 이상 쓰지 않을 기억을 deprecated로 내립니다. | `deprecate <n> <id8> --reason ... --confirm ...` |
+| 새 기억으로 교체 | 기존 기억을 더 나은 문장으로 교체하고 연결을 남깁니다. | `replace <n> <id8> --with ...` |
+| 사람 확정 표시 | 내 판단으로 받아들인 기억을 표시하거나 해제합니다. | `accept`, `unaccept` |
+| 나중에 다시 보기 | 검증이 필요한 판단에 재검토 날짜를 붙입니다. | `due --date YYYY-MM-DD`, `reminders` |
+| 결과 기록 | 나중에 성공·실패·불확실·판정불가로 정리합니다. | `resolve --outcome ...` |
+| 저장 의도 안내 | 새 저장인지, 수정인지, 결과 기록인지 명령을 안내합니다. | `route` |
+
+### 4. 내 판단과 AI 판단 비교
+
+| 기능 | 무엇을 해주나 | 명령·구성 |
+|---|---|---|
+| 내 말과 AI 말 묶기 | owner 발화와 AI 요약을 각각 노드로 저장하고 관계 엣지로 묶습니다. | `pair "<내 말>" "<AI 말>"` |
+| 반응 방향 보존 | AI가 내 말을 수용/반박/수정했는지, 내가 AI 말을 수용/반박/수정했는지 남깁니다. | `--by ai/owner`, `--relation accepts/refutes/revises` |
+| 순수 직감 저장 | AI 말 없이 내 직감만 owner 노드로 남깁니다. | `pair "<내 직감>" --confirm "PAIR owner:1"` |
+| 적중률 보기 | 내 직감과 AI 의견이 나중에 얼마나 맞았는지 참고 지표로 봅니다. | `trust`, `resolve` 연동 |
+
+### 5. Claude Code hook과 MCP 연결
+
+| 기능 | 무엇을 해주나 | 명령·구성 |
+|---|---|---|
+| 발화 후보 수집 | Claude Code 대화 중 판단·교훈 후보만 버퍼에 모읍니다. 자동 저장은 아닙니다. | `capture enable`, `capture preview` |
+| 수집 제어 | 잠깐 끄기, 재개, 영구 OFF, 완전 제거를 지원합니다. | `capture pause/resume/disable/enable/uninstall` |
+| SAVE 발화 게이트 | 사람이 `SAVE n`이라고 말한 경우만 저장 게이트 증거로 기록합니다. | `capture install-gate`, `uninstall-gate` |
+| Claude Code MCP 서버 | Claude Code에서 BingguPack 도구를 stdio MCP로 연결합니다. | `scripts/openbinggu_mcp_server.py`, `mcp.example.json` |
+| MCP 설치 도우미 | sandbox home을 분리해 안전하게 MCP 엔트리를 등록합니다. | `scripts/install_claude_mcp.py --sandbox --apply` |
+| MCP 8도구 | preview, classify, pack build/validate, publish guard, consumer smoke, save candidate, selftest를 노출합니다. | `selftest`, `capture_classify`, `capture_preview`, `pack_build`, `pack_validate`, `publish_guard_dryrun`, `consumer_smoke`, `save_candidate` |
+| MCP 저장 안전장치 | MCP 단독 저장은 `G4_no_auto`로 차단하고 temp ledger만 씁니다. | actor=reader, `ledger=temp_only` |
+
+### 6. 폰·웹·클라우드 보조 경로
+
+| 기능 | 무엇을 해주나 | 명령·구성 |
+|---|---|---|
+| hosted inbox 보기 | 다른 기기에서 보낸 저장 의도를 로컬에서 읽기 전용으로 확인합니다. | `hosted inbox` |
+| 선택 항목만 가져오기 | inbox에서 고른 번호만 로컬 장부로 가져옵니다. | `hosted pull --select ... --confirm "LIVE SAVE ..."` |
+| Cloudflare Worker skeleton | save-intent, capture preview, hosted MCP 실험 경로를 제공합니다. | `hosted/workers/*` |
+| cloud 설정 오케스트레이션 | KV, wrangler 설정, 배포 전 점검을 한 진입점에서 수행합니다. | `setup-cloud`, `setup-cloud --apply`, `--deploy` |
+| 신뢰 경계 | TTL, pull 후 purge, HMAC, 원문 최소화 정책을 검증합니다. | `tests/hosted_boundary_e2e.py` |
+
+### 7. 외부 소스와 그래프
+
+| 기능 | 무엇을 해주나 | 명령·구성 |
+|---|---|---|
+| 외부 소스 등록 | arxiv, GitHub, RSS, URL 등 사람이 고른 소스만 화이트리스트에 등록합니다. | `harvest add --kind ... --url ...` |
+| 후보 수확 | 등록된 소스를 읽어 후보로만 올립니다. 영구 저장은 사람이 다시 승인합니다. | `harvest run`, `harvest list`, `harvest remove` |
+| 관계 후보 확인 | 기억 사이의 관계 후보를 보여주고 사람이 승인/거절합니다. | `confirm-edges --approve`, `--reject` |
+| 그래프 문법 | 노드·동사형 엣지·evidence 연결 규칙을 검증합니다. | `binggupack/schema/verb_edge.py`, `docs/BINGGUPACK_GRAPH_GRAMMAR_SPEC.md` |
+| pack 계약 | 기억 pack을 외부로 주고받을 때 지켜야 하는 JSON 형식을 검증합니다. | `schemas/openbinggu_pack_contract.schema.json`, `openbinggu_pack_validate.py` |
+| 로컬 ingest | incoming 폴더나 staging 데이터를 읽어 검토 가능한 후보로 바꿉니다. | `localbinggu_incoming_loader.py`, `localbinggu_ingest_executor.py` |
+| watcher 계열 | 파일·incoming·edge·pack 후보를 감시하고 배치 후보를 만드는 내부 자동화 경로입니다. | `watcher_*`, `watcher_incoming_folder_adapter.py` |
+
+### 8. 안전·검증·개발자 기능
+
+| 기능 | 무엇을 해주나 | 명령·구성 |
+|---|---|---|
+| 경로 안전 게이트 | MCP/local 도구가 허용 루트 밖을 읽거나 쓰지 못하게 막습니다. | `binggupack/safety/path_safety.py`, `openbinggu_path_safety_gate.py` |
+| 민감정보 저장 방지 | SAVE 게이트, PII/secret 차단, hash 기반 확인 기록을 제공합니다. | `binggupack/safety/gate_*`, `binggu_save_gate.py` |
+| 의미 분류 | 판단·교훈·선호·규칙 후보를 정규식/semantic 경로로 분류합니다. | `binggupack/classifier/*`, `binggu_canonical_semantic.py` |
+| match policy | 중복·유사 후보를 자동 병합할지, 리뷰 후보로 내릴지 정책으로 분류합니다. | `binggupack/policy/match.py`, `localbinggu_match_policy.py` |
+| OS별 경로 처리 | Windows, WSL, macOS, Linux의 home/ledger/settings 경로를 정리합니다. | `binggupack/workspace/platform.py` |
+| 패키지 실행 | 설치 후 CLI와 모듈 실행을 모두 지원합니다. | `binggu`, `binggupack`, `python -m binggupack` |
+| 대화형 저장 보조 | TTY에서 후보 선택과 confirm 문구 구성을 도와줍니다. | `python -m binggupack.cli.interactive_save` |
+| 세션 종료 후보화 | 세션 마무리 시 남길 만한 교훈을 후보로 정리하는 경로가 있습니다. | `binggu_session_close.py` |
+| 자기진화 거버넌스 | 학습 결과와 기존 규칙이 충돌할 때 자동 변경하지 않고 대비표·적중률·무결성 증거를 남깁니다. | `binggu_contrast_protocol.py`, `binggu_hit_stats.py`, `binggu_merkle_anchor.py`, `binggu_policy.py` |
+| smoke/selftest | 장부, MCP, hosted, storage, classifier, pack, publish 경로를 회귀 검증합니다. | `python binggu.py --selftest`, `scripts/smoke_test.py`, `tests/*` |
+| publish/export 파이프라인 | pack export, hit export, publish queue, OpenCrab pack 생성 등 고급 배포 준비 경로가 있습니다. | `scripts/binggu_publish_*`, `binggu_cloud_pack_export.py`, `binggu_hit_export.py` |
+| reviewed plan 검증 | 사람이 검토한 계획만 적용 가능한지 미리보기와 가드를 검증합니다. | `binggupack/review/*`, `openbinggu_reviewed_*` |
+| hybrid AGI 실험 모듈 | commit-reveal, blind ledger, drift metrics, sync adapter 등 실험적 고급 모듈이 들어 있습니다. | `scripts/hybrid_agi/*` |
+
+### CLI 명령 전체 목록
+
+```text
+장부/상태:        init(start), status(doctor), list
+후보/저장:        preview(remember), reflect, save
+회상/설명:        recall(ask), why, preflight, trace
+정리/검토:        deprecate, replace, accept, unaccept, due, reminders, resolve
+화자/신뢰:        pair, trust, route
+Claude hook:      capture status/pause/resume/disable/enable/preview/uninstall/install-gate/uninstall-gate
+폰/클라우드:      hosted inbox, hosted pull, setup-cloud
+외부/그래프:      harvest add/list/remove/run, confirm-edges
+```
 
 ## 핵심 원칙
 
