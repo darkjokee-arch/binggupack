@@ -1,0 +1,113 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/darkjokee-arch/binggupack/blob/main/schemas/openbinggu_pack_contract.schema.json",
+  "title": "OpenBinggu Minimum Pack Contract",
+  "description": "scripts/openbinggu_pack_validate.py v0.10 의 형식 계약을 기계가독 형태로 미러한 draft-07 schema. validator(Python)가 정본(SSOT)이며, 본 schema 는 validator 의 STOP(=invalid) 규칙만 표현한다. validator 가 타입을 강제하지 않는 필드(scope/evidence_policy/created_from/cross_pack_tags)는 존재만 요구한다. REVIEW_ONLY(cross_pack fuzzy)는 형식상 valid 이며 사람 리뷰가 필요하다(schema 로는 구분하지 않음). production write/promotion 은 v0.9 정책으로 별도 차단된다.",
+  "type": "object",
+  "required": [
+    "pack_id",
+    "pack_type",
+    "scope",
+    "depends_on",
+    "evidence_policy",
+    "merge_policy",
+    "promotion_allowed_default",
+    "status",
+    "cross_pack_tags",
+    "risk_level",
+    "created_from"
+  ],
+  "properties": {
+    "pack_id": {
+      "type": "string",
+      "description": "pack 식별자"
+    },
+    "pack_type": {
+      "description": "pack 종류",
+      "enum": ["seed", "session", "evidence", "candidate", "review", "audit", "runtime", "synthetic_fixture"]
+    },
+    "scope": {
+      "description": "pack 의 적용 범위(자유서술). validator 는 존재만 확인한다."
+    },
+    "depends_on": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "선행 pack_id 목록. 존재 형식만 확인하며 의미론적 merge 는 하지 않는다."
+    },
+    "evidence_policy": {
+      "description": "증거 수집/최소요건 정책. validator 는 존재만 확인한다."
+    },
+    "merge_policy": {
+      "type": "object",
+      "required": ["mode", "target", "cross_pack"],
+      "properties": {
+        "mode": {"enum": ["manual", "auto", "review"]},
+        "target": {"enum": ["staging", "candidate", "review", "production"]},
+        "cross_pack": {"enum": ["isolated", "review_only", "fuzzy"]}
+      },
+      "description": "merge 방식/대상/교차pack 정책"
+    },
+    "promotion_allowed_default": {
+      "const": false,
+      "description": "반드시 false. promotion(업로드/promote)은 계약상 금지."
+    },
+    "status": {
+      "enum": ["draft", "staged", "validated", "review_required", "archived", "rejected"]
+    },
+    "cross_pack_tags": {
+      "description": "교차 pack 태그. validator 는 존재만 요구하며, list 이고 merge_policy.cross_pack=fuzzy 일 때만 REVIEW_ONLY 로 표시한다."
+    },
+    "risk_level": {
+      "enum": ["low", "medium", "high", "unknown"]
+    },
+    "created_from": {
+      "description": "pack 생성 출처. validator 는 존재만 확인한다."
+    },
+    "production_write_allowed": {
+      "not": {"const": true},
+      "description": "존재한다면 true 금지(BLOCKED_BY_V09)."
+    },
+    "opencrab_ingest_allowed": {
+      "not": {"const": true},
+      "description": "존재한다면 true 금지(BLOCKED_BY_V09)."
+    },
+    "github_publish_allowed": {
+      "not": {"const": true},
+      "description": "존재한다면 true 금지(BLOCKED_BY_V09)."
+    }
+  },
+  "not": {
+    "required": ["forced_domain"],
+    "description": "forced_domain 금지 — 새 주제를 9도메인에 강제배정하지 않는다. scope/cross_pack_tags 로만 표현."
+  },
+  "allOf": [
+    {
+      "$comment": "rule 3: risk_level high|unknown + merge_policy.mode=auto → 자동 merge 금지(STOP).",
+      "if": {
+        "required": ["risk_level", "merge_policy"],
+        "properties": {
+          "risk_level": {"enum": ["high", "unknown"]},
+          "merge_policy": {
+            "required": ["mode"],
+            "properties": {"mode": {"const": "auto"}}
+          }
+        }
+      },
+      "then": false
+    },
+    {
+      "$comment": "rule 4: session|candidate|evidence pack 은 production target 금지(STOP).",
+      "if": {
+        "required": ["pack_type", "merge_policy"],
+        "properties": {
+          "pack_type": {"enum": ["session", "candidate", "evidence"]},
+          "merge_policy": {
+            "required": ["target"],
+            "properties": {"target": {"const": "production"}}
+          }
+        }
+      },
+      "then": false
+    }
+  ]
+}

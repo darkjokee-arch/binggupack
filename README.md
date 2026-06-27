@@ -111,6 +111,7 @@ python binggu.py route "..."    # 뭘 할지 헷갈리면 안내해줌
 - [자기진화 거버넌스 설계](docs/BINGGUPACK_GOVERNANCE_DESIGN.md) — 학습↔규칙 충돌 조정, self-modifying 회피 (v1.13.0)
 - [화자 축 설계](docs/BINGGUPACK_SPEAKER_AXIS_DESIGN.md) — 내 말/AI 요약 따로 쌓기, 양방향 신뢰도
 - [10분 튜토리얼](docs/BINGGUPACK_TUTORIAL.md) · [설치 가이드](INSTALL.md) · [변경 이력](CHANGELOG.md)
+- [📑 문서 전체 색인](docs/INDEX.md) — 정본 문서와 설계·작업 기록 구분
 
 ## License
 
