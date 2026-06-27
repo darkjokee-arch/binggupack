@@ -1,7 +1,8 @@
 # PyPI Trusted Publishing (OIDC) 전환 설계
 
-> **상태: 설계/초안.** 이 문서와 `.github/workflows/publish.yml` 초안은 **신규 파일 생성만** 한 것이며,
-> 실제 자동 publish 활성화는 아래 **owner 수동 단계 + 수동 트리거 검증** 후에만 이루어진다.
+> **상태: Trusted Publisher 등록 완료 (2026-06-27).** PyPI Trusted Publisher + GitHub Environment `pypi`
+> (Required reviewers: `darkjokee-arch` · Environment secrets 0) 등록 완료. 다음 release부터
+> `workflow_dispatch` 수동 1회 검증으로 OIDC publish 가능(자동 `release: published`는 여전히 주석=비활성).
 > 현재 운영 publish 경로(로컬 `~/.pypirc` + `twine upload`)는 **변경되지 않고 폴백으로 유지**된다.
 
 대상 패키지: **binggupack** (PyPI) / 저장소: **darkjokee-arch/binggupack** / 워크플로: **publish.yml**
@@ -106,8 +107,8 @@
 
 ## 7. 검증 체크리스트 (활성화 시)
 
-- [ ] (owner) PyPI에 Trusted Publisher 등록 완료 (owner/repo/workflow/environment 정확).
-- [ ] GitHub Environment `pypi` 생성 여부 결정(쓰면 워크플로 `environment`와 일치, 안 쓰면 양쪽 제거).
+- [x] (owner) PyPI Trusted Publisher 등록 완료 — owner=darkjokee-arch / repo=binggupack / workflow=publish.yml / environment=pypi. ✅ 2026-06-27
+- [x] GitHub Environment `pypi` 생성 완료 — Required reviewers: `darkjokee-arch` · Environment secrets 0. ✅ 2026-06-27
 - [ ] Actions에서 `workflow_dispatch`로 수동 1회 실행 → `twine check` 통과 → PyPI 업로드 성공 확인.
 - [ ] (선택) TestPyPI 사전 시험 완료.
 - [ ] 안정 확인 후에만 `release: published` 자동 트리거 주석 해제 여부 결정.
