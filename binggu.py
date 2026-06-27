@@ -1081,13 +1081,15 @@ def main():
     p = argparse.ArgumentParser(prog="binggu", description="BingguPack 개인 장부 CLI")
     p.add_argument("--ledger", default=DEFAULT_LEDGER)
     sub = p.add_subparsers(dest="cmd", required=True)
-    ip = sub.add_parser("init")
+    # 쉬운 별칭(UX): start=init · doctor=status · remember=preview · ask=recall.
+    # 동작/안전 게이트는 본명령과 동일(별칭은 이름만 짧게). aliases= 와 dispatch dict 양쪽에 매핑.
+    ip = sub.add_parser("init", aliases=["start"])
     ip.add_argument("--agi-memory", action="store_true", dest="agi_memory")  # 명시 별칭(동작 동일)
     ip.add_argument("--global", action="store_true", dest="global_scope")     # 전역 수집(미지정 시 현재 위치만)
     ip.add_argument("--no-capture", action="store_true", dest="no_capture")   # 장부만, capture profile 생략
     ip.add_argument("--force-capture", action="store_true", dest="force_capture")  # owner sticky OFF 해제하고 강제 ON
-    sub.add_parser("status")
-    sp = sub.add_parser("preview"); sp.add_argument("text")
+    sub.add_parser("status", aliases=["doctor"])
+    sp = sub.add_parser("preview", aliases=["remember"]); sp.add_argument("text")
     rp = sub.add_parser("reflect")          # 회고·자가평가 → 지식 후보(반성이 지식으로 · 저장 0)
     rp.add_argument("text", nargs="?", default=None)
     rp.add_argument("--from-file", dest="from_file", default=None)  # 쌓인 회고 파일 일괄 후보화
@@ -1100,7 +1102,7 @@ def main():
     sp = sub.add_parser("list"); sp.add_argument("--status", default=None)
     sp.add_argument("--kind", default=None)
     # 회상(L4~L6 · read-only) — recall(why_search) / trace(judgment_trace) / preflight
-    rcp = sub.add_parser("recall"); rcp.add_argument("query")
+    rcp = sub.add_parser("recall", aliases=["ask"]); rcp.add_argument("query")
     rcp.add_argument("--limit", type=int, default=None)
     rcp.add_argument("--record", action="store_true", dest="record")  # use_count++ (기본 read-only)
     wp_ = sub.add_parser("why"); wp_.add_argument("query")                  # recall 별칭
@@ -1171,11 +1173,12 @@ def main():
     scp.add_argument("--apply", action="store_true")     # 실제 변경(미지정=점검만)
     scp.add_argument("--deploy", action="store_true")    # (--apply 와) wrangler deploy 까지 — 비가역
     a = p.parse_args()
-    fn = {"init": cmd_init, "status": cmd_status, "preview": cmd_preview, "reflect": cmd_reflect, "save": cmd_save,
+    fn = {"init": cmd_init, "start": cmd_init, "status": cmd_status, "doctor": cmd_status,
+          "preview": cmd_preview, "remember": cmd_preview, "reflect": cmd_reflect, "save": cmd_save,
           "list": cmd_list, "deprecate": cmd_deprecate, "replace": cmd_replace,
           "accept": cmd_accept, "unaccept": cmd_unaccept, "due": cmd_due,
           "resolve": cmd_resolve, "reminders": cmd_reminders, "capture": cmd_capture,
-          "recall": cmd_recall, "why": cmd_recall, "trace": cmd_trace, "preflight": cmd_preflight,
+          "recall": cmd_recall, "why": cmd_recall, "ask": cmd_recall, "trace": cmd_trace, "preflight": cmd_preflight,
           "hosted": cmd_hosted, "harvest": cmd_harvest, "setup-cloud": cmd_setup_cloud,
           "confirm-edges": cmd_confirm_edges, "pair": cmd_pair, "trust": cmd_trust,
           "route": cmd_route}[a.cmd]
