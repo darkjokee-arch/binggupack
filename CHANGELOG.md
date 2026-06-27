@@ -10,6 +10,7 @@
 
 ### Fixed
 - MCP `save_candidate` 실 write 크래시 — `snap_dir` 미생성으로 `snapshot→copy2` FileNotFoundError가 stdio 루프를 죽이던 문제(`os.makedirs` 1줄). dry-run/조기 BLOCK 경로는 영향 없었음.
+- **owner 발화 a0 형식게이트 면제** — owner 노드는 자연어 원문 그대로 담아야 하는데(화자축 본질) a0 정본 게이트가 명제형만 통과시켜 구어체·의문문 사장님 발화가 `node_1_meaning`/`node_1_word`로 막히던 문제. `speaker=="owner"` 한정으로 형식 게이트만 면제("owner 직감 검열·자동폐기 금지" 원칙 확장). PII/secret/`G4_no_auto` 안전 게이트는 그대로 강제, ai 발화는 명제형 강제 유지.
 
 ### Safety
 - 양방향이어도 헌법 불변: `G4_no_auto`(actor=human) 게이트·candidate-only·PII 제외·원자성(단일 pack)·dangling 방지. 자동 저장 0.

@@ -48,6 +48,7 @@
 - owner 노드(speaker=owner) + ai 노드(speaker=ai) 각각 독립 + 각 자기증거 + 페어 엣지
 - **인자 순서 고정**: `save_paired(owner_text, ai_text, …)` — 첫 인자는 항상 owner 발화(원문 그대로), 둘째는 ai 발화. `--by`(`owner`/`ai`, 기본 ai)가 엣지 방향(반응 주체)을 정한다.
 - **owner 단독 허용**: `ai_text`가 없으면 owner 노드 1개만(순수 직감 — 억지 ai 노드/엣지 생성 금지).
+- **owner 형식게이트 면제**: owner 발화는 자연어 원문 그대로라 구어체·의문문·짧은 문장이 a0 정본 게이트(`node_1_word`/`node_1_meaning`)에 형식 결함으로 걸리기 쉽다. `speaker=="owner"`일 때 이 형식 게이트만 면제(검열·자동폐기 금지 원칙). **PII/secret/`G4_no_auto`는 그대로 강제**, ai 발화는 명제형 강제 유지(면제 없음).
 - **원자성**: 단일 pack → `staging_apply` 1회(부분커밋 시 전체 롤백).
 - **dangling 방지**: 페어 중 한쪽이라도 기존재면 전체 skip(`pair_partial_exists`).
 
