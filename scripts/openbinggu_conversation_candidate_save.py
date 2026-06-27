@@ -197,7 +197,12 @@ def _pick_one_node(text, pick, speaker):
     verdict = a0.classify_node({"id": "pre:" + _sent_hash(sent), "sentence": sent,
                                 "node_type": lkmap.KO2EN[kind], "evidence_refs": ["pre"]}, status="candidate")
     if verdict["verdict"] == "FAIL":
-        return "a0_fail"
+        # owner 발화는 사장님 자연어 원문 그대로 보존(§8-1 ⑥·화자축 본질). a0 형식 게이트
+        # (node_1_word/meaning = 단어·비종결·짧음 구어체)는 "owner 직감 검열·자동폐기 금지"
+        # 원칙으로 면제. PII/secret(아래)·G4_no_auto(호출부)는 그대로 강제 — 안전 게이트 무영향.
+        _owner_form_exempt = {"node_1_word", "node_1_meaning"}
+        if not (speaker == "owner" and verdict.get("guard") in _owner_form_exempt):
+            return "a0_fail"
     pii = scan_residual_pii(sent) + [k for k, rx in _PREVIEW_PII_EXTRA if rx.search(sent)]
     if pii or any(p.search(sent) for p in v011.SECRET_PATTERNS):
         return "pii_or_secret"
