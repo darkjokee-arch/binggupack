@@ -94,8 +94,13 @@ def _suggest_subtype(sent):
     return None
 
 
-def capture_preview(text, max_candidates=DEFAULT_MAX):
-    """대화 발췌 → 핵심문장 후보 미리보기. 순수 함수(write 0). 반환 dict."""
+def capture_preview(text, max_candidates=DEFAULT_MAX, explicit=False):
+    """대화 발췌 → 핵심문장 후보 미리보기. 순수 함수(write 0). 반환 dict.
+
+    explicit: 명시 저장 의도 경로(pair/remember 등 사용자가 직접 '이걸 기억해'라고 친 입력)면 True.
+      판단-veto(SSOT classify 게이트)만 면제한다 — 사용자가 직접 친 문장은 자동수집 노이즈가 아니므로.
+      PII/secret/길이/중복 등 안전·형식 게이트는 explicit 와 무관하게 그대로 적용된다(완화 0).
+      자동 캡처/일반 preview 는 explicit=False 로 노이즈 0 을 유지한다."""
     max_candidates = max(1, min(int(max_candidates or DEFAULT_MAX), HARD_MAX))
     raw = (text or "")
     truncated = False
@@ -135,11 +140,12 @@ def capture_preview(text, max_candidates=DEFAULT_MAX):
         # 순수지식(ignored/preview_trigger)은 제외 — preview/capture 후보 기준 불일치(노이즈) 제거.
         # 안전(PII/secret)은 이 게이트보다 앞서 항상 제외되므로 게이트 결과와 무관하게 보호된다.
         cap = capclf.classify(sent)
-        if cap["state"] != "captured_candidate":
+        if cap["state"] != "captured_candidate" and not explicit:
             excl("not_judgment:" + (cap["vetoes"][0] if cap["vetoes"] else cap["state"]))
             continue
-        # 왜 후보인지(설명가능성) — 캡처 게이트가 잡은 판단 signal. pinned=명시 저장 의도.
-        capture_reason = ",".join(cap["signals"]) or ("명시저장" if cap["pinned"] else "판단")
+        # 왜 후보인지(설명가능성) — 캡처 게이트가 잡은 판단 signal. explicit(명시 입력)은 판단-veto
+        # 면제이므로 signal 이 없을 수 있다 → '명시저장'. pinned 도 명시 저장 의도.
+        capture_reason = ",".join(cap["signals"]) or ("명시저장" if (explicit or cap["pinned"]) else "판단")
         h = _norm_hash(sent)
         if h in seen:
             excl("duplicate")

@@ -63,6 +63,8 @@ _CHECKS = [
     ("hosted_boundary_e2e", "../tests/hosted_boundary_e2e.py"),
     # storage 현재 동작 고정(C0) — 트랙 C facade 이동의 회귀 가드. 순수 python·temp DB·운영 write 0.
     ("storage_characterization", "../tests/storage_characterization.py"),
+    # 명시 저장 경로 판단-veto 면제 + 안전 게이트 유지(A안 버그픽스 회귀 가드). 순수 python.
+    ("explicit_save_path", "../tests/explicit_save_path.py"),
 ]
 
 # 하위 selftest 의 "GATE: GO" / "RESULT: n/n  GATE=GO" 양식 모두 수용

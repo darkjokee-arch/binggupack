@@ -188,9 +188,15 @@ PAIR_RELATIONS = {"ai_accepts", "ai_refutes", "ai_revises",
 
 
 def _pick_one_node(text, pick, speaker):
-    """text 에서 pick 번째 후보 1건을 A0/PII 게이트 통과 후 node dict 로. 실패 시 에러코드(str)."""
-    cands = capture_preview(text)["candidates"]
+    """text 에서 pick 번째 후보 1건을 A0/PII 게이트 통과 후 node dict 로. 실패 시 에러코드(str).
+    pair(owner/ai)는 사용자가 직접 친 명시 저장 입력 → SSOT 판단-veto 면제(explicit=True).
+    PII/secret(아래)·A0(아래)·중복·confirm·actor(호출부) 안전 게이트는 그대로 강제된다."""
+    pv = capture_preview(text, explicit=True)
+    cands = pv["candidates"]
     if not isinstance(pick, int) or pick < 1 or pick > len(cands):
+        # 명시 입력인데 후보가 없으면 안전 게이트(PII/secret)로 제외됐을 수 있다 → 사유 명확화.
+        if any(k.startswith("pii_") or k == "secret_pattern" for k in pv["excluded_counts"]):
+            return "pii_or_secret"
         return "index_out_of_range"
     c = cands[pick - 1]
     sent, kind = c["sentence"], c["label_kind"]
