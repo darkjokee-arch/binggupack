@@ -101,6 +101,7 @@ def topic_to_pack(topic, provider=None, fetch_runner=None, home=None, out_dir=No
 # ── selftest (provider/fetch 전부 mock · 실 네트워크 0 · temp 만) ──────
 def _selftest():
     import tempfile
+    os.environ["BINGGU_PARSER_CLI_OFF"] = "1"   # selftest 결정성 — parser 실 CLI 0(plain 폴백)
     ok = []
 
     def chk(name, cond):

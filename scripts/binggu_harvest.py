@@ -527,6 +527,7 @@ def run_harvest(ledger_path=None, home=None, runner=None, sources_path_=None, pe
 def _selftest():
     import sqlite3
     import tempfile
+    os.environ["BINGGU_PARSER_CLI_OFF"] = "1"   # selftest 결정성 — parser 실 CLI(uvx/npx) 0, plain 폴백
     ok = 0
     tot = 0
 
@@ -769,7 +770,8 @@ def _selftest():
         one2.get("raw_sha256") == hashlib.sha256(pdf_raw).hexdigest())
     chk("T14c typed error 동봉",
         (one2.get("parse_error") or {}).get("type") in
-        ("PARSER_MISSING", "UNSUPPORTED_FORMAT", "PARSER_FAILED", "EMPTY_RESULT", "CORRUPT_DOCUMENT"))
+        ("BACKEND_NOT_WIRED", "BACKEND_CALL_FAILED", "PARSER_MISSING",
+         "UNSUPPORTED_FORMAT", "PARSER_FAILED", "EMPTY_RESULT", "CORRUPT_DOCUMENT"))
 
     add_source("url", "https://example.org/feed.txt", path=sp)
     src_txt = {"url": "https://example.org/feed.txt", "kind": "url",

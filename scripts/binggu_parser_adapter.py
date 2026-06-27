@@ -13,15 +13,32 @@ backend 가용성은 런타임 탐지. MarkItDown/KorDoc 미설치면 PARSER_MIS
 텍스트류는 plain 폴백. 바이너리(PDF/HWP 등)는 plain 폴백 금지(깨진 텍스트 방지).
 """
 import io
+import os
 import re
+import shutil
 import hashlib
+import tempfile
+import subprocess
 
 # typed error 코드(조건3) — 자유 문자열 금지, 분류 가능한 enum.
 ERR_UNSUPPORTED = "UNSUPPORTED_FORMAT"
-ERR_MISSING = "PARSER_MISSING"
+ERR_NOT_WIRED = "BACKEND_NOT_WIRED"      # backend CLI/런타임 미가용(설치 여부와 별개로 호출 불가)
+ERR_CALL_FAILED = "BACKEND_CALL_FAILED"  # backend 호출은 됐으나 exit≠0/timeout/예외
+ERR_MISSING = "PARSER_MISSING"           # (deprecated 호환 — NOT_WIRED 로 대체)
 ERR_FAILED = "PARSER_FAILED"
 ERR_CORRUPT = "CORRUPT_DOCUMENT"
 ERR_EMPTY = "EMPTY_RESULT"
+
+
+def _which(name):
+    """Windows .cmd/.exe 포함 실행 경로 탐색."""
+    return shutil.which(name) or shutil.which(name + ".cmd")
+
+
+def _run_cli(cmd, timeout=300):
+    """CLI subprocess 실행 → (returncode, stdout_bytes, stderr_text). 예외는 호출부가 분류."""
+    p = subprocess.run(cmd, capture_output=True, timeout=timeout)
+    return p.returncode, p.stdout, p.stderr.decode("utf-8", "replace")
 
 # 확장자/콘텐츠타입 → 논리 포맷
 _EXT_FMT = {
@@ -85,39 +102,62 @@ class PlainTextBackend(ParserBackend):
 
 
 class MarkItDownBackend(ParserBackend):
-    """MS MarkItDown — html/docx/pptx/xlsx 등. 미설치면 available()=False(→PARSER_MISSING)."""
+    """MS MarkItDown — CLI 로 호출(html/docx/pptx/xlsx/pdf). markitdown CLI 또는 uvx 경유.
+    실행 경로 미결선이면 available()=False(→BACKEND_NOT_WIRED)."""
     name = "markitdown"
     HANDLES = {"html", "docx", "pptx", "xlsx", "pdf"}
+    _EXT = {"html": "html", "docx": "docx", "pptx": "pptx", "xlsx": "xlsx", "pdf": "pdf"}
 
     def available(self):
-        try:
-            import markitdown  # noqa: F401
-            return True
-        except Exception:
-            return False
+        if os.environ.get("BINGGU_PARSER_CLI_OFF") == "1":
+            return False  # 상위 selftest 결정성 보장(실 CLI 0)
+        return (_which("markitdown") or _which("uvx")) is not None
 
     def parse(self, raw_bytes, fmt):
-        from markitdown import MarkItDown
-        md = MarkItDown()
-        res = md.convert_stream(io.BytesIO(raw_bytes))
-        return getattr(res, "text_content", None) or getattr(res, "markdown", "") or ""
+        td = tempfile.mkdtemp(prefix="markitdown_")
+        infile = os.path.join(td, "in." + self._EXT.get(fmt, "bin"))
+        with open(infile, "wb") as f:
+            f.write(raw_bytes)
+        exe = _which("markitdown")
+        # uvx 경유 시 PDF/office 풀파서를 위해 markitdown[all] extra 사용.
+        cmd = [exe, infile] if exe else [_which("uvx"), "--from", "markitdown[all]", "markitdown", infile]
+        rc, out, err = _run_cli(cmd)
+        if rc != 0:
+            raise RuntimeError("markitdown exit %d: %s" % (rc, err[:200]))
+        return out.decode("utf-8", "replace")
 
 
 class KorDocBackend(ParserBackend):
-    """KorDoc — HWP/HWPX/PDF/XLSX/DOCX(한국 문서 강점). 미설치면 available()=False."""
+    """KorDoc — npx CLI 로 호출(HWP/HWPX/PDF/XLSX/DOCX → Markdown). 한국 문서 강점.
+    npx 미결선이면 available()=False(→BACKEND_NOT_WIRED)."""
     name = "kordoc"
     HANDLES = {"hwp", "hwpx", "pdf", "xlsx", "docx"}
+    _EXT = {"hwp": "hwp", "hwpx": "hwpx", "pdf": "pdf", "xlsx": "xlsx", "docx": "docx"}
 
     def available(self):
-        try:
-            import kordoc  # noqa: F401
-            return True
-        except Exception:
-            return False
+        if os.environ.get("BINGGU_PARSER_CLI_OFF") == "1":
+            return False  # 상위 selftest 결정성 보장(실 CLI 0)
+        return _which("npx") is not None
 
     def parse(self, raw_bytes, fmt):
-        import kordoc
-        return kordoc.parse_bytes(raw_bytes)  # best-effort 인터페이스(실 API 확인 후 보정)
+        td = tempfile.mkdtemp(prefix="kordoc_")
+        infile = os.path.join(td, "in." + self._EXT.get(fmt, "bin"))
+        outfile = os.path.join(td, "out.md")
+        with open(infile, "wb") as f:
+            f.write(raw_bytes)
+        cmd = [_which("npx"), "--no-install", "kordoc", infile,
+               "--format", "markdown", "--silent", "-o", outfile]
+        rc, out, err = _run_cli(cmd)
+        if rc != 0:
+            raise RuntimeError("kordoc exit %d: %s" % (rc, err[:200]))
+        if os.path.exists(outfile):
+            with open(outfile, encoding="utf-8") as f:
+                txt = f.read()
+            if txt.strip():
+                return txt
+        # rc=0 이어도 출력 없음 = soft fail(예: PDF→pdfjs-dist 의존성 부족) → 호출부가 CALL_FAILED 분류
+        raise RuntimeError("kordoc no output(의존성 부족 가능): %s"
+                           % ((err or out.decode("utf-8", "replace"))[:150]))
 
 
 # 라우팅 우선순위(포맷별 backend 선호 순). 미가용은 자동 skip → 폴백 체인.
@@ -174,14 +214,16 @@ def parse_document(raw_bytes, content_type=None, filename=None, backends=None):
     for bname in chain:
         b = backends.get(bname)
         if not b or not b.available():
-            last_err = {"type": ERR_MISSING, "detail": "%s unavailable" % bname}
+            last_err = {"type": ERR_NOT_WIRED, "detail": "%s 미결선(CLI/런타임 호출 불가)" % bname}
             continue
         tried_available = True
         try:
             text = b.parse(raw, fmt)
-        except Exception as e:  # 조건3 — 어떤 backend 실패도 typed error 로 흡수
-            etype = ERR_CORRUPT if _looks_corrupt(e) else ERR_FAILED
-            last_err = {"type": etype, "detail": ("%s: %s" % (bname, e))[:200]}
+        except subprocess.TimeoutExpired:                # backend 호출 timeout
+            last_err = {"type": ERR_CALL_FAILED, "detail": "%s: timeout" % bname}
+            continue
+        except Exception as e:  # 조건3 — backend 호출 실패(exit≠0/예외)도 typed error 로 흡수
+            last_err = {"type": ERR_CALL_FAILED, "detail": ("%s: %s" % (bname, e))[:200]}
             continue
         if not text or not str(text).strip():
             last_err = {"type": ERR_EMPTY, "detail": "%s produced empty" % bname}
@@ -216,9 +258,10 @@ def _selftest():
         ok.append(cond)
         print(("  PASS " if cond else "  FAIL ") + name)
 
-    # 1) 텍스트/HTML 은 plain 으로 항상 됨
+    # 1) 텍스트/HTML — selftest 는 실 CLI 안 타게 plain 만 주입(결정적·실네트워크 0). 실 markitdown 은 별도 샘플 검증.
     r = parse_document(b"<html><body><p>\xec\x95\x88\xeb\x85\x95 hello</p><script>x=1</script></body></html>",
-                       content_type="text/html", filename="a.html")
+                       content_type="text/html", filename="a.html",
+                       backends={"plain": PlainTextBackend()})
     chk("P1 HTML 파싱 ok", r["ok"] and "hello" in r["derived_text"])
     chk("P1b script 제거", "x=1" not in r["derived_text"])
     chk("P1c raw_sha256 동봉(fingerprint)", len(r["raw_sha256"]) == 64)
@@ -230,22 +273,22 @@ def _selftest():
     chk("P2b typed error UNSUPPORTED", r["error"]["type"] == ERR_UNSUPPORTED)
 
     # 3) 바이너리(PDF)인데 backend 미설치 → PARSER_MISSING, plain 폴백 안 함(깨진 텍스트 방지)
-    no_backends = {"plain": PlainTextBackend()}  # markitdown/kordoc 없음 가정
+    no_backends = {"plain": PlainTextBackend()}  # markitdown/kordoc 미결선 가정
     r = parse_document(b"%PDF-1.4 ...", content_type="application/pdf", filename="a.pdf",
                        backends=no_backends)
     chk("P3 PDF backend 부재 → ok=False", r["ok"] is False)
-    chk("P3b PARSER_MISSING", r["error"]["type"] == ERR_MISSING)
+    chk("P3b BACKEND_NOT_WIRED(미결선)", r["error"]["type"] == ERR_NOT_WIRED)
     chk("P3c 바이너리 plain 폴백 안 함", r["derived_text"] is None)
 
-    # 4) backend 가 raise → CORRUPT/FAILED 로 흡수(전체 안 죽음)
+    # 4) backend 가 raise(호출 실패) → BACKEND_CALL_FAILED 로 흡수(전체 안 죽음)
     class BoomBackend(ParserBackend):
         name = "markitdown"
         def available(self): return True
-        def parse(self, raw, fmt): raise ValueError("corrupt file header")
+        def parse(self, raw, fmt): raise RuntimeError("markitdown exit 1: bad file")
     r = parse_document(b"xxxx", content_type="application/pdf", filename="a.pdf",
-                       backends={"markitdown": BoomBackend(), "kordoc": KorDocBackend()})
+                       backends={"markitdown": BoomBackend()})
     chk("P4 backend raise → typed error(raise 전파 0)", r["ok"] is False and r["error"] is not None)
-    chk("P4b CORRUPT 분류", r["error"]["type"] == ERR_CORRUPT)
+    chk("P4b BACKEND_CALL_FAILED 분류", r["error"]["type"] == ERR_CALL_FAILED)
 
     # 5) mock 성공 backend → derived_text + parser 기록
     class OkBackend(ParserBackend):
