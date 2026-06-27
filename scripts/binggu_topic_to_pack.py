@@ -83,9 +83,9 @@ def topic_to_pack(topic, provider=None, fetch_runner=None, home=None, out_dir=No
             elif execute and confirm:
                 # real import — 사용자 명시 확정(--execute --yes). 여기 도달 = pack_validate PASS +
                 # PII gate(residual 0) + importable 통과. apply_with_rollback 이 적재 전 snapshot 백업 후 commit.
-                # staging_home 미지정 시 temp(데모) — 운영 저장소 write 는 실제 staging home 지정 시에만.
-                import tempfile as _tf
-                shome = staging_home or os.path.join(_tf.mkdtemp(prefix="oc_apply_"), ".binggupack")
+                # staging_home 미지정 시 운영 경로 '<home>/oc_staging'(기본 ~/.binggupack/oc_staging).
+                # home 인자를 따르므로 호출자가 home=temp 주면 격리 검증 가능. 명시 temp 는 staging_home 으로.
+                shome = staging_home or os.path.join(home, "oc_staging")
                 os.makedirs(shome, exist_ok=True)
                 ap = BPL.apply_with_rollback(shome, "owner", loaded, keep=True)
                 oc["apply"] = {"committed": bool(ap.get("applied")), "reason": ap.get("reason"),
@@ -195,7 +195,8 @@ def _main(argv):
                     help="real import 의도(실제 저장소 write). --yes 와 함께여야 실제 commit, 미지정 시 dry-run")
     ap.add_argument("--yes", action="store_true",
                     help="real import 최종 확정(--execute 와 함께·실제 저장소 write 동의)")
-    ap.add_argument("--staging-home", default=None, help="real import 대상 staging home(미지정 시 temp 데모)")
+    ap.add_argument("--staging-home", default=None,
+                    help="real import 대상 staging home(미지정 시 운영 경로 ~/.binggupack/oc_staging)")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args(argv)
 
