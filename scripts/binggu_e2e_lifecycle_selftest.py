@@ -40,7 +40,7 @@ def run(args, home):
 def main():
     home = tempfile.mkdtemp(prefix="bgp_e2e_")
     ledger = os.path.join(home, ".binggupack", "ledger.sqlite")
-    txt = "엔드투엔드 라이프사이클 검증 문장 — 빙구팩 실사용 경로가 이 OS에서 작동한다"
+    txt = "엔드투엔드 라이프사이클은 항상 preview 후 SAVE 확인을 먼저 거친다."
 
     # 1) init — 실장부 생성
     r = run(["init", "--no-capture"], home)
@@ -55,7 +55,9 @@ def main():
     # 4) preview — preview_id 발급
     r = run(["preview", txt], home)
     m = re.search(r"preview_id: ([0-9a-f]+)", r.stdout)
-    check("4.preview preview_id 발급", bool(m), extra=(m.group(0) if m else r.stderr[:80]))
+    has_candidate_1 = bool(re.search(r"\|\s*1\s*\|", r.stdout))
+    check("4.preview 후보 1건 + preview_id 발급", bool(m) and has_candidate_1,
+          extra=(m.group(0) if m else r.stdout[:80] or r.stderr[:80]))
     pid = m.group(1) if m else ""
 
     # 5) save — 실장부 write (saved:1)
