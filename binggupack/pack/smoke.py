@@ -52,7 +52,8 @@ def run_smoke(home=None):
     r = handle_tool("capture_classify", {"utterance": "B안으로 결정"}, allow_root)
     chk("2.capture_classify_ALLOW", r.get("verdict") == "ALLOW")
 
-    r = handle_tool("capture_preview", {"utterances": [SYN]}, allow_root)
+    # SSOT 후보 게이트(should_capture) 후 — 자동 preview 는 판단문만 후보가 된다(SYN 영문 합성은 후보 0).
+    r = handle_tool("capture_preview", {"utterances": ["이 입찰은 마진이 낮아 보류하기로 결정했다."]}, allow_root)
     tr = r.get("tool_result") or {}
     chk("3.capture_preview_ALLOW_nothing_saved",
         r.get("verdict") == "ALLOW" and tr.get("nothing_saved") is True and len(tr.get("candidates", [])) >= 1)

@@ -21,7 +21,9 @@ import os
 import json
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from openbinggu_mcp_server_handlers import handle_tool, TOOLS, _FORBIDDEN  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # ROOT — binggupack facade
+# 트랙 C(C4): 핸들러 정본은 binggupack.mcp facade 경유. scripts 직접 import 도 호환(facade 재노출).
+from binggupack.mcp import handle_tool, TOOLS, _FORBIDDEN  # noqa: E402
 
 _TOOL_DESC = {
     "pack_build": "로컬 자료로 candidate pack 빌드(dry-run, temp)",
