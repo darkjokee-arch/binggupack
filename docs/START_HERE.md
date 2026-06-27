@@ -19,6 +19,15 @@ BingguPack은 이런 말을 후보로 보여주고, **내가 직접 고른 것�
 
 clone한 폴더에서는 `binggu` 대신 `python binggu.py`로 실행하면 됩니다.
 
+설치해서 쓰면 `binggu` 명령을 바로 사용할 수 있습니다.
+
+```bash
+python -m pip install binggupack
+binggu start
+```
+
+소스에서 바로 실행하려면 아래처럼 clone하고 `python binggu.py`를 쓰면 됩니다.
+
 ```bash
 # 1) 내 장부 만들기
 git clone https://github.com/darkjokee-arch/binggupack.git
@@ -83,6 +92,8 @@ python binggu.py trust
 ```bash
 python binggu.py pair "다음엔 이 거래처 먼저 검토" --confirm "PAIR owner:1"
 ```
+
+> `remember` 는 내가 직접 친 **명시 입력**이라, "다음엔 …" 같은 약한 직감도 후보로 보여줍니다(자동 수집은 이런 잡담성 문장을 거릅니다 — 책임 분리). 단 **바로 저장하지는 않습니다.** 후보만 보여주고, 안내해 주는 `save … --explicit --confirm "SAVE n"` 으로 내가 한 번 더 도장 찍습니다. 비밀번호·개인정보는 명시 입력이어도 차단됩니다. clone 실행자는 `binggu`를 `python binggu.py`로 바꿔 읽으면 됩니다.
 
 ## 6. 회상이 도움이 됐는지 기록하기
 

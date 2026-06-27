@@ -24,14 +24,28 @@ Homepage = "https://github.com/darkjokee-arch/binggupack"
 Release = "https://github.com/darkjokee-arch/binggupack/releases/tag/v1.15.0"
 
 [project.scripts]
-# v1.11.0 groundwork: 패키지로 노출되는 보조 진입점. 기존 `python binggu.py ...` /
-# `python scripts/smoke_test.py` 는 backward-compatible 하게 그대로 유지된다.
+# PyPI 설치 후 바로 쓰는 공개 CLI. clone 사용자는 기존 `python binggu.py ...` 그대로 동작한다.
+binggu = "binggu:main"
+binggupack = "binggu:main"
 binggu-interactive-save = "binggupack.cli.interactive_save:main"
 
-[tool.setuptools.packages.find]
-include = ["binggupack*"]   # flat-layout 의 top-level binggu.py / scripts 와 충돌 회피
+[tool.setuptools]
+py-modules = ["binggu"]
+include-package-data = true
 
-# 설치/검증 (clone 직후, 패키지 설치 없이도 동작):
+[tool.setuptools.packages.find]
+include = ["binggupack*", "scripts", "hooks"]   # scripts/hooks 는 CLI 호환용 번들
+
+[tool.setuptools.package-data]
+scripts = ["hybrid_agi/*.py", "hybrid_agi/README.md"]
+hooks = ["settings.snippet.json"]
+
+# 설치/검증:
+#   pip install binggupack
+#   binggu start
+#   python -m binggupack doctor
+#
+# clone 직후, 패키지 설치 없이도 동작:
 #   python scripts/smoke_test.py --home ./_binggu_test_home
 #   python scripts/install_claude_mcp.py --sandbox --apply
 # 서버 직접 실행(설정 등록은 owner):

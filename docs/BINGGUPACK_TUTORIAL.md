@@ -1,4 +1,4 @@
-# BingguPack 10분 튜토리얼 — clone부터 후보 관리(candidate UX)까지
+# BingguPack 10분 튜토리얼 — 설치부터 후보 관리(candidate UX)까지
 
 > 이 문서는 BingguPack을 처음 받은 사용자가 **데이터 없이도** 전체 흐름을 따라해 보는 가이드입니다.
 > 모든 단계는 로컬 synthetic/temp 데이터만 사용하며, 운영 저장소를 변경하지 않습니다.
@@ -11,6 +11,16 @@
 
 ## 1. 받기
 
+일반 사용자는 PyPI로 설치합니다.
+
+```bash
+python -m pip install binggupack
+binggu start
+binggu doctor
+```
+
+개발/검증 명령까지 직접 돌리려면 clone합니다.
+
 ```bash
 git clone https://github.com/darkjokee-arch/binggupack.git
 cd binggupack
@@ -22,8 +32,8 @@ cd binggupack
 python scripts/openbinggu_doctor.py --selftest
 ```
 
-✅ 기대: 마지막에 `summary: 12/12 PASS` + `GATE: GO` + 종료코드 `0`.
-(버전에 따라 검사 개수는 늘어날 수 있습니다 — `GATE: GO` + 종료코드 `0`이면 정상입니다. `GATE: GO`가 아니거나 종료코드가 0이 아닐 때만 사용을 멈추고 이슈를 확인하세요.)
+✅ 기대: 마지막에 `GATE: GO` + 종료코드 `0`.
+(버전에 따라 검사 개수는 늘어날 수 있습니다. `GATE: GO`가 아니거나 종료코드가 0이 아닐 때만 사용을 멈추고 이슈를 확인하세요.)
 
 ## 3. toy 예제로 pack 흐름 보기
 
@@ -123,7 +133,7 @@ python binggu.py init
 python binggu.py preview "오늘 정리할 문장들"
 ```
 
-자세한 명령은 README의 후보 관리 표 참조.
+PyPI 설치자는 같은 명령을 `binggu start`, `binggu remember "..."`로 실행하면 됩니다. 자세한 명령은 README의 후보 관리 표 참조.
 
 ### 화자 축 — 내 발화와 AI 요약 따로 쌓기 (v1.12.0 · 양방향 페어 v1.14.0)
 

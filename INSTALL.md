@@ -6,7 +6,7 @@
 
 이 문서는 **실전 설치 절차** 중심입니다. 개념·설계는 [README.md](README.md), 따라하기는 [docs/BINGGUPACK_TUTORIAL.md](docs/BINGGUPACK_TUTORIAL.md)를 보세요.
 
-설치 흐름: **Requirements → Clone → Verify → MCP sandbox 등록 → 재시작 → 도구 확인 → save gate 확인 → 운영 home 보호 → Troubleshooting**.
+설치 흐름: **PyPI 빠른 설치 또는 Clone → Verify → MCP sandbox 등록 → 재시작 → 도구 확인 → save gate 확인 → 운영 home 보호 → Troubleshooting**.
 
 ---
 
@@ -19,7 +19,23 @@
 - python 런처: Windows `py` · WSL/macOS/Linux `python3`. 아래 예시의 `python`을 OS에 맞게 바꿔 쓰세요.
 - (선택) hosted/MCP·semantic 도장: Node.js + `wrangler`, Ollama `bge-m3`. 로컬 CLI만 쓰면 불필요.
 
-## Clone
+## PyPI quick install
+
+로컬 CLI만 쓰려면 이 경로가 가장 짧습니다.
+
+```bash
+python -m pip install binggupack
+binggu start
+binggu remember "배포 전에 live endpoint를 먼저 확인한다"
+binggu doctor
+python -m binggupack doctor
+```
+
+- `binggu`와 `python -m binggupack`은 같은 CLI를 실행합니다.
+- `remember`는 미리보기만 합니다. 실제 저장은 화면에 나온 `save ... --confirm "SAVE n"`을 사람이 실행할 때만 됩니다.
+- `scripts/` selftest와 MCP sandbox 등록은 아래 clone 경로에서 실행하는 개발/검증 절차입니다.
+
+## Clone / source install
 
 bash (macOS / WSL / Linux):
 ```bash
@@ -120,6 +136,7 @@ python -m venv .build_venv
 
 - `pyproject.toml`에 `[build-system]` + `binggupack` 패키지 정의가 있습니다.
 - build 산출물(`dist/`, `.build_venv/`)은 `.gitignore` 대상입니다.
+- 패키지 설치 CLI 회귀는 `python tests/package_cli_selftest.py`로 확인합니다.
 
 ## 화자 축 사용 (v1.12.0+ · 양방향 페어 v1.14.0)
 
@@ -127,13 +144,13 @@ python -m venv .build_venv
 
 ```bash
 # 내가 먼저 말하고 AI가 반응 → --by ai (기본)
-python binggu.py pair "<owner 발화>" "<ai 발화>" --by ai --relation refutes --confirm "PAIR ai_refutes owner:1 ai:1"
+binggu pair "<owner 발화>" "<ai 발화>" --by ai --relation refutes --confirm "PAIR ai_refutes owner:1 ai:1"
 # AI가 먼저 말하고 내가 반응 → --by owner
-python binggu.py pair "<owner 발화>" "<ai 발화>" --by owner --relation revises --confirm "PAIR owner_revises owner:1 ai:1"
-python binggu.py pair "<내 직감만>" --confirm "PAIR owner:1"   # 순수 직감 단독
-python binggu.py save "<문장>" --speaker owner   # 단건 저장 + 화자 칸
-python binggu.py trust          # 양방향 신뢰도 (누가 더 잘 맞나)
-python binggu.py route "<발화>"  # 신규/수정/결과 안내
+binggu pair "<owner 발화>" "<ai 발화>" --by owner --relation revises --confirm "PAIR owner_revises owner:1 ai:1"
+binggu pair "<내 직감만>" --confirm "PAIR owner:1"   # 순수 직감 단독
+binggu save "<문장>" --speaker owner   # 단건 저장 + 화자 칸
+binggu trust          # 양방향 신뢰도 (누가 더 잘 맞나)
+binggu route "<발화>"  # 신규/수정/결과 안내
 ```
 
 상세: [화자 축 설계](docs/BINGGUPACK_SPEAKER_AXIS_DESIGN.md) · [튜토리얼](docs/BINGGUPACK_TUTORIAL.md).

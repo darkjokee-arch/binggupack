@@ -13,7 +13,7 @@
 | 4 | interactive UX 옵션 | **설계만** | [INTERACTIVE_SAVE_GATE_DESIGN](../ux/INTERACTIVE_SAVE_GATE_DESIGN.md). 기본은 explicit confirm 유지 |
 | 5 | pack/workflow lifecycle examples | **착수(예제 추가)** | [examples/pack_workflow](../../examples/pack_workflow/README.md) |
 | 6 | tutorial / examples 추가 | **부분(Lane D)** | pack/workflow 예제로 시작 |
-| 7 | PyPI / package distribution readiness | **점검 완료(NOT READY)** | [PYPI_READINESS](../packaging/PYPI_READINESS.md) |
+| 7 | PyPI / package distribution readiness | **로컬 설치·CLI READY** | [PYPI_READINESS](../packaging/PYPI_READINESS.md) |
 | 8 | CI / regression matrix 유지 | **유지** | 3-OS CI + smoke 10/10 불변 |
 
 ## 비목표 (Non-goals)
@@ -50,5 +50,5 @@
 1. (이번) 로드맵·설계 문서·예제·readiness 점검 → merge 가능한 후보 상태
 2. (다음 owner 승인 후) Lane B 모듈화를 단계적 wrapper로 실제 구현 + backward-compat 검증
 3. interactive UX 최소 prototype
-4. PyPI readiness 충족(pyproject 보강) 후 build 검증
+4. PyPI readiness는 로컬 설치·CLI 회귀까지 통과. 실제 publish는 별도 owner 승인 후 진행
 5. 전체 게이트 통과 시 v1.11.0 stable 승격

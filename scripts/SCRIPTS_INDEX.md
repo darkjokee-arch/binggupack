@@ -7,7 +7,7 @@
 > 4. 분류: **현행**=현재 라인에서 import되거나 게이트로 사용 / **1회성**=owner GO 1회 실연·canary(재실행은 별도 GO) / **레거시**=참조 0 실측, 이전 버전 라인 / **archived**=`_archived_oneoff_20260612/` 이동 대상.
 > 5. raw 경로·secret·PII는 어떤 스크립트도 출력하지 않는다(id/hash/count/reason_code만) — 새 스크립트도 이 규약을 따를 것.
 
-총 77개 (.py — scripts/ 직속 73 + archived 이동분 4 표기). 분류 근거 = 각 파일 머리 docstring + import 참조 관계 실측(`grep "import <모듈>"` 교차).
+총 77개 운영 스크립트(.py — scripts/ 직속 73 + archived 이동분 4 표기) + 패키징 marker `__init__.py` 1개. 분류 근거 = 각 파일 머리 docstring + import 참조 관계 실측(`grep "import <모듈>"` 교차).
 
 | 파일명 | 분류 | 한 줄 역할 | selftest |
 | :--- | :--- | :--- | :--- |
@@ -40,7 +40,7 @@
 | openbinggu_incoming_to_staging.py | 현행 | incoming→staging loader dry-run — contract+secret+risk 정책, plan만 생성 | --selftest |
 | openbinggu_label_kind_map.py | 현행 | label_kind 한영 매핑 단일 정본 + deterministic 5종 분류기(정규식) | --selftest |
 | openbinggu_mcp_path_gate_adapter.py | 현행 | MCP 도구 path 입력 가드 — 실행 직전 classify_path, BLOCK 시 미호출 | --selftest |
-| openbinggu_mcp_server.py | 현행 | OpenBinggu local MCP 서버(stdio JSON-RPC) — read/dry-run 5 tool만 노출 | --selftest |
+| openbinggu_mcp_server.py | 현행 | BingguPack local MCP 서버(stdio JSON-RPC) — 8도구(selftest/capture/pack/publish dry-run/save_candidate) 노출 | --selftest |
 | openbinggu_mcp_server_handlers.py | 현행 | MCP 도구 핸들러 결선 — enforce_access+path gate 2중 통과 시만 underlying 호출 | --selftest |
 | openbinggu_owner_accept_ux.py | 현행 | owner_accepted UX — record-only event 테이블 append("ACCEPT/UNACCEPT <n> <id8>") | --selftest |
 | openbinggu_pack_consumer_smoke.py | 현행 | 로컬 pack consumer smoke — 모델 중립 소비 contract 기준 sanitize view 생성 | --selftest |

@@ -40,6 +40,19 @@ BingguPack은 이런 문장을 **후보로 보여주고**, 내가 직접 고른 
 
 clone해서 바로 쓸 수 있습니다. 아래에서 `binggu`라고 부르는 명령은 clone한 폴더에서는 `python binggu.py`로 실행하면 됩니다.
 
+일반 사용자는 PyPI 설치가 가장 짧습니다.
+
+```bash
+pip install binggupack
+binggu start
+binggu remember "배포 전에 live endpoint를 먼저 확인한다"
+binggu doctor
+```
+
+`python -m binggupack doctor`처럼 모듈 실행도 됩니다.
+
+소스에서 바로 실행하려면 clone해서 `python binggu.py`를 쓰면 됩니다.
+
 ```bash
 git clone https://github.com/darkjokee-arch/binggupack.git
 cd binggupack
@@ -53,6 +66,8 @@ python binggu.py remember "배포 전에 live endpoint를 먼저 확인한다"
 ```
 
 출력에 저장 명령이 같이 나옵니다. 그 명령을 보고 내가 고른 번호만 저장합니다.
+
+처음 보는 문서가 많다면 [START_HERE](docs/START_HERE.md) → [10분 튜토리얼](docs/BINGGUPACK_TUTORIAL.md) → [설치 가이드](INSTALL.md)까지만 보면 됩니다.
 
 ```bash
 python binggu.py save "배포 전에 live endpoint를 먼저 확인한다" \
@@ -140,6 +155,8 @@ python scripts/openbinggu_doctor.py --selftest
 python scripts/smoke_test.py --home ./_binggu_smoke_home
 python binggu.py --selftest
 ```
+
+문서와 스크립트 이름에 남아 있는 `OpenBinggu`는 예전 내부 코드네임입니다. 현재 공개 제품명은 BingguPack이고, 새로 읽을 문서는 `BINGGUPACK_*`와 `START_HERE`를 우선 보세요.
 
 ## License
 

@@ -8,7 +8,7 @@
 //   S5 MCP-Protocol-Version 헤더: 미지원 값 400 (absent 허용 — initialize 협상)
 //   S6 응답 캡 기존 36K → 20K자
 //   §4 tool 5종 전건 annotations(readOnlyHint=true) + outputSchema
-// 불변: read-only 5 tool · synthetic toy pack 전용 · JSON-only(GET 405) · stateless ·
+// 불변: read-only 6 tool · synthetic toy pack 전용 · JSON-only(GET 405) · stateless ·
 //   fail-closed 누출 스캔(SANITIZE_BLOCK) · 배포/OAuth/등록 0 (wrangler dev 로컬 전용).
 
 import { capturePreview, scanPii } from "./capture_preview";
