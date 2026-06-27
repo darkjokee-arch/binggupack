@@ -61,6 +61,8 @@ _CHECKS = [
     # hosted 경계 회귀 가드(runner+inbox selftest 묶음). 순수 python·network/node/wrangler 0 — 기본 doctor 적격.
     # wrangler/node 필요한 live E2E 는 여기 넣지 않는다(기본 doctor 는 무설치·무네트워크 유지).
     ("hosted_boundary_e2e", "../tests/hosted_boundary_e2e.py"),
+    # storage 현재 동작 고정(C0) — 트랙 C facade 이동의 회귀 가드. 순수 python·temp DB·운영 write 0.
+    ("storage_characterization", "../tests/storage_characterization.py"),
 ]
 
 # 하위 selftest 의 "GATE: GO" / "RESULT: n/n  GATE=GO" 양식 모두 수용
