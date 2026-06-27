@@ -41,6 +41,30 @@ _PREVIEW_PII_EXTRA = [
 ]
 
 
+# 제외 사유 사람친화 라벨 (사람 출력 전용 — JSON excluded_counts 키는 기계용으로 불변).
+_VETO_LABEL = {
+    "단순조회": "단순조회", "단순질문": "단순질문",
+    "ops_imperative": "운영지시", "ops_report": "운영보고", "meta_confirm": "진행확인",
+    "농담": "잡담", "감탄": "감탄", "인사": "인사", "임시감정": "임시감정",
+    "ignored": "판단신호 없음", "preview_trigger": "저장 트리거",
+}
+_EXCL_LABEL = {
+    "short_or_fragment": "너무짧음", "over_max_sentence": "문장과길이초과",
+    "secret_pattern": "비밀패턴", "duplicate": "중복",
+    "over_max_candidates": "후보수상한", "over_max": "상한초과",
+}
+
+
+def _friendly_excl(key):
+    """excluded_counts 키를 사람친화 라벨로(판단아님/민감정보/너무짧음 등). 출력 전용."""
+    if key.startswith("not_judgment:"):
+        why = key.split(":", 1)[1]
+        return _VETO_LABEL.get(why, why) + "(판단아님)"
+    if key.startswith("pii_"):
+        return "민감정보"
+    return _EXCL_LABEL.get(key, key)
+
+
 def _meaningful(s):
     stripped = _REDACT_RE.sub("", s).strip()
     if len(stripped) < 6:
@@ -114,6 +138,8 @@ def capture_preview(text, max_candidates=DEFAULT_MAX):
         if cap["state"] != "captured_candidate":
             excl("not_judgment:" + (cap["vetoes"][0] if cap["vetoes"] else cap["state"]))
             continue
+        # 왜 후보인지(설명가능성) — 캡처 게이트가 잡은 판단 signal. pinned=명시 저장 의도.
+        capture_reason = ",".join(cap["signals"]) or ("명시저장" if cap["pinned"] else "판단")
         h = _norm_hash(sent)
         if h in seen:
             excl("duplicate")
@@ -135,18 +161,20 @@ def capture_preview(text, max_candidates=DEFAULT_MAX):
             {"id": "preview:" + h, "sentence": sent, "node_type": lkmap.KO2EN[kind],
              "evidence_refs": ["preview"]}, status="candidate")
         # 문장 전체 저장(발췌 cut 제거) — 본 것 = 저장된 것. node_id/hash 도 전체 기준.
+        # gate: 캡처 게이트 출처(regex 정본). rule_id: 도장 근거(semantic_* 이면 semantic 개입, 그 외 종결어 fallback).
         candidates.append({"sentence": sent, "label_kind": kind, "rule_id": rule_id,
                            "semantic_subtype": semantic_subtype,
+                           "capture_reason": capture_reason, "gate": "regex",
                            "a0_verdict": verdict["verdict"], "candidate": True})
 
     lines = ["# 캡처 미리보기 — 후보 %d건 (전부 candidate, 미저장)" % len(candidates),
-             "", "| # | 도장 | 문장 | 분류근거 | 헌법판정 |", "|---|---|---|---|---|"]
+             "", "| # | 도장 | 문장 | 캡처근거 | 도장근거 | 헌법판정 |", "|---|---|---|---|---|---|"]
     for i, c in enumerate(candidates, 1):
-        lines.append("| %d | %s | %s | %s | %s |" % (i, c["label_kind"], c["sentence"],
-                                                     c["rule_id"], c["a0_verdict"]))
+        lines.append("| %d | %s | %s | %s | %s | %s |" % (i, c["label_kind"], c["sentence"],
+                                                          c["capture_reason"], c["rule_id"], c["a0_verdict"]))
     if excluded:
         lines.append("")
-        lines.append("제외: " + ", ".join("%s=%d" % (k, v) for k, v in sorted(excluded.items())))
+        lines.append("제외: " + ", ".join("%s=%d" % (_friendly_excl(k), v) for k, v in sorted(excluded.items())))
     if truncated:
         lines.append("")
         lines.append("(입력이 %d자 캡으로 절단됨)" % INPUT_CAP)
@@ -267,6 +295,14 @@ def run_selftest():
         len(pii_tail) > 80 and len(r14["candidates"]) == 0
         and any(k.startswith("pii_") for k in r14["excluded_counts"])
         and "9876" not in r14["preview_markdown"])
+
+    # 15. 설명가능성 — 후보에 capture_reason(왜 후보)/gate 노출 + 제외 사유 사람친화 라벨
+    r15 = capture_preview("이 입찰은 마진이 낮아 보류하기로 결정했다. 상태 보여줘.")
+    c15 = r15["candidates"][0] if r15["candidates"] else {}
+    rec(15, "후보 capture_reason/gate 노출 + 제외 친화 라벨",
+        len(r15["candidates"]) == 1 and bool(c15.get("capture_reason")) and c15.get("gate") == "regex"
+        and "단순조회" in r15["preview_markdown"]
+        and any(k.startswith("not_judgment:") for k in r15["excluded_counts"]))
 
     # 10. write/save 0 — 감시 디렉토리 FS 전후 동일 + 본 모듈 save 함수 부재
     fs_after = _fs_snapshot(watch)
