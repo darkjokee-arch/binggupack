@@ -58,6 +58,9 @@ _CHECKS = [
     ("runtime_access_engine", "openbinggu_runtime_access_engine.py"),  # deny-by-default 강제 엔진(21케이스, write 0)
     ("mcp_server_handlers", "openbinggu_mcp_server_handlers.py"),  # MCP 도구 핸들러 gate 결선(synthetic, underlying mock)
     ("reviewer_auth_session", "openbinggu_reviewer_auth_session_selftest.py"),  # reviewer 인증/세션(in-memory, FS write 0)
+    # hosted 경계 회귀 가드(runner+inbox selftest 묶음). 순수 python·network/node/wrangler 0 — 기본 doctor 적격.
+    # wrangler/node 필요한 live E2E 는 여기 넣지 않는다(기본 doctor 는 무설치·무네트워크 유지).
+    ("hosted_boundary_e2e", "../tests/hosted_boundary_e2e.py"),
 ]
 
 # 하위 selftest 의 "GATE: GO" / "RESULT: n/n  GATE=GO" 양식 모두 수용
