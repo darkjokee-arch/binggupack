@@ -34,13 +34,13 @@ python binggu.py route "..."
 긴 명령 대신 이 4개만 기억해도 됩니다 — 동작·안전 게이트는 본명령과 똑같습니다.
 
 ```bash
-binggu start                       # = init   내 노트 시작
-binggu remember "백업은 항상 먼저 한다"  # = preview  후보로 보여주기(아직 미저장)
-binggu ask "이번 작업 전에 조심할 것?"   # = recall   관련 기억·과거 실수 회상
-binggu doctor                      # = status  노트 상태 + 무결성 점검
+binggu start                          # = init   내 노트 시작
+binggu remember "다음엔 이 거래처 먼저 검토"  # = preview  내가 친 직감은 약해도 후보로 보여줌(미저장)
+binggu ask "이번 작업 전에 조심할 것?"      # = recall   관련 기억·과거 실수 회상
+binggu doctor                         # = status  노트 상태 + 무결성 점검
 ```
 
-> `remember` 는 **바로 저장하지 않습니다.** 후보만 보여주고, 저장은 안내해 주는 `save … --confirm "SAVE n"` 으로 내가 한 번 더 도장 찍습니다. (`binggu` 는 `python binggu.py` 로 읽으세요)
+> `remember` 는 내가 직접 친 **명시 입력**이라, "다음엔 …" 같은 약한 직감도 후보로 보여줍니다(자동 수집은 이런 잡담성 문장을 거릅니다 — 책임 분리). 단 **바로 저장하지는 않습니다.** 후보만 보여주고, 안내해 주는 `save … --explicit --confirm "SAVE n"` 으로 내가 한 번 더 도장 찍습니다. 비밀번호·개인정보는 명시 입력이어도 차단됩니다. (`binggu` 는 `python binggu.py` 로 읽으세요)
 
 ## 꼭 알아야 할 용어 5개
 

@@ -65,6 +65,8 @@ _CHECKS = [
     ("storage_characterization", "../tests/storage_characterization.py"),
     # 명시 저장 경로 판단-veto 면제 + 안전 게이트 유지(A안 버그픽스 회귀 가드). 순수 python.
     ("explicit_save_path", "../tests/explicit_save_path.py"),
+    # 저장 본체(save_selected) 동작 — SSOT/explicit 변경의 회귀를 게이트에서 직접 포착(이전엔 미연결).
+    ("conversation_candidate_save", "openbinggu_conversation_candidate_save.py"),
 ]
 
 # 하위 selftest 의 "GATE: GO" / "RESULT: n/n  GATE=GO" 양식 모두 수용

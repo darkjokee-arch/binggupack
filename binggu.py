@@ -482,8 +482,9 @@ def _preview_id(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:8]
 
 
-def cmd_preview(a):
-    pv = capture_preview(a.text)
+def cmd_preview(a, explicit=False):
+    # explicit: remember(명시 저장 의도) 경로면 True — 판단-veto 면제(안전 게이트는 유지).
+    pv = capture_preview(a.text, explicit=explicit)
     print(pv["preview_markdown"])
     # SAVE 게이트 대조용 — 직전 preview 후보를 last_preview 에 영속(hook 이 사람 'SAVE n' 발화 시 이걸 읽어 도장).
     # 이 연결이 없으면 CLI preview→save 흐름이 save_gate_log 와 분리돼 autopush 이중게이트가 영구 BLOCK.
@@ -496,8 +497,9 @@ def cmd_preview(a):
     print("\npreview_id: %s" % pid)
     if pv["candidates"]:
         print("⚠ 외부 사실(릴리스 상태·업로드 여부·등급 등)은 실측 확인 전에 저장하지 마세요.")
+        _x = " --explicit" if explicit else ""
         print("저장은 번호를 직접 골라서:  python binggu.py save \"<같은 텍스트>\" --preview-id %s "
-              "--pick <고른 번호들> --confirm \"SAVE <고른 번호들>\"" % pid)
+              "--pick <고른 번호들> --confirm \"SAVE <고른 번호들>\"%s" % (pid, _x))
     return 0
 
 
@@ -553,7 +555,8 @@ def cmd_save(a):
     db, snap_dir = _open(a.ledger)
     idx = [int(x) for x in a.pick.split(",") if x.strip()]
     r = save_selected(db, a.text, idx, {"actor": "human", "confirm": a.confirm},
-                      snap_dir, due_date=a.due, speaker=getattr(a, "speaker", None))
+                      snap_dir, due_date=a.due, speaker=getattr(a, "speaker", None),
+                      explicit=getattr(a, "explicit", False))
     db.close()
     return _show(r)
 
@@ -1099,6 +1102,7 @@ def main():
     sp.add_argument("--pick", required=True); sp.add_argument("--confirm", required=True)
     sp.add_argument("--due", default=None)
     sp.add_argument("--speaker", choices=["owner", "ai"], default=None)  # 화자 칸(owner=사용자 발화/ai=AI 요약)
+    sp.add_argument("--explicit", action="store_true")  # remember(명시 입력) preview 로 본 후보 저장 — 판단-veto 면제
     sp = sub.add_parser("list"); sp.add_argument("--status", default=None)
     sp.add_argument("--kind", default=None)
     # 회상(L4~L6 · read-only) — recall(why_search) / trace(judgment_trace) / preflight
@@ -1174,7 +1178,8 @@ def main():
     scp.add_argument("--deploy", action="store_true")    # (--apply 와) wrangler deploy 까지 — 비가역
     a = p.parse_args()
     fn = {"init": cmd_init, "start": cmd_init, "status": cmd_status, "doctor": cmd_status,
-          "preview": cmd_preview, "remember": cmd_preview, "reflect": cmd_reflect, "save": cmd_save,
+          "preview": cmd_preview, "remember": lambda a: cmd_preview(a, explicit=True),  # remember=명시 입력
+          "reflect": cmd_reflect, "save": cmd_save,
           "list": cmd_list, "deprecate": cmd_deprecate, "replace": cmd_replace,
           "accept": cmd_accept, "unaccept": cmd_unaccept, "due": cmd_due,
           "resolve": cmd_resolve, "reminders": cmd_reminders, "capture": cmd_capture,

@@ -320,7 +320,7 @@ def run():
     it6, p6 = _mk_intent(outbox, pii_sent, [1])
     orig_preview = _convsave.capture_preview
     try:
-        _convsave.capture_preview = lambda t: {"candidates": [
+        _convsave.capture_preview = lambda t, **_kw: {"candidates": [
             {"sentence": pii_sent, "label_kind": "판단"}]}
         r6 = process_outbox(db, outbox, ctx, snap_dir, NOW)
     finally:

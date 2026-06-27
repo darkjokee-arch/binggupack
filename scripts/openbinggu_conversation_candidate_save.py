@@ -32,14 +32,15 @@ def _sent_hash(s):
     return hashlib.sha256(re.sub(r"\s+", " ", s).strip().encode("utf-8")).hexdigest()[:8]
 
 
-def _maybe_promote_actor_by_gate(text, indices, ctx):
+def _maybe_promote_actor_by_gate(text, indices, ctx, explicit=False):
     """사람-발화 게이트(binggu_save_gate): actor 비human 이어도 선택 문장이 사람 SAVE 발화로
-    기록됐으면 human 승격(0-A 해법, 4cli REFINE). 게이트 실패/미기록 → 승격 0(fail-closed)."""
+    기록됐으면 human 승격(0-A 해법, 4cli REFINE). 게이트 실패/미기록 → 승격 0(fail-closed).
+    explicit: 명시 저장 경로면 preview 후보 추출도 explicit(저장 본체와 index 정합)."""
     if ctx.get("actor", "").strip().lower() == "human":
         return ctx
     try:
         import binggu_save_gate as sgate
-        cands = capture_preview(text)["candidates"]
+        cands = capture_preview(text, explicit=explicit)["candidates"]
         sents = [cands[i - 1]["sentence"] for i in indices
                  if isinstance(i, int) and 1 <= i <= len(cands)]
         if sents and sgate.gate_human_for(sents):
@@ -51,12 +52,12 @@ def _maybe_promote_actor_by_gate(text, indices, ctx):
     return ctx
 
 
-def save_selected(db, text, indices, ctx, snap_dir, due_date=None, speaker=None):
+def save_selected(db, text, indices, ctx, snap_dir, due_date=None, speaker=None, explicit=False):
     """선택 후보만 staging 저장. 반환 {applied, saved, skipped_existing, rejected, reason, pack_id}.
     진입 시 사람-발화 게이트로 actor 승격 후 기존 게이트(actor/confirm/A0/PII) 그대로 적용.
     speaker: 화자 축(owner=사용자 발화/ai=AI 요약). None=미지정(기존 호출 후방호환·NULL 적재).
     owner 직감도 conv-self 자기증빙 evidence 가 붙으므로 A0 REVIEW 거부 없이 저장된다(evidence_refs 보유)."""
-    ctx = _maybe_promote_actor_by_gate(text, indices, ctx)
+    ctx = _maybe_promote_actor_by_gate(text, indices, ctx, explicit)
     before = db.store_checksum()
 
     def block(reason):
@@ -75,8 +76,9 @@ def save_selected(db, text, indices, ctx, snap_dir, due_date=None, speaker=None)
     if not indices:
         return block("empty_selection")
 
-    # 2) 원본 text 재실행 (변조 불가 — preview 결과 객체 불신)
-    pv = capture_preview(text)
+    # 2) 원본 text 재실행 (변조 불가 — preview 결과 객체 불신). explicit 은 preview 와 동일해야
+    #    후보 index 가 정합한다(명시 저장은 explicit=True 로 본 그 후보를 그대로 저장).
+    pv = capture_preview(text, explicit=explicit)
     cands = pv["candidates"]
 
     saved_items = []
@@ -98,8 +100,13 @@ def save_selected(db, text, indices, ctx, snap_dir, due_date=None, speaker=None)
             {"id": "pre:" + _sent_hash(sent), "sentence": sent,
              "node_type": lkmap.KO2EN[kind], "evidence_refs": ["pre"]}, status="candidate")
         if verdict["verdict"] == "FAIL":
-            rej("a0_fail")
-            continue
+            # 명시 저장(explicit: remember 등 사용자가 직접 친 입력)은 a0 형식 게이트
+            # (node_1_word/meaning = 비종결·짧음 구어체)를 면제 — pair owner 면제와 동일 원칙.
+            # PII/secret(아래 3b)·G4_no_auto·confirm·중복·actor 안전 게이트는 그대로 강제된다.
+            _form_exempt = {"node_1_word", "node_1_meaning"}
+            if not (explicit and verdict.get("guard") in _form_exempt):
+                rej("a0_fail")
+                continue
         if verdict["verdict"] == "REVIEW" and not ctx.get("allow_review"):
             rej("a0_review_needs_explicit_allow")
             continue
@@ -321,10 +328,19 @@ def run():
     def rec(cid, desc, ok):
         results.append((cid, desc, "PASS" if ok else "FAIL"))
 
+    # candidate_save 는 사용자 명시 저장 함수 — selftest 는 명시 경로(explicit=True)를 검증한다.
+    # 명시 입력은 SSOT 판단-veto 면제(문서/사실/판단 도장 모두 저장 가능), 안전 게이트(PII/secret/
+    # confirm/actor/중복/A0 형식 외)는 그대로 강제. 자동/일반 경로(explicit=False)는 binggu.py selftest 가 커버.
+    _orig_save = save_selected
+
+    def _ss(*a, **k):
+        k.setdefault("explicit", True)
+        return _orig_save(*a, **k)
+
     db = open_g3(os.path.join(tmp, "s.sqlite"))
 
     # 1. 정상: 후보 1·5번(문서·판단) 선택 저장 + due
-    r1 = save_selected(db, CONVO, [1, 5], {"actor": "human", "confirm": "SAVE 1,5"},
+    r1 = _ss(db, CONVO, [1, 5], {"actor": "human", "confirm": "SAVE 1,5"},
                        snap_dir, due_date="2026-06-20")
     n = db.con.execute("SELECT count(*) FROM nodes").fetchone()[0]
     e = db.con.execute("SELECT count(*) FROM edges").fetchone()[0]
@@ -341,11 +357,11 @@ def run():
         and aud == 1 and rev == 1 and r1["due_set"] == 1)
 
     # 2. confirm 문구 불일치 BLOCK
-    r2 = save_selected(db, CONVO, [2], {"actor": "human", "confirm": "SAVE 2,3"}, snap_dir)
+    r2 = _ss(db, CONVO, [2], {"actor": "human", "confirm": "SAVE 2,3"}, snap_dir)
     rec(2, "confirm 불일치 BLOCK", (not r2["applied"]) and r2["reason"] == "confirm_phrase_mismatch")
 
     # 3. auto 차단
-    r3 = save_selected(db, CONVO, [2], {"actor": "auto", "confirm": "SAVE 2"}, snap_dir)
+    r3 = _ss(db, CONVO, [2], {"actor": "auto", "confirm": "SAVE 2"}, snap_dir)
     rec(3, "actor=auto BLOCK", (not r3["applied"]) and r3["reason"] == "G4_no_auto")
 
     # 4. 자기증빙 prefix + ephemeral 동결 확인
@@ -358,21 +374,21 @@ def run():
     rec(5, "원문 전문 미저장(문장 단위만)", CONVO not in blob)
 
     # 6. 부분 재선택 — [1,5] 재선택 시 전부 skip → nothing_to_save / [5,2]는 5 skip·2 저장
-    r6a = save_selected(db, CONVO, [1, 5], {"actor": "human", "confirm": "SAVE 1,5"}, snap_dir)
-    r6b = save_selected(db, CONVO, [5, 2], {"actor": "human", "confirm": "SAVE 5,2"}, snap_dir)
+    r6a = _ss(db, CONVO, [1, 5], {"actor": "human", "confirm": "SAVE 1,5"}, snap_dir)
+    r6b = _ss(db, CONVO, [5, 2], {"actor": "human", "confirm": "SAVE 5,2"}, snap_dir)
     rec(6, "부분 재선택(전부 skip→noop / 일부만 신규 저장)",
         (not r6a["applied"]) and r6a["reason"] == "nothing_to_save" and r6a["skipped_existing"] == 2
         and r6b["applied"] and r6b["saved"] == 1 and r6b["skipped_existing"] == 1)
 
     # 7. 인덱스 범위 밖 거부
-    r7 = save_selected(db, CONVO, [99], {"actor": "human", "confirm": "SAVE 99"}, snap_dir)
+    r7 = _ss(db, CONVO, [99], {"actor": "human", "confirm": "SAVE 99"}, snap_dir)
     rec(7, "인덱스 범위 밖 거부", (not r7["applied"]) and r7["rejected"].get("index_out_of_range") == 1)
 
     # 8. A0 FAIL 후보 거부 — 단편 문장만으로 구성된 입력 (preview 가 후보로 올려도 절단/단편은 저장 게이트가 거부)
     frag_text = "공고번호 20250000001 검토 진행 상황 정리 메모"  # 비종결 — preview 후보로 잡혀도 A0 FAIL
     pv8 = capture_preview(frag_text)
     if pv8["candidates"]:
-        r8 = save_selected(db, frag_text, [1], {"actor": "human", "confirm": "SAVE 1"}, snap_dir)
+        r8 = _ss(db, frag_text, [1], {"actor": "human", "confirm": "SAVE 1"}, snap_dir)
         ok8 = (not r8["applied"]) and r8["rejected"].get("a0_fail") == 1
     else:
         ok8 = True  # 후보 자체가 없으면 저장 경로 진입 불가 = 동일하게 안전
@@ -380,7 +396,7 @@ def run():
 
     # 9. checksum rollback — 신규 DB
     db2 = open_g3(os.path.join(tmp, "s2.sqlite"))
-    r9 = save_selected(db2, CONVO, [1], {"actor": "human", "confirm": "SAVE 1",
+    r9 = _ss(db2, CONVO, [1], {"actor": "human", "confirm": "SAVE 1",
                                          "checksum_mismatch": True}, snap_dir)
     rolled = db2.con.execute("SELECT count(*) FROM nodes").fetchone()[0] == 0
     rec(9, "checksum rollback(부분쓰기 0)", (not r9["applied"]) and rolled)
@@ -388,10 +404,10 @@ def run():
 
     # 10. duplicate pack 차단 (동일 선택 동일 내용 재시도 — 6a 가 skip 경로, 이번엔 registry 경로 검증)
     db3 = open_g3(os.path.join(tmp, "s3.sqlite"))
-    save_selected(db3, CONVO, [3], {"actor": "human", "confirm": "SAVE 3"}, snap_dir)
+    _ss(db3, CONVO, [3], {"actor": "human", "confirm": "SAVE 3"}, snap_dir)
     db3.con.execute("DELETE FROM nodes")  # 노드만 지워 skip 우회 → registry 가 잡아야 함
     db3.con.commit()
-    r10 = save_selected(db3, CONVO, [3], {"actor": "human", "confirm": "SAVE 3"}, snap_dir)
+    r10 = _ss(db3, CONVO, [3], {"actor": "human", "confirm": "SAVE 3"}, snap_dir)
     rec(10, "duplicate(applied_registry) 차단", (not r10["applied"])
         and r10["reason"] == "duplicate_already_applied")
     db3.close()
@@ -405,7 +421,7 @@ def run():
     import binggu_hit_stats as _HS
     db_spk = open_g3(os.path.join(tmp, "s_spk.sqlite"))
     # 14. speaker 적재(owner) — save_selected speaker 파라미터(후방호환·NULL/owner/ai)
-    save_selected(db_spk, CONVO, [1], {"actor": "human", "confirm": "SAVE 1"}, snap_dir, speaker="owner")
+    _ss(db_spk, CONVO, [1], {"actor": "human", "confirm": "SAVE 1"}, snap_dir, speaker="owner")
     _sp = db_spk.con.execute("SELECT speaker FROM nodes").fetchone()
     rec(14, "speaker 적재(owner)", bool(_sp) and _sp[0] == "owner")
     # 15. 페어 저장 — owner/ai 독립 노드 + ai_refutes 연결 + dangling 0(불변식2·3)
@@ -446,7 +462,7 @@ def run():
     # 13. 긴 문장(80자 초과) 전체 저장 — 발췌 cut 폐기 검증(저장된 sentence == 입력 문장 전체)
     db_long = open_g3(os.path.join(tmp, "s_long.sqlite"))
     LONG = "이 입찰은 " + "매우 " * 30 + "신중하게 검토한 끝에 보류한다."
-    rl = save_selected(db_long, LONG, [1], {"actor": "human", "confirm": "SAVE 1"}, snap_dir)
+    rl = _ss(db_long, LONG, [1], {"actor": "human", "confirm": "SAVE 1"}, snap_dir)
     stored = db_long.con.execute("SELECT sentence FROM nodes").fetchone()
     rec(13, "긴 문장 전체 저장(발췌 0·node sentence=전체)",
         rl["applied"] and rl["saved"] == 1 and stored and stored[0] == LONG and len(LONG) > 80)
