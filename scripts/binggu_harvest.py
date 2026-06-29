@@ -332,11 +332,31 @@ def _maybe_parse(fr):
     return PA.parse_document(raw, content_type=fr.get("content_type"), filename=fr.get("url"))
 
 
+def _strip_boilerplate(seg):
+    """파생(markdown) segment 에서 네비/메뉴 보일러플레이트 제거 → 정제 본문 반환(없으면 None).
+
+    역할분담(A): 2차 라인 온톨로지화는 OpenCrab(클라우드) 담당이고 빙구팩은 양질 본문 정제 전담.
+    파생(derived)은 가공본이며 원문 raw 는 _store_raw 가 sha256 으로 별도 보존하므로 정제는 **무손실**.
+    링크/이미지를 텍스트로 펴고, 정제 후 본문성(>=30자)이 없는 토막(메뉴/네비/링크 나열)은 드롭한다.
+    _content_chunks(원문 1:1 경로)는 이 정제를 거치지 않는다(§1 원문 보존 불변)."""
+    import re as _re
+    s = _re.sub(r"!\[[^\]]*\]\([^)]*\)", "", str(seg or ""))   # 이미지 제거
+    s = _re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", s)            # [텍스트](url) → 텍스트
+    s = _re.sub(r"https?://\S+", "", s)                        # 벌거벗은 url 제거
+    s = s.strip(" \t*#-+|>").strip()
+    if len(s) < 30:                                            # 짧은 토막(메뉴/네비/링크 잔재) 드롭
+        return None
+    return s
+
+
 def _derived_chunks(derived_text, source_ref, pr):
     """파생 텍스트(가공본) → evidence_chunk[]. text 는 derived 임을 evidence_meta 로 명시
     (derivative=True / parser / raw_sha256). 원문 raw 는 _store_raw 가 별도 보관."""
     chunks, stops = [], []
     for i, seg in enumerate(_split_segments(derived_text)):
+        seg = _strip_boilerplate(seg)                 # A(역할분담): 파생 보일러플레이트 드롭(무손실·raw 별도보존)
+        if seg is None:
+            continue
         red, resid = _redact_all(seg)                 # secret+PII 마스킹(파생 텍스트도 동일 게이트)
         if resid:
             stops.append({"seg": i, "reason": "secret/PII residual after redaction", "kinds": resid})
