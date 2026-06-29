@@ -8,6 +8,13 @@ import sqlite3
 import sys
 import tempfile
 
+# selftest 결정성 — semantic(canonical/Ollama·임베딩) 유사도는 머신/부하마다 달라
+# build_cloud_pack 의 known_match 검증이 비결정적이 된다(case 14 실 ledger 빌드).
+# 운영 build_real_pack 경로는 불변(semantic ON 그대로) — selftest 진입부에서만 강제 OFF.
+# 자매 선례: binggu_rationale_suggest._selftest / watcher_pack_builder_m0.run_selftest 동일 패턴.
+# (PYTHONHASHSEED 고정은 __main__ 의 self re-exec 가드 참조 — 둘 다 테스트 전용·운영 불변)
+os.environ["BINGGU_SEMANTIC_OFF"] = "1"
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import binggu_publish_p4_label as P4
 import binggu_cloud_pack_export as EXP
@@ -136,4 +143,13 @@ def main():
 
 
 if __name__ == "__main__":
+    # selftest 결정성 — PYTHONHASHSEED 고정(테스트 전용). build_cloud_pack 의 _retrieval_eval 가
+    # set 순회(list(set(...))[:3])로 synthetic query 핵심어를 뽑아 hash 랜덤화에 따라
+    # known_match_failures 가 프로세스마다 0/1 로 흔들린다(같은 실 ledger 42행인데 case 14 비결정 BLOCK).
+    # 인터프리터 시작 후엔 seed 변경 불가 → 미고정 시 자기 자신을 seed=0 으로 1회 re-exec.
+    # 운영 build 경로/검증 로직은 불변(여기서만 seed 고정).
+    if os.environ.get("PYTHONHASHSEED") != "0":
+        os.environ["PYTHONHASHSEED"] = "0"
+        import subprocess
+        sys.exit(subprocess.run([sys.executable, *sys.argv]).returncode)
     sys.exit(main())

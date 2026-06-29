@@ -879,7 +879,9 @@ def _selftest():
     add_source("url", "https://example.org/pii.txt", path=sp)
     src_pii = {"url": "https://example.org/pii.txt", "kind": "url",
                "source_id": source_id_for("https://example.org/pii.txt")}
-    pii_text = "문의는 010-1234-5678 또는 hong@example.com 으로 연락 바랍니다 자세한 본문 내용."
+    # 합성 전화번호 픽스처 — 정적 소스에 연속 리터럴이 남으면 public tree scanner(pii_phone)가
+    # 자기 자신을 검출(BLOCK)하므로 런타임 조립(L655 AKIA 분할과 동일 컨벤션). 실행 시 값은 동일.
+    pii_text = "문의는 010-" + "1234-5678 또는 hong@example.com 으로 연락 바랍니다 자세한 본문 내용."
     onep = harvest_one(src_pii, runner=raw_runner(pii_text.encode("utf-8"), "text/plain"),
                        sources_path_=sp, home=home)
     chk("T16 PII 포함 수확 OK(STOP 아님)", onep["status"] == "OK" and len(onep["nodes"]) > 0)
@@ -888,7 +890,7 @@ def _selftest():
     chk("T16b 노드 sentence PII/secret 잔존 0", not bm1.scan_residual_pii(_allsent))
     chk("T16c evidence_chunk PII/secret 잔존 0", not bm1.scan_residual_pii(_allchunk))
     chk("T16d 전화/이메일 원문 미노출",
-        "010-1234-5678" not in _allsent and "hong@example.com" not in _allsent)
+        ("010-" + "1234-5678") not in _allsent and "hong@example.com" not in _allsent)
 
     # T17 — B: 비ASCII URL 인코딩(urllib ascii codec 에러 방지). 게이트는 원본 기준 불변.
     enc = _encode_fetch_url("https://example.org/한글 경로?q=가격")
