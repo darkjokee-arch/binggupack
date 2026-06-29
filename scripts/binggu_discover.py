@@ -187,6 +187,34 @@ class NaverProvider(SearchProvider):
                 for i in (data.get("items") or [])][:limit]
 
 
+class TavilyProvider(SearchProvider):
+    """Tavily Search API(LLM 정제·빠름·측정 최速). TAVILY_API_KEY 필요(무료 월 1,000 credits).
+    키 미설정/오류면 빈 결과 → 자동 스킵(살아나면 자동 활성). runner 주입 시 selftest mock."""
+    name = "tavily"
+
+    def __init__(self, runner=None):
+        self._runner = runner
+
+    def search(self, query, limit=10):
+        if self._runner is not None:
+            return list(self._runner(query, limit) or [])[:limit]
+        key = os.environ.get("TAVILY_API_KEY")
+        if not key:
+            return []  # 미설정 → 빈 결과(키 살아나면 자동 활성)
+        import urllib.request
+        req = urllib.request.Request(
+            "https://api.tavily.com/search",
+            data=json.dumps({"query": query, "max_results": limit}).encode("utf-8"),
+            headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"})
+        try:
+            data = json.loads(urllib.request.urlopen(req, timeout=25).read())
+        except Exception:
+            return []
+        return [{"url": r.get("url"), "title": r.get("title"),
+                 "snippet": r.get("content"), "source": "tavily"}
+                for r in (data.get("results") or [])][:limit]
+
+
 class FallbackProvider(SearchProvider):
     """provider 체인 — 앞에서부터 시도, 결과 있으면 채택(빈 결과/예외는 다음으로). 본진 다운 시 폴백."""
     name = "fallback"
@@ -208,7 +236,7 @@ class FallbackProvider(SearchProvider):
 
 
 def default_provider():
-    """그물 우선순위 — SearXNG(본진·측정 결정) → serper/naver(키 있으면 보조 폴백) → ddgs → DDG(최후).
+    """그물 우선순위 — SearXNG(본진·측정 결정) → serper/naver/tavily(키 있으면 보조 폴백) → ddgs → DDG(최후).
     URL/키 미설정 그물은 자동 제외(unset 이면 chain 미합류, 살아나면 자동 활성).
     항상 DDGProvider 최후 폴백(키·인프라 0)."""
     chain = []
@@ -218,6 +246,8 @@ def default_provider():
         chain.append(SerperProvider())
     if os.environ.get("NAVER_CLIENT_ID") and os.environ.get("NAVER_CLIENT_SECRET"):
         chain.append(NaverProvider())
+    if os.environ.get("TAVILY_API_KEY"):
+        chain.append(TavilyProvider())
     try:
         import ddgs  # noqa: F401
         chain.append(DdgsProvider())
@@ -534,6 +564,25 @@ def _selftest():
     chk("D17 serper 키 set 시 chain 합류", "serper" in names)
     chk("D17b searxng 본진이 serper 앞(우선)", names.index("searxng") < names.index("serper"))
     for _k, _v in _save.items():
+        if _v is None:
+            os.environ.pop(_k, None)
+        else:
+            os.environ[_k] = _v
+
+    # D18~ — Tavily provider(키 미설정 빈결과 + runner 계약 + chain 합류). env save/restore.
+    _tk = os.environ.pop("TAVILY_API_KEY", None)
+    chk("D18 Tavily 키 미설정 → 빈결과(자동 스킵)", TavilyProvider().search("q") == [])
+    if _tk is not None:
+        os.environ["TAVILY_API_KEY"] = _tk
+    tv_m = TavilyProvider(runner=lambda q, n: [
+        {"url": "https://t.com", "title": "t", "snippet": "x", "source": "tavily"}])
+    chk("D18b Tavily runner→계약 매핑", tv_m.search("q")[0]["source"] == "tavily")
+    _save2 = {k: os.environ.get(k) for k in ("SEARXNG_URL", "TAVILY_API_KEY")}
+    os.environ["SEARXNG_URL"] = "http://localhost:8888"
+    os.environ["TAVILY_API_KEY"] = "dummy"
+    chk("D18c tavily 키 set 시 chain 합류",
+        "tavily" in [p.name for p in default_provider().providers])
+    for _k, _v in _save2.items():
         if _v is None:
             os.environ.pop(_k, None)
         else:
