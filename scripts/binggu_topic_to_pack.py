@@ -80,18 +80,24 @@ def topic_to_pack(topic, provider=None, fetch_runner=None, home=None, out_dir=No
 
     # ② 승급 — min_score 이상 후보를 harvest 화이트리스트로(add_source 게이트 통과분만)
     promoted = []
+    promoted_sids = set()   # 이번 run 승급 source_id — ③수확을 이 topic 으로 격리(cross-topic 오염 차단)
     for c in disc["candidates"]:
         if c.get("score", 0) < min_score:
             continue
         pr = DISC.promote_discovery(c["source_id"], sources_path_=sp, discover_path_=dp)
         if pr.get("status") == "OK":
             promoted.append(pr["promoted_url"])
+            promoted_sids.add(c["source_id"])
         if len(promoted) >= max_sources:
             break
 
-    # ③ 수확 — 등록 소스마다 크롤+파싱+후보화. 파싱 실패는 그 소스만 skip(조건3, 전체 안 죽음)
+    # ③ 수확 — 이번 run 에 승급한 소스만(누적 화이트리스트 전체가 아니라 현재 topic 만).
+    #   sp 에 다른 topic 의 기존 등록 소스가 있어도 이 pack 에 섞이지 않음(topic 격리·오염 차단).
+    #   candidate.source_id 와 add_source 의 source_id 는 둘 다 source_id_for(norm_url) → 매칭 보장.
     documents, skipped = [], []
     for s in HV.load_sources(sp):
+        if s.get("source_id") not in promoted_sids:
+            continue
         one = HV.harvest_one(s, runner=fetch_runner, sources_path_=sp, home=home)
         if one["status"] == "OK":
             # 원본 evidence_chunks 사용 — evidence_meta(source/raw_pointer/raw_sha256/parser/derivative) 보존.
@@ -305,6 +311,18 @@ def _selftest():
     mani = json.load(open(os.path.join(out, "manifest.json"), encoding="utf-8"))
     chk("E10 기록 manifest 독립 재검증 PASS", PV.validate_pack(mani)["verdict"] in ("PASS", "REVIEW_ONLY"))
     chk("E11 promotion_allowed_default=false(안전 불변)", mani["promotion_allowed_default"] is False)
+
+    # E12 — cross-topic 오염 차단: sp 에 다른 topic 소스를 선등록(운영 home 누적 시뮬)한 뒤 새 topic 실행 →
+    #   기존 소스는 이번 run 승급분이 아니므로 수확 제외(수리 전이면 3건, 수리 후 2건).
+    home_iso = os.path.join(tempfile.mkdtemp(prefix="t2p_iso_"), ".binggupack")
+    os.makedirs(home_iso)
+    HV.add_source("url", "https://other.example.com/old-topic.html",
+                  keyword="다른주제", path=HV.sources_path(home_iso))
+    out_iso = tempfile.mkdtemp(prefix="t2p_iso_pack_")
+    r_iso = topic_to_pack("입찰 가격 예측", provider=provider, fetch_runner=fetch_runner,
+                          home=home_iso, out_dir=out_iso)
+    chk("E12 cross-topic 오염 차단(기존 sp 소스 미수확)",
+        r_iso["harvested_docs"] == 2 and r_iso["promoted"] == 3)
 
     # ── F. 배선 통합(A/B/C/D) — 전부 mock·temp·네트워크0 ─────────────────
     # F1 (A+B) subtopics=True → 세분화 query 그물 확장(누적 후보 ≥ 단일 발견). 기존 단일경로 불변 검증은 E2.
