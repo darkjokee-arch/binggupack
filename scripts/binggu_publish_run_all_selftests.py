@@ -56,6 +56,7 @@ GATES = [
     ("local ingest",      "localbinggu_ingest_executor.py",            ["--selftest"], "GATE=GO"),
     ("harvest inbound",   "binggu_harvest.py",                         ["--selftest"], "GATE: GO"),
     ("local collect",     "binggu_local_collect.py",                   ["--selftest"], "GATE: GO"),
+    ("knowledge graph",   "binggu_knowledge_graph.py",                 ["--selftest"], "GATE: GO"),
     ("P3 self-improve",   "openbinggu_p3_self_improve.py",             ["--selftest"], "GATE: GO"),
     ("tree scan",         "openbinggu_public_tree_scan.py",            ["--tree", REPO, "--public"], "verdict=CLEAN"),
 ]
