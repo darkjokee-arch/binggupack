@@ -10,6 +10,7 @@ fetch/파싱/적재는 절대 안 함(harvest 책임). 이 모듈은 **후보 �
     + IDNA(punycode/homograph) 정규화. dirty/unknown 후보는 제외(fail-closed).
   - 등록(promote)은 harvest.add_source 게이트를 통과시켜서만 — discover 가 화이트리스트를 직접 못 씀.
   - 실 네트워크는 provider runner 주입(기본 실 fetch). selftest 는 mock runner — 실 네트워크 0.
+  - provider = 일반검색 그물 + 공식 커넥터(data.go.kr/KIPRIS·키 우대·없으면 폴백)·topic 상황적응 routing.
 """
 import os
 import re
@@ -34,6 +35,7 @@ TRUST_SEED = {
     "arxiv.org": 1.0, "data.go.kr": 1.0, "kostat.go.kr": 1.0,
     "visitkorea.or.kr": 1.0, "scholar.google": 1.0, "who.int": 1.0,
     "oecd.org": 1.0, "g2b.go.kr": 1.0, "nps.or.kr": 1.0, "law.go.kr": 1.0,
+    "apis.data.go.kr": 1.0, "plus.kipris.or.kr": 1.0, "kipris.or.kr": 1.0,
     # ── Tier2(0.7) — 백과·.org·신뢰 미디어·공식 기업 도메인 ──
     "wikipedia.org": 0.7, "namu.wiki": 0.7, ".org": 0.7, "github.com": 0.7,
 }
@@ -227,6 +229,107 @@ class TavilyProvider(SearchProvider):
                 for r in (data.get("results") or [])][:limit]
 
 
+class DataGoKrProvider(SearchProvider):
+    """공공데이터포털(data.go.kr) 데이터셋 검색 공식 커넥터. DATA_GO_KR_SERVICE_KEY 필요.
+    JSON OpenAPI → SearchProvider 1:1(stdlib json·서드파티 0). 키 미설정/오류면 빈 결과(자동 스킵).
+    runner 주입 시 selftest mock. serviceKey 는 secret — env/인자 참조만(하드코딩 0)."""
+    name = "data_go_kr"
+    ENDPOINT = "https://api.odcloud.kr/api/15077093/v1/centers"  # env DATA_GO_KR_ENDPOINT 로 교체 가능
+
+    def __init__(self, runner=None, service_key=None):
+        self._runner = runner
+        self._service_key = service_key
+
+    def search(self, query, limit=10):
+        if self._runner is not None:
+            return list(self._runner(query, limit) or [])[:limit]
+        key = self._service_key or os.environ.get("DATA_GO_KR_SERVICE_KEY")
+        if not key:
+            return []  # 미설정 → 빈 결과(키 살아나면 자동 활성)
+        from urllib.parse import urlencode
+        import urllib.request
+        endpoint = os.environ.get("DATA_GO_KR_ENDPOINT") or self.ENDPOINT
+        url = endpoint + "?" + urlencode({
+            "serviceKey": key, "page": 1, "perPage": limit,
+            "returnType": "JSON", "cond[title::LIKE]": query})
+        req = urllib.request.Request(url, headers={"User-Agent": DDGProvider.UA})
+        try:
+            data = json.loads(urllib.request.urlopen(req, timeout=25).read())
+        except Exception:
+            return []
+        records = (data.get("data") or data.get("items")
+                   or data.get("response", {}).get("body", {}).get("items") or [])
+        out = []
+        for rec in records:
+            if not isinstance(rec, dict):
+                continue
+            u = (rec.get("url") or rec.get("link") or rec.get("detailUrl")
+                 or rec.get("fileUrl"))
+            if not u and rec.get("id"):
+                u = "https://www.data.go.kr/data/%s/fileData.do" % rec.get("id")
+            if not u:
+                continue
+            title = rec.get("title") or rec.get("datasetNm") or rec.get("name") or ""
+            snippet = (rec.get("description") or rec.get("desc")
+                       or rec.get("snippet") or "")
+            out.append({"url": u, "title": title, "snippet": snippet,
+                        "source": "data_go_kr"})
+        return out[:limit]
+
+
+class KiprisProvider(SearchProvider):
+    """키프리스(KIPRIS Plus) 특허/실용/상표/디자인 검색 공식 커넥터. KIPRIS_SERVICE_KEY 필요.
+    응답 XML → xml.etree.ElementTree(stdlib·bs4 금지). 키 미설정/오류면 빈 결과(자동 스킵).
+    runner 주입 시 selftest mock. ServiceKey 는 secret — env/인자 참조만(하드코딩 0)."""
+    name = "kipris"
+    ENDPOINT = ("http://plus.kipris.or.kr/openapi/rest/"
+                "patUtiModInfoSearchSevice/freeSearchInfo")  # env KIPRIS_ENDPOINT 로 교체 가능
+
+    def __init__(self, runner=None, service_key=None):
+        self._runner = runner
+        self._service_key = service_key
+
+    def search(self, query, limit=10):
+        if self._runner is not None:
+            return list(self._runner(query, limit) or [])[:limit]
+        key = self._service_key or os.environ.get("KIPRIS_SERVICE_KEY")
+        if not key:
+            return []  # 미설정 → 빈 결과(키 살아나면 자동 활성)
+        from urllib.parse import urlencode
+        import urllib.request
+        import xml.etree.ElementTree as ET  # stdlib(bs4 금지)
+        endpoint = os.environ.get("KIPRIS_ENDPOINT") or self.ENDPOINT
+        url = endpoint + "?" + urlencode(
+            {"word": query, "ServiceKey": key, "numOfRows": limit})
+        req = urllib.request.Request(url, headers={"User-Agent": DDGProvider.UA})
+        try:
+            root = ET.fromstring(urllib.request.urlopen(req, timeout=25).read())
+        except Exception:
+            return []
+        out = []
+        for item in root.iter("item"):
+            def _t(*tags):
+                for tag in tags:
+                    el = item.find(tag)
+                    if el is not None and el.text:
+                        return el.text
+                return None
+            appno = _t("applicationNumber", "ApplicationNumber")
+            title = _t("inventionTitle", "InventionName", "inventionName") or ""
+            snippet = _t("astrtCont", "abstract") or ""
+            u = _t("url", "link")
+            if not u and appno:
+                u = ("https://www.kipris.or.kr/khome/search/searchResult.do?query="
+                     + str(appno))
+            if not u:
+                continue
+            out.append({"url": u, "title": title, "snippet": snippet,
+                        "source": "kipris"})
+            if len(out) >= limit:
+                break
+        return out[:limit]
+
+
 class FallbackProvider(SearchProvider):
     """provider 체인 — 앞에서부터 시도, 결과 있으면 채택(빈 결과/예외는 다음으로). 본진 다운 시 폴백."""
     name = "fallback"
@@ -247,10 +350,78 @@ class FallbackProvider(SearchProvider):
         return []
 
 
-def default_provider():
+class CompositeProvider(SearchProvider):
+    """공식 커넥터 + 일반검색을 **합산**(merge·url dedup)하는 그물. FallbackProvider(first-non-empty)와
+    달리 breadth 무손실 — 공식 결과가 일반검색을 억누르지 않음. 공식을 앞에 두어 자연히 상위 랭킹.
+    child 예외/빈결과는 건너뜀(절대 raise 0). 채택 child 명으로 name 라벨 갱신."""
+    name = "composite"
+
+    def __init__(self, providers):
+        self.providers = [p for p in providers if p is not None]
+
+    def search(self, query, limit=10):
+        merged, seen, used = [], set(), []
+        for p in self.providers:
+            try:
+                res = p.search(query, limit) or []
+            except Exception:
+                continue  # child 실패는 건너뜀(예외 전파 0)
+            got = False
+            for hit in res:
+                if not isinstance(hit, dict):
+                    continue
+                u = hit.get("url")
+                if not u or u in seen:
+                    continue
+                seen.add(u)
+                merged.append(hit)
+                got = True
+            if got:
+                used.append(p.name)
+        self.name = "composite:" + ("+".join(used) if used else "none")
+        return merged
+
+
+# ── 공식 커넥터 레지스트리 + intent routing(상황 적응 선택) ─────────────
+#   topic 토큰이 keywords 와 겹치고 AND 필요 env 키가 모두 set 인 커넥터만 합류.
+#   둘 중 하나라도 불충족이면 제외 → 일반검색만(폴백 보장).
+OFFICIAL_CONNECTORS = (
+    {"name": "kipris",
+     "keywords": ("특허", "실용신안", "patent", "상표", "디자인권", "지식재산", "특허권"),
+     "env": ("KIPRIS_SERVICE_KEY",),
+     "factory": lambda: KiprisProvider()},
+    {"name": "data_go_kr",
+     "keywords": ("공공데이터", "통계", "조달", "입찰", "행정", "데이터셋", "공공"),
+     "env": ("DATA_GO_KR_SERVICE_KEY",),
+     "factory": lambda: DataGoKrProvider()},
+)
+
+
+def select_official_providers(topic):
+    """topic 매칭 + 키 set 인 공식 커넥터만 인스턴스화. 매칭 0 또는 키 부족이면 [](일반검색만)."""
+    toks = _tokens(topic)
+    if not toks:
+        return []
+    out = []
+    for c in OFFICIAL_CONNECTORS:
+        kw = set()
+        for k in c["keywords"]:
+            kw |= _tokens(k)
+        if not (toks & kw):
+            continue  # topic 불일치 → 제외
+        if not all(os.environ.get(e) for e in c["env"]):
+            continue  # 키 부족 → 제외(자동 폴백)
+        out.append(c["factory"]())
+    return out
+
+
+def default_provider(topic=None):
     """그물 우선순위 — SearXNG(본진·측정 결정) → serper/naver/tavily(키 있으면 보조 폴백) → ddgs → DDG(최후).
     URL/키 미설정 그물은 자동 제외(unset 이면 chain 미합류, 살아나면 자동 활성).
-    항상 DDGProvider 최후 폴백(키·인프라 0)."""
+    항상 DDGProvider 최후 폴백(키·인프라 0).
+
+    topic 주어지고 매칭 공식 커넥터(키 set)가 있으면 CompositeProvider([*공식, 일반]) 로 합산
+    (공식 우대·일반검색 무손실 병행). topic=None(무인자)이면 기존 일반 그물 그대로(회귀 0)."""
     chain = []
     if os.environ.get("SEARXNG_URL"):
         chain.append(SearxngProvider())
@@ -266,7 +437,11 @@ def default_provider():
     except Exception:
         pass
     chain.append(DDGProvider())  # 최후 폴백(키/인프라 0)
-    return FallbackProvider(chain) if len(chain) > 1 else chain[0]
+    general = FallbackProvider(chain) if len(chain) > 1 else chain[0]
+    off = select_official_providers(topic) if topic else []
+    if off:
+        return CompositeProvider([*off, general])  # 공식+일반 합산(무손실)
+    return general  # 무인자/매칭 0 → 기존 동작 그대로
 
 
 def _parse_ddg_html(html, limit=10):
@@ -424,7 +599,7 @@ def discover(topic, provider=None, limit=10, home=None, persist=True, merge=True
 
     반환 dict(status/topic/candidates/rejected/provider). 후보는 vet 통과(clean)분만.
     """
-    provider = provider or default_provider()
+    provider = provider or default_provider(topic)
     raw = provider.search(topic, limit=limit) or []
     cands, rejected, seen = [], [], set()
     for i, hit in enumerate(raw):
@@ -657,6 +832,114 @@ def _selftest():
     chk("D25 가중 0.55 trust 지배 — 동일 relevance 면 Tier1 > default",
         score_candidate("x", {"url": "https://a.go.kr", "title": "t", "snippet": "s", "_rank": 0})[0]
         > score_candidate("x", {"url": "https://a.com", "title": "t", "snippet": "s", "_rank": 0})[0])
+
+    # D26~ — 공식 커넥터(data.go.kr/KIPRIS) 키 미설정 빈결과 + runner 계약 매핑(네트워크 0)
+    _dk = os.environ.pop("DATA_GO_KR_SERVICE_KEY", None)
+    chk("D26 DataGoKr 키 미설정 → 빈결과(자동 스킵)", DataGoKrProvider().search("q") == [])
+    if _dk is not None:
+        os.environ["DATA_GO_KR_SERVICE_KEY"] = _dk
+    dgk_m = DataGoKrProvider(runner=lambda q, n: [
+        {"url": "https://www.data.go.kr/data/1/fileData.do", "title": "조달 통계",
+         "snippet": "공공 입찰 데이터", "source": "data_go_kr"}])
+    _dgk = dgk_m.search("q")
+    chk("D26b DataGoKr runner→계약 매핑(source=='data_go_kr')",
+        _dgk[0]["url"].startswith("https://www.data.go.kr/") and _dgk[0]["source"] == "data_go_kr")
+    _kk = os.environ.pop("KIPRIS_SERVICE_KEY", None)
+    chk("D27 KIPRIS 키 미설정 → 빈결과(자동 스킵)", KiprisProvider().search("q") == [])
+    if _kk is not None:
+        os.environ["KIPRIS_SERVICE_KEY"] = _kk
+    kp_m = KiprisProvider(runner=lambda q, n: [
+        {"url": "https://www.kipris.or.kr/khome/x", "title": "발명명칭",
+         "snippet": "요약", "source": "kipris"}])
+    chk("D27b KIPRIS runner→계약 매핑(source=='kipris')", kp_m.search("q")[0]["source"] == "kipris")
+
+    # D28~ — select_official_providers: topic 매칭 AND 키 set 인 커넥터만. env save/restore.
+    _ek = os.environ.get("KIPRIS_SERVICE_KEY")
+    _ed = os.environ.get("DATA_GO_KR_SERVICE_KEY")
+    os.environ["KIPRIS_SERVICE_KEY"] = "dummy"
+    os.environ.pop("DATA_GO_KR_SERVICE_KEY", None)
+    _names_patent = [p.name for p in select_official_providers("특허 침해 분석")]
+    chk("D28 특허 topic + KIPRIS키 → kipris 포함", "kipris" in _names_patent)
+    chk("D28a 비특허 topic('신혼부부 통계') → kipris 미포함",
+        "kipris" not in [p.name for p in select_official_providers("신혼부부 통계")])
+    # data_go_kr 키 미설정이면 통계/조달 topic 매칭이어도 제외
+    chk("D28a2 통계 topic 인데 data.go.kr 키 미설정 → 미포함",
+        "data_go_kr" not in [p.name for p in select_official_providers("조달 통계 데이터셋")])
+    # 키 전무 → []
+    os.environ.pop("KIPRIS_SERVICE_KEY", None)
+    chk("D28b 키 전무 → [](일반검색만)", select_official_providers("특허 통계") == [])
+
+    # D29 default_provider(topic)+키 → CompositeProvider & 공식이 chain 앞
+    os.environ["KIPRIS_SERVICE_KEY"] = "dummy"
+    _dpt = default_provider("특허 침해 분석")
+    chk("D29 default_provider(topic)+키 → CompositeProvider", isinstance(_dpt, CompositeProvider))
+    chk("D29a 공식(kipris)이 chain 맨 앞", _dpt.providers[0].name == "kipris")
+    os.environ.pop("KIPRIS_SERVICE_KEY", None)
+    # D29b 회귀가드 — 무인자 default_provider() 는 기존과 동일(FallbackProvider/단일, Composite 아님)
+    _dp0 = default_provider()
+    chk("D29b 무인자 default_provider() 는 Composite 아님(회귀 0)",
+        not isinstance(_dp0, CompositeProvider))
+    # 키/매칭 0 인 topic 도 일반검색 그대로(Composite 아님)
+    chk("D29c topic 있어도 공식키 0 → 일반검색 그대로(Composite 아님)",
+        not isinstance(default_provider("특허 통계"), CompositeProvider))
+    # env restore
+    if _ek is not None:
+        os.environ["KIPRIS_SERVICE_KEY"] = _ek
+    else:
+        os.environ.pop("KIPRIS_SERVICE_KEY", None)
+    if _ed is not None:
+        os.environ["DATA_GO_KR_SERVICE_KEY"] = _ed
+
+    # D30 CompositeProvider 병합·dedup·공식 상위·child 예외 건너뜀
+    _offp = _mock_provider([{"url": "https://data.go.kr/d/1", "title": "공식", "snippet": "조달"},
+                            {"url": "https://dup.com/x", "title": "중복src", "snippet": "s"}])
+    _genp = _mock_provider([{"url": "https://dup.com/x", "title": "일반중복", "snippet": "s"},
+                            {"url": "https://general.com/y", "title": "일반", "snippet": "s"}])
+
+    class _Boom2(SearchProvider):
+        name = "boom2"
+        def search(self, q, limit=10): raise RuntimeError("down")
+    comp = CompositeProvider([_offp, _Boom2(), _genp])
+    _cres = comp.search("q")
+    chk("D30 Composite 공식 결과가 맨 위", _cres[0]["url"] == "https://data.go.kr/d/1")
+    chk("D30a url dedup(중복 1건)",
+        len([h for h in _cres if h["url"] == "https://dup.com/x"]) == 1)
+    chk("D30b 일반 hit 보존(무손실)",
+        any(h["url"] == "https://general.com/y" for h in _cres))
+    chk("D30c child 예외 건너뜀(예외 전파 0)", isinstance(_cres, list))
+    chk("D30d 전부 빈결과 → [](raise 0)",
+        CompositeProvider([_mock_provider([]), _mock_provider([])]).search("q") == [])
+
+    # D31 discover(topic, composite-mock): 공식 .go.kr vet 통과·trust 1.0 최상위 + 일반 보존(무손실)
+    _comp_disc = CompositeProvider([
+        _mock_provider([{"url": "https://www.data.go.kr/data/1", "title": "조달 데이터",
+                         "snippet": "공공 입찰 통계"}]),
+        _mock_provider([{"url": "https://general.com/y", "title": "일반 자료",
+                         "snippet": "조달 입찰 통계"}])])
+    _rc = discover("조달 입찰 통계", provider=_comp_disc, home=home, persist=False)
+    chk("D31 공식 .go.kr 후보가 최상위(domain_trust 1.0)",
+        "data.go.kr" in _rc["candidates"][0]["url"])
+    chk("D31a 일반 hit 도 후보 보존(무손실)",
+        any("general.com" in c["url"] for c in _rc["candidates"]))
+
+    # D32 공식 커넥터 dirty url 도 vet_url 로 rejected(공식 신뢰가 SSRF 게이트 우회 못 함)
+    _dirty = CompositeProvider([
+        _mock_provider([{"url": "http://127.0.0.1/secret", "title": "internal", "snippet": "x"},
+                        {"url": "file:///c:/x.txt", "title": "local", "snippet": "x"}])])
+    _rd = discover("공공데이터", provider=_dirty, home=home, persist=False)
+    chk("D32 공식 커넥터 dirty url(127.0.0.1/file:) 도 vet 차단",
+        _rd["n_found"] == 0 and _rd["n_rejected"] >= 2)
+
+    # D33 default_provider(topic) selftest 경로 네트워크 0 — 공식키 미설정이면 connector 미인스턴스화
+    _g0 = os.environ.get("KIPRIS_SERVICE_KEY")
+    os.environ.pop("KIPRIS_SERVICE_KEY", None)
+    os.environ.pop("DATA_GO_KR_SERVICE_KEY", None)
+    chk("D33 공식키 미설정 topic → connector 미인스턴스화(네트워크 0·일반검색만)",
+        not isinstance(default_provider("특허 조달 통계"), CompositeProvider))
+    if _g0 is not None:
+        os.environ["KIPRIS_SERVICE_KEY"] = _g0
+    if _ed is not None:
+        os.environ["DATA_GO_KR_SERVICE_KEY"] = _ed
 
     total, passed = len(ok), sum(ok)
     print("\nRESULT: %d/%d PASS" % (passed, total))

@@ -51,6 +51,7 @@ GATES = [
     ("worker recall (node)","binggu_worker_recall_selftest.py",        ["--selftest"], "GATE=GO"),
     ("created_at backfill","binggu_created_at_backfill.py",            ["--selftest"], "GATE: GO"),
     ("cloud_pack export", "binggu_cloud_pack_export.py",               ["--selftest"], "GATE=GO"),
+    ("cloud_ingest_wire", "binggu_cloud_ingest_wire.py",               ["--selftest"], "GATE=GO"),
     ("local ingest",      "localbinggu_ingest_executor.py",            ["--selftest"], "GATE=GO"),
     ("harvest inbound",   "binggu_harvest.py",                         ["--selftest"], "GATE: GO"),
     ("P3 self-improve",   "openbinggu_p3_self_improve.py",             ["--selftest"], "GATE: GO"),

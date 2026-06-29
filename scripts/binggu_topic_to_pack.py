@@ -13,27 +13,60 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import binggu_discover as DISC       # noqa: E402
-import binggu_harvest as HV          # noqa: E402
-import binggu_pack_factory as FAC    # noqa: E402
+import binggu_discover as DISC               # noqa: E402
+import binggu_harvest as HV                  # noqa: E402
+import binggu_pack_factory as FAC            # noqa: E402
+import binggu_subtopic_decompose as SUB      # noqa: E402  (항목 A — 주제 세분화·네트워크0 import)
+import binggu_pack_edges as EDG              # noqa: E402  (항목 C — pack 간 edges·순수함수)
+# 항목 D(binggu_cloud_ingest_wire)는 클라우드 경로라 lazy import(기존 BPL/WR 스타일).
 
 
 def topic_to_pack(topic, provider=None, fetch_runner=None, home=None, out_dir=None,
                   min_score=0.0, max_sources=10, opencrab_export=False,
-                  recommend_workflow=False, execute=False, confirm=False, staging_home=None):
+                  recommend_workflow=False, execute=False, confirm=False, staging_home=None,
+                  subtopics=False, max_subtopics=8, subtopic_use_search=False, llm_runner=None,
+                  pack_edges=False, peer_packs=None,
+                  cloud_ingest=False, cloud_env=None, cloud_transport=None,
+                  create_workflow=False, workflow_spec=None):
     """주제 → pack → (opencrab export) → (workflow 추천) 전체 파이프라인.
 
     OpenCrab import 2모드(제품 설계):
       - dry-run(기본): import 가능성 자동 검증(read-only, 저장소 미변경)
       - real import(execute=True AND confirm=True): 사용자 명시 확정 → 실제 staging 저장소 write(commit).
         execute=True 라도 confirm 없으면 dry-run 유지(실수 방지). real 전 pack_validate+PII gate+importable 강제.
-    반환 dict(status/discovered/promoted/harvested/skipped/verdict/pack/opencrab_import/workflow)."""
+
+    배선 옵션(전부 기본 OFF — 기존 단일 파이프라인 동작 불변):
+      - subtopics(A): True 면 binggu_subtopic_decompose 로 주제 세분화 → 각 subtopic.query 로 discover
+        그물을 확장(B 의 provider 그대로 사용)해 후보를 더 정밀하게 모은다. 누적 후보로 승급.
+      - pack_edges(C): True 면 빌드된 pack(+peer_packs)으로 binggu_pack_edges.infer_edges 호출 →
+        pack-간 workflow edges 추론 결과를 반환에 첨부(노드 엣지 불변·별개 차원).
+      - cloud_ingest(D): True 면 binggu_cloud_ingest_wire.ingest_pack 호출. 기본 dry-run(네트워크0).
+        live 는 execute&confirm + env BINGGU_CLOUD_INGEST=1 + transport 주입(owner GO) 3중 충족시에만.
+    반환 dict(status/discovered/promoted/harvested/skipped/verdict/pack/opencrab_import/workflow
+              /pack_edges/cloud_ingest)."""
     home = home or HV._home()
     sp = HV.sources_path(home)
     dp = DISC.discover_path(home)
 
     # ① 발견 — provider 검색 → vet → 랭킹 → discover_candidates.json
-    disc = DISC.discover(topic, provider=provider, home=home)
+    #   (A) subtopics=True 면 주제를 세분화해 [원주제]+[subtopic.query…] 그물로 확장(B provider 재사용).
+    #       discover(merge=True)가 동일 discover_path 에 누적 → 누적 후보 전체를 승급 대상으로 로드.
+    if subtopics:
+        subs = SUB.decompose(topic, provider=provider, max_subtopics=max_subtopics,
+                             use_search=subtopic_use_search, llm_runner=llm_runner)
+        queries, seen_q = [topic], {topic}
+        for s in subs:
+            q = s.get("query")
+            if q and q not in seen_q:
+                seen_q.add(q)
+                queries.append(q)
+        for q in queries:
+            DISC.discover(q, provider=provider, home=home)   # merge=True 누적(persist)
+        agg = sorted(DISC.load_discoveries(dp), key=lambda c: c.get("score", 0), reverse=True)
+        disc = {"status": "OK", "topic": topic, "candidates": agg, "n_found": len(agg),
+                "subtopics": subs}
+    else:
+        disc = DISC.discover(topic, provider=provider, home=home)
 
     # ② 승급 — min_score 이상 후보를 harvest 화이트리스트로(add_source 게이트 통과분만)
     promoted = []
@@ -103,12 +136,88 @@ def topic_to_pack(topic, provider=None, fetch_runner=None, home=None, out_dir=No
         import binggu_workflow_recommend as WR
         wf = WR.recommend(res["pack"])
 
+    # ⑧ pack 간 edges(C) — 빌드된 pack(+peer_packs)으로 pack-level workflow edges 추론(결정적·preview).
+    #    단일 pack 만이면 self 금지로 edges=0(무해). peer_packs 주면 관계 추론(related/adjacent/…).
+    pe = None
+    if pack_edges and res["status"] == "OK":
+        metas = ([res["pack"]] if res.get("pack") else []) + list(peer_packs or [])
+        pe = EDG.infer_edges(metas)
+
+    # ⑨ 클라우드 ingest 배선(D) — 기본 dry-run(계획만·네트워크0). live 는 owner 3중 게이트.
+    ci = None
+    if cloud_ingest and res["status"] == "OK":
+        import binggu_cloud_ingest_wire as CW
+        dry = not (execute and confirm)        # real import 확정과 동일 토글 — 미확정이면 dry-run
+        ci = CW.ingest_pack(documents, transport=cloud_transport, env=cloud_env, home=home,
+                            dry_run=dry, create_workflow=create_workflow,
+                            workflow_spec=workflow_spec)
+
     return {"status": res["status"], "topic": topic,
             "discovered": disc["n_found"], "promoted": len(promoted),
             "harvested_docs": len(documents), "skipped": skipped,
             "verdict": res["verdict"]["verdict"], "counts": res["counts"],
             "pack": res["pack"], "written": res.get("written"),
-            "opencrab_import": oc, "workflow": wf}
+            "opencrab_import": oc, "workflow": wf,
+            "pack_edges": pe, "cloud_ingest": ci}
+
+
+def decompose_to_packs(topic, provider=None, fetch_runner=None, home=None, out_dir=None,
+                       max_subtopics=6, subtopic_use_search=False, llm_runner=None,
+                       min_score=0.0, max_sources=10, infer_pack_edges=True,
+                       topic_jaccard_min=0.34, cloud_ingest=False, cloud_env=None,
+                       cloud_transport=None, execute=False, confirm=False):
+    """A→B→수집/정제→C(팩 간 edges)→D(클라우드 dry-run) 전체 비전 오케스트레이션.
+
+    주제 → 세분화(A·binggu_subtopic_decompose) → 각 subtopic 별 discover/harvest/pack(B+수집·
+    topic_to_pack 재사용) → pack 간 edges(C·binggu_pack_edges) → (opt) 클라우드 ingest 계획
+    (D·기본 dry-run·네트워크0). 각 subtopic 은 격리 sub-home 으로 discover/harvest 상태 분리
+    (운영 ~/.binggupack 미접촉 — 호출자가 temp home 주면 전부 temp 하위).
+
+    반환 {status, topic, n_subtopics, subpacks:[…요약], pack_edges, cloud_ingest}.
+    """
+    base_home = home or HV._home()
+
+    # A — 주제 세분화(무손실·결정적). 빈 결과면 원주제 1건으로 폴백.
+    subs = SUB.decompose(topic, provider=provider, max_subtopics=max_subtopics,
+                         use_search=subtopic_use_search, llm_runner=llm_runner)
+    if not subs:
+        subs = [{"subtopic": topic, "query": topic, "rationale": "원주제(세분화 폴백)"}]
+
+    sub_summaries, packs = [], []
+    for i, s in enumerate(subs):
+        # 격리 sub-home — subtopic 마다 discover/harvest 상태 분리(pack 들이 서로 다른 소스셋 보존)
+        sub_home = os.path.join(base_home, "subtopics", "%02d_%s" % (i, FAC._slug(s["subtopic"])))
+        os.makedirs(sub_home, exist_ok=True)
+        sub_out = os.path.join(out_dir, "sub_%02d" % i) if out_dir else None
+        r = topic_to_pack(s["query"], provider=provider, fetch_runner=fetch_runner,
+                          home=sub_home, out_dir=sub_out, min_score=min_score,
+                          max_sources=max_sources)
+        if r.get("pack"):
+            packs.append(r["pack"])
+        sub_summaries.append({"subtopic": s["subtopic"], "query": s["query"],
+                              "status": r["status"], "discovered": r["discovered"],
+                              "harvested_docs": r["harvested_docs"],
+                              "verdict": r["verdict"], "pack_id": (r.get("pack") or {})
+                              .get("manifest", {}).get("pack_id"),
+                              "written": r.get("written")})
+
+    # C — pack 간 edges(여러 세분화 pack 의 메타 신호 → pack-level workflow edges)
+    pe = EDG.infer_edges(packs, topic_jaccard_min=topic_jaccard_min) if infer_pack_edges else None
+
+    # D — 클라우드 ingest 계획(기본 dry-run·네트워크0). pack 별 ingest 계획 수집.
+    ci = None
+    if cloud_ingest:
+        import binggu_cloud_ingest_wire as CW
+        dry = not (execute and confirm)
+        ci = []
+        for pk in packs:
+            ci.append(CW.ingest_pack(pk, transport=cloud_transport, env=cloud_env,
+                                     home=base_home, dry_run=dry))
+
+    ok_any = any(x["status"] == "OK" for x in sub_summaries)
+    return {"status": "OK" if ok_any else "EMPTY", "topic": topic,
+            "n_subtopics": len(subs), "n_packs": len(packs),
+            "subpacks": sub_summaries, "pack_edges": pe, "cloud_ingest": ci}
 
 
 # ── selftest (provider/fetch 전부 mock · 실 네트워크 0 · temp 만) ──────
@@ -173,6 +282,53 @@ def _selftest():
     mani = json.load(open(os.path.join(out, "manifest.json"), encoding="utf-8"))
     chk("E10 기록 manifest 독립 재검증 PASS", PV.validate_pack(mani)["verdict"] in ("PASS", "REVIEW_ONLY"))
     chk("E11 promotion_allowed_default=false(안전 불변)", mani["promotion_allowed_default"] is False)
+
+    # ── F. 배선 통합(A/B/C/D) — 전부 mock·temp·네트워크0 ─────────────────
+    # F1 (A+B) subtopics=True → 세분화 query 그물 확장(누적 후보 ≥ 단일 발견). 기존 단일경로 불변 검증은 E2.
+    home_a = os.path.join(tempfile.mkdtemp(prefix="t2p_a_"), ".binggupack")
+    os.makedirs(home_a)
+    out_a = tempfile.mkdtemp(prefix="t2p_a_pack_")
+    ra = topic_to_pack("입찰 가격 예측", provider=provider, fetch_runner=fetch_runner,
+                       home=home_a, out_dir=out_a, subtopics=True, max_subtopics=4)
+    chk("F1 (A) subtopics 세분화 후 status OK", ra["status"] == "OK")
+    chk("F1b (A) 세분화 그물 후보 누적(>=단일 3)", ra["discovered"] >= 3 and ra["counts"]["nodes"] > 0)
+
+    # F2 (D) cloud_ingest dry-run → 계획만(네트워크0·transport 미주입이어도 mode=dry-run)
+    home_d = os.path.join(tempfile.mkdtemp(prefix="t2p_d_"), ".binggupack")
+    os.makedirs(home_d)
+    out_d = tempfile.mkdtemp(prefix="t2p_d_pack_")
+    rd = topic_to_pack("입찰 가격 예측", provider=provider, fetch_runner=fetch_runner,
+                       home=home_d, out_dir=out_d, cloud_ingest=True, cloud_env={})
+    chk("F2 (D) cloud_ingest dry-run 계획·네트워크0",
+        rd["cloud_ingest"] is not None and rd["cloud_ingest"]["mode"] == "dry-run")
+
+    # F3 (C) pack_edges — 단일 pack + peer_pack 주입 → related/adjacent 추론
+    home_c = os.path.join(tempfile.mkdtemp(prefix="t2p_c_"), ".binggupack")
+    os.makedirs(home_c)
+    rc = topic_to_pack("입찰 가격 예측", provider=provider, fetch_runner=fetch_runner,
+                       home=home_c, pack_edges=True,
+                       peer_packs=[{"manifest": {"pack_id": "topic/peer",
+                                                  "topic": "입찰 가격 예측 분석"}}])
+    chk("F3 (C) pack_edges 추론 status OK·peer 관계 검출",
+        rc["pack_edges"] is not None and rc["pack_edges"]["status"] == "OK"
+        and rc["pack_edges"]["counts"]["edges"] >= 1)
+
+    # F4 (A→B→수집→C→D) decompose_to_packs 전체 비전 — 다중 pack + pack-간 edges + cloud dry-run
+    home_f = os.path.join(tempfile.mkdtemp(prefix="t2p_f_"), ".binggupack")
+    os.makedirs(home_f)
+    out_f = tempfile.mkdtemp(prefix="t2p_f_pack_")
+    rf = decompose_to_packs("입찰 가격 예측", provider=provider, fetch_runner=fetch_runner,
+                            home=home_f, out_dir=out_f, max_subtopics=3,
+                            topic_jaccard_min=0.3,   # 세분화 pack 들은 공통 토큰만 공유(긴 query) → 임계 조정
+                            cloud_ingest=True, cloud_env={})
+    chk("F4 (full) decompose_to_packs 다중 pack 생성", rf["status"] == "OK" and rf["n_packs"] >= 2)
+    chk("F4b (C) 세분화 pack 간 edges 추론(related 등 >=1)",
+        rf["pack_edges"] is not None and rf["pack_edges"]["counts"]["edges"] >= 1)
+    chk("F4c (D) pack 별 cloud ingest dry-run 계획",
+        isinstance(rf["cloud_ingest"], list) and len(rf["cloud_ingest"]) == rf["n_packs"]
+        and all(p["mode"] == "dry-run" for p in rf["cloud_ingest"]))
+    chk("F4d (A) 세분화 결과 subpack 메타 보존",
+        len(rf["subpacks"]) == rf["n_subtopics"] and rf["n_subtopics"] >= 2)
 
     total, passed = len(ok), sum(ok)
     print("\n[counts] %s" % r["counts"])
