@@ -41,7 +41,8 @@ def discover_path(home=None):
 
 # ── provider interface (조건4 — 교체 가능한 검색 그물) ─────────────────
 class SearchProvider:
-    """검색 그물 추상. search(query, limit) -> [{"url","title","snippet"}]."""
+    """검색 그물 추상. search(query, limit) -> [{"url","title","snippet", (opt)"source"}].
+    source = 실제 결과를 낸 엔진명(선택). 미제공 시 discover 가 provider.name 으로 채운다."""
     name = "base"
 
     def search(self, query, limit=10):
@@ -103,7 +104,8 @@ class SearxngProvider(SearchProvider):
                 data = json.loads(urllib.request.urlopen(req, timeout=20).read())
             except Exception:
                 return []
-        return [{"url": x.get("url"), "title": x.get("title"), "snippet": x.get("content")}
+        return [{"url": x.get("url"), "title": x.get("title"), "snippet": x.get("content"),
+                 "source": x.get("engine") or "searxng"}
                 for x in (data.get("results") or [])][:limit]
 
 
@@ -120,7 +122,69 @@ class DdgsProvider(SearchProvider):
         from ddgs import DDGS  # lazy — 미설치여도 모듈 로드 OK
         with DDGS() as d:
             res = d.text(query, max_results=limit)
-        return [{"url": r.get("href"), "title": r.get("title"), "snippet": r.get("body")} for r in res]
+        return [{"url": r.get("href"), "title": r.get("title"), "snippet": r.get("body"),
+                 "source": "ddgs"} for r in res]
+
+
+class SerperProvider(SearchProvider):
+    """Serper.dev Google SERP API(유료·정확한 글로벌). SERPER_API_KEY 필요.
+    키 미설정/오류면 빈 결과 → FallbackProvider 가 다음 그물로(자동 스킵). runner 주입 시 selftest mock."""
+    name = "serper"
+
+    def __init__(self, runner=None):
+        self._runner = runner
+
+    def search(self, query, limit=10):
+        if self._runner is not None:
+            return list(self._runner(query, limit) or [])[:limit]
+        key = os.environ.get("SERPER_API_KEY")
+        if not key:
+            return []  # 미설정 → 빈 결과(키 살아나면 자동 활성)
+        import urllib.request
+        req = urllib.request.Request(
+            "https://google.serper.dev/search",
+            data=json.dumps({"q": query, "num": limit}).encode("utf-8"),
+            headers={"X-API-KEY": key, "Content-Type": "application/json"})
+        try:
+            data = json.loads(urllib.request.urlopen(req, timeout=20).read())
+        except Exception:
+            return []
+        return [{"url": o.get("link"), "title": o.get("title"),
+                 "snippet": o.get("snippet"), "source": "serper"}
+                for o in (data.get("organic") or [])][:limit]
+
+
+class NaverProvider(SearchProvider):
+    """네이버 검색 API(한국어 강점). NAVER_CLIENT_ID/SECRET 필요.
+    키 미설정/오류면 빈 결과 → 자동 스킵. runner 주입 시 selftest mock."""
+    name = "naver"
+
+    def __init__(self, runner=None):
+        self._runner = runner
+
+    def search(self, query, limit=10):
+        if self._runner is not None:
+            return list(self._runner(query, limit) or [])[:limit]
+        cid = os.environ.get("NAVER_CLIENT_ID")
+        sec = os.environ.get("NAVER_CLIENT_SECRET")
+        if not (cid and sec):
+            return []  # 미설정 → 빈 결과(키 살아나면 자동 활성)
+        from urllib.parse import urlencode
+        import urllib.request
+        url = ("https://openapi.naver.com/v1/search/webkr.json?"
+               + urlencode({"query": query, "display": limit}))
+        req = urllib.request.Request(url, headers={
+            "X-Naver-Client-Id": cid, "X-Naver-Client-Secret": sec})
+        try:
+            data = json.loads(urllib.request.urlopen(req, timeout=20).read())
+        except Exception:
+            return []
+        # 네이버 title/description 은 <b> 강조태그 포함 — 정규식만으로 제거(bs4 금지).
+        def _strip(s):
+            return re.sub(r"<[^>]+>", "", s or "")
+        return [{"url": i.get("link"), "title": _strip(i.get("title")),
+                 "snippet": _strip(i.get("description")), "source": "naver"}
+                for i in (data.get("items") or [])][:limit]
 
 
 class FallbackProvider(SearchProvider):
@@ -144,11 +208,16 @@ class FallbackProvider(SearchProvider):
 
 
 def default_provider():
-    """4-CLI 측정 결정 — SearXNG(본진·빠름·공식출처·봇차단헤지) → ddgs(폴백) → DDG 스크래핑(최후).
-    SEARXNG_URL 설정 시 SearXNG 우선. ddgs 미설치면 자동 제외. 항상 DDGProvider 최후 폴백."""
+    """그물 우선순위 — SearXNG(본진·측정 결정) → serper/naver(키 있으면 보조 폴백) → ddgs → DDG(최후).
+    URL/키 미설정 그물은 자동 제외(unset 이면 chain 미합류, 살아나면 자동 활성).
+    항상 DDGProvider 최후 폴백(키·인프라 0)."""
     chain = []
     if os.environ.get("SEARXNG_URL"):
         chain.append(SearxngProvider())
+    if os.environ.get("SERPER_API_KEY"):
+        chain.append(SerperProvider())
+    if os.environ.get("NAVER_CLIENT_ID") and os.environ.get("NAVER_CLIENT_SECRET"):
+        chain.append(NaverProvider())
     try:
         import ddgs  # noqa: F401
         chain.append(DdgsProvider())
@@ -303,7 +372,9 @@ def discover(topic, provider=None, limit=10, home=None, persist=True, merge=True
         seen.add(sid)
         cand = {"source_id": sid, "url": norm, "kind": infer_kind(norm),
                 "title": hit.get("title", ""), "snippet": hit.get("snippet", ""),
-                "provider": provider.name, "query_origin": topic, "_rank": i}
+                "provider": provider.name, "source": hit.get("source") or provider.name,
+                "query_origin": topic, "rank": i + 1, "fetched_at": time.time(),
+                "_rank": i}
         score, comp = score_candidate(topic, cand)
         cand["score"], cand["score_components"] = score, comp
         cand["score_version"] = "v1"
@@ -422,6 +493,51 @@ def _selftest():
     rsx = discover("공동주택 하자보수", provider=sx, home=home, persist=False)
     chk("D13 SearXNG provider 로 discover 후보 생성",
         rsx["n_found"] == 1 and rsx["candidates"][0]["provider"] == "searxng")
+
+    # D14~ — provider 계약 확장(rank/source/fetched_at)
+    chk("D14 candidate 에 rank/source/fetched_at 동봉",
+        all(("rank" in c and "source" in c and "fetched_at" in c) for c in rsx["candidates"]))
+    chk("D14b source 기본 = engine 없으면 provider 명", rsx["candidates"][0]["source"] == "searxng")
+    sx2 = SearxngProvider(runner=lambda url: {"results": [
+        {"url": "https://law.go.kr/y", "title": "법", "content": "x", "engine": "google"}]})
+    rsx2 = discover("법령 공식", provider=sx2, home=home, persist=False)
+    chk("D14c hit.engine → candidate.source", rsx2["candidates"][0]["source"] == "google")
+    chk("D14d rank 1-based 보존", rsx2["candidates"][0]["rank"] == 1)
+
+    # D15~ — serper/naver 키 미설정 → 빈결과(자동 스킵). env save/restore.
+    _sk = os.environ.pop("SERPER_API_KEY", None)
+    chk("D15 Serper 키 미설정 → 빈결과(자동 스킵)", SerperProvider().search("q") == [])
+    if _sk is not None:
+        os.environ["SERPER_API_KEY"] = _sk
+    _ni = os.environ.pop("NAVER_CLIENT_ID", None)
+    _ns = os.environ.pop("NAVER_CLIENT_SECRET", None)
+    chk("D15b Naver 키 미설정 → 빈결과(자동 스킵)", NaverProvider().search("q") == [])
+    if _ni is not None:
+        os.environ["NAVER_CLIENT_ID"] = _ni
+    if _ns is not None:
+        os.environ["NAVER_CLIENT_SECRET"] = _ns
+
+    # D16~ — runner mock 계약 매핑(실 네트워크 0)
+    sp_m = SerperProvider(runner=lambda q, n: [
+        {"url": "https://s.com", "title": "t", "snippet": "x", "source": "serper"}])
+    chk("D16 Serper runner→계약 매핑", sp_m.search("q")[0]["url"] == "https://s.com")
+    nv_m = NaverProvider(runner=lambda q, n: [
+        {"url": "https://n.com", "title": "t", "snippet": "x", "source": "naver"}])
+    chk("D16b Naver runner→계약 매핑", nv_m.search("q")[0]["source"] == "naver")
+
+    # D17~ — default_provider 키 가드(키 set 시 chain 합류, 본진 우선). env save/restore.
+    _save = {k: os.environ.get(k) for k in ("SEARXNG_URL", "SERPER_API_KEY")}
+    os.environ["SEARXNG_URL"] = "http://localhost:8888"
+    os.environ["SERPER_API_KEY"] = "dummy"
+    dpv = default_provider()
+    names = [p.name for p in dpv.providers]
+    chk("D17 serper 키 set 시 chain 합류", "serper" in names)
+    chk("D17b searxng 본진이 serper 앞(우선)", names.index("searxng") < names.index("serper"))
+    for _k, _v in _save.items():
+        if _v is None:
+            os.environ.pop(_k, None)
+        else:
+            os.environ[_k] = _v
 
     total, passed = len(ok), sum(ok)
     print("\nRESULT: %d/%d PASS" % (passed, total))

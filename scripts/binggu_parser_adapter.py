@@ -129,7 +129,12 @@ class MarkItDownBackend(ParserBackend):
 
 class KorDocBackend(ParserBackend):
     """KorDoc — npx CLI 로 호출(HWP/HWPX/PDF/XLSX/DOCX → Markdown). 한국 문서 강점.
-    npx 미결선이면 available()=False(→BACKEND_NOT_WIRED)."""
+    npx 미결선이면 available()=False(→BACKEND_NOT_WIRED).
+
+    pdfjs-dist DEFERRED(보류·2026-06-29 재확인): kordoc 의 PDF 는 pdfjs-dist(optional peerDep·~35MB)
+    미설치 시 빈 출력(soft fail) → _ROUTING['pdf'] 가 markitdown[all] 으로 폴백한다(실 PDF 추출 검증 완료).
+    markitdown 이 PDF 를 충분히 커버하므로 pdfjs-dist 번들 추가는 보류. HWP/HWPX/XLSX/DOCX 등
+    한국문서는 kordoc 단독 경로 유지(npx kordoc v3.5.1 실행 확인)."""
     name = "kordoc"
     HANDLES = {"hwp", "hwpx", "pdf", "xlsx", "docx"}
     _EXT = {"hwp": "hwp", "hwpx": "hwpx", "pdf": "pdf", "xlsx": "xlsx", "docx": "docx"}

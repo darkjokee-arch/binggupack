@@ -19,6 +19,11 @@ classifiers = [
 ]
 dependencies = []   # 외부 의존성 0 (stdlib only). 선택: rapidfuzz(매칭 향상)·ollama/bge-m3(semantic).
 
+[project.optional-dependencies]
+# 2차 라인 검색 그물 폴백. 미설치여도 SearXNG(도커)·DDG(stdlib)로 discover 동작 — 견고성 보강용.
+#   pip install "binggupack[search]"
+search = ["ddgs>=9"]
+
 [project.urls]
 Homepage = "https://github.com/darkjokee-arch/binggupack"
 Release = "https://github.com/darkjokee-arch/binggupack/releases/tag/v1.15.0"
