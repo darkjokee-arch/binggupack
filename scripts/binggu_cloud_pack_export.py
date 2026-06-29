@@ -279,7 +279,7 @@ def _retrieval_eval(chunks):
     hits, rel_hits, covs, known_fail = 0, 0, [], 0
     for c in chunks:
         ct = terms(c["text"])
-        q_terms = set(list(ct)[:3])   # synthetic query = chunk 핵심어 3개
+        q_terms = set(sorted(ct)[:3])   # synthetic query = chunk 핵심어 3개 (sorted=결정적·hash시드 무관; ct는 문자열 set)
         queries.append({"query_id": "Q-" + c["chunk_id"], "terms": sorted(q_terms),
                         "expected_chunk": c["chunk_id"], "synthetic": True})
         # 검색: q_terms 와 overlap 최대 chunk
