@@ -24,12 +24,24 @@ import binggu_harvest as HV  # noqa: E402
 
 DISCOVER_FILE = "discover_candidates.json"
 
-# 도메인 신뢰 seed(bootstrap) — 화이트리스트 0개 상태에서 거친 랭킹 시작점. v2에서 학습/확장.
+# 도메인 신뢰 seed(bootstrap) — "최상품 자료" 티어 랭킹. 공식/학술/1차자료를 상위로.
+#   Tier1(1.0) 공식기관·학술·1차데이터·국제기구  /  Tier2(0.7) 백과·.org·공식기업·신뢰미디어
+#   Tier3 감점(0.15)은 아래 _PENALTY_DOMAINS 로 별도 강제(명시 매칭 우선).
 TRUST_SEED = {
-    ".gov": 1.0, ".go.kr": 1.0, ".edu": 0.9, ".ac.kr": 0.9,
-    "arxiv.org": 0.9, "github.com": 0.8, "wikipedia.org": 0.8,
-    "g2b.go.kr": 1.0, "data.go.kr": 1.0, "nps.or.kr": 0.85,
+    # ── Tier1(1.0) 최상품 — 공식기관·학술·1차데이터·국제기구 ──
+    ".gov": 1.0, ".gov.": 1.0, ".go.kr": 1.0, ".ac.kr": 1.0, ".edu": 1.0,
+    ".re.kr": 1.0, ".or.kr": 1.0,
+    "arxiv.org": 1.0, "data.go.kr": 1.0, "kostat.go.kr": 1.0,
+    "visitkorea.or.kr": 1.0, "scholar.google": 1.0, "who.int": 1.0,
+    "oecd.org": 1.0, "g2b.go.kr": 1.0, "nps.or.kr": 1.0, "law.go.kr": 1.0,
+    # ── Tier2(0.7) — 백과·.org·신뢰 미디어·공식 기업 도메인 ──
+    "wikipedia.org": 0.7, "namu.wiki": 0.7, ".org": 0.7, "github.com": 0.7,
 }
+# 감점 도메인(Tier3·0.15) — 개인블로그·제휴/쇼핑/광고성·SEO 클릭베이트. 명시 매칭 시 강제(Tier 우선 X).
+_PENALTY_DOMAINS = {
+    "blog.naver.com", "tistory.com", "blog.", "brunch.co.kr", "velog.io", ".shop",
+}
+_PENALTY_TRUST = 0.15
 _DEFAULT_TRUST = 0.4
 
 
@@ -339,6 +351,10 @@ def _relevance(topic, title, snippet):
 
 def _domain_trust(url):
     u = url.lower()
+    # 감점 우선 — blog.naver.com 같은 명백한 개인블로그/광고성은 Tier 키워드 동시매칭이어도 0.15 강제.
+    for bad in _PENALTY_DOMAINS:
+        if bad in u:
+            return _PENALTY_TRUST
     best = _DEFAULT_TRUST
     for key, val in TRUST_SEED.items():
         if key in u and val > best:
@@ -346,14 +362,35 @@ def _domain_trust(url):
     return best
 
 
+# 콘텐츠 품질 신호(선택) — 정보성 +, 광고성/클릭베이트 -. 가중 작게(±0.05·과조정 금지).
+#   정보신호: 숫자/% (예: 2023년·12%·5000원은 digit 으로 포착) + 통계/공식/발표 류.
+_INFO_TERMS = ("통계", "공식", "발표", "보고서", "백서", "연구", "지표")
+_AD_TERMS = ("할인", "최저가", "예약", "지금바로", "지금 바로", "클릭", "회원가입",
+             "이벤트", "특가", "쿠폰", "무료체험", "광고", "제휴")
+
+
+def _content_quality(title, snippet):
+    """title+snippet 콘텐츠 품질 신호 → ±0.05. 정보성(숫자·%·통계·공식·발표) +, 광고성 -."""
+    text = (str(title or "") + " " + str(snippet or "")).lower()
+    delta = 0.0
+    if re.search(r"\d|%", text) or any(t in text for t in _INFO_TERMS):
+        delta += 0.05
+    if any(t in text for t in _AD_TERMS):
+        delta -= 0.05
+    return delta
+
+
 def score_candidate(topic, cand):
-    """score = 0.5·relevance + 0.4·domain_trust + 0.1·rank_bonus. 컴포넌트 분해 동봉(B 지적)."""
+    """score = 0.35·relevance + 0.55·domain_trust + 0.1·rank_bonus + content_quality(±0.05).
+    출처 신뢰(최상품)를 핵심 가중으로(0.55). 컴포넌트 분해 동봉(B 지적). 결과는 [0,1] 클램프."""
     rel = _relevance(topic, cand.get("title"), cand.get("snippet"))
     trust = _domain_trust(cand["url"])
     rank_bonus = max(0.0, 1.0 - cand.get("_rank", 0) * 0.1)  # 검색순위 보너스
+    cq = _content_quality(cand.get("title"), cand.get("snippet"))
     comp = {"relevance": round(rel, 3), "domain_trust": round(trust, 3),
-            "rank_bonus": round(rank_bonus, 3)}
-    score = round(0.5 * rel + 0.4 * trust + 0.1 * rank_bonus, 4)
+            "rank_bonus": round(rank_bonus, 3), "content_quality": round(cq, 3)}
+    base = 0.35 * rel + 0.55 * trust + 0.1 * rank_bonus + cq
+    score = round(max(0.0, min(1.0, base)), 4)
     return score, comp
 
 
@@ -407,7 +444,7 @@ def discover(topic, provider=None, limit=10, home=None, persist=True, merge=True
                 "_rank": i}
         score, comp = score_candidate(topic, cand)
         cand["score"], cand["score_components"] = score, comp
-        cand["score_version"] = "v1"
+        cand["score_version"] = "v2"
         cand["rationale"] = "rel=%.2f trust=%.2f via %s" % (
             comp["relevance"], comp["domain_trust"], provider.name)
         cand.pop("_rank", None)
@@ -587,6 +624,39 @@ def _selftest():
             os.environ.pop(_k, None)
         else:
             os.environ[_k] = _v
+
+    # D19~ — 출처 티어 랭킹 v2(최상품 우선·감점 도메인). 결정적·네트워크 0.
+    chk("D19 Tier1 .go.kr/통계청 trust=1.0", _domain_trust("https://www.kostat.go.kr/x") == 1.0)
+    chk("D19b Tier1 arxiv 학술 trust=1.0", _domain_trust("https://arxiv.org/abs/2401.1") == 1.0)
+    chk("D19c Tier1 .re.kr 연구기관 trust=1.0", _domain_trust("https://www.kdi.re.kr/r/1") == 1.0)
+    chk("D19d Tier1 visitkorea.or.kr 관광공사 trust=1.0",
+        _domain_trust("https://english.visitkorea.or.kr/x") == 1.0)
+    chk("D20 Tier2 wikipedia trust=0.7", _domain_trust("https://ko.wikipedia.org/wiki/x") == 0.7)
+    chk("D20b Tier2 namu.wiki trust=0.7", _domain_trust("https://namu.wiki/w/x") == 0.7)
+    chk("D21 감점 blog.naver.com=0.15", _domain_trust("https://blog.naver.com/abc/123") == 0.15)
+    chk("D21b 감점 tistory=0.15", _domain_trust("https://abc.tistory.com/1") == 0.15)
+    chk("D21c 감점 velog/.shop=0.15",
+        _domain_trust("https://velog.io/@x") == 0.15 and _domain_trust("https://deal.shop/x") == 0.15)
+    chk("D21d 감점 우선 — blog.naver.com 은 Tier 키워드 동시매칭이어도 0.15",
+        _domain_trust("https://blog.naver.com/post.org") == 0.15)
+    chk("D22 미분류 default=0.4", _domain_trust("https://random-site.com/x") == 0.4)
+    # 티어 랭킹 — 공식 통계청 > 상업 개인블로그(신혼여행 검색 회귀 케이스)
+    _official = {"url": "https://www.kostat.go.kr/stat", "title": "통계청 신혼부부 통계",
+                 "snippet": "2023년 신혼부부 통계 발표", "_rank": 2}
+    _blogc = {"url": "https://blog.naver.com/wedding", "title": "신혼여행 추천",
+              "snippet": "신혼여행 best 예약 할인 지금바로 클릭", "_rank": 0}
+    _so, _soc = score_candidate("신혼부부 신혼여행 통계", _official)
+    _sb, _ = score_candidate("신혼부부 신혼여행 통계", _blogc)
+    chk("D23 공식 통계청 score > 상업블로그 score(상위 랭킹)", _so > _sb)
+    chk("D23b score_components 에 content_quality 동봉", "content_quality" in _soc)
+    # 콘텐츠 품질 신호 — 정보성 + / 광고성 -
+    chk("D24 정보신호(숫자·통계·발표) +", _content_quality("2023년 통계 발표", "조사 결과 12% 상승") > 0)
+    chk("D24b 광고성(최저가·예약·클릭·이벤트) -",
+        _content_quality("최저가 예약", "지금바로 클릭 할인 이벤트 회원가입") < 0)
+    chk("D24c 신호 없음 → 0", _content_quality("일반 제목", "평범한 본문") == 0.0)
+    chk("D25 가중 0.55 trust 지배 — 동일 relevance 면 Tier1 > default",
+        score_candidate("x", {"url": "https://a.go.kr", "title": "t", "snippet": "s", "_rank": 0})[0]
+        > score_candidate("x", {"url": "https://a.com", "title": "t", "snippet": "s", "_rank": 0})[0])
 
     total, passed = len(ok), sum(ok)
     print("\nRESULT: %d/%d PASS" % (passed, total))

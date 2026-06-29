@@ -123,6 +123,97 @@ def _write_pack(pack, out_dir):
     return out_dir
 
 
+# ── 역할분담(A) 지원: 클라우드 ingest 입력 번들 산출 ───────────────────
+#   온톨로지화는 OpenCrab(클라우드)이 담당(로컬 평면 덤프는 무의미). 빙구팩은
+#   '정제 양질 텍스트 번들'만 만들어 cloud opencrab_ingest_text(title/content)로 넘긴다.
+#   build_pack/노드 생성 절대 미접촉 — 순수 추가(독립) 함수.
+def _iter_pack_chunks(pack_or_documents):
+    """pack dict / build_pack 반환 / documents 리스트 → evidence chunk 평탄화 yield.
+
+    - pack dict(build_pack['pack'])   : 단수 키 'evidence_chunk'
+    - build_pack 반환({status,pack..}) : 'pack' 하위로 재귀
+    - 단일 document                    : 'evidence_chunks'(또는 'chunks')
+    - documents 리스트                 : 각 document 의 chunk 순회
+    """
+    src = pack_or_documents
+    if isinstance(src, dict):
+        if isinstance(src.get("pack"), dict):            # build_pack 반환 형태
+            src = src["pack"]
+        if "evidence_chunk" in src:                      # pack contract(단수 키)
+            for c in src.get("evidence_chunk") or []:
+                yield c
+            return
+        if "evidence_chunks" in src or "chunks" in src:  # 단일 document
+            for c in (src.get("evidence_chunks") or src.get("chunks") or []):
+                yield c
+            return
+        return
+    for d in src or []:                                  # documents 리스트
+        if isinstance(d, dict):
+            for c in (d.get("evidence_chunks") or d.get("chunks") or []):
+                yield c
+
+
+def _guess_title(source_ref, text):
+    """추정 제목: source_ref 의 마지막 토큰(source_id) 우선, 없으면 본문 첫 줄."""
+    if source_ref:
+        parts = [p.strip() for p in str(source_ref).split("::") if p.strip()]
+        if parts:
+            cand = parts[-1]
+            if cand and cand.lower() not in ("url", "harvest", "unknown", "src"):
+                return cand[:120]
+    for line in str(text or "").splitlines():            # 본문 첫 비어있지 않은 줄
+        line = line.strip()
+        if line:
+            return line[:120]
+    return (str(source_ref) if source_ref else "source")[:120]
+
+
+def export_cloud_text(pack_or_documents, min_chars=1, join_sep="\n\n", title_fn=None):
+    """역할분담(A) — 빙구팩이 클라우드 ingest 에 넘길 '출처별 정제 텍스트 번들'을 만든다.
+
+    pack(또는 build_pack 이 받는 documents)의 evidence_chunk 본문 텍스트를 **출처(source)별로
+    group→join** 해 cloud opencrab_ingest_text(title/content) 입력으로 바로 쓸 수 있게 반환한다.
+    노드/온톨로지는 만들지 않는다(그건 클라우드 담당). build_pack 미접촉 — 순수 독립 함수.
+
+    인자:
+      pack_or_documents : build_pack['pack'] dict · build_pack 반환 dict · documents 리스트 모두 허용
+      min_chars         : 합본 글자수가 이 미만인 출처는 제외(기본 1 — 빈 출처만 제거)
+      join_sep          : 동일 출처 chunk 본문 결합 구분자(기본 빈 줄)
+      title_fn          : (source_ref, text)->title 추정 함수 오버라이드(기본 _guess_title)
+
+    반환: [{"source": <source_ref>, "title": <추정 제목>, "text": <합본 정제 텍스트>,
+            "chars": int}, ...]  — chars(글자수) 내림차순 정렬(동률은 입력 순서 유지).
+    """
+    groups = {}                                          # source(key) -> {source, texts[]}
+    for c in _iter_pack_chunks(pack_or_documents):
+        if not isinstance(c, dict):
+            continue
+        text = c.get("text")
+        if not text or not str(text).strip():            # 빈 본문은 번들 제외
+            continue
+        src = c.get("source")
+        if src is None:
+            src = (c.get("evidence_meta") or {}).get("raw_pointer") or "unknown"
+        key = str(src)
+        g = groups.get(key)
+        if g is None:
+            g = groups[key] = {"source": src, "texts": []}
+        g["texts"].append(str(text).strip())
+
+    bundles = []
+    for g in groups.values():                            # dict = 입력(첫 등장) 순서 보존
+        joined = join_sep.join(g["texts"])
+        if len(joined) < min_chars:
+            continue
+        title = (title_fn or _guess_title)(g["source"], joined)
+        bundles.append({"source": g["source"], "title": title,
+                        "text": joined, "chars": len(joined)})
+
+    bundles.sort(key=lambda b: -b["chars"])              # 글자수 내림차순(stable=동률 입력순)
+    return bundles
+
+
 # ── selftest (메모리 mock documents · 실 네트워크/store 0) ─────────────
 def _selftest():
     import tempfile
@@ -178,6 +269,41 @@ def _selftest():
         and os.path.exists(os.path.join(out, "nodes.jsonl")))
     mani = json.load(open(os.path.join(out, "manifest.json"), encoding="utf-8"))
     chk("F9b 기록 manifest 재검증 PASS", PV.validate_pack(mani)["verdict"] in ("PASS", "REVIEW_ONLY"))
+
+    # ── export_cloud_text (역할분담 A — 클라우드 ingest 입력 번들) ──
+    def mk_export_doc(src, texts):
+        chunks = [{"item_id": "EVX-%s-%d" % (src, i), "text": t,
+                   "source": "harvest :: url :: %s" % src,
+                   "evidence_meta": {"raw_pointer": "p"}} for i, t in enumerate(texts)]
+        return {"nodes": [], "evidence_index": [], "evidence_chunks": chunks}
+
+    edocs = [mk_export_doc("alpha", ["가나다 본문 하나 입니다.", "라마바 본문 둘 추가 텍스트 더 깁니다."]),
+             mk_export_doc("beta", ["짧은 한 줄."])]
+    bundles = export_cloud_text(edocs)
+    chk("E1 출처별 번들 2개", len(bundles) == 2)
+    chk("E2 source별 group(alpha 2 chunk 합본)",
+        any(str(b["source"]).endswith("alpha") and "가나다" in b["text"] and "라마바" in b["text"]
+            for b in bundles))
+    chk("E3 chars 내림차순(alpha 먼저)",
+        bundles[0]["chars"] >= bundles[1]["chars"] and str(bundles[0]["source"]).endswith("alpha"))
+    chk("E4 ingest 키(source/title/text/chars) 존재",
+        all({"source", "title", "text", "chars"} <= set(b) for b in bundles))
+    chk("E5 chars == len(text)", all(b["chars"] == len(b["text"]) for b in bundles))
+    chk("E6 title 추정(source_id)", any(b["title"] == "alpha" for b in bundles))
+
+    # pack(단수 evidence_chunk) 입력도 동일 동작 — build_pack 미접촉(추가 함수)
+    pk = build_pack("t", docs)["pack"]
+    pbund = export_cloud_text(pk)
+    chk("E7 pack(evidence_chunk) 입력 지원", len(pbund) >= 1 and all("text" in b for b in pbund))
+    chk("E8 build_pack 반환 dict 입력 지원", len(export_cloud_text(build_pack("t", docs))) >= 1)
+    # 빈/빈본문 입력 안전
+    chk("E9 빈 입력 → 빈 리스트", export_cloud_text([]) == [] and export_cloud_text({}) == [])
+    chk("E10 빈 본문 chunk 제외",
+        export_cloud_text([mk_export_doc("z", ["  ", ""])]) == [])
+    # build_pack 결과가 export 호출로 변하지 않음(회귀 0)
+    base = build_pack("입찰 가격 예측", docs)
+    _ = export_cloud_text(base["pack"])
+    chk("E11 build_pack 회귀 0(노드 5 유지)", base["counts"]["nodes"] == 5)
 
     total, passed = len(ok), sum(ok)
     print("\nRESULT: %d/%d PASS" % (passed, total))

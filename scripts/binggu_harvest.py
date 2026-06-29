@@ -332,19 +332,71 @@ def _maybe_parse(fr):
     return PA.parse_document(raw, content_type=fr.get("content_type"), filename=fr.get("url"))
 
 
+# 광고/클릭베이트 신호 키워드(보수적 — 본문성 정보가 없을 때만 드롭 판정에 사용).
+# 양질 본문에 한 단어 섞여도 드롭하지 않음(2개 이상 + 정보신호 부재 + 짧음 동시 충족 시만).
+_AD_SIGNAL_KWS = (
+    "할인", "최저가", "예약", "지금 바로", "클릭", "회원가입",
+    "이벤트", "쿠폰", "무료배송", "바로가기", "더보기",
+)
+
+
+def _has_info_signal(s):
+    """정보신호 존재 여부 — 숫자/%/년도/고유명사(영문 대문자 시작 토큰) 중 하나라도 있으면 True.
+    있으면 본문성으로 간주 → 광고 게이트 드롭 제외(보수적: 정보가 조금이라도 있으면 보존)."""
+    import re as _re
+    if _re.search(r"\d", s):                     # 숫자(수치·년도 포함)
+        return True
+    if "%" in s:                                 # 퍼센트
+        return True
+    if _re.search(r"\b[A-Z][A-Za-z]{1,}\b", s):  # 고유명사 proxy — 영문 대문자 시작 단어(브랜드/제품)
+        return True
+    return False
+
+
+def _is_ad_spam(s):
+    """콘텐츠 품질 게이트 — 광고/클릭베이트 신호 위주면 True(드롭). **과공격 방지(보수적)**.
+
+    드롭 조건(셋 모두 충족 시만): ① 광고 신호 키워드 2개 이상  ② 정보신호 부재(_has_info_signal=False)
+    ③ 짧음(<=_AD_SPAM_MAX_LEN). 하나라도 어긋나면 보존(양질 본문에 '예약' 한 단어 섞여도 살림)."""
+    if _has_info_signal(s):                       # 정보 한 톨이라도 있으면 보존
+        return False
+    n_ad = sum(1 for kw in _AD_SIGNAL_KWS if kw in s)
+    if n_ad < 2:                                  # 광고 키워드 2개 미만이면 보존
+        return False
+    if len(s) > _AD_SPAM_MAX_LEN:                 # 길면(양질 본문 가능성) 보존
+        return False
+    return True
+
+
+_AD_SPAM_MAX_LEN = 120  # 이 길이 이하 + 광고키워드 2+ + 정보신호 0 일 때만 드롭(보수)
+
+
 def _strip_boilerplate(seg):
-    """파생(markdown) segment 에서 네비/메뉴 보일러플레이트 제거 → 정제 본문 반환(없으면 None).
+    """파생(markdown) segment 에서 네비/메뉴 보일러플레이트·강조 마크업 제거 → 정제 본문(없으면 None).
 
     역할분담(A): 2차 라인 온톨로지화는 OpenCrab(클라우드) 담당이고 빙구팩은 양질 본문 정제 전담.
     파생(derived)은 가공본이며 원문 raw 는 _store_raw 가 sha256 으로 별도 보존하므로 정제는 **무손실**.
-    링크/이미지를 텍스트로 펴고, 정제 후 본문성(>=30자)이 없는 토막(메뉴/네비/링크 나열)은 드롭한다.
+    링크/이미지를 텍스트로 펴고, 마크다운 강조 마크업(**bold**/__bold__/*italic*/_italic_/`code`)은
+    내부 텍스트만 남기고 제거하며, 헤더(#)·리스트(*/-/+) 선두 기호도 정리한다.
+    정제 후 본문성(>=30자)이 없는 토막(메뉴/네비/링크 나열)이나 광고성 토막(_is_ad_spam)은 드롭한다.
     _content_chunks(원문 1:1 경로)는 이 정제를 거치지 않는다(§1 원문 보존 불변)."""
     import re as _re
     s = _re.sub(r"!\[[^\]]*\]\([^)]*\)", "", str(seg or ""))   # 이미지 제거
     s = _re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", s)            # [텍스트](url) → 텍스트
     s = _re.sub(r"https?://\S+", "", s)                        # 벌거벗은 url 제거
+    # 마크다운 강조 마크업 제거(내부 텍스트는 보존). bold(2글자)를 italic(1글자)보다 먼저 처리.
+    s = _re.sub(r"\*\*(.+?)\*\*", r"\1", s)                    # **bold** → bold (인접 잔재도 반복 매치)
+    s = _re.sub(r"__(.+?)__", r"\1", s)                        # __bold__ → bold
+    s = _re.sub(r"(?<!\w)\*(?!\s)([^*\n]+?)(?<!\s)\*(?!\w)", r"\1", s)  # *italic* → italic(리스트마커 보호)
+    s = _re.sub(r"(?<!\w)_([^_\n]+?)_(?!\w)", r"\1", s)        # _italic_ → italic(snake_case 보호)
+    s = _re.sub(r"`([^`]*)`", r"\1", s)                        # `code` → code(백틱 제거)
+    # 헤더/리스트 선두 기호 정리(줄별) — 누락분 보강.
+    s = _re.sub(r"(?m)^[ \t]*#{1,6}[ \t]*", "", s)            # 헤더 # 선두 제거
+    s = _re.sub(r"(?m)^[ \t]*[*+\-][ \t]+", "", s)            # 리스트 마커(*/+/-) 선두 제거
     s = s.strip(" \t*#-+|>").strip()
     if len(s) < 30:                                            # 짧은 토막(메뉴/네비/링크 잔재) 드롭
+        return None
+    if _is_ad_spam(s):                                         # 광고성/클릭베이트 위주 토막 드롭(보수)
         return None
     return s
 
@@ -844,6 +896,40 @@ def _selftest():
     chk("T17b ASCII URL 무변경",
         _encode_fetch_url("https://example.org/path?q=1") == "https://example.org/path?q=1")
     chk("T17c IDNA host 인코딩", _encode_fetch_url("https://한국.kr/x").startswith("https://xn--"))
+
+    # ── T18 마크다운 강조 마크업 제거(내부 텍스트 보존) — 파생 정제 _strip_boilerplate ──
+    md_bold = "**예산****,** **여행기간** 등 핵심 항목을 다루는 충분히 긴 여행 가이드 본문입니다."
+    out18 = _strip_boilerplate(md_bold)
+    chk("T18 **bold** 잔재 제거(별표 0)",
+        out18 is not None and "*" not in out18)
+    chk("T18b 내부 텍스트 보존(예산·여행기간)",
+        out18 is not None and "예산" in out18 and "여행기간" in out18 and "예산," in out18)
+    md_mixed = "이 문단은 __강조__ 와 *기울임* 과 `코드` 마크업을 포함한 충분히 긴 본문 내용입니다."
+    out18c = _strip_boilerplate(md_mixed)
+    chk("T18c __bold__/*italic*/`code` 마크업 제거·텍스트 보존",
+        out18c is not None and "_" not in out18c and "*" not in out18c and "`" not in out18c
+        and "강조" in out18c and "기울임" in out18c and "코드" in out18c)
+    md_head = "# 헤더 제목\n* 첫번째 리스트 항목으로 충분히 긴 본문 내용을 담고 있는 줄입니다."
+    out18d = _strip_boilerplate(md_head)
+    chk("T18d 헤더(#)·리스트(*) 선두 기호 제거",
+        out18d is not None and not out18d.lstrip().startswith(("#", "* ")))
+    chk("T18e snake_case 밑줄 보존(과제거 방지)",
+        (_strip_boilerplate("함수 some_var_name 는 코드에서 충분히 긴 본문으로 설명되는 식별자입니다.") or "")
+        .find("some_var_name") >= 0)
+
+    # ── T19 콘텐츠 품질 게이트(광고성 드롭) — 보수적(2+키워드 + 정보부재 + 짧음) ──
+    ad = "지금 바로 예약! 최저가 할인 쿠폰 이벤트 무료배송 바로가기 회원가입 더보기"
+    chk("T19 광고성 토막 드롭(키워드 2+ · 정보신호 0 · 짧음)", _strip_boilerplate(ad) is None)
+    good_one_kw = "이 호텔 객실은 넓고 조용하며 예약은 홈페이지에서 누구나 간편하게 진행할 수 있습니다."
+    chk("T19b 양질 본문에 '예약' 한 단어 → 보존(과공격 금지)",
+        _strip_boilerplate(good_one_kw) is not None)
+    ad_with_num = "2024년 봄 특별 할인 이벤트로 전 상품 30% 예약 시 추가 쿠폰 무료배송 혜택을 드립니다."
+    chk("T19c 광고키워드 다수라도 정보신호(숫자·%) 있으면 보존",
+        _strip_boilerplate(ad_with_num) is not None)
+    ad_long = ("할인 예약 안내드립니다. 본 안내문은 광고 키워드가 들어가 있으나 충분히 길고 설명이 많은 "
+               "본문이라 정보성이 인정되어 보수적으로 보존되어야 하는 긴 문단의 예시 내용입니다. "
+               "추가 설명과 맥락이 풍부하게 들어가 있습니다.")
+    chk("T19d 광고키워드 있어도 길면 보존(보수)", _strip_boilerplate(ad_long) is not None)
 
     print("\nRESULT: %d/%d %s" % (ok, tot, "PASS" if ok == tot else "FAIL"))
     print("GATE: %s" % ("GO" if ok == tot else "BLOCK"))
