@@ -101,6 +101,35 @@ def _coerce_labels(resp):
     return []
 
 
+# ── 깨진 라벨 필터(구조적·주제무관 — LLM 분기 출력 후처리·고정 단어 0) ───────
+#   실증 n10: '{"가지":["브라이덜 무ｎｍ...シャシャシャ' 류 반복토큰/JSON파편 통과 버그.
+#   ★ 노이즈 판정을 주제별 고정 단어로 박지 않는다(brittle). 순수 구조 신호만:
+#     과길이 / JSON 구조 파편 / 토큰·문자 연속반복 / 제어문자·깨진 유니코드.
+_LABEL_MAX_LEN = 40                                   # 정상 라벨=짧은 명사구. 초과=깨진 출력
+_JSON_FRAGMENT_RE = re.compile(r'[{}\[\]"]')          # 배열/객체 텍스트 파편(정상 명사구엔 부재)
+_REPEAT_RUN_RE = re.compile(r"(.{1,4}?)\1{2,}", re.S)  # 1~4자 단위 3회+ 연속 반복(シャシャシャ)
+_CONTROL_RE = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f�]")  # 제어문자·U+FFFD(깨진 유니코드)
+
+
+def _is_broken_label(label):
+    """LLM 분기 출력의 깨진 라벨 판정(구조적·주제무관·고정 단어 0).
+    신호: 과길이 / JSON 구조 파편 / 토큰·문자 연속반복 / 제어문자·깨진 유니코드.
+    정상 라벨(짧은 명사구)은 False. 의미판단 0 — 순수 구조 신호.
+    구두점/공백 전용(정규화 후 빈 키)은 깨짐 아님(False) → explore 의 empty prune 에 위임."""
+    s = str(label or "")
+    if not _normalize_label(s):
+        return False  # 빈/구두점전용 — explore empty prune 가 처리(여기서 가로채면 사유 왜곡)
+    if len(s) > _LABEL_MAX_LEN:
+        return True
+    if _JSON_FRAGMENT_RE.search(s):
+        return True
+    if _CONTROL_RE.search(s):
+        return True
+    if _REPEAT_RUN_RE.search(s):
+        return True
+    return False
+
+
 def _coerce_score(resp):
     """transport 응답 → 0~1 관련성 float. number / {relevance|score|관련성:..} / str 관용.
     파싱 실패 → None(호출자 fail-open). 예외 흡수."""
@@ -209,8 +238,14 @@ def expand_node(node, root, path, transport, breadth=8):
     except Exception:
         return []
     labels = _coerce_labels(resp)
-    # 빈 라벨 제거 + breadth 캡(순서 보존)
-    out = [str(x).strip() for x in labels if str(x).strip()]
+    # 빈 라벨 제거 + 깨진 라벨(구조적·주제무관) 필터 + breadth 캡(순서 보존).
+    #   구두점전용('---' 등)은 _is_broken_label 이 통과시켜 explore 의 empty prune 가 처리.
+    out = []
+    for x in labels:
+        s = str(x).strip()
+        if not s or _is_broken_label(s):
+            continue
+        out.append(s)
     return out[:b]
 
 
@@ -564,6 +599,34 @@ def _selftest():
     r16 = explore("R", _tree_transport({"R": ["정상", "   ", "---"]}), max_depth=1, breadth=8, relevance_min=0.0)
     chk("E16a 정규화 빈 라벨('---') prune(empty)", any(p["reason"] == "empty" for p in r16["pruned"]))
     chk("E16b 정상 자식만 노드화", [n["label"] for n in r16["nodes"] if n["depth"] == 1] == ["정상"])
+
+    # E17 — 깨진 라벨 필터(구조적·주제무관). 실증 n10 반복토큰/JSON파편/과길이/제어문자 드롭, 정상 보존.
+    broken_tree = {"R": [
+        "정상가지",                       # 정상 보존
+        '{"가지":["브라이덜 무ｎｍ',         # JSON 구조 파편
+        "シャシャシャシャシャ",             # 토큰 연속 반복
+        "가" * 50,                        # 과길이
+        "정상\x00라벨",                    # 제어문자
+        "또다른정상",                      # 정상 보존
+    ]}
+    r17 = explore("R", _tree_transport(broken_tree), max_depth=1, breadth=8, relevance_min=0.0)
+    r17_labels = [n["label"] for n in r17["nodes"] if n["depth"] == 1]
+    chk("E17a 정상 라벨 2개 보존", "정상가지" in r17_labels and "또다른정상" in r17_labels)
+    chk("E17b JSON 파편 드롭", not any(("{" in l or '"' in l or "[" in l) for l in r17_labels))
+    chk("E17c 반복토큰 드롭", "シャシャシャシャシャ" not in r17_labels)
+    chk("E17d 과길이 드롭", ("가" * 50) not in r17_labels)
+    chk("E17e 제어문자 드롭", "정상\x00라벨" not in r17_labels)
+    chk("E17f 깨진 라벨만 제거(정상 2개)", len(r17_labels) == 2)
+    # _is_broken_label 단위 검증
+    chk("E17g JSON 파편 True", _is_broken_label('{"가지":[') is True)
+    chk("E17h 토큰 반복 True(abcabcabc)", _is_broken_label("abcabcabc") is True)
+    chk("E17i 단일문자 반복 True(aaaa)", _is_broken_label("aaaa") is True)
+    chk("E17j 과길이 True", _is_broken_label("x" * 41) is True)
+    chk("E17k 제어문자 True", _is_broken_label("정상\x00라벨") is True)
+    chk("E17l 정상 명사구 False", _is_broken_label("신혼여행 항공") is False
+        and _is_broken_label("패키지구성") is False)
+    chk("E17m 구두점전용은 비깨짐(empty 위임)", _is_broken_label("---") is False)
+    chk("E17n 빈 문자열 비깨짐", _is_broken_label("") is False)
 
     total, passed = len(ok), sum(ok)
     print("\nRESULT: %d/%d PASS" % (passed, total))

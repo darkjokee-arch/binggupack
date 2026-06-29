@@ -371,7 +371,57 @@ def _is_ad_spam(s):
 _AD_SPAM_MAX_LEN = 120  # 이 길이 이하 + 광고키워드 2+ + 정보신호 0 일 때만 드롭(보수)
 
 
-def _strip_boilerplate(seg):
+# ── 구조 노이즈 신호(주제무관·block-level) — ★ 고정 단어 리스트 금지 ──────────────
+#   노이즈 판정을 'verification/쿠키' 같은 고정 키워드로 박지 않는다(brittle·본문 오인).
+#   대신 주제와 무관한 **구조 지표**(블록 길이·링크밀도·반복도)를 **결합**해 block 단위로 격리.
+#   의미적 노이즈는 plan(LLM) 영역 — 코드는 구조적(주제무관)만 본다. raw 보존 불변(무손실).
+#
+# 정제 강도(intensity) — 보수적 기본. "off" 면 신규 구조 드롭 미적용(기존동작·회귀0).
+_STRIP_INTENSITY_DEFAULT = "conservative"
+_LINK_DENSITY_MAX = 0.5     # 블록 문자의 이 비율 이상이 링크/URL → 네비/메뉴 신호
+_LINK_MIN_COUNT = 3         # 링크 개수 이 이상일 때만 밀도 신호 발동(본문 내 소수 링크 보호)
+_BOILERPLATE_MIN_REPEAT = 2  # 여러 블록에 공통 등장 횟수 >= 이 값 → boilerplate(헤더/푸터/네비)
+_BOILERPLATE_MAXLEN = 120   # 반복 블록 중 이 길이 이하만 드롭(긴 본문 우연 중복 보호)
+
+
+def _link_stats(raw_seg):
+    """원본 블록의 링크 통계 → (개수, 점유밀도 0~1). 마크다운 링크/이미지 + 벌거벗은 URL.
+    네비/메뉴(링크 나열)는 밀도가 높고, 본문 내 소수 링크는 밀도가 낮다(주제무관 구조 신호).
+    고정 단어가 아니라 '링크가 블록을 얼마나 차지하나'라는 구조량만 본다."""
+    import re as _re
+    s = str(raw_seg or "")
+    total = max(1, len(s.strip()))
+    covered = 0
+    n = 0
+
+    def _acc(m):
+        nonlocal covered, n
+        covered += len(m.group(0))
+        n += 1
+        return " "
+    rest = _re.sub(r"!?\[[^\]]*\]\([^)]*\)", _acc, s)   # 마크다운 링크/이미지 점유
+    for m in _re.finditer(r"https?://\S+", rest):       # 링크 밖 벌거벗은 URL 점유
+        covered += len(m.group(0))
+        n += 1
+    return n, min(1.0, covered / total)
+
+
+def _norm_block(s):
+    """블록 정규화 키(소문자·공백 압축) — 반복 boilerplate 동일성 비교용."""
+    return " ".join(str(s or "").lower().split())
+
+
+def repeated_boilerplate_keys(segments, min_repeat=None):
+    """여러 블록에 공통 등장하는 정규화 키 집합 = 헤더/푸터/네비 boilerplate(주제무관).
+    단일 등장은 boilerplate 아님(본문일 수 있음) — 반복(>=min_repeat)만 구조 노이즈로 본다.
+    raw 세그먼트 기준으로 산출(정제 전)."""
+    from collections import Counter
+    min_repeat = _BOILERPLATE_MIN_REPEAT if min_repeat is None else min_repeat
+    c = Counter(_norm_block(s) for s in segments if _norm_block(s))
+    return {k for k, v in c.items() if v >= min_repeat}
+
+
+def _strip_boilerplate(seg, intensity=None, repeated_keys=None):
     """파생(markdown) segment 에서 네비/메뉴 보일러플레이트·강조 마크업 제거 → 정제 본문(없으면 None).
 
     역할분담(A): 2차 라인 온톨로지화는 OpenCrab(클라우드) 담당이고 빙구팩은 양질 본문 정제 전담.
@@ -379,9 +429,18 @@ def _strip_boilerplate(seg):
     링크/이미지를 텍스트로 펴고, 마크다운 강조 마크업(**bold**/__bold__/*italic*/_italic_/`code`)은
     내부 텍스트만 남기고 제거하며, 헤더(#)·리스트(*/-/+) 선두 기호도 정리한다.
     정제 후 본문성(>=30자)이 없는 토막(메뉴/네비/링크 나열)이나 광고성 토막(_is_ad_spam)은 드롭한다.
+
+    추가(A 보편정제·주제무관 구조 신호 결합) — ★ 고정 단어 X:
+      ① 링크밀도: 블록 대부분이 링크/URL(밀도>=_LINK_DENSITY_MAX) + 다수 링크(>=_LINK_MIN_COUNT)
+         + 정제본문에 정보신호 없음 → 네비/메뉴로 드롭. 본문 내 소수 링크는 밀도 낮아 보존.
+      ② 반복 boilerplate: 여러 블록 공통 등장 키(repeated_keys)면서 짧음(<=_BOILERPLATE_MAXLEN)
+         → 헤더/푸터/네비로 드롭. 단일 등장/긴 블록은 보존(본문 우연중복 보호).
+    intensity="off" 면 ①② 미적용(기존동작·회귀0). 기본 conservative(보수적 임계).
     _content_chunks(원문 1:1 경로)는 이 정제를 거치지 않는다(§1 원문 보존 불변)."""
     import re as _re
-    s = _re.sub(r"!\[[^\]]*\]\([^)]*\)", "", str(seg or ""))   # 이미지 제거
+    raw = str(seg or "")
+    intensity = intensity or _STRIP_INTENSITY_DEFAULT
+    s = _re.sub(r"!\[[^\]]*\]\([^)]*\)", "", raw)             # 이미지 제거
     s = _re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", s)            # [텍스트](url) → 텍스트
     s = _re.sub(r"https?://\S+", "", s)                        # 벌거벗은 url 제거
     # 마크다운 강조 마크업 제거(내부 텍스트는 보존). bold(2글자)를 italic(1글자)보다 먼저 처리.
@@ -398,15 +457,29 @@ def _strip_boilerplate(seg):
         return None
     if _is_ad_spam(s):                                         # 광고성/클릭베이트 위주 토막 드롭(보수)
         return None
+    if intensity != "off":
+        n_links, dens = _link_stats(raw)                       # 주제무관 구조량(원본 기준)
+        # 신호① 링크밀도 — 블록 대부분 링크 + 다수 링크 + 정보신호 부재 → 네비/메뉴
+        if dens >= _LINK_DENSITY_MAX and n_links >= _LINK_MIN_COUNT and not _has_info_signal(s):
+            return None
+        # 신호② 반복 boilerplate — 여러 블록 공통 등장 + 짧음 → 헤더/푸터/네비
+        if repeated_keys and _norm_block(raw) in repeated_keys and len(s) <= _BOILERPLATE_MAXLEN:
+            return None
     return s
 
 
-def _derived_chunks(derived_text, source_ref, pr):
+def _derived_chunks(derived_text, source_ref, pr, intensity=None):
     """파생 텍스트(가공본) → evidence_chunk[]. text 는 derived 임을 evidence_meta 로 명시
-    (derivative=True / parser / raw_sha256). 원문 raw 는 _store_raw 가 별도 보관."""
+    (derivative=True / parser / raw_sha256). 원문 raw 는 _store_raw 가 별도 보관.
+
+    A(보편정제): 블록 분할 후 문서 전체 기준으로 반복 boilerplate(헤더/푸터/네비) 키를 먼저 산출하고
+    각 블록을 _strip_boilerplate 로 정제(주제무관 구조 신호 결합). intensity 로 강도 조절(기본 보수)."""
     chunks, stops = [], []
-    for i, seg in enumerate(_split_segments(derived_text)):
-        seg = _strip_boilerplate(seg)                 # A(역할분담): 파생 보일러플레이트 드롭(무손실·raw 별도보존)
+    segs = _split_segments(derived_text)
+    repeated = repeated_boilerplate_keys(segs)        # block-level: 여러 블록 공통 등장(반복도) 신호
+    for i, seg in enumerate(segs):
+        # A(역할분담): 파생 보일러플레이트 드롭(무손실·raw 별도보존) + 구조 노이즈 격리
+        seg = _strip_boilerplate(seg, intensity=intensity, repeated_keys=repeated)
         if seg is None:
             continue
         red, resid = _redact_all(seg)                 # secret+PII 마스킹(파생 텍스트도 동일 게이트)
@@ -932,6 +1005,35 @@ def _selftest():
                "본문이라 정보성이 인정되어 보수적으로 보존되어야 하는 긴 문단의 예시 내용입니다. "
                "추가 설명과 맥락이 풍부하게 들어가 있습니다.")
     chk("T19d 광고키워드 있어도 길면 보존(보수)", _strip_boilerplate(ad_long) is not None)
+
+    # ── T20 구조 노이즈 block-level 격리(주제무관 신호 결합 — ★ 고정 단어 X) ──
+    #   정제 후에도 30자 이상이라 기존 길이게이트를 통과하는 네비/반복 블록을 구조 신호로 잡는다.
+    nav = ("[홈](/) [회사소개](/about) [로그인](/login) [회원가입](/signup) "
+           "[장바구니](/cart) [고객센터](/cs) [공지사항](/notice) [자주묻는질문](/faq)")
+    chk("T20 네비 링크밀도 블록 드롭(고밀도+다수링크+정보부재)", _strip_boilerplate(nav) is None)
+    chk("T20a intensity=off → 미적용(기존동작·회귀0, 네비 보존)",
+        _strip_boilerplate(nav, intensity="off") is not None)
+    travel = ("교토 여행 둘째 날에는 아라시야마 대나무 숲을 천천히 걸었고 강가의 작은 찻집에서 따뜻한 말차를 "
+              "마시며 한참을 쉬었다 오후에는 금각사까지 버스로 이동했는데 풍경이 무척 인상적이었다")
+    chk("T20b 여행후기 본문 보존(링크 없음·프로즈)", _strip_boilerplate(travel) is not None)
+    mixed = ("이 식당 정보는 공식 [홈페이지](https://example.com/restaurant) 에서 확인할 수 있으며 예약 없이도 "
+             "방문이 가능했고 직원들이 매우 친절했다는 점이 가장 기억에 남는 방문 경험이었다고 적어 둔다")
+    chk("T20c 본문 내 소수 링크 → 밀도 낮아 보존(과제거 방지)", _strip_boilerplate(mixed) is not None)
+    # 반복 boilerplate(쿠키/이용약관 배너) — 30자 이상이라 길이게이트는 못 잡지만 반복도 신호로 드롭.
+    banner = "이 사이트는 쿠키를 사용합니다 계속 이용하시면 쿠키 정책에 동의하는 것으로 간주됩니다 확인"
+    chk("T20d 반복전 단일 배너는 길이게이트 통과(>=30)", len(banner) >= 30)
+    doc = "\n\n".join([banner, travel, banner])    # 헤더/푸터처럼 위·아래 반복
+    chunks_t20, _stops_t20 = _derived_chunks(doc, "src::t20", {"parser": "x", "raw_sha256": "z"})
+    texts_t20 = [c["text"] for c in chunks_t20]
+    chk("T20e 반복 boilerplate 블록 드롭(헤더/푸터)",
+        not any("쿠키" in t and "동의" in t for t in texts_t20))
+    chk("T20f 동일 문서 내 본문은 보존(아라시야마)",
+        any("아라시야마" in t for t in texts_t20))
+    # 단일 등장 boilerplate-유사 블록은 보존(반복 아님 → 본문일 수 있음·보수)
+    doc1 = "\n\n".join([banner, travel])
+    chunks_t20b, _ = _derived_chunks(doc1, "src::t20b", {"parser": "x", "raw_sha256": "z"})
+    chk("T20g 단일 등장 블록은 보존(반복 아님 → 보수)",
+        any("쿠키" in c["text"] for c in chunks_t20b))
 
     print("\nRESULT: %d/%d %s" % (ok, tot, "PASS" if ok == tot else "FAIL"))
     print("GATE: %s" % ("GO" if ok == tot else "BLOCK"))
