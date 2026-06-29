@@ -621,6 +621,20 @@ def cmd_reflect(a):
 
 
 def cmd_save(a):
+    # 화자 페어 가드: owner 발화를 평면 save 로 저장하면 ai 발화와의 페어 연결(엣지)이 빠져
+    # 노드가 흩어진다(화자축 본질 상실). owner 화자 저장은 pair 로만 — pair 가 페어/단독 둘 다 커버.
+    # (capture 자동수집과 무관 · explicit 우회로 정합 · false positive 0: 단독 직감도 pair 로 가능)
+    if getattr(a, "speaker", None) == "owner":
+        print(
+            "BLOCK: owner_flat_save_forbidden — owner 화자 저장은 pair 를 쓰세요(노드2+엣지1 연결 보존).\n"
+            "  · AI 발화에 대한 반응(수용/반박/수정):\n"
+            "      python binggu.py pair \"<owner 원문 그대로>\" \"<ai 발화>\" "
+            "--by owner --relation {accepts|refutes|revises} --confirm \"PAIR owner_<relation> owner:1 ai:1\"\n"
+            "  · 순수 단독 직감(ai 없음):\n"
+            "      python binggu.py pair \"<owner 원문 그대로>\" --confirm \"PAIR owner:1\"\n"
+            "  · save --speaker owner 는 화자 페어 엣지가 빠져 노드가 흩어집니다(2026-06-28 재발 차단)."
+        )
+        return 1
     # 승인 정책: preview 를 실제로 본 텍스트만 저장 가능 — raw text 직행 저장 차단
     if getattr(a, "from_file", None):
         try:
