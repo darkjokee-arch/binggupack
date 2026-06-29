@@ -105,9 +105,14 @@ class SearxngProvider(SearchProvider):
         self.base = (base or os.environ.get("SEARXNG_URL") or "http://localhost:8888").rstrip("/")
         self._runner = runner
 
-    def search(self, query, limit=10):
+    def search(self, query, limit=10, lang=None):
+        # lang(=현지어 타겟) 주어지면 SearXNG 'language' 파라미터로 전달(id/en/ko 등).
+        #   lang=None 이면 기존 동작 그대로(language 미전송 = 회귀 0).
         from urllib.parse import urlencode
-        url = self.base + "/search?" + urlencode({"q": query, "format": "json"})
+        params = {"q": query, "format": "json"}
+        if lang:
+            params["language"] = lang
+        url = self.base + "/search?" + urlencode(params)
         if self._runner is not None:
             r = self._runner(url)
             data = r if isinstance(r, dict) else {}
@@ -594,13 +599,29 @@ def _write_discoveries(cands, path=None):
 
 
 # ── 핵심: discover ────────────────────────────────────────────────────
-def discover(topic, provider=None, limit=10, home=None, persist=True, merge=True):
+def _provider_search(provider, topic, limit, lang):
+    """provider.search 호출 — provider 가 lang 인자를 받으면 전파, 아니면 무시(시그니처 호환).
+    SearXNG 만 lang 을 쓰고 Ddgs/Fallback/Composite 등은 lang 미수용이어도 회귀 0."""
+    if lang is not None:
+        import inspect
+        try:
+            if "lang" in inspect.signature(provider.search).parameters:
+                return provider.search(topic, limit=limit, lang=lang) or []
+        except (TypeError, ValueError):
+            pass
+    return provider.search(topic, limit=limit) or []
+
+
+def discover(topic, provider=None, limit=10, home=None, persist=True, merge=True, lang=None):
     """주제→소스 후보 발견. provider 검색 → vet → 랭킹 → discover_candidates.json.
+
+    lang(=현지어 타겟·SearXNG 'language' id/en/ko 등) 주어지면 provider.search 에 전파.
+      lang=None 이면 기존 동작 그대로(회귀 0). lang 미수용 provider 는 무시(시그니처 호환).
 
     반환 dict(status/topic/candidates/rejected/provider). 후보는 vet 통과(clean)분만.
     """
     provider = provider or default_provider(topic)
-    raw = provider.search(topic, limit=limit) or []
+    raw = _provider_search(provider, topic, limit, lang)
     cands, rejected, seen = [], [], set()
     for i, hit in enumerate(raw):
         ok, res = vet_url(hit.get("url", ""))
@@ -940,6 +961,38 @@ def _selftest():
         os.environ["KIPRIS_SERVICE_KEY"] = _g0
     if _ed is not None:
         os.environ["DATA_GO_KR_SERVICE_KEY"] = _ed
+
+    # D34~ — SearXNG 현지어/언어 검색(lang → 'language' 파라미터). 실 네트워크 0(runner 가 url 캡처).
+    _captured = {}
+
+    def _lang_runner(url):
+        _captured["url"] = url
+        return {"results": [{"url": "https://pantai.id/x", "title": "Pantai Bali",
+                             "content": "pantai tersembunyi"}]}
+    sx_lang = SearxngProvider(runner=_lang_runner)
+    _rl = sx_lang.search("pantai tersembunyi bali", lang="id")
+    chk("D34 lang='id' → 요청 url 에 language=id 실림", "language=id" in _captured["url"])
+    chk("D34a lang 결과 계약 매핑 보존", _rl[0]["url"] == "https://pantai.id/x")
+    _captured.clear()
+    sx_lang.search("q")  # lang 미지정(회귀)
+    chk("D34b lang=None → 요청 url 에 language 미전송(회귀 0)", "language" not in _captured["url"])
+    # discover 가 lang 을 SearXNG provider 로 전파
+    _captured.clear()
+    _rd_lang = discover("pantai bali", provider=SearxngProvider(runner=_lang_runner),
+                        home=home, persist=False, lang="id")
+    chk("D34c discover(lang) → provider.search 로 language=id 전파",
+        "language=id" in _captured.get("url", "") and _rd_lang["n_found"] == 1)
+    # discover lang=None 회귀 — language 미전송
+    _captured.clear()
+    discover("pantai bali", provider=SearxngProvider(runner=_lang_runner),
+             home=home, persist=False)
+    chk("D34d discover lang=None → language 미전송(회귀 0)",
+        "language" not in _captured.get("url", ""))
+    # lang 미수용 provider(ddgs runner)에 lang 줘도 안전(시그니처 호환·예외 0)
+    _dg_lang = DdgsProvider(runner=lambda q, n: [{"url": "https://a.com", "title": "t", "snippet": "s"}])
+    _rd_ddgs = discover("q", provider=_dg_lang, home=home, persist=False, lang="id")
+    chk("D34e lang 미수용 provider(ddgs)에 lang 전달해도 안전(무시·예외 0)",
+        _rd_ddgs["n_found"] == 1)
 
     total, passed = len(ok), sum(ok)
     print("\nRESULT: %d/%d PASS" % (passed, total))
