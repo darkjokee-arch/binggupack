@@ -24,6 +24,7 @@ import os
 import re
 import sys
 import json
+import hashlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -223,6 +224,186 @@ def infer_edges(pack_metas, *, topic_jaccard_min=0.34, max_edges=None):
             "errors": errors}
 
 
+# ════════════════════════════════════════════════════════════════════════
+# 항목 C2 — pack-간 edges → 실 OpenCrab opencrab_workflow_manage 배선
+#   infer_edges 산출 edges({from_pkg,to_pkg,...}) 를 workflow_manage 가 요구하는
+#   '워크플로우 node id 사이 방향 엣지'로 변환하는 순수 빌더 + transport 주입형
+#   오케스트레이터. 전부 additive — infer_edges/RELATIONS/_CONFIDENCE 미수정.
+#   실 호출은 AND(dry_run=False, BINGGU_WORKFLOW_SYNC=1, transport 주입, cfg.url) 만.
+# ════════════════════════════════════════════════════════════════════════
+
+WORKFLOW_TOOL = "opencrab_workflow_manage"
+# owner 토글 — cloud ingest(BINGGU_CLOUD_INGEST)와 분리: ingest 켜도 workflow write 자동 활성 X
+SYNC_ENABLE_ENV = "BINGGU_WORKFLOW_SYNC"
+DEFAULT_CLIENT = "binggupack-pack-edges-sync"
+
+
+def _node_id(pack_id):
+    """pack_id → 결정적·ascii-safe workflow node id (충돌 0·원문 미변형).
+
+    slug(영숫자만) + sha1(pack_id)[:10]. slug 가 동일해지는 'a/b' vs 'a.b' 도
+    해시 접미사로 유일성 보장. package_id 원문은 절대 변형하지 않음(별 필드로 보존)."""
+    pid = str(pack_id)
+    slug = re.sub(r"[^0-9a-zA-Z]+", "_", pid).strip("_")
+    if len(slug) > 40:
+        slug = slug[:40].strip("_")
+    h = hashlib.sha1(pid.encode("utf-8")).hexdigest()[:10]
+    return (slug + "_" + h) if slug else ("pkg_" + h)
+
+
+def to_workflow_nodes_edges(infer_result, *, pack_metas=None):
+    """infer_edges 결과 → workflow nodes/edges (pack_id→node id 매핑·referential integrity).
+
+    입력(raise 0):
+      - dict(+'edges' 리스트 키)       → 그대로 edges 사용
+      - list/tuple(pack_metas)         → infer_edges() 내부 호출
+      - 그 외(비-list·status ERROR 등) → 빈 결과(typed)
+    pack_metas 를 주면 엣지 없는 pack 도 node 로 포함(무손실·완전성).
+
+    반환: {nodes, edges, node_map:{pack_id:node_id}, counts:{nodes,edges}}.
+      nodes : {id, package_id, title, (order)}  ※ order 는 sequence 있을 때만
+      edges : {from, to, relation, confidence, basis}  ※ node id 기준
+    """
+    # 입력 정규화
+    if isinstance(infer_result, dict) and isinstance(infer_result.get("edges"), list):
+        inferred = infer_result["edges"]
+    elif isinstance(infer_result, (list, tuple)):
+        inferred = infer_edges(infer_result).get("edges", [])
+    else:
+        inferred = []
+
+    # pack_metas 정규화 → pack_id별 메타(title/order 용)
+    meta_by_id = {}
+    if isinstance(pack_metas, (list, tuple)):
+        for obj in pack_metas:
+            m = _normalize_meta(obj)
+            if m is not None:
+                meta_by_id.setdefault(m["pack_id"], m)
+
+    # node_map 대상 pack_id: edges from/to 합집합 + valid metas(완전성)
+    pack_ids = set(meta_by_id.keys())
+    for e in inferred:
+        if isinstance(e, dict):
+            if isinstance(e.get("from_pkg"), str):
+                pack_ids.add(e["from_pkg"])
+            if isinstance(e.get("to_pkg"), str):
+                pack_ids.add(e["to_pkg"])
+
+    node_map = {pid: _node_id(pid) for pid in sorted(pack_ids)}  # 정렬 순회 → 결정적
+
+    nodes = []
+    for pid in sorted(pack_ids):
+        m = meta_by_id.get(pid)
+        node = {"id": node_map[pid], "package_id": pid,
+                "title": (m["topic"] if (m and m.get("topic")) else pid)}
+        if m and m.get("sequence") is not None:
+            node["order"] = m["sequence"]
+        nodes.append(node)
+
+    edges = []
+    for e in inferred:
+        if not isinstance(e, dict):
+            continue
+        frm, to = e.get("from_pkg"), e.get("to_pkg")
+        if frm not in node_map or to not in node_map:   # referential integrity
+            continue
+        edges.append({"from": node_map[frm], "to": node_map[to],
+                      "relation": e.get("relation"), "confidence": e.get("confidence"),
+                      "basis": e.get("basis")})
+
+    return {"nodes": nodes, "edges": edges, "node_map": node_map,
+            "counts": {"nodes": len(nodes), "edges": len(edges)}}
+
+
+def build_workflow_payload_from_edges(infer_result, *, pack_metas=None, action="create",
+                                      workflow_name=None, workflow_id=None, description=None,
+                                      status="draft", rpc_id=1):
+    """infer_edges 결과 → opencrab_workflow_manage tools/call JSON-RPC payload (순수·raise 0).
+
+    create면 name=workflow_name. update면 workflow_id/workflow_name 패스스루.
+    반환: {jsonrpc:'2.0', id:int, method:'tools/call',
+           params:{name:WORKFLOW_TOOL, arguments:{action, nodes, edges, ...}}}."""
+    ne = to_workflow_nodes_edges(infer_result, pack_metas=pack_metas)
+    args = {"action": action, "nodes": ne["nodes"], "edges": ne["edges"]}
+    if action == "create":
+        if workflow_name is not None:
+            args["name"] = workflow_name
+    else:
+        if workflow_id is not None:
+            args["workflow_id"] = workflow_id
+        if workflow_name is not None:
+            args["workflow_name"] = workflow_name
+    if description is not None:
+        args["description"] = description
+    if status is not None:
+        args["status"] = status
+    return {"jsonrpc": "2.0", "id": int(rpc_id), "method": "tools/call",
+            "params": {"name": WORKFLOW_TOOL, "arguments": args}}
+
+
+def sync_edges_to_workflow(infer_result, *, pack_metas=None, transport=None, env=None,
+                           config_path=None, home=None, dry_run=True, action="create",
+                           workflow_name=None, workflow_id=None, description=None,
+                           status="draft", rpc_id=1):
+    """pack-간 edges → opencrab_workflow_manage 동기화 오케스트레이터 (typed·raise 0).
+
+    삼중 게이트(AND): dry_run=False + BINGGU_WORKFLOW_SYNC=1 + transport 주입 + cfg.url 존재.
+    하나라도 미충족이면 transport 호출 0. 기본 dry_run=True → payload 만(네트워크 0).
+
+    반환: {mode:'dry-run'|'live'|'error', action, planned_calls, payload, results?,
+           reason, token_fingerprint, source}. 원문 토큰 미노출(sha8 지문만)."""
+    try:
+        payload = build_workflow_payload_from_edges(
+            infer_result, pack_metas=pack_metas, action=action, workflow_name=workflow_name,
+            workflow_id=workflow_id, description=description, status=status, rpc_id=rpc_id)
+    except Exception as ex:  # noqa — 순수 계산도 방어(raise 0)
+        return {"mode": "error", "action": action, "planned_calls": 0, "payload": None,
+                "reason": "BUILD_ERROR:" + type(ex).__name__,
+                "token_fingerprint": "n/a", "source": "n/a"}
+
+    # dry-run(기본): 계획만 — transport 주입돼 있어도 미호출(네트워크 0)
+    if dry_run:
+        return {"mode": "dry-run", "action": action, "planned_calls": 1, "payload": payload,
+                "reason": "DRY_RUN", "token_fingerprint": "n/a", "source": "n/a"}
+
+    # live 게이트 1: owner 토글
+    e = os.environ if env is None else env
+    if str(e.get(SYNC_ENABLE_ENV, "")).strip() != "1":
+        return {"mode": "live", "action": action, "planned_calls": 1, "payload": payload,
+                "results": None, "reason": "WORKFLOW_SYNC_DISABLED",
+                "token_fingerprint": "n/a", "source": "n/a"}
+    # live 게이트 2: transport
+    if transport is None:
+        return {"mode": "live", "action": action, "planned_calls": 1, "payload": payload,
+                "results": None, "reason": "NO_TRANSPORT",
+                "token_fingerprint": "n/a", "source": "n/a"}
+    # live 게이트 3: cloud config(url) — 여기서만 lazy import(모듈 import 부작용 0 보존)
+    try:
+        import binggu_cloud_ingest_wire as CW  # noqa: E402 — live 분기 전용 지연 로드
+        cfg = CW.load_cloud_config(env=env, config_path=config_path, home=home)
+    except Exception as ex:  # noqa
+        return {"mode": "live", "action": action, "planned_calls": 1, "payload": payload,
+                "results": None, "reason": "CONFIG_ERROR:" + type(ex).__name__,
+                "token_fingerprint": "n/a", "source": "n/a"}
+    if not cfg.get("url"):
+        return {"mode": "live", "action": action, "planned_calls": 1, "payload": payload,
+                "results": None, "reason": "NO_CLOUD_CONFIG",
+                "token_fingerprint": cfg.get("token_fingerprint", "none"),
+                "source": cfg.get("source", "none")}
+
+    try:
+        session = CW.run_mcp_session(transport, [{"payload": payload}], client_name=DEFAULT_CLIENT)
+        return {"mode": "live", "action": action, "planned_calls": 1, "payload": payload,
+                "results": session, "reason": None if session.get("ok") else "SESSION_ERROR",
+                "token_fingerprint": cfg.get("token_fingerprint", "none"),
+                "source": cfg.get("source", "none")}
+    except Exception as ex:  # noqa — 상위 raise 0 보장
+        return {"mode": "live", "action": action, "planned_calls": 1, "payload": payload,
+                "results": None, "reason": "TRANSPORT_ERROR:" + type(ex).__name__,
+                "token_fingerprint": cfg.get("token_fingerprint", "none"),
+                "source": cfg.get("source", "none")}
+
+
 # ── selftest (전부 메모리 mock · 네트워크/store 0) ─────────────────────
 def _selftest():
     ok = []
@@ -366,6 +547,152 @@ def _selftest():
     r_cap = infer_edges(big, max_edges=2)
     chk("C15 max_edges 제한", len(r_cap["edges"]) == 2
         and r_cap["edges"] == infer_edges(big)["edges"][:2])
+
+    # ── 항목 C2: workflow_manage 배선 (W=순수 변환 · S=오케스트레이터) ──
+    big_w = [meta("topic/a"), meta("topic/a/b"),
+             meta("q", tags=["z"]), meta("r", tags=["z"])]
+
+    # W1 변환: name/action/nodes 구조
+    inp_w1 = [meta("topic/child", depends_on=["topic/parent"]), meta("topic/parent")]
+    pl_w1 = build_workflow_payload_from_edges(infer_edges(inp_w1), pack_metas=inp_w1)
+    a_w1 = pl_w1["params"]["arguments"]
+    chk("W1 name=workflow_manage·action=create·nodes에 package_id+id",
+        pl_w1["params"]["name"] == WORKFLOW_TOOL and a_w1["action"] == "create"
+        and len(a_w1["nodes"]) >= 2
+        and all("package_id" in n and "id" in n for n in a_w1["nodes"]))
+
+    # W2 node id 결정적+충돌0: slug 동일해지는 'a/b' vs 'a.b'
+    ne_w2 = to_workflow_nodes_edges([], pack_metas=[meta("a/b"), meta("a.b")])
+    chk("W2 node id 결정적·충돌0(a/b vs a.b)",
+        _node_id("a/b") != _node_id("a.b") and _node_id("a/b") == _node_id("a/b")
+        and len({n["id"] for n in ne_w2["nodes"]}) == 2)
+
+    # W3 referential integrity: edge from/to 전부 node id 집합·pack_id 직접노출 0
+    ne_w3 = to_workflow_nodes_edges(infer_edges(big_w), pack_metas=big_w)
+    nid_w3 = {n["id"] for n in ne_w3["nodes"]}
+    pid_w3 = {n["package_id"] for n in ne_w3["nodes"]}
+    chk("W3 referential integrity(edge from/to=node id·pack_id 노출 0)",
+        len(ne_w3["edges"]) >= 1
+        and all(e["from"] in nid_w3 and e["to"] in nid_w3 for e in ne_w3["edges"])
+        and all(e["from"] not in pid_w3 and e["to"] not in pid_w3 for e in ne_w3["edges"]))
+
+    # W4 무손실/완전성: 엣지 없는 pack 도 node (node 수 == valid pack 수)
+    metas_w4 = [meta("solo/1"), meta("solo/2"), meta("solo/3")]
+    ne_w4 = to_workflow_nodes_edges(infer_edges(metas_w4), pack_metas=metas_w4)
+    chk("W4 무손실: 엣지 없는 pack 도 node(== valid pack 수)",
+        ne_w4["edges"] == [] and len(ne_w4["nodes"]) == 3)
+
+    # W5 메타 전달: relation/confidence/basis == inferred
+    inf_w5 = infer_edges([meta("topic/child", depends_on=["topic/parent"]),
+                          meta("topic/parent")])
+    ne_w5 = to_workflow_nodes_edges(inf_w5)
+    src_w5 = inf_w5["edges"][0]
+    chk("W5 메타 전달: relation/confidence/basis == inferred",
+        len(ne_w5["edges"]) == 1
+        and ne_w5["edges"][0]["relation"] == src_w5["relation"]
+        and ne_w5["edges"][0]["confidence"] == src_w5["confidence"]
+        and ne_w5["edges"][0]["basis"] == src_w5["basis"])
+
+    # W6 JSON-RPC 계약
+    pl_w6 = build_workflow_payload_from_edges(infer_edges(big_w), pack_metas=big_w)
+    chk("W6 JSON-RPC: jsonrpc 2.0·id int·arguments dict·action 키",
+        pl_w6["jsonrpc"] == "2.0" and isinstance(pl_w6["id"], int)
+        and isinstance(pl_w6["params"]["arguments"], dict)
+        and "action" in pl_w6["params"]["arguments"])
+
+    # W7 action=update: workflow_id 패스스루·nodes/edges 동봉
+    pl_w7 = build_workflow_payload_from_edges(infer_edges(big_w), pack_metas=big_w,
+                                              action="update", workflow_id="wf-123")
+    a_w7 = pl_w7["params"]["arguments"]
+    chk("W7 action=update: workflow_id 패스스루·nodes/edges 동봉",
+        a_w7["action"] == "update" and a_w7.get("workflow_id") == "wf-123"
+        and "nodes" in a_w7 and "edges" in a_w7)
+
+    # W8 결정성: 동일 입력 2회 build → sort_keys 바이트 동일
+    b_w8a = json.dumps(build_workflow_payload_from_edges(infer_edges(big_w), pack_metas=big_w),
+                       ensure_ascii=False, sort_keys=True)
+    b_w8b = json.dumps(build_workflow_payload_from_edges(infer_edges(big_w), pack_metas=big_w),
+                       ensure_ascii=False, sort_keys=True)
+    chk("W8 결정성: 2회 build 바이트 동일", b_w8a == b_w8b)
+
+    # W9 빈 엣지(단일 pack) → edges []·node 는 metas 반영
+    ne_w9 = to_workflow_nodes_edges(infer_edges([meta("only/one")]),
+                                    pack_metas=[meta("only/one")])
+    chk("W9 빈 엣지(단일 pack) → edges 0·node metas 반영",
+        ne_w9["edges"] == [] and len(ne_w9["nodes"]) == 1
+        and ne_w9["nodes"][0]["package_id"] == "only/one")
+
+    # W10 출력 직렬화 PII/secret 잔존 0
+    blob_w = json.dumps(build_workflow_payload_from_edges(infer_edges(big_w), pack_metas=big_w),
+                        ensure_ascii=False)
+    try:
+        import watcher_batch_m1 as _bm1w
+        chk("W10 출력 PII/secret 잔존 0", not _bm1w.scan_residual_pii(blob_w))
+    except Exception:
+        chk("W10 출력 PII/secret 잔존 0(scanner 부재 skip)", True)
+
+    # S1 dry_run 기본: spy transport 호출 0·mode dry-run·payload·reason DRY_RUN
+    spy = {"n": 0}
+
+    def spy_t(payload):
+        spy["n"] += 1
+        return {"result": {"isError": False}}
+
+    r_s1 = sync_edges_to_workflow(infer_edges(big_w), pack_metas=big_w, transport=spy_t)
+    chk("S1 dry_run 기본 → transport 0·mode dry-run·payload·reason DRY_RUN",
+        spy["n"] == 0 and r_s1["mode"] == "dry-run" and r_s1["payload"]
+        and r_s1["reason"] == "DRY_RUN")
+
+    # S2 live + 토글 OFF → WORKFLOW_SYNC_DISABLED·transport 0
+    spy["n"] = 0
+    r_s2 = sync_edges_to_workflow(infer_edges(big_w), pack_metas=big_w, transport=spy_t,
+                                  env={}, dry_run=False)
+    chk("S2 live + 토글 OFF → WORKFLOW_SYNC_DISABLED·transport 0",
+        r_s2["reason"] == "WORKFLOW_SYNC_DISABLED" and spy["n"] == 0)
+
+    # S3 live + 토글 ON + mock transport + url → initialize 1 then tools/call 1·ok
+    seq_s = []
+
+    def seq_t(payload):
+        seq_s.append(payload.get("method"))
+        return {"result": {"isError": False}}
+
+    live_env_s = {SYNC_ENABLE_ENV: "1", "BINGGU_CLOUD_MCP_URL": "https://x.example/mcp",
+                  "BINGGU_CLOUD_MCP_TOKEN": "tok-sync-abcdef123"}
+    r_s3 = sync_edges_to_workflow(infer_edges(big_w), pack_metas=big_w, transport=seq_t,
+                                  env=live_env_s, dry_run=False)
+    chk("S3 live ON+transport+url → initialize 1 then tools/call 1·ok·reason None",
+        bool(seq_s) and seq_s[0] == "initialize" and seq_s.count("tools/call") == 1
+        and r_s3["results"]["ok"] and r_s3["reason"] is None)
+
+    # S4 live + transport None → NO_TRANSPORT(네트워크 0)
+    r_s4 = sync_edges_to_workflow(infer_edges(big_w), pack_metas=big_w, transport=None,
+                                  env=live_env_s, dry_run=False)
+    chk("S4 live + transport None → NO_TRANSPORT", r_s4["reason"] == "NO_TRANSPORT")
+
+    # S5 live + transport 예외 → typed SESSION_ERROR 흡수(raise 0)·errors 기록
+    def boom_t(payload):
+        raise RuntimeError("net_down")
+
+    r_s5 = sync_edges_to_workflow(infer_edges(big_w), pack_metas=big_w, transport=boom_t,
+                                  env=live_env_s, dry_run=False)
+    chk("S5 transport 예외 → SESSION_ERROR 흡수(raise 0)·errors 기록",
+        isinstance(r_s5, dict) and r_s5["reason"] == "SESSION_ERROR"
+        and r_s5["results"]["errors"])
+
+    # S6 토큰 평문 미노출·token_fingerprint sha8 형식
+    pub_s6 = json.dumps({k: v for k, v in r_s3.items() if k != "results"}, ensure_ascii=False)
+    chk("S6 토큰 평문 미노출·token_fingerprint sha8 형식",
+        "tok-sync-abcdef123" not in pub_s6 and r_s3["token_fingerprint"].startswith("sha8:"))
+
+    # S7 비정상 입력(status ERROR dict / 비-list) → typed·raise 0·빈 nodes/edges
+    ne_s7a = to_workflow_nodes_edges({"status": "ERROR", "edges": []})
+    ne_s7b = to_workflow_nodes_edges(42)
+    ne_s7c = to_workflow_nodes_edges("nope")
+    chk("S7 비정상 입력 → typed·raise 0·빈 nodes/edges",
+        ne_s7a["nodes"] == [] and ne_s7a["edges"] == []
+        and ne_s7b["nodes"] == [] and ne_s7b["edges"] == []
+        and ne_s7c["nodes"] == [] and ne_s7c["edges"] == [])
 
     total, passed = len(ok), sum(ok)
     print("\nRESULT: %d/%d PASS" % (passed, total))

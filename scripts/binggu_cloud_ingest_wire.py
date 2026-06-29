@@ -6,8 +6,11 @@
 자동 넘기는 얇은 래퍼만 제공한다(노드/온톨로지 생성 0 — 클라우드가 함).
 
 안전 불변 (전부 _selftest 로 증명):
-  - 이중 게이트: dry_run 기본 True + 토글 BINGGU_CLOUD_INGEST=1 기본 OFF.
-    둘 다 풀려야(AND) live 네트워크 1건이라도 발생. 하나라도 닫혀 있으면 transport 호출 0.
+  - 삼중 게이트: dry_run 기본 True + confirm 명시 확정 + 토글 BINGGU_CLOUD_INGEST=1 기본 OFF.
+    셋 다 풀려야(AND) live 네트워크 1건이라도 발생. 하나라도 닫혀 있으면 transport 호출 0.
+    (confirm tri-state: None=후방호환 not dry_run / True=확정 / False=명시 거부.)
+    인증불가(NO_TOKEN)는 호출 전 사전차단. 예외/응답은 typed 카테고리(AUTH_FAILED/
+    NETWORK_ERROR/EMPTY_RESPONSE/RPC_ERROR/TOOL_ERROR)로 분류·흡수.
   - URL/토큰 하드코딩 0 · 평문 출력 0: env(BINGGU_CLOUD_MCP_URL/BINGGU_CLOUD_MCP_TOKEN) 우선,
     없으면 binggu_home()/cloud_ingest.json 폴백. 토큰은 _redact_token(sha8/len)만 노출.
   - transport 주입형: default_http_transport 만 실 urllib. _selftest 는 mock transport 주입
@@ -51,6 +54,65 @@ def _redact_token(token):
         return "none"
     s = str(token)
     return "sha8:%s len=%d" % (hashlib.sha256(s.encode("utf-8")).hexdigest()[:8], len(s))
+
+
+# ───────────────────────────── confirm 게이트 / 분류 헬퍼 ─────────────────────────────
+def _is_confirmed(dry_run, confirm):
+    """명시 confirm 게이트 판정(tri-state·raise 0).
+
+    - dry_run True            → 무조건 False(계획만).
+    - confirm is False(명시거부) → False(dry_run=False 여도 live 차단).
+    - confirm is True(명시확정)  → True.
+    - confirm is None(미전달)   → not dry_run (기존 의미 보존·후방호환).
+    """
+    if dry_run:
+        return False
+    if confirm is False:
+        return False
+    if confirm is True:
+        return True
+    return not dry_run
+
+
+def _classify_exception(ex):
+    """transport 예외 → 카테고리 문자열(실 urllib 하드 import 0·평문 토큰/URL 노출 0).
+
+    ex.__class__.__name__ + getattr(ex,'code',None) 만으로 판정:
+      - HTTPError code in (401,403) → 'AUTH_FAILED'
+      - code 존재 기타             → 'HTTP_ERROR:<code>'
+      - 클래스명에 URLError/timeout/TimeoutError/socket 포함 → 'NETWORK_ERROR'
+      - 그 외                      → 'TRANSPORT_ERROR:<클래스명>'
+    """
+    name = ex.__class__.__name__
+    code = getattr(ex, "code", None)
+    if isinstance(code, int):
+        if code in (401, 403):
+            return "AUTH_FAILED"
+        return "HTTP_ERROR:%d" % code
+    low = name.lower()
+    if "urlerror" in low or "timeout" in low or "socket" in low:
+        return "NETWORK_ERROR"
+    return "TRANSPORT_ERROR:" + name
+
+
+def _classify_response(resp):
+    """JSON-RPC 응답 → (ok:bool, outcome:str)·raise 0.
+
+      - None / {} / 'result'·'error' 키 모두 부재 → (False, 'EMPTY_RESPONSE')
+      - resp.get('error')                         → (False, 'RPC_ERROR')
+      - resp['result'].get('isError') True        → (False, 'TOOL_ERROR')
+      - 그 외                                      → (True, 'OK')
+    """
+    if not isinstance(resp, dict) or not resp:
+        return (False, "EMPTY_RESPONSE")
+    if "result" not in resp and "error" not in resp:
+        return (False, "EMPTY_RESPONSE")
+    if resp.get("error"):
+        return (False, "RPC_ERROR")
+    result = resp.get("result")
+    if isinstance(result, dict) and result.get("isError"):
+        return (False, "TOOL_ERROR")
+    return (True, "OK")
 
 
 def load_cloud_config(env=None, config_path=None, home=None):
@@ -182,10 +244,16 @@ def default_http_transport(url, token, *, timeout=30):
 def run_mcp_session(transport, payloads, *, client_name=DEFAULT_CLIENT):
     """initialize 1회 후 tools/call 순차 실행. stateless HTTP JSON-RPC.
 
-    반환(typed·raise 0): {ok, initialized, results:[...], errors:[...], calls:int}
-    transport 예외는 errors 로 흡수.
+    반환(typed·raise 0): {ok, initialized, results:[...], errors:[...], calls:int,
+                         error_categories:[...]}
+      - 기존 키(ok/initialized/results/errors/calls) 불변 — 상위 계약 보존.
+      - results[].outcome(OK/EMPTY_RESPONSE/RPC_ERROR/TOOL_ERROR) 추가.
+      - errors[].category(_classify_exception/응답분류) 추가.
+      - error_categories: 중복제거 카테고리 리스트(가시성).
+    transport 예외/비정상 응답은 errors 로 흡수(category 부여).
     """
-    out = {"ok": False, "initialized": False, "results": [], "errors": [], "calls": 0}
+    out = {"ok": False, "initialized": False, "results": [], "errors": [], "calls": 0,
+           "error_categories": []}
     init_payload = {"jsonrpc": "2.0", "id": 0, "method": "initialize",
                     "params": {"protocolVersion": "2024-11-05",
                                "clientInfo": {"name": client_name, "version": "1.0"},
@@ -193,9 +261,17 @@ def run_mcp_session(transport, payloads, *, client_name=DEFAULT_CLIENT):
     try:
         init_resp = transport(init_payload)
         out["initialized"] = True
-        out["results"].append({"phase": "initialize", "response": init_resp})
+        init_ok, init_outcome = _classify_response(init_resp)
+        out["results"].append({"phase": "initialize", "response": init_resp,
+                               "outcome": init_outcome})
+        if not init_ok:
+            out["errors"].append({"phase": "initialize", "id": 0,
+                                  "error": init_outcome, "category": init_outcome})
     except Exception as ex:  # noqa
-        out["errors"].append({"phase": "initialize", "error": type(ex).__name__})
+        cat = _classify_exception(ex)
+        out["errors"].append({"phase": "initialize", "id": 0,
+                              "error": type(ex).__name__, "category": cat})
+        out["error_categories"] = _dedupe([cat])
         return out  # initialize 실패면 tools/call 미진행
 
     for p in payloads:
@@ -203,29 +279,52 @@ def run_mcp_session(transport, payloads, *, client_name=DEFAULT_CLIENT):
         try:
             resp = transport(call)
             out["calls"] += 1
-            out["results"].append({"phase": "tools/call", "id": call.get("id"), "response": resp})
+            resp_ok, outcome = _classify_response(resp)
+            out["results"].append({"phase": "tools/call", "id": call.get("id"),
+                                   "response": resp, "outcome": outcome})
+            if not resp_ok:
+                out["errors"].append({"phase": "tools/call", "id": call.get("id"),
+                                      "error": outcome, "category": outcome})
         except Exception as ex:  # noqa — 개별 호출 실패도 흡수, 나머지 계속
+            cat = _classify_exception(ex)
             out["errors"].append({"phase": "tools/call", "id": call.get("id"),
-                                  "error": type(ex).__name__})
+                                  "error": type(ex).__name__, "category": cat})
     out["ok"] = out["initialized"] and not out["errors"]
+    out["error_categories"] = _dedupe([e.get("category") for e in out["errors"]])
     return out
+
+
+def _dedupe(seq):
+    """순서 보존 중복 제거(None 제거)."""
+    seen, res = set(), []
+    for x in seq:
+        if x is None or x in seen:
+            continue
+        seen.add(x)
+        res.append(x)
+    return res
 
 
 # ───────────────────────────── 오케스트레이터 (메인 진입점) ─────────────────────────────
 def ingest_pack(pack_or_documents, *, transport=None, env=None, config_path=None, home=None,
-                dry_run=True, create_workflow=False, workflow_spec=None, **ingest_opts):
+                dry_run=True, confirm=None, create_workflow=False, workflow_spec=None,
+                **ingest_opts):
     """topic_to_pack 통합용 메인 진입점.
 
-    이중 게이트:
-      - dry_run=True(기본)        → 계획(payloads)만 반환, 네트워크 0.
-      - dry_run=False + 토글 ON   → transport 가 있을 때만 live(initialize→tools/call).
-        토글 OFF 면 reason='CLOUD_INGEST_DISABLED'·호출 0. transport None 이면 'NO_TRANSPORT'.
+    삼중 게이트(전부 충족해야 live 네트워크 1건):
+      - dry_run=True(기본)         → 계획(payloads)만 반환, 네트워크 0.
+      - confirm(명시 확정 게이트)   → tri-state. None=후방호환(not dry_run),
+        True=명시 확정, False=명시 거부(dry_run=False 여도 'NOT_CONFIRMED'·호출 0).
+      - 토글 BINGGU_CLOUD_INGEST=1 → OFF 면 'CLOUD_INGEST_DISABLED'·호출 0.
+      - transport 주입            → None 이면 'NO_TRANSPORT'.
+      - url/token 존재            → 'NO_CLOUD_CONFIG' / 'NO_TOKEN'(인증불가 사전차단).
 
-    반환(typed·raise 0): {mode:'dry-run'|'live', enabled, planned_calls, payloads|results,
-                         workflow, reason, token_fingerprint, source}
+    반환(typed·raise 0): {mode:'dry-run'|'live', enabled, confirmed, planned_calls,
+                         payloads|results, workflow, reason, token_fingerprint, source}
     """
     cfg = load_cloud_config(env=env, config_path=config_path, home=home)
     payloads = build_ingest_payloads(pack_or_documents, **ingest_opts)
+    confirmed = _is_confirmed(dry_run, confirm)
 
     wf_payload = None
     if create_workflow:
@@ -233,7 +332,8 @@ def ingest_pack(pack_or_documents, *, transport=None, env=None, config_path=None
         spec.setdefault("rpc_id", len(payloads) + 1)
         wf_payload = build_workflow_payload(spec.pop("action", "create"), **spec)
 
-    base = {"enabled": cfg["enabled"], "planned_calls": len(payloads),
+    base = {"enabled": cfg["enabled"], "confirmed": confirmed,
+            "planned_calls": len(payloads),
             "token_fingerprint": cfg["token_fingerprint"], "source": cfg["source"]}
 
     # dry-run: 계획만(네트워크 0) — transport 가 주입돼 있어도 호출 안 함
@@ -246,19 +346,30 @@ def ingest_pack(pack_or_documents, *, transport=None, env=None, config_path=None
                      "workflow": wf_payload, "reason": "DRY_RUN"})
         return base
 
-    # live 게이트 1: owner 토글
+    # live 게이트 1: 명시 confirm 거부(dry_run=False 라도 차단)
+    if not confirmed:
+        base.update({"mode": "live", "results": None, "workflow": wf_payload,
+                     "reason": "NOT_CONFIRMED"})
+        return base
+    # live 게이트 2: owner 토글
     if not cfg["enabled"]:
         base.update({"mode": "live", "results": None, "workflow": wf_payload,
                      "reason": "CLOUD_INGEST_DISABLED"})
         return base
-    # live 게이트 2: transport
+    # live 게이트 3: transport
     if transport is None:
         base.update({"mode": "live", "results": None, "workflow": wf_payload,
                      "reason": "NO_TRANSPORT"})
         return base
+    # live 게이트 4: url
     if not cfg["url"]:
         base.update({"mode": "live", "results": None, "workflow": wf_payload,
                      "reason": "NO_CLOUD_CONFIG"})
+        return base
+    # live 게이트 5: token(인증불가 사전차단 — transport 호출 0)
+    if cfg.get("reason") == "NO_TOKEN":
+        base.update({"mode": "live", "results": None, "workflow": wf_payload,
+                     "reason": "NO_TOKEN"})
         return base
 
     call_payloads = list(payloads)
@@ -268,11 +379,24 @@ def ingest_pack(pack_or_documents, *, transport=None, env=None, config_path=None
     try:
         session = run_mcp_session(transport, call_payloads)
         base.update({"mode": "live", "results": session, "workflow": wf_payload,
-                     "reason": None if session["ok"] else "SESSION_ERROR"})
+                     "reason": _session_reason(session)})
     except Exception as ex:  # noqa — 상위 raise 0 보장(이론상 run_mcp_session 가 이미 흡수)
         base.update({"mode": "live", "results": None, "workflow": wf_payload,
                      "reason": "TRANSPORT_ERROR:" + type(ex).__name__})
     return base
+
+
+def _session_reason(session):
+    """run_mcp_session 결과 → ingest_pack reason 승격(상위호환).
+
+    ok → None. 단일 dominant 카테고리 있으면 그 카테고리, 복합이면 'SESSION_ERROR'.
+    """
+    if session.get("ok"):
+        return None
+    cats = session.get("error_categories") or []
+    if len(cats) == 1:
+        return cats[0]
+    return "SESSION_ERROR"
 
 
 # ───────────────────────────── selftest (mock transport · 네트워크 0) ─────────────────────────────
@@ -387,9 +511,10 @@ def _selftest():
         raise RuntimeError("net_down")
 
     r_err = ingest_pack(docs, transport=boom_transport, env=live_env, dry_run=False)
-    chk("D4 transport 예외 → typed 흡수(raise 0)·errors 기록",
-        isinstance(r_err, dict) and r_err["reason"] == "SESSION_ERROR"
-        and r_err["results"]["errors"])
+    chk("D4 transport 예외 → typed 흡수(raise 0)·errors 기록·reason 카테고리 승격",
+        isinstance(r_err, dict) and r_err["reason"] == "TRANSPORT_ERROR:RuntimeError"
+        and r_err["results"]["errors"]
+        and r_err["results"]["error_categories"] == ["TRANSPORT_ERROR:RuntimeError"])
 
     # ── ingest_pack live + transport None → NO_TRANSPORT ──
     r_nt = ingest_pack(docs, transport=None, env=live_env, dry_run=False)
@@ -442,6 +567,110 @@ def _selftest():
     import shutil
     shutil.rmtree(tmp, ignore_errors=True)
 
+    # ── confirm 게이트(명시 분리) ──
+    spy["n"] = 0
+    r_g1 = ingest_pack(docs, transport=spy_transport, env=live_env, dry_run=False, confirm=False)
+    chk("G1 confirm=False 명시거부 → NOT_CONFIRMED·transport 호출 0",
+        r_g1["reason"] == "NOT_CONFIRMED" and spy["n"] == 0
+        and r_g1["confirmed"] is False)
+
+    seqg2 = []
+
+    def seqg2_transport(payload):
+        seqg2.append(payload.get("method"))
+        return {"result": {"isError": False}}
+
+    r_g2 = ingest_pack(docs, transport=seqg2_transport, env=live_env, dry_run=False)
+    chk("G2 confirm=None 후방호환 → live(initialize+tools/call)·reason None·confirmed True",
+        seqg2[0] == "initialize" and seqg2.count("tools/call") == 2
+        and r_g2["reason"] is None and r_g2["confirmed"] is True)
+
+    seqg3 = []
+
+    def seqg3_transport(payload):
+        seqg3.append(payload.get("method"))
+        return {"result": {"isError": False}}
+
+    r_g3 = ingest_pack(docs, transport=seqg3_transport, env=live_env, dry_run=False, confirm=True)
+    chk("G3 confirm=True 명시확정 → live 정상·reason None",
+        seqg3[0] == "initialize" and r_g3["reason"] is None
+        and r_g3["confirmed"] is True and r_g3["results"]["ok"])
+
+    spy["n"] = 0
+    r_g4 = ingest_pack(docs, transport=spy_transport, env={}, dry_run=False, confirm=True)
+    chk("G4 confirm=True 라도 토글 OFF → CLOUD_INGEST_DISABLED·transport 호출 0",
+        r_g4["reason"] == "CLOUD_INGEST_DISABLED" and spy["n"] == 0)
+
+    spy["n"] = 0
+    notoken_env = {ENABLE_ENV: "1", "BINGGU_CLOUD_MCP_URL": "https://x.example/mcp"}
+    r_g5 = ingest_pack(docs, transport=spy_transport, env=notoken_env, dry_run=False, confirm=True)
+    chk("G5 NO_TOKEN 사전차단 → reason=NO_TOKEN·transport 호출 0",
+        r_g5["reason"] == "NO_TOKEN" and spy["n"] == 0)
+
+    # ── typed error 분류(인증실패·네트워크·빈응답) ──
+    class _HTTPLike(Exception):
+        def __init__(self, code):
+            super().__init__("http")
+            self.code = code
+
+    def auth_transport(payload):
+        if payload.get("method") == "initialize":
+            return {"result": {}}
+        raise _HTTPLike(401)
+
+    r_e1 = ingest_pack(docs, transport=auth_transport, env=live_env, dry_run=False, confirm=True)
+    chk("E1 AUTH_FAILED(code=401) → category·reason 승격·raise 0",
+        isinstance(r_e1, dict) and r_e1["reason"] == "AUTH_FAILED"
+        and any(e.get("category") == "AUTH_FAILED" for e in r_e1["results"]["errors"]))
+
+    class _URLError(Exception):
+        pass
+
+    def net_transport(payload):
+        if payload.get("method") == "initialize":
+            return {"result": {}}
+        raise _URLError("conn reset")
+
+    r_e2 = ingest_pack(docs, transport=net_transport, env=live_env, dry_run=False, confirm=True)
+    chk("E2 NETWORK_ERROR(URLError) → category·typed 흡수",
+        r_e2["reason"] == "NETWORK_ERROR"
+        and any(e.get("category") == "NETWORK_ERROR" for e in r_e2["results"]["errors"]))
+
+    def empty_transport(payload):
+        if payload.get("method") == "initialize":
+            return {"result": {}}
+        return {}
+
+    r_e3 = ingest_pack(docs, transport=empty_transport, env=live_env, dry_run=False, confirm=True)
+    chk("E3 EMPTY_RESPONSE(tools/call {}) → outcome·errors 적재·reason 승격",
+        r_e3["reason"] == "EMPTY_RESPONSE"
+        and any(e.get("category") == "EMPTY_RESPONSE" for e in r_e3["results"]["errors"])
+        and any(x.get("outcome") == "EMPTY_RESPONSE"
+                for x in r_e3["results"]["results"] if x.get("phase") == "tools/call"))
+
+    def rpc_transport(payload):
+        if payload.get("method") == "initialize":
+            return {"result": {}}
+        return {"error": {"code": -32000, "message": "boom"}}
+
+    r_e4 = ingest_pack(docs, transport=rpc_transport, env=live_env, dry_run=False, confirm=True)
+    chk("E4 RPC_ERROR(error 키) → outcome=RPC_ERROR·ok False",
+        r_e4["reason"] == "RPC_ERROR" and not r_e4["results"]["ok"]
+        and any(x.get("outcome") == "RPC_ERROR"
+                for x in r_e4["results"]["results"] if x.get("phase") == "tools/call"))
+
+    chk("E5 _classify_exception 단위: 403/500/RuntimeError",
+        _classify_exception(_HTTPLike(403)) == "AUTH_FAILED"
+        and _classify_exception(_HTTPLike(500)) == "HTTP_ERROR:500"
+        and _classify_exception(RuntimeError("x")) == "TRANSPORT_ERROR:RuntimeError")
+
+    chk("E6 _classify_response 단위: None/{}/error/isError True/False",
+        _classify_response(None) == (False, "EMPTY_RESPONSE")
+        and _classify_response({}) == (False, "EMPTY_RESPONSE")
+        and _classify_response({"error": {"code": -1}}) == (False, "RPC_ERROR")
+        and _classify_response({"result": {"isError": True}}) == (False, "TOOL_ERROR")
+        and _classify_response({"result": {"isError": False}}) == (True, "OK"))
+
     total, passed = len(ok), sum(ok)
     print("\nRESULT: %d/%d PASS" % (passed, total))
     print("GATE=" + ("GO" if passed == total else "NO-GO"))
@@ -464,7 +693,7 @@ def main(argv=None):
     print("binggu_cloud_ingest_wire — topic_to_pack 통합용 래퍼.")
     print("  검증:    python binggu_cloud_ingest_wire.py --selftest")
     print("  진입점:  ingest_pack(pack_or_documents, dry_run=True)  # 기본 계획만(네트워크 0)")
-    print("  live:    dry_run=False AND env BINGGU_CLOUD_INGEST=1 AND transport 주입 (owner GO)")
+    print("  live:    dry_run=False AND confirm=True AND env BINGGU_CLOUD_INGEST=1 AND transport 주입 (owner GO)")
     return 0
 
 

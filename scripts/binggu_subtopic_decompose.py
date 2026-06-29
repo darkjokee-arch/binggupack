@@ -182,18 +182,12 @@ def _search_corpus(topic, provider, limit=10):
     return corpus
 
 
-def llm_decompose(topic, llm_runner):
-    """opt-in LLM 세분화 — llm_runner(topic) 주입 결과 정규화. 기본 미호출(llm_runner=None).
-    runner 반환은 [str] 또는 [{subtopic/label,...}] 허용. 예외/형식오류 흡수(→[])."""
-    if llm_runner is None:
-        return []
-    try:
-        raw = llm_runner(topic) or []
-    except Exception:
-        return []
+def _normalize_llm_items(raw, topic):
+    """LLM raw items([str] 또는 [{subtopic/label/query,...}])을 출력계약으로 정규화.
+    llm_decompose·llm_transport_decompose 공용(중복 제거). 절대 raise 0(방어적 순회)."""
     topic = str(topic or "").strip()
     out = []
-    for item in raw:
+    for item in (raw or []):
         if isinstance(item, dict):
             label = item.get("subtopic") or item.get("label") or item.get("query")
             if not label:
@@ -209,6 +203,130 @@ def llm_decompose(topic, llm_runner):
             query = _make_query(topic, label)
         out.append({"subtopic": label, "rationale": rationale, "query": query})
     return out
+
+
+def llm_decompose(topic, llm_runner):
+    """opt-in LLM 세분화(고수준) — llm_runner(topic)->[items] 주입 결과 정규화.
+    기본 미호출(llm_runner=None). runner 반환은 [str] 또는 [{subtopic/label,...}] 허용.
+    예외/형식오류 흡수(→[])."""
+    if llm_runner is None:
+        return []
+    try:
+        raw = llm_runner(topic) or []
+    except Exception:
+        return []
+    return _normalize_llm_items(raw, topic)
+
+
+# ── A2 — 세분화 LLM 위임 경로(저수준 transport 규약·binggu_cloud_ingest_wire 정합) ──
+#   transport(payload)->response. 네트워크는 transport 책임(selftest=mock·실 urllib 는
+#   default_llm_transport 에만 격리). 미주입(None)이면 룰기반 폴백 유지(기존 동작 100% 불변).
+def _build_llm_payload(topic, max_subtopics=8):
+    """결정적 LLM 요청 payload 빌드(순수함수·네트워크0). transport 가 이 dict 를 전송."""
+    topic = str(topic or "").strip()
+    n = max_subtopics if (isinstance(max_subtopics, int) and max_subtopics > 0) else 8
+    return {
+        "task": "subtopic_decompose",
+        "topic": topic,
+        "max_subtopics": n,
+        "instruction": (
+            "주어진 topic 을 검색·수집에 바로 쓸 수 있는 세부 주제(facet)로 분해하라. "
+            "결과는 JSON 배열 [{\"subtopic\":..., \"rationale\":..., \"query\":...}] 형식. "
+            "최대 %d개. 각 query 는 topic 을 포함한 검색 질의여야 한다." % n
+        ),
+    }
+
+
+def _parse_llm_response(resp, topic):
+    """LLM 응답 관용 파서(raise 0) — 다양한 provider 형식을 raw items 리스트로.
+    (a) list → 그대로 / (b) dict 의 subtopics|items|results 키 → 그 값 /
+    (c) OpenAI 스타일 {choices:[{message:{content}}]} → content 추출 후 JSON|줄단위 /
+    (d) str → JSON|줄단위 / 인식불가 → []. 모든 파싱 try/except 로 예외 전파 0."""
+    import json as _json
+
+    def _from_text(text):
+        text = str(text or "").strip()
+        if not text:
+            return []
+        try:
+            parsed = _json.loads(text)
+        except Exception:
+            parsed = None
+        if isinstance(parsed, list):
+            return parsed
+        if isinstance(parsed, dict):
+            for k in ("subtopics", "items", "results"):
+                v = parsed.get(k)
+                if isinstance(v, list):
+                    return v
+            return []
+        # JSON 아님 → 줄단위 텍스트 폴백
+        lines = [ln.strip(" \t-*•") for ln in text.splitlines()]
+        return [ln for ln in lines if ln]
+
+    if resp is None:
+        return []
+    if isinstance(resp, list):
+        return resp
+    if isinstance(resp, dict):
+        for k in ("subtopics", "items", "results"):
+            v = resp.get(k)
+            if isinstance(v, list):
+                return v
+        # OpenAI 스타일 choices[].message.content
+        try:
+            choices = resp.get("choices")
+            if isinstance(choices, list) and choices:
+                msg = choices[0].get("message") if isinstance(choices[0], dict) else None
+                content = msg.get("content") if isinstance(msg, dict) else None
+                if content is not None:
+                    return _from_text(content)
+        except Exception:
+            return []
+        return []
+    if isinstance(resp, str):
+        return _from_text(resp)
+    return []
+
+
+def llm_transport_decompose(topic, transport, max_subtopics=8):
+    """opt-in LLM 세분화(저수준 transport) — payload 빌드→transport 호출→파싱→정규화.
+    transport(payload)->response. 미주입(None)이면 []. 절대 raise 0(transport/파싱 예외 흡수)."""
+    if transport is None:
+        return []
+    payload = _build_llm_payload(topic, max_subtopics=max_subtopics)
+    try:
+        resp = transport(payload)
+    except Exception:
+        return []
+    raw = _parse_llm_response(resp, topic)
+    return _normalize_llm_items(raw, topic)
+
+
+def default_llm_transport(url, token, *, model=None, timeout=30):
+    """실 네트워크 LLM transport 생성기(클로저) — **selftest 미사용·실 endpoint 전용**.
+    url/token 은 호출측이 env/config 에서 읽어 주입(하드코딩 0). 토큰 평문 로그 0.
+    반환 transport(payload)->dict(JSON 응답). 네트워크 예외는 호출자(llm_transport_decompose)가 흡수."""
+    import json as _json
+    import urllib.request as _urlreq
+
+    def _transport(payload):
+        body = dict(payload or {})
+        if model:
+            body["model"] = model
+        data = _json.dumps(body, ensure_ascii=False).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = "Bearer " + str(token)
+        req = _urlreq.Request(url, data=data, headers=headers, method="POST")
+        with _urlreq.urlopen(req, timeout=timeout) as r:
+            raw = r.read().decode("utf-8", "replace")
+        try:
+            return _json.loads(raw)
+        except Exception:
+            return raw
+
+    return _transport
 
 
 def _dedup(items):
@@ -229,13 +347,16 @@ def _dedup(items):
 
 
 def decompose_detail(topic, provider=None, corpus=None, max_subtopics=8,
-                     use_search=False, llm_runner=None, limit=10):
+                     use_search=False, llm_runner=None, limit=10, transport=None):
     """세분화 오케스트레이션(템플릿 → 검색 빈출어 보강 → LLM 보강 → dedup → cap).
 
     절대 raise 0 — 실패는 status 필드로. 무손실 — 템플릿 facet 항상 포함.
     반환 {status, topic, domain, source, subtopics}.
       status: OK / EMPTY_TOPIC
       source: 어떤 레이어가 기여했는지(template / +search / +llm)
+    LLM 경로 둘 다 opt-in(기본 None):
+      llm_runner = 고수준 콜백 llm_runner(topic)->[items]
+      transport  = 저수준 콜백 transport(payload)->response (binggu_cloud_ingest_wire 규약)
     """
     topic = "" if topic is None else str(topic).strip()
     if not topic:
@@ -263,11 +384,19 @@ def decompose_detail(topic, provider=None, corpus=None, max_subtopics=8,
                 "query": _make_query(topic, term),
             })
 
-    # ③ LLM 보강(opt-in·기본 미호출)
+    # ③ LLM 보강(opt-in·기본 미호출·고수준 콜백)
     llm_items = llm_decompose(topic, llm_runner)
     if llm_items:
         source.append("llm")
         items.extend(llm_items)
+
+    # ③' LLM transport 보강(opt-in·기본 미호출·저수준 payload 콜백·표준 transport 규약)
+    if transport is not None:
+        t_items = llm_transport_decompose(topic, transport, max_subtopics=max_subtopics)
+        if t_items:
+            if "llm" not in source:
+                source.append("llm")
+            items.extend(t_items)
 
     # ④ dedup → cap
     items = _dedup(items)
@@ -279,12 +408,14 @@ def decompose_detail(topic, provider=None, corpus=None, max_subtopics=8,
 
 
 def decompose(topic, provider=None, corpus=None, max_subtopics=8,
-              use_search=False, llm_runner=None, limit=10):
+              use_search=False, llm_runner=None, limit=10, transport=None):
     """계약 진입점(Phase3 통합용) — [{subtopic, rationale, query}] 반환.
-    빈/None topic → [] (raise 0). decompose_detail()['subtopics'] 그대로."""
+    빈/None topic → [] (raise 0). decompose_detail()['subtopics'] 그대로.
+    transport: opt-in 저수준 LLM 콜백(기본 None·미주입시 룰기반·기존 동작 불변)."""
     return decompose_detail(topic, provider=provider, corpus=corpus,
                             max_subtopics=max_subtopics, use_search=use_search,
-                            llm_runner=llm_runner, limit=limit)["subtopics"]
+                            llm_runner=llm_runner, limit=limit,
+                            transport=transport)["subtopics"]
 
 
 # ── selftest (provider/corpus/llm 전부 mock — 실 네트워크 0·결정적) ──────
@@ -391,6 +522,86 @@ def _selftest():
     det_p = decompose_detail("신혼여행", provider=prov, use_search=True, max_subtopics=20)
     chk("S15 provider use_search 빈출어(코타키나발루) 병합",
         "코타키나발루" in " ".join(x["subtopic"] for x in det_p["subtopics"]))
+
+    # ── A2 — 저수준 transport LLM 경로(mock transport·실 네트워크 0) ──
+    import json as _json
+
+    # S16 — transport 주입 병합(OpenAI 스타일 응답·spy 호출횟수)
+    calls = {"n": 0, "payloads": []}
+
+    def _t_openai(payload):
+        calls["n"] += 1
+        calls["payloads"].append(payload)
+        content = _json.dumps([
+            {"subtopic": "신혼여행 환율", "rationale": "예산", "query": "신혼여행 환율 정보"},
+            {"subtopic": "신혼여행 통신", "rationale": "현지", "query": "신혼여행 현지 유심"},
+        ], ensure_ascii=False)
+        return {"choices": [{"message": {"content": content}}]}
+
+    det_t = decompose_detail("신혼여행", transport=_t_openai, max_subtopics=30)
+    sub_t = " ".join(x["subtopic"] for x in det_t["subtopics"])
+    chk("S16a transport 항목(환율/통신) 병합", "환율" in sub_t and "통신" in sub_t)
+    chk("S16b source 에 'llm' 포함", "llm" in det_t["source"])
+    chk("S16c transport 1회 호출(spy)", calls["n"] == 1)
+    chk("S16d payload task=subtopic_decompose·topic 전달",
+        calls["payloads"][0].get("task") == "subtopic_decompose"
+        and calls["payloads"][0].get("topic") == "신혼여행")
+
+    # S17 — transport=None → transport 경로 미호출(룰기반만)
+    sentinel = {"n": 0}
+
+    def _t_spy(payload):
+        sentinel["n"] += 1
+        return []
+
+    det_n2 = decompose_detail("신혼여행", transport=None, max_subtopics=30)
+    chk("S17a transport=None → spy 미호출", sentinel["n"] == 0)
+    chk("S17b transport=None → 룰기반 source(llm 기여 없음·llm_runner도 None)",
+        "llm" not in det_n2["source"])
+
+    # S18 — transport 예외 흡수(raise 0·폴백)
+    def _t_boom(payload):
+        raise RuntimeError("llm down")
+
+    det_tb = decompose_detail("입찰 공고", transport=_t_boom, max_subtopics=20)
+    chk("S18 transport 예외 흡수·템플릿 유지",
+        det_tb["status"] == "OK" and len(det_tb["subtopics"]) > 0
+        and "llm" not in det_tb["source"])
+
+    # S19 — 응답 형식 변형 관용 파싱(예외 0)
+    chk("S19a list[str] 파싱", _parse_llm_response(["a", "b"], "t") == ["a", "b"])
+    chk("S19b dict subtopics 키 파싱",
+        _parse_llm_response({"subtopics": ["x"]}, "t") == ["x"])
+    chk("S19c JSON 문자열 파싱",
+        _parse_llm_response('[{"subtopic":"y"}]', "t") == [{"subtopic": "y"}])
+    chk("S19d 인식불가(int) → []", _parse_llm_response(123, "t") == [])
+    chk("S19e None → []", _parse_llm_response(None, "t") == [])
+    chk("S19f OpenAI content 줄단위 폴백(비JSON)",
+        _parse_llm_response({"choices": [{"message": {"content": "알파\n베타"}}]}, "t")
+        == ["알파", "베타"])
+
+    # S20 — 출력 계약 보존(transport 항목도 3키·query 에 topic·cap 준수)
+    def _t_strlist(payload):
+        return ["견적", "환전"]  # str 항목 → query 자동생성
+
+    det_c = decompose_detail("신혼여행", transport=_t_strlist, max_subtopics=4)
+    chk("S20a transport 항목 3키 보존",
+        all(set(["subtopic", "rationale", "query"]) <= set(x.keys())
+            for x in det_c["subtopics"]))
+    chk("S20b transport 항목 query 에 topic 포함",
+        all("신혼여행" in x["query"] for x in det_c["subtopics"]))
+    chk("S20c max_subtopics cap 준수", len(det_c["subtopics"]) <= 4)
+
+    # S21 — 결정성(동일 mock transport·동일 입력 2회 완전 동일)
+    d1 = decompose("신혼여행", transport=_t_openai, max_subtopics=30)
+    d2 = decompose("신혼여행", transport=_t_openai, max_subtopics=30)
+    chk("S21 transport 경로 결정성(2회 동일)", d1 == d2)
+
+    # S22 — _build_llm_payload 결정적·max cap 반영
+    p1 = _build_llm_payload("주제", max_subtopics=5)
+    p2 = _build_llm_payload("주제", max_subtopics=5)
+    chk("S22 payload 결정적·max_subtopics 반영",
+        p1 == p2 and p1["max_subtopics"] == 5)
 
     total, passed = len(ok), sum(ok)
     print("\nRESULT: %d/%d PASS" % (passed, total))

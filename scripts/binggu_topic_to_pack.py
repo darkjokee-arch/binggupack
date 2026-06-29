@@ -25,7 +25,10 @@ def topic_to_pack(topic, provider=None, fetch_runner=None, home=None, out_dir=No
                   min_score=0.0, max_sources=10, opencrab_export=False,
                   recommend_workflow=False, execute=False, confirm=False, staging_home=None,
                   subtopics=False, max_subtopics=8, subtopic_use_search=False, llm_runner=None,
+                  subtopic_transport=None,
                   pack_edges=False, peer_packs=None,
+                  sync_workflow=False, workflow_transport=None, workflow_action="create",
+                  workflow_name=None, workflow_id=None,
                   cloud_ingest=False, cloud_env=None, cloud_transport=None,
                   create_workflow=False, workflow_spec=None):
     """주제 → pack → (opencrab export) → (workflow 추천) 전체 파이프라인.
@@ -38,12 +41,18 @@ def topic_to_pack(topic, provider=None, fetch_runner=None, home=None, out_dir=No
     배선 옵션(전부 기본 OFF — 기존 단일 파이프라인 동작 불변):
       - subtopics(A): True 면 binggu_subtopic_decompose 로 주제 세분화 → 각 subtopic.query 로 discover
         그물을 확장(B 의 provider 그대로 사용)해 후보를 더 정밀하게 모은다. 누적 후보로 승급.
+        subtopic_transport(A2): 저수준 LLM 콜백 transport(payload)->response 주입(기본 None=룰기반).
+        미주입이면 템플릿/검색 빈출어 룰기반만(기존 동작 100% 불변). 실 네트워크는 transport 책임.
       - pack_edges(C): True 면 빌드된 pack(+peer_packs)으로 binggu_pack_edges.infer_edges 호출 →
         pack-간 workflow edges 추론 결과를 반환에 첨부(노드 엣지 불변·별개 차원).
+        sync_workflow(C2): True 면 추론 edges 를 binggu_pack_edges.sync_edges_to_workflow 로
+        OpenCrab workflow_manage 에 동기화. 기본 dry-run(payload 계획만·네트워크0). live 는
+        execute&confirm + env BINGGU_WORKFLOW_SYNC=1 + workflow_transport 주입 + cloud url 4중 충족시만.
       - cloud_ingest(D): True 면 binggu_cloud_ingest_wire.ingest_pack 호출. 기본 dry-run(네트워크0).
-        live 는 execute&confirm + env BINGGU_CLOUD_INGEST=1 + transport 주입(owner GO) 3중 충족시에만.
+        confirm tri-state 를 그대로 전달(D2). live 는 execute&confirm + env BINGGU_CLOUD_INGEST=1
+        + transport 주입(owner GO) 충족시에만.
     반환 dict(status/discovered/promoted/harvested/skipped/verdict/pack/opencrab_import/workflow
-              /pack_edges/cloud_ingest)."""
+              /pack_edges/workflow_sync/cloud_ingest)."""
     home = home or HV._home()
     sp = HV.sources_path(home)
     dp = DISC.discover_path(home)
@@ -53,7 +62,8 @@ def topic_to_pack(topic, provider=None, fetch_runner=None, home=None, out_dir=No
     #       discover(merge=True)가 동일 discover_path 에 누적 → 누적 후보 전체를 승급 대상으로 로드.
     if subtopics:
         subs = SUB.decompose(topic, provider=provider, max_subtopics=max_subtopics,
-                             use_search=subtopic_use_search, llm_runner=llm_runner)
+                             use_search=subtopic_use_search, llm_runner=llm_runner,
+                             transport=subtopic_transport)   # A2 — 저수준 LLM 위임(기본 None=룰기반)
         queries, seen_q = [topic], {topic}
         for s in subs:
             q = s.get("query")
@@ -139,9 +149,20 @@ def topic_to_pack(topic, provider=None, fetch_runner=None, home=None, out_dir=No
     # ⑧ pack 간 edges(C) — 빌드된 pack(+peer_packs)으로 pack-level workflow edges 추론(결정적·preview).
     #    단일 pack 만이면 self 금지로 edges=0(무해). peer_packs 주면 관계 추론(related/adjacent/…).
     pe = None
+    metas = None
     if pack_edges and res["status"] == "OK":
         metas = ([res["pack"]] if res.get("pack") else []) + list(peer_packs or [])
         pe = EDG.infer_edges(metas)
+
+    # ⑧' pack-간 edges → OpenCrab workflow_manage 동기화(C2) — 기본 dry-run(payload 계획만·네트워크0).
+    #     EDG 내부 4중 게이트(dry_run=False + BINGGU_WORKFLOW_SYNC=1 + transport + cloud url)로 live 차단.
+    ws = None
+    if sync_workflow and pe is not None and pe.get("status") == "OK":
+        wdry = not (execute and confirm)        # cloud ingest 와 동일 토글 — 미확정이면 dry-run
+        ws = EDG.sync_edges_to_workflow(pe, pack_metas=metas, transport=workflow_transport,
+                                        env=cloud_env, home=home, dry_run=wdry,
+                                        action=workflow_action, workflow_name=workflow_name,
+                                        workflow_id=workflow_id)
 
     # ⑨ 클라우드 ingest 배선(D) — 기본 dry-run(계획만·네트워크0). live 는 owner 3중 게이트.
     ci = None
@@ -149,8 +170,8 @@ def topic_to_pack(topic, provider=None, fetch_runner=None, home=None, out_dir=No
         import binggu_cloud_ingest_wire as CW
         dry = not (execute and confirm)        # real import 확정과 동일 토글 — 미확정이면 dry-run
         ci = CW.ingest_pack(documents, transport=cloud_transport, env=cloud_env, home=home,
-                            dry_run=dry, create_workflow=create_workflow,
-                            workflow_spec=workflow_spec)
+                            dry_run=dry, confirm=confirm,   # D2 — confirm tri-state 명시 전달
+                            create_workflow=create_workflow, workflow_spec=workflow_spec)
 
     return {"status": res["status"], "topic": topic,
             "discovered": disc["n_found"], "promoted": len(promoted),
@@ -158,11 +179,12 @@ def topic_to_pack(topic, provider=None, fetch_runner=None, home=None, out_dir=No
             "verdict": res["verdict"]["verdict"], "counts": res["counts"],
             "pack": res["pack"], "written": res.get("written"),
             "opencrab_import": oc, "workflow": wf,
-            "pack_edges": pe, "cloud_ingest": ci}
+            "pack_edges": pe, "workflow_sync": ws, "cloud_ingest": ci}
 
 
 def decompose_to_packs(topic, provider=None, fetch_runner=None, home=None, out_dir=None,
                        max_subtopics=6, subtopic_use_search=False, llm_runner=None,
+                       subtopic_transport=None,
                        min_score=0.0, max_sources=10, infer_pack_edges=True,
                        topic_jaccard_min=0.34, cloud_ingest=False, cloud_env=None,
                        cloud_transport=None, execute=False, confirm=False):
@@ -179,7 +201,8 @@ def decompose_to_packs(topic, provider=None, fetch_runner=None, home=None, out_d
 
     # A — 주제 세분화(무손실·결정적). 빈 결과면 원주제 1건으로 폴백.
     subs = SUB.decompose(topic, provider=provider, max_subtopics=max_subtopics,
-                         use_search=subtopic_use_search, llm_runner=llm_runner)
+                         use_search=subtopic_use_search, llm_runner=llm_runner,
+                         transport=subtopic_transport)   # A2 — 저수준 LLM 위임(기본 None=룰기반)
     if not subs:
         subs = [{"subtopic": topic, "query": topic, "rationale": "원주제(세분화 폴백)"}]
 
@@ -212,7 +235,7 @@ def decompose_to_packs(topic, provider=None, fetch_runner=None, home=None, out_d
         ci = []
         for pk in packs:
             ci.append(CW.ingest_pack(pk, transport=cloud_transport, env=cloud_env,
-                                     home=base_home, dry_run=dry))
+                                     home=base_home, dry_run=dry, confirm=confirm))
 
     ok_any = any(x["status"] == "OK" for x in sub_summaries)
     return {"status": "OK" if ok_any else "EMPTY", "topic": topic,
@@ -329,6 +352,59 @@ def _selftest():
         and all(p["mode"] == "dry-run" for p in rf["cloud_ingest"]))
     chk("F4d (A) 세분화 결과 subpack 메타 보존",
         len(rf["subpacks"]) == rf["n_subtopics"] and rf["n_subtopics"] >= 2)
+
+    # ── G. A2/C2/D2 신규 배선(저수준 transport·workflow 동기화·confirm tri-state) ──
+    # G1 (A2) subtopic_transport 주입 → decompose 가 저수준 transport 호출(룰기반 그물 불변)
+    a2_calls = {"n": 0}
+
+    def _sub_t(payload):
+        a2_calls["n"] += 1
+        return [{"subtopic": "입찰 가격 예측 변동성", "rationale": "리스크",
+                 "query": "입찰 가격 예측 변동성 분석"}]
+
+    home_g1 = os.path.join(tempfile.mkdtemp(prefix="t2p_g1_"), ".binggupack")
+    os.makedirs(home_g1)
+    rg1 = topic_to_pack("입찰 가격 예측", provider=provider, fetch_runner=fetch_runner,
+                        home=home_g1, subtopics=True, max_subtopics=6,
+                        subtopic_transport=_sub_t)
+    chk("G1 (A2) subtopic_transport 주입 → transport 호출·status OK",
+        a2_calls["n"] >= 1 and rg1["status"] == "OK" and rg1["discovered"] >= 3)
+
+    # G2 (C2) sync_workflow=True 기본 dry-run → workflow payload 계획만·transport 미호출(네트워크0)
+    wf_calls = {"n": 0}
+
+    def _wf_t(payload):
+        wf_calls["n"] += 1
+        return {"result": {"isError": False}}
+
+    home_g2 = os.path.join(tempfile.mkdtemp(prefix="t2p_g2_"), ".binggupack")
+    os.makedirs(home_g2)
+    rg2 = topic_to_pack("입찰 가격 예측", provider=provider, fetch_runner=fetch_runner,
+                        home=home_g2, pack_edges=True, sync_workflow=True,
+                        workflow_transport=_wf_t,
+                        peer_packs=[{"manifest": {"pack_id": "topic/peer",
+                                                  "topic": "입찰 가격 예측 분석"}}])
+    chk("G2 (C2) sync_workflow dry-run 계획·transport 미호출·payload 동봉(네트워크0)",
+        rg2["workflow_sync"] is not None and rg2["workflow_sync"]["mode"] == "dry-run"
+        and wf_calls["n"] == 0 and bool(rg2["workflow_sync"]["payload"]))
+
+    # G2b (C2) sync_workflow 기본 OFF → workflow_sync None(기존 단일경로 불변)
+    chk("G2b (C2) sync_workflow 미지정 → workflow_sync None", rc["workflow_sync"] is None)
+
+    # G3 (D2) cloud_ingest confirm tri-state 배선 → 기본 dry-run·confirmed False·transport 미호출
+    d2_calls = {"n": 0}
+
+    def _ci_t(payload):
+        d2_calls["n"] += 1
+        return {"result": {"isError": False}}
+
+    home_g3 = os.path.join(tempfile.mkdtemp(prefix="t2p_g3_"), ".binggupack")
+    os.makedirs(home_g3)
+    rg3 = topic_to_pack("입찰 가격 예측", provider=provider, fetch_runner=fetch_runner,
+                        home=home_g3, cloud_ingest=True, cloud_env={}, cloud_transport=_ci_t)
+    chk("G3 (D2) cloud_ingest confirm 배선 → dry-run·confirmed False·transport 미호출",
+        rg3["cloud_ingest"]["mode"] == "dry-run"
+        and rg3["cloud_ingest"]["confirmed"] is False and d2_calls["n"] == 0)
 
     total, passed = len(ok), sum(ok)
     print("\n[counts] %s" % r["counts"])
