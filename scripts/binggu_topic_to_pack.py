@@ -18,12 +18,18 @@ import binggu_harvest as HV                  # noqa: E402
 import binggu_pack_factory as FAC            # noqa: E402
 import binggu_subtopic_decompose as SUB      # noqa: E402  (항목 A — 주제 세분화·네트워크0 import)
 import binggu_pack_edges as EDG              # noqa: E402  (항목 C — pack 간 edges·순수함수)
+import binggu_semantic_clean as CLEAN        # noqa: E402  (정제기 — 수확물 의미정제·폴백 네트워크0)
 # 항목 D(binggu_cloud_ingest_wire)는 클라우드 경로라 lazy import(기존 BPL/WR 스타일).
+
+# 적재 전 소스 관련성 최소컷(④) — score 가 이 값 미만인 후보는 승급/수확 제외(주제무관·저신뢰 차단).
+# 0.0 이면 필터 무력(모든 후보 승급)이라 의미있는 floor 로 상향. 정제기(내용 관련성·hints)와 2층 방어.
+DEFAULT_MIN_SCORE = 0.15
 
 
 def topic_to_pack(topic, provider=None, fetch_runner=None, home=None, out_dir=None,
-                  min_score=0.0, max_sources=10, opencrab_export=False,
+                  min_score=DEFAULT_MIN_SCORE, max_sources=10, opencrab_export=False,
                   recommend_workflow=False, execute=False, confirm=False, staging_home=None,
+                  clean=True, clean_transport=None, clean_batch_size=10,
                   subtopics=False, max_subtopics=8, subtopic_use_search=False, llm_runner=None,
                   subtopic_transport=None,
                   pack_edges=False, peer_packs=None,
@@ -95,20 +101,51 @@ def topic_to_pack(topic, provider=None, fetch_runner=None, home=None, out_dir=No
     #   sp 에 다른 topic 의 기존 등록 소스가 있어도 이 pack 에 섞이지 않음(topic 격리·오염 차단).
     #   candidate.source_id 와 add_source 의 source_id 는 둘 다 source_id_for(norm_url) → 매칭 보장.
     documents, skipped = [], []
+    # ⑤ 본문 보존율 측정 — 정제기 kept/dropped 누적(과도 정제=빈약 팩 감시·결과로 노출).
+    clean_total = clean_kept = clean_dropped = 0
+    clean_errors = []
     for s in HV.load_sources(sp):
         if s.get("source_id") not in promoted_sids:
             continue
         one = HV.harvest_one(s, runner=fetch_runner, sources_path_=sp, home=home)
         if one["status"] == "OK":
-            # 원본 evidence_chunks 사용 — evidence_meta(source/raw_pointer/raw_sha256/parser/derivative) 보존.
+            # ★ 정제기 연결(한 길목·①) — 수확 evidence_chunks 를 binggu_semantic_clean.clean_chunks 로
+            #   한 번 통과시켜 정제본으로 교체한다. 이 길목은 derived/raw 무관(③):
+            #   harvest_one 은 파싱 가능 소스면 _derived_chunks, text/plain·미상이면 _content_chunks(raw)
+            #   결과를 모두 evidence_chunks 로 반환하므로, 여기서 한 번 거치면 빠졌던 raw 경로도 자동 정제됨.
+            #   hints=[topic] 로 주제무관 외국어/잡블로그 본문을 LLM(transport)이 drop(②).
+            #   clean_transport 미주입이면 _structural_keep 구조 폴백 → 무손실(네트워크0·절대 raise 0).
+            #   build_pack·cloud_ingest(export_cloud_text) 둘 다 documents.evidence_chunks 를 읽으므로
+            #   이 한 길목이면 양쪽 다 정제본을 받는다(정제 누락 차단).
+            raw_chunks = one.get("evidence_chunks", [])
+            if clean and raw_chunks:
+                cr = CLEAN.clean_chunks(raw_chunks, llm_transport=clean_transport,
+                                        batch_size=clean_batch_size,
+                                        hints=[topic] if topic else None)
+                ev_chunks = cr["kept"]
+                st = cr["stats"]
+                clean_total += st["total"]
+                clean_kept += st["kept"]
+                clean_dropped += st["dropped"]
+                if st.get("errors"):
+                    clean_errors.extend(st["errors"])
+            else:
+                ev_chunks = raw_chunks
+            # 정제본 evidence_chunks 로 교체 — evidence_meta(source/raw_pointer/raw_sha256/parser/derivative) 보존.
             documents.append({"nodes": one["nodes"], "evidence_index": one["evidence_index"],
-                              "evidence_chunks": one.get("evidence_chunks", []),
+                              "evidence_chunks": ev_chunks,
                               "parse_artifacts": one.get("parse_artifacts", [])})
         else:
             # B4 — parse 실패는 parse_error.type, fetch 실패는 reason(FETCH_ERROR 등)로 typed 보장(null 0).
             etype = (one.get("parse_error") or {}).get("type") or one.get("reason") or one["status"]
             skipped.append({"source_id": s.get("source_id"), "status": one["status"],
                             "error": etype, "detail": one.get("detail")})
+
+    # ⑤ 정제 통계(본문 보존율) — 0 청크면 keep_rate=1.0(분모 0 안전). transport 모드 동봉.
+    clean_stats = {"total": clean_total, "kept": clean_kept, "dropped": clean_dropped,
+                   "keep_rate": round(clean_kept / clean_total, 4) if clean_total else 1.0,
+                   "transport": ("llm" if clean_transport is not None else "fallback") if clean else "off",
+                   "errors": clean_errors}
 
     # ④ 팩 생성 + ⑤ validate(완료 기준)
     res = FAC.build_pack(topic, documents, out_dir=out_dir)
@@ -184,6 +221,7 @@ def topic_to_pack(topic, provider=None, fetch_runner=None, home=None, out_dir=No
             "harvested_docs": len(documents), "skipped": skipped,
             "verdict": res["verdict"]["verdict"], "counts": res["counts"],
             "pack": res["pack"], "written": res.get("written"),
+            "clean": clean_stats,
             "opencrab_import": oc, "workflow": wf,
             "pack_edges": pe, "workflow_sync": ws, "cloud_ingest": ci}
 
@@ -191,7 +229,7 @@ def topic_to_pack(topic, provider=None, fetch_runner=None, home=None, out_dir=No
 def decompose_to_packs(topic, provider=None, fetch_runner=None, home=None, out_dir=None,
                        max_subtopics=6, subtopic_use_search=False, llm_runner=None,
                        subtopic_transport=None,
-                       min_score=0.0, max_sources=10, infer_pack_edges=True,
+                       min_score=DEFAULT_MIN_SCORE, max_sources=10, infer_pack_edges=True,
                        topic_jaccard_min=0.34, cloud_ingest=False, cloud_env=None,
                        cloud_transport=None, execute=False, confirm=False):
     """A→B→수집/정제→C(팩 간 edges)→D(클라우드 dry-run) 전체 비전 오케스트레이션.
@@ -424,6 +462,43 @@ def _selftest():
         rg3["cloud_ingest"]["mode"] == "dry-run"
         and rg3["cloud_ingest"]["confirmed"] is False and d2_calls["n"] == 0)
 
+    # ── H. 정제기 연결(①②③④⑤) — 폴백 무손실·LLM drop·본문 보존율·관련성 컷 ──
+    # H1 (①⑤) clean stats 파이프라인 노출 + 폴백 무손실(transport 미주입 → keep율 1.0·정상 본문 손실 0)
+    chk("H1 (1+5) clean stats 노출 + 폴백 무손실(transport=fallback·kept==total·keep율 1.0)",
+        r["clean"] is not None and r["clean"]["transport"] == "fallback"
+        and r["clean"]["total"] > 0 and r["clean"]["kept"] == r["clean"]["total"]
+        and r["clean"]["keep_rate"] == 1.0)
+
+    # H2 (③) raw(text/plain)+derived 둘 다 정제 길목 통과 — 빠졌던 raw 경로도 clean.total 에 포함
+    chk("H2 (3) raw+derived 모두 정제 길목 통과(clean.total>=적재 evidence_chunk)",
+        r["clean"]["total"] >= r["counts"]["evidence_chunk"] and r["clean"]["total"] >= 2)
+
+    # H3 (②) LLM transport 주입 → 노이즈 verdict 로 실제 drop(주제무관 본문 제거 작동)
+    def _clean_drop_t(prompt):
+        n = prompt.count("\n[")                # 배치 청크 수(번호 라인)
+        v = [1] + [0] * (max(1, n) - 1)         # 첫 청크만 본문, 나머지 노이즈(0) → drop
+        return json.dumps({"verdicts": v})
+    home_h = os.path.join(tempfile.mkdtemp(prefix="t2p_h_"), ".binggupack")
+    os.makedirs(home_h)
+    out_h = tempfile.mkdtemp(prefix="t2p_h_pack_")
+    rh = topic_to_pack("입찰 가격 예측", provider=provider, fetch_runner=fetch_runner,
+                       home=home_h, out_dir=out_h, clean_transport=_clean_drop_t)
+    chk("H3 (2) LLM transport 주입 → 노이즈 drop(transport=llm·dropped>0·0<kept<total·status OK)",
+        rh["clean"]["transport"] == "llm" and rh["clean"]["dropped"] > 0
+        and 0 < rh["clean"]["kept"] < rh["clean"]["total"] and rh["status"] == "OK")
+
+    # H4 (④) 관련성 최소컷 게이트 실동작 — min_score 상향 시 저점수 소스 승급 차단
+    home_h4 = os.path.join(tempfile.mkdtemp(prefix="t2p_h4_"), ".binggupack")
+    os.makedirs(home_h4)
+    rh4 = topic_to_pack("입찰 가격 예측", provider=provider, fetch_runner=fetch_runner,
+                        home=home_h4, min_score=0.7)   # example.org(0.6317) 컷 → 2건만 승급
+    chk("H4 (4) min_score 관련성 컷 실동작(0.7 → 저점수 1건 제외·promoted==2·discovered==3)",
+        rh4["promoted"] == 2 and rh4["discovered"] == 3)
+
+    # H5 (④) 기본 min_score 가 0 이 아닌 의미있는 컷(필터 무력 해소) + 기본값에서 mock 3건 전부 통과(회귀0)
+    chk("H5 (4) 기본 min_score 의미있는 컷(>0) + 기본 경로 promoted==3 회귀0",
+        DEFAULT_MIN_SCORE > 0.0 and r["promoted"] == 3)
+
     total, passed = len(ok), sum(ok)
     print("\n[counts] %s" % r["counts"])
     print("[skipped] %s" % r["skipped"])
@@ -439,6 +514,10 @@ def _main(argv):
     ap.add_argument("--topic", help="수집 주제 (예: '입찰 가격 예측')")
     ap.add_argument("--out", default=None, help="pack 출력 디렉토리(없으면 미기록)")
     ap.add_argument("--max-sources", type=int, default=5, help="승급/수확할 최대 소스 수")
+    ap.add_argument("--min-score", type=float, default=DEFAULT_MIN_SCORE,
+                    help="적재 전 소스 관련성 최소컷(score>=이 값만 승급·기본 %.2f)" % DEFAULT_MIN_SCORE)
+    ap.add_argument("--clean-llm", action="store_true",
+                    help="정제기 LLM(ollama) 주입 — 주제무관 본문 실제 drop(미지정 시 구조 폴백·네트워크0)")
     ap.add_argument("--opencrab-export", action="store_true", help="OpenCrab import 가능성 검증/export")
     ap.add_argument("--recommend-workflow", action="store_true", help="pack 기반 workflow 추천")
     ap.add_argument("--execute", action="store_true",
@@ -456,6 +535,8 @@ def _main(argv):
         ap.error("--topic 필요 (또는 --selftest)")
 
     r = topic_to_pack(args.topic, out_dir=args.out, max_sources=args.max_sources,
+                      min_score=args.min_score,
+                      clean_transport=(CLEAN.default_ollama_transport() if args.clean_llm else None),
                       opencrab_export=args.opencrab_export,
                       recommend_workflow=args.recommend_workflow, execute=args.execute,
                       confirm=args.yes, staging_home=args.staging_home)

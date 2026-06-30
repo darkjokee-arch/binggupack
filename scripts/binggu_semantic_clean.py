@@ -401,6 +401,20 @@ def _selftest():
     chk("T11c 파싱 실패 → None", _parse_verdicts("그냥 텍스트") is None)
     chk("T11d None → None", _parse_verdicts(None) is None)
 
+    # T12 — 본문 보존율 하한(과도 정제=빈약 팩 방지) : 명백한 정상 본문만 → keep율 1.0(손실 0)
+    clean_bodies = [BODY1, BODY2,
+                    "2026년 3분기 영업이익은 전년 동기 대비 8.4% 증가했다.",
+                    "제안 시스템은 평균 응답시간을 120ms 로 단축했다."]
+    rk = clean_chunks(clean_bodies, llm_transport=None)        # 폴백(구조 신호·LLM 없음)
+    keep_rate = rk["stats"]["kept"] / max(1, rk["stats"]["total"])
+    chk("T12 폴백 정상 본문 보존(kept==total==4·과도 정제 0)",
+        rk["stats"]["kept"] == rk["stats"]["total"] == 4)
+    chk("T12b 본문 keep율 하한 게이트(>=0.9·빈약 정제 차단)", keep_rate >= 0.9)
+    # T12c — LLM 경로에서도 본문 verdict=1 이면 전건 보존(정상 본문 손실 0)
+    rk2 = clean_chunks(clean_bodies, llm_transport=lambda p: json.dumps({"verdicts": [1, 1, 1, 1]}))
+    chk("T12c LLM 본문 keep율 1.0(정상 본문 손실 0·dropped 0)",
+        rk2["stats"]["kept"] == 4 and rk2["stats"]["dropped"] == 0)
+
     total, passed = len(ok), sum(ok)
     print("\nRESULT: %d/%d PASS" % (passed, total))
     print("GATE: " + ("GO" if passed == total else "NO-GO"))
