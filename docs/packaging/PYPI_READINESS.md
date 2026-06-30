@@ -8,7 +8,7 @@
 |---|---|---|
 | `pyproject.toml` 존재 | ✅ | `[project]` 메타 있음 |
 | `name` | ✅ | `binggupack` |
-| `version` | ✅ | `1.15.0` — `binggupack.__about__` / `pyproject.toml` 일치 |
+| `version` | ✅ | `1.16.0` — `binggupack.__about__` / `pyproject.toml` 일치 |
 | `description` / `requires-python` | ✅ | `>=3.10`, stdlib only(dependencies=[]) |
 | `license` metadata | ⚠️ | `[project]`에 license 필드 없음(LICENSE 파일은 MIT 존재) → `license = {text="MIT"}` 또는 SPDX 표기 권장 |
 | `[build-system]` 섹션 | ✅ | `setuptools>=61` + `setuptools.build_meta` |
@@ -16,7 +16,7 @@
 | console_scripts | ✅ | `binggu = "binggu:main"`, `binggupack = "binggu:main"` |
 | README long_description | ✅ | `readme = "README.md"` |
 | build 도구 | ✅ | 격리 venv `pip install .`로 build/install 검증 |
-| local install 가능성 | ✅ | `tests/package_cli_selftest.py` 9/9 PASS |
+| local install 가능성 | ✅ | `tests/package_cli_selftest.py` 10/10 PASS |
 
 ## package install 검증 결과
 

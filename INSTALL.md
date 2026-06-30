@@ -1,6 +1,6 @@
-# Install BingguPack v1.15.0
+# Install BingguPack v1.16.0
 
-> 최신: `v1.15.0` (owner 발화 a0 형식게이트 면제 — 구어체·짧은 직감 원문 보존). 설치: `pip install binggupack` (PyPI) 또는 아래 `git clone`.
+> 최신: `v1.16.0` (외부 리뷰 5건 정리 — PII scan 버그·ruff/mypy 툴체인 점진 도입·브랜드 통일). 설치: `pip install binggupack` (PyPI) 또는 아래 `git clone`.
 
 > `scripts/`·`docs/`의 `openbinggu_`/`OPENBINGGU_` 접두사는 레거시 내부 코드네임입니다(BingguPack과 동일 프로젝트).
 

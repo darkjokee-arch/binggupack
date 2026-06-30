@@ -2,8 +2,8 @@
 
 **AI와 일하면서 쌓이는 내 판단, 실수, 취향, 규칙을 내 PC 안의 기억 장부로 바꾸는 로컬 우선 AI 작업 메모리입니다.**
 
-> 현재 `main`: 분류 기준 통합, `remember`/`pair` 명시 입력 경로, 회상 효용 trace, `storage`/`mcp` facade까지 반영.
-> 최신 배포판: **v1.15.0** · [Release](https://github.com/darkjokee-arch/binggupack/releases/tag/v1.15.0) · [PyPI](https://pypi.org/project/binggupack/)
+> 현재 `main`: 분류 기준 통합, `remember`/`pair` 명시 입력 경로, 회상 효용 trace, `storage`/`mcp` facade, ruff/mypy 툴체인·브랜드 통일까지 반영.
+> 최신 배포판: **v1.16.0** · [Release](https://github.com/darkjokee-arch/binggupack/releases/tag/v1.16.0) · [PyPI](https://pypi.org/project/binggupack/)
 > 로컬 우선 · 자동 저장 없음 · 내가 고른 것만 저장 · MIT License
 
 [처음 시작하기](docs/START_HERE.md) · [10분 튜토리얼](docs/BINGGUPACK_TUTORIAL.md) · [설치](INSTALL.md) · [Claude Code MCP](INSTALL.md#install-claude-code-mcp-sandbox-entry) · [캡처 hook](docs/BINGGUPACK_CAPTURE_HOOK_SETUP.md) · [문서 색인](docs/INDEX.md)
