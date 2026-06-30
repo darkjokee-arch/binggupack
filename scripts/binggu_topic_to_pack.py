@@ -29,7 +29,7 @@ DEFAULT_MIN_SCORE = 0.15
 def topic_to_pack(topic, provider=None, fetch_runner=None, home=None, out_dir=None,
                   min_score=DEFAULT_MIN_SCORE, max_sources=10, opencrab_export=False,
                   recommend_workflow=False, execute=False, confirm=False, staging_home=None,
-                  clean=True, clean_transport=None, clean_batch_size=10,
+                  clean=True, clean_transport=None, clean_batch_size=10, lang=None,
                   subtopics=False, max_subtopics=8, subtopic_use_search=False, llm_runner=None,
                   subtopic_transport=None,
                   pack_edges=False, peer_packs=None,
@@ -77,12 +77,12 @@ def topic_to_pack(topic, provider=None, fetch_runner=None, home=None, out_dir=No
                 seen_q.add(q)
                 queries.append(q)
         for q in queries:
-            DISC.discover(q, provider=provider, home=home)   # merge=True 누적(persist)
+            DISC.discover(q, provider=provider, home=home, lang=lang)   # merge=True 누적(persist)·lang=현지어 타겟
         agg = sorted(DISC.load_discoveries(dp), key=lambda c: c.get("score", 0), reverse=True)
         disc = {"status": "OK", "topic": topic, "candidates": agg, "n_found": len(agg),
                 "subtopics": subs}
     else:
-        disc = DISC.discover(topic, provider=provider, home=home)
+        disc = DISC.discover(topic, provider=provider, home=home, lang=lang)   # lang=현지어 타겟(None=언어무관)
 
     # ② 승급 — min_score 이상 후보를 harvest 화이트리스트로(add_source 게이트 통과분만)
     promoted = []
@@ -518,6 +518,8 @@ def _main(argv):
                     help="적재 전 소스 관련성 최소컷(score>=이 값만 승급·기본 %.2f)" % DEFAULT_MIN_SCORE)
     ap.add_argument("--clean-llm", action="store_true",
                     help="정제기 LLM(ollama) 주입 — 주제무관 본문 실제 drop(미지정 시 구조 폴백·네트워크0)")
+    ap.add_argument("--lang", default=None,
+                    help="현지어 타겟 수집(SearXNG language 코드: th/id/ja/it/fr/es/el/en/zh/vi 등). 미지정=언어무관(기존 동작)")
     ap.add_argument("--opencrab-export", action="store_true", help="OpenCrab import 가능성 검증/export")
     ap.add_argument("--recommend-workflow", action="store_true", help="pack 기반 workflow 추천")
     ap.add_argument("--execute", action="store_true",
@@ -539,7 +541,7 @@ def _main(argv):
                       clean_transport=(CLEAN.default_ollama_transport() if args.clean_llm else None),
                       opencrab_export=args.opencrab_export,
                       recommend_workflow=args.recommend_workflow, execute=args.execute,
-                      confirm=args.yes, staging_home=args.staging_home)
+                      confirm=args.yes, staging_home=args.staging_home, lang=args.lang)
     # 요약 출력(pack 본문 제외 — 큰 nodes 배열 생략)
     summary = {k: v for k, v in r.items() if k != "pack"}
     summary["pack_counts"] = r["counts"]
