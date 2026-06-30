@@ -1,6 +1,8 @@
 # PyPI / Distribution Readiness (Lane E)
 
 > **상태: READY FOR LOCAL PACKAGE INSTALL TEST.** PyPI publish·token 사용·external secret = 0 (금지 준수).
+>
+> **버전 구분**: PyPI 현재 배포 = **`1.15.0`** (발행: 1.14.0, 1.15.0). git 소스/이 문서 기준 = **`1.16.0`** (아직 PyPI 미발행 — owner 수동 승인 영역). 즉 `1.16.0`은 소스 최신이지 PyPI 최신이 아닙니다.
 
 ## 점검 결과
 
@@ -8,7 +10,7 @@
 |---|---|---|
 | `pyproject.toml` 존재 | ✅ | `[project]` 메타 있음 |
 | `name` | ✅ | `binggupack` |
-| `version` | ✅ | `1.16.0` — `binggupack.__about__` / `pyproject.toml` 일치 |
+| `version` | ✅ | 소스 `1.16.0` — `binggupack.__about__` / `pyproject.toml` 일치 (PyPI 현재 배포는 `1.15.0` — 미발행분) |
 | `description` / `requires-python` | ✅ | `>=3.10`, stdlib only(dependencies=[]) |
 | `license` metadata | ⚠️ | `[project]`에 license 필드 없음(LICENSE 파일은 MIT 존재) → `license = {text="MIT"}` 또는 SPDX 표기 권장 |
 | `[build-system]` 섹션 | ✅ | `setuptools>=61` + `setuptools.build_meta` |

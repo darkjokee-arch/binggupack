@@ -3,7 +3,8 @@
 **AI와 일하면서 쌓이는 내 판단, 실수, 취향, 규칙을 내 PC 안의 기억 장부로 바꾸는 로컬 우선 AI 작업 메모리입니다.**
 
 > 현재 `main`: 분류 기준 통합, `remember`/`pair` 명시 입력 경로, 회상 효용 trace, `storage`/`mcp` facade, ruff/mypy 툴체인·브랜드 통일까지 반영.
-> 최신 배포판: **v1.16.0** · [Release](https://github.com/darkjokee-arch/binggupack/releases/tag/v1.16.0) · [PyPI](https://pypi.org/project/binggupack/)
+> 최신 소스(git clone): **v1.16.0** · [Release](https://github.com/darkjokee-arch/binggupack/releases/tag/v1.16.0)
+> PyPI 현재 배포: **1.15.0** · [PyPI](https://pypi.org/project/binggupack/) — `pip install binggupack`로 받는 버전입니다. v1.16.0 기능은 아래 `git clone`으로 사용하세요.
 > 로컬 우선 · 자동 저장 없음 · 내가 고른 것만 저장 · MIT License
 
 [처음 시작하기](docs/START_HERE.md) · [10분 튜토리얼](docs/BINGGUPACK_TUTORIAL.md) · [설치](INSTALL.md) · [Claude Code MCP](INSTALL.md#install-claude-code-mcp-sandbox-entry) · [캡처 hook](docs/BINGGUPACK_CAPTURE_HOOK_SETUP.md) · [문서 색인](docs/INDEX.md)
@@ -80,7 +81,7 @@ CLI 전체: init/start · status/doctor · preview/remember · reflect · save �
 
 clone해서 바로 쓸 수 있습니다. 아래에서 `binggu`라고 부르는 명령은 clone한 폴더에서는 `python binggu.py`로 실행하면 됩니다.
 
-일반 사용자는 PyPI 설치가 가장 짧습니다.
+일반 사용자는 PyPI 설치가 가장 짧습니다. (PyPI 현재 배포 = `1.15.0`. v1.16.0 기능은 아래 `git clone`으로 사용하세요.)
 
 ```bash
 pip install binggupack

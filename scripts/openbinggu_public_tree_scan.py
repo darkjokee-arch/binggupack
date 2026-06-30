@@ -8,6 +8,8 @@ OpenBinggu public tree secret/PII scanner (S4 실 트리 결선 최소 구현 �
 - 기본 read-only / dry-run. 트리 변경·write 0.
 - raw 값 미출력 → count / reason_code / file_id(hash) / where(파일명 아닌 위치 라벨) 만.
 - 검출 1건 이상이면 verdict=BLOCK (공개/업로드 차단 근거).
+- fail-closed: size(512KB 초과)·읽기실패로 '내용 미검사'된 텍스트 후보가 있으면 CLEAN 금지(BLOCK).
+  (바이너리 확장자=_TEXT_EXT 밖은 공개 PII 대상 아님 → 무해 skip 유지)
 - .gitignore/제외 경로(ignore_globs)와 연동: 매칭 파일은 scan 제외(공개 대상 아님 전제).
 
 범위: 스캔(read-only) + synthetic selftest(temp fixture). production/store/DB write 0.
@@ -137,7 +139,13 @@ def scan_public_tree(root, ignore_globs=()):
                 continue
             try:
                 if os.path.getsize(full) > _MAX_BYTES:
+                    # 512KB 초과 텍스트 후보 = 내용 미검사. 바이너리(_TEXT_EXT 밖)는 위 ext 분기에서
+                    # 무해 skip 되므로, 여기 도달하는 건 'PII 가능 텍스트인데 size 때문에 미검사'.
+                    # → fail-closed: read_error 와 동일하게 finding 으로 승격(raw 노출 0).
                     content_skipped["size"] += 1
+                    findings.append({"reason_code": "content_size_skip", "file_id": fid,
+                                     "where": "content"})
+                    by_reason["content_size_skip"] = by_reason.get("content_size_skip", 0) + 1
                     continue
                 with _open_text(full) as fh:
                     for lineno, line in enumerate(fh, 1):
@@ -160,12 +168,18 @@ def scan_public_tree(root, ignore_globs=()):
                 by_reason["content_read_error"] = by_reason.get("content_read_error", 0) + 1
 
     hits = len(findings)
+    # fail-closed: 내용 미검사 텍스트 후보(size 초과 / 읽기 실패)는 CLEAN 금지.
+    # size_skip·read_error 는 위에서 finding 으로 승격되어 hits 에 이미 반영되지만,
+    # verdict 계산에서도 명시적으로 못박아 검출 무력화 회귀를 이중 차단한다(verdict-only 게이트 대비).
+    # ext skip(바이너리·_TEXT_EXT 밖)은 공개 PII 대상이 아니므로 제외 — 무해 skip 유지.
+    uninspected_text = content_skipped["size"] + content_skipped["read_error"]
+    verdict = "BLOCK" if (hits > 0 or uninspected_text > 0) else "CLEAN"
     return {
         "scanned": scanned, "skipped_ignored": skipped, "hits": hits,
         "content_skipped": content_skipped,  # 미검사 카운트 노출(fail-open 방지)
         "by_reason": dict(sorted(by_reason.items())),
         "findings": findings,            # file_id/reason_code/where 만 (raw 경로/내용 0)
-        "verdict": "BLOCK" if hits > 0 else "CLEAN",
+        "verdict": verdict,
         "raw_not_output": True,
     }
 
@@ -204,18 +218,24 @@ def _build_fixture(base):
     w(os.path.join(skip, "big.txt"), "x" * (_MAX_BYTES + 1))
     w(os.path.join(skip, "locked.txt"), "normal readable text\n")
 
+    # ext-only(바이너리만): _TEXT_EXT 밖 → 무해 skip, 텍스트 미검사 0 → CLEAN 유지(과차단 회귀 방지)
+    extonly = os.path.join(base, "extonly_tree")
+    os.makedirs(extonly, exist_ok=True)
+    w(os.path.join(extonly, "README.md"), "# clean\nok\n")
+    w(os.path.join(extonly, "image.bin"), "binary-ish payload (ext whitelist 밖)\n")
+
     # neg(음성 fixture): 스캔이 반드시 잡아야 할 합성 위반 1건 — credentials 경로+secret 내용
     neg = os.path.join(base, "neg_tree")
     os.makedirs(os.path.join(neg, "config"), exist_ok=True)
     w(os.path.join(neg, "config", "credentials.txt"),
       "api_" + "key = " + "AKIA" + "0000EXAMPLE0000\n")
-    return clean, dirty, skip, neg
+    return clean, dirty, skip, neg, extonly
 
 
 def _selftest():
     global _open_text
     base = os.path.join(os.environ.get("TEMP", "/tmp"), "openbinggu_public_tree_scan_fixture")
-    clean, dirty, skip, neg = _build_fixture(base)
+    clean, dirty, skip, neg, extonly = _build_fixture(base)
 
     print("=" * 72)
     print("OpenBinggu public tree secret/PII scanner (synthetic / selftest)")
@@ -252,9 +272,13 @@ def _selftest():
     # ignore 연동: .env / id_rsa 제외해도 config.py(token)·notes.txt(PII) 남아 여전히 BLOCK
     check("dirty_with_ignore_still_block", dirty, "BLOCK",
           ignore=("*/.env", ".env", "*/id_rsa", "id_rsa"), expect_min_hits=2)
-    # content skip 집계 노출: ext 밖 1 + 512KB 초과 1 (읽기 실패 없음 → CLEAN)
-    check("skip_counts_exposed_clean", skip, "CLEAN", expect_min_hits=0,
+    # size 초과 텍스트 후보(big.txt) = 내용 미검사 → fail-closed BLOCK (verdict-only 게이트 fail-open 차단).
+    # ext 밖 바이너리(blob.bin)는 무해 skip(검사 대상 아님). content_size_skip finding 으로 노출.
+    check("size_skip_text_fail_closed", skip, "BLOCK", expect_min_hits=1,
           expect_skip={"ext": 1, "size": 1, "read_error": 0})
+    # ext-only skip(바이너리만) = 텍스트 미검사 0 → CLEAN 유지(바이너리는 공개 PII 대상 아님, 과차단 금지)
+    check("extonly_skip_stays_clean", extonly, "CLEAN", expect_min_hits=0,
+          expect_skip={"ext": 1, "size": 0, "read_error": 0})
     # 읽기 실패 = fail-closed BLOCK 승격(시뮬레이션: locked.txt 만 read 실패)
     _orig_open = _open_text
 

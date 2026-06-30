@@ -1,6 +1,7 @@
 # Install BingguPack v1.16.0
 
-> 최신: `v1.16.0` (외부 리뷰 5건 정리 — PII scan 버그·ruff/mypy 툴체인 점진 도입·브랜드 통일). 설치: `pip install binggupack` (PyPI) 또는 아래 `git clone`.
+> 최신 소스(git clone): `v1.16.0` (외부 리뷰 5건 정리 — PII scan 버그·ruff/mypy 툴체인 점진 도입·브랜드 통일).
+> PyPI 현재 배포: `1.15.0` — `pip install binggupack`는 **PyPI의 1.15.0**을 설치합니다. v1.16.0 기능은 아래 `git clone`으로 사용하세요.
 
 > `scripts/`·`docs/`의 `openbinggu_`/`OPENBINGGU_` 접두사는 레거시 내부 코드네임입니다(BingguPack과 동일 프로젝트).
 
@@ -22,6 +23,8 @@
 ## PyPI quick install
 
 로컬 CLI만 쓰려면 이 경로가 가장 짧습니다.
+
+> PyPI 현재 배포는 **`1.15.0`**입니다. `pip install binggupack`는 1.15.0을 설치합니다. **v1.16.0**(현재 git 소스 최신)의 기능이 필요하면 아래 [Clone / source install](#clone--source-install)을 사용하세요.
 
 ```bash
 python -m pip install binggupack

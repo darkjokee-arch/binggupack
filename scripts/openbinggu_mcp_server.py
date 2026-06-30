@@ -118,16 +118,21 @@ def handle_jsonrpc(req, allow_root):
             targs = {}
         if not isinstance(targs, dict):
             return _err(rid, -32602, "invalid arguments")
-        r = handle_tool(name, targs, allow_root)
-        sanitized = _sanitize(r)
-        # MCP tools/call 표준: result.content(텍스트) 필수. structuredContent 동봉.
-        # selftest 호환 위해 sanitized 최상위 키(verdict/executed 등)도 병합 유지.
-        result = {"content": [{"type": "text",
-                               "text": json.dumps(sanitized, ensure_ascii=False)}],
-                  "structuredContent": sanitized,
-                  "isError": False}
-        result.update(sanitized)
-        return _ok(rid, result)
+        try:
+            r = handle_tool(name, targs, allow_root)
+            sanitized = _sanitize(r)
+            # MCP tools/call 표준: result.content(텍스트) 필수. structuredContent 동봉.
+            # selftest 호환 위해 sanitized 최상위 키(verdict/executed 등)도 병합 유지.
+            result = {"content": [{"type": "text",
+                                   "text": json.dumps(sanitized, ensure_ascii=False)}],
+                      "structuredContent": sanitized,
+                      "isError": False}
+            result.update(sanitized)
+            return _ok(rid, result)
+        except Exception as e:
+            # tool 내부 예외/직렬화 실패는 해당 요청 단위 -32603 으로 격리(루프·세션 유지).
+            # message 는 예외 타입만 — raw secret/PII/trace 미노출.
+            return _err(rid, -32603, "internal error: " + type(e).__name__)
 
     return _err(rid, -32601, "method not found: " + method)
 
@@ -149,12 +154,21 @@ def serve_stdio(allow_root):
             sys.stdout.write(json.dumps(_err(None, -32700, "parse error")) + "\n")
             sys.stdout.flush()
             continue
-        resp = handle_jsonrpc(req, allow_root)
+        # 한 줄 처리 실패가 루프(세션) 전체를 죽이지 않도록 방어. raw 미노출.
+        try:
+            resp = handle_jsonrpc(req, allow_root)
+        except Exception as e:
+            rid = req.get("id") if isinstance(req, dict) else None
+            resp = _err(rid, -32603, "internal error: " + type(e).__name__)
         # notification(id 없음)은 응답 미발신. request(id 있음)만 1줄 발신.
         has_id = isinstance(req, dict) and req.get("id") is not None
         if has_id:
-            sys.stdout.write(json.dumps(resp, ensure_ascii=False) + "\n")
-            sys.stdout.flush()
+            try:
+                sys.stdout.write(json.dumps(resp, ensure_ascii=False) + "\n")
+                sys.stdout.flush()
+            except Exception:
+                # 직렬화/쓰기 실패도 루프 유지(다음 요청 계속 처리).
+                continue
 
 
 # ---------------- selftest ----------------
@@ -248,6 +262,30 @@ def _selftest():
     # 13) malformed: invalid params
     r = call({"jsonrpc": "2.0", "id": 13, "method": "tools/call", "params": "oops"})
     checks.append(("malformed_invalid_params", "error" in r and r["error"]["code"] == -32602))
+
+    # 14) tool 내부 예외 격리: handle_tool 가 raise 해도 해당 요청만 -32603,
+    #     루프/세션은 유지되고 예외 메시지(raw 경로/secret)는 응답에 미노출.
+    global handle_tool
+    _orig_handle_tool = handle_tool
+
+    def _boom(name, targs, allow_root):
+        raise RuntimeError("BOOM C:/Users/PC/AppData/NPKI/secret.der must_not_leak")
+
+    handle_tool = _boom
+    try:
+        r = call({"jsonrpc": "2.0", "id": 14, "method": "tools/call",
+                  "params": {"name": "pack_validate", "arguments": {"pack_path": "examples/toy_project/p.json"}}})
+        # 격리 후에도 정상 경로가 같은 루프에서 계속 동작하는지(세션 생존) 확인.
+        r_next = call({"jsonrpc": "2.0", "id": 15, "method": "tools/list"})
+    finally:
+        handle_tool = _orig_handle_tool
+    err14 = r.get("error", {})
+    blob14 = json.dumps(r, ensure_ascii=False)
+    leak14 = any(tok in blob14 for tok in ["NPKI", "secret.der", "must_not_leak", "BOOM"])
+    checks.append(("tool_exception_isolated_-32603",
+                   "error" in r and err14.get("code") == -32603 and not leak14))
+    checks.append(("session_survives_after_tool_exception",
+                   "result" in r_next and r_next["result"].get("tools") is not None))
 
     # raw 미출력: 전 응답 직렬화 후 민감 substring 검사
     probe_paths = ["../outside", "NPKI", ".env", "safety-app", "bid-engine"]

@@ -90,6 +90,20 @@ def _norm_url(u):
     return str(u or "").strip()
 
 
+def _url_has_credentials(url):
+    """URL netloc 에 userinfo(username/password)가 박혀 있으면 True — 평문 secret 저장/전송 위험.
+    classify_source_pointer 는 host 만 보고 userinfo 를 무시하므로(공개 host 면 clean) 별도 가드가 필요.
+    urlsplit username/password 로 판정. 파싱 실패(잘못된 포트 등) 시 netloc '@' 보조검사로 fail-closed."""
+    from urllib.parse import urlsplit
+    try:
+        sp = urlsplit(url if "://" in url else "//" + url, scheme="")
+        return bool(sp.username or sp.password)
+    except ValueError:
+        # 파싱 실패 — netloc(첫 '/'·'?' 이전)에 '@' 가 있으면 보수적으로 credential 로 간주.
+        netloc_part = url.split("://", 1)[-1].split("/", 1)[0].split("?", 1)[0]
+        return "@" in netloc_part
+
+
 def source_id_for(url):
     """소스 식별자 = url 의 결정적 sha(12). 같은 url 재등록은 멱등."""
     return "src:" + hashlib.sha256(_norm_url(url).encode("utf-8")).hexdigest()[:12]
@@ -128,6 +142,10 @@ def add_source(kind, url, keyword=None, path=None):
         return {"status": "BLOCK", "reason": "BAD_KIND", "valid": list(VALID_KINDS)}
     if not url:
         return {"status": "BLOCK", "reason": "EMPTY_URL"}
+    # URL credential(userinfo) 거부 — user:pass@host 형태면 secret 평문 저장/전송 위험 → BLOCK.
+    #   classify_source_pointer 는 host 만 보고 userinfo 를 무시(공개 host 면 clean)하므로 여기서 선차단.
+    if _url_has_credentials(url):
+        return {"status": "BLOCK", "reason": "URL_CREDENTIALS"}
     # URL 공개안전성 — 로컬경로/내부 IP/localhost/UNC/file:// 면 dirty → 등록 거부(누출 차단).
     label = SP.classify_source_pointer(url)
     if label != "clean":
@@ -757,6 +775,18 @@ def _selftest():
     chk("T2e 멱등 재등록(같은 url 1건)",
         add_source("arxiv", PUB, path=sp)["reason"] == "ALREADY_REGISTERED"
         and len(load_sources(sp)) == 1)
+
+    # T2f URL credential(userinfo) 등록 거부 — user:pass@host 는 secret 평문 저장/전송 위험.
+    #   classify_source_pointer 는 host(공개)만 보므로 통과하던 우회를 별도 가드로 차단(합성 토큰·실 secret 아님).
+    CRED = "https://u5er:" + "p4ss" + "@feeds.example.com/private.rss"   # 런타임 조립(정적 스캐너 회피)
+    cred_r = add_source("rss", CRED, path=sp)
+    chk("T2f credential URL 등록 거부(URL_CREDENTIALS)",
+        cred_r["status"] == "BLOCK" and cred_r["reason"] == "URL_CREDENTIALS")
+    chk("T2f2 credential URL 평문 저장 0(소스장 미오염)",
+        len(load_sources(sp)) == 1
+        and not any("@feeds.example.com" in (s.get("url") or "") for s in load_sources(sp)))
+    chk("T2f3 username-only(user@host) 도 거부",
+        add_source("url", "https://u5er" + "@feeds.example.com/x", path=sp)["reason"] == "URL_CREDENTIALS")
 
     # T3 mock fetch 텍스트 → candidate=true·promotion_allowed=false 후보만 생성(영구 0)
     fetch_calls.clear()
