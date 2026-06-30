@@ -115,16 +115,19 @@ class MarkItDownBackend(ParserBackend):
 
     def parse(self, raw_bytes, fmt):
         td = tempfile.mkdtemp(prefix="markitdown_")
-        infile = os.path.join(td, "in." + self._EXT.get(fmt, "bin"))
-        with open(infile, "wb") as f:
-            f.write(raw_bytes)
-        exe = _which("markitdown")
-        # uvx 경유 시 PDF/office 풀파서를 위해 markitdown[all] extra 사용.
-        cmd = [exe, infile] if exe else [_which("uvx"), "--from", "markitdown[all]", "markitdown", infile]
-        rc, out, err = _run_cli(cmd)
-        if rc != 0:
-            raise RuntimeError("markitdown exit %d: %s" % (rc, err[:200]))
-        return out.decode("utf-8", "replace")
+        try:
+            infile = os.path.join(td, "in." + self._EXT.get(fmt, "bin"))
+            with open(infile, "wb") as f:
+                f.write(raw_bytes)
+            exe = _which("markitdown")
+            # uvx 경유 시 PDF/office 풀파서를 위해 markitdown[all] extra 사용.
+            cmd = [exe, infile] if exe else [_which("uvx"), "--from", "markitdown[all]", "markitdown", infile]
+            rc, out, err = _run_cli(cmd)
+            if rc != 0:
+                raise RuntimeError("markitdown exit %d: %s" % (rc, err[:200]))
+            return out.decode("utf-8", "replace")
+        finally:
+            shutil.rmtree(td, ignore_errors=True)  # temp 디렉토리 누수 방지(성공/실패 무관)
 
 
 class KorDocBackend(ParserBackend):
@@ -146,23 +149,26 @@ class KorDocBackend(ParserBackend):
 
     def parse(self, raw_bytes, fmt):
         td = tempfile.mkdtemp(prefix="kordoc_")
-        infile = os.path.join(td, "in." + self._EXT.get(fmt, "bin"))
-        outfile = os.path.join(td, "out.md")
-        with open(infile, "wb") as f:
-            f.write(raw_bytes)
-        cmd = [_which("npx"), "--no-install", "kordoc", infile,
-               "--format", "markdown", "--silent", "-o", outfile]
-        rc, out, err = _run_cli(cmd)
-        if rc != 0:
-            raise RuntimeError("kordoc exit %d: %s" % (rc, err[:200]))
-        if os.path.exists(outfile):
-            with open(outfile, encoding="utf-8") as f:
-                txt = f.read()
-            if txt.strip():
-                return txt
-        # rc=0 이어도 출력 없음 = soft fail(예: PDF→pdfjs-dist 의존성 부족) → 호출부가 CALL_FAILED 분류
-        raise RuntimeError("kordoc no output(의존성 부족 가능): %s"
-                           % ((err or out.decode("utf-8", "replace"))[:150]))
+        try:
+            infile = os.path.join(td, "in." + self._EXT.get(fmt, "bin"))
+            outfile = os.path.join(td, "out.md")
+            with open(infile, "wb") as f:
+                f.write(raw_bytes)
+            cmd = [_which("npx"), "--no-install", "kordoc", infile,
+                   "--format", "markdown", "--silent", "-o", outfile]
+            rc, out, err = _run_cli(cmd)
+            if rc != 0:
+                raise RuntimeError("kordoc exit %d: %s" % (rc, err[:200]))
+            if os.path.exists(outfile):
+                with open(outfile, encoding="utf-8") as f:
+                    txt = f.read()
+                if txt.strip():
+                    return txt
+            # rc=0 이어도 출력 없음 = soft fail(예: PDF→pdfjs-dist 의존성 부족) → 호출부가 CALL_FAILED 분류
+            raise RuntimeError("kordoc no output(의존성 부족 가능): %s"
+                               % ((err or out.decode("utf-8", "replace"))[:150]))
+        finally:
+            shutil.rmtree(td, ignore_errors=True)  # temp 디렉토리 누수 방지(성공/실패 무관)
 
 
 # 라우팅 우선순위(포맷별 backend 선호 순). 미가용은 자동 skip → 폴백 체인.
