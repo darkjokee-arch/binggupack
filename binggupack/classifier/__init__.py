@@ -9,7 +9,8 @@ v1.11 에서는 import-time 외부 패키지 0 · 네트워크 0 · stdlib-only 
 정본 vs 보조 (절대 불변)
 ────────────────────────────────────────────────────────────────────────
 - **regex 가 정본(canonical)** 이다:
-    scripts/openbinggu_label_kind_map.classify_label_kind  (label_kind 5종)
+    binggupack.classifier.label_kind_map.classify_label_kind  (label_kind 5종;
+      scripts/openbinggu_label_kind_map.py 는 backward-compatible wrapper, v1.16 strangler Phase2 이관)
     binggupack.classifier.capture_classifier.classify      (should_capture 게이트;
       scripts/binggu_capture_classifier.py 는 backward-compatible wrapper, v1.11.0 phase4 이관)
   이 두 정규식 모듈은 항상 먼저·항상 최종 결정권을 가진다.
@@ -54,7 +55,7 @@ __all__ = [
 ]
 
 # canonical label_kind 정본(읽기 전용 참고용). 정의 정본은 어디까지나
-# scripts/openbinggu_label_kind_map.KIND_KO. 여기 사본은 advice.label 후보 검증용 힌트일 뿐.
+# binggupack.classifier.label_kind_map.KIND_KO. 여기 사본은 advice.label 후보 검증용 힌트일 뿐.
 CANONICAL_LABEL_KINDS: Tuple[str, ...] = ("문서", "증거", "개념", "상태", "판단")
 
 
