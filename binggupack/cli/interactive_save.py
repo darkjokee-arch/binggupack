@@ -17,7 +17,8 @@ usage:
   python -m binggupack.cli.interactive_save            # TTY 에서 대화형
   python -m binggupack.cli.interactive_save --selftest # 비-TTY 검증 (저장 0)
 """
-import sys, argparse
+import argparse
+import sys
 
 _VALID_ACTIONS = ("SAVE", "DEPRECATE", "REPLACE", "ACCEPT", "UNACCEPT")
 

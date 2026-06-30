@@ -23,12 +23,16 @@ import time
 try:
     from binggupack.workspace import platform as _plat
 except Exception:  # pragma: no cover - 폴백(외부 의존 없이 동일 경로)
-    _plat = None
+    _plat = None  # type: ignore[assignment]
 
 # 순수 파싱 helper 정본은 binggupack.safety.gate_text(S3-B/C). import 실패 시 동일 정의 폴백 — byte-identical.
 try:
     from binggupack.safety.gate_text import (  # noqa: F401
-        parse_save_indices, SAVE_TRIGGER_RE, _norm, sent_hash)
+        SAVE_TRIGGER_RE,
+        _norm,
+        parse_save_indices,
+        sent_hash,
+    )
 except Exception:  # pragma: no cover - 폴백(외부 의존 없이 동일 정의)
     SAVE_TRIGGER_RE = re.compile(
         r"\s*(?:SAVE|저장|세이브)\s*\d+(\s*,\s*\d+)*\s*", re.IGNORECASE)

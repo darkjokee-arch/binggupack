@@ -19,6 +19,7 @@ CaptureSession import 는 binggupack 정본(binggupack.capture.session) 경유�
 """
 
 import json
+
 from binggupack.capture.session import CaptureSession
 
 

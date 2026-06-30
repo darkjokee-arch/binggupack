@@ -19,10 +19,10 @@ CLI: python scripts/openbinggu_path_safety_gate.py --selftest
 
 설계 ref: BINGGUPACK_FIRST_RELEASE_4CLI_SYNTHESIS.md §3-A(S3)/§3-B(X1)
 """
-import sys
+import hashlib
 import os
 import re
-import hashlib
+import sys
 
 
 def _path_id(s):

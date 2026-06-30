@@ -19,8 +19,8 @@ read-only. write/merge/apply 없음.
   Reject  domain/space/node_type/label_kind 중 하나라도 다름           -> rejected_fuzzy_matches
   D9      D9 candidate/partial ↔ confirmed 병합 시도                    -> d9_protected_matches (자동 merge 금지)
 """
-import re
 import hashlib
+import re
 
 try:
     from rapidfuzz import fuzz

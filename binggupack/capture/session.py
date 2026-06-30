@@ -99,7 +99,6 @@ def _selftest():
             cap_hit += 1
         else:
             mis.append(("누락", u, st))
-    base = s2.size
     for u in ignore_expect:
         st = s2.on_user_prompt(u)["verdict"]["state"]
         if st == "ignored":

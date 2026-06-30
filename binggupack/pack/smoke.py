@@ -8,7 +8,10 @@ wrapper 다. 동작/출력/exit code 는 v1.10.0 과 byte-identical 하게 유�
 handle_tool 직접 호출로 8도구 + save gate(G4_no_auto) 검증.
 BINGGU_HOME 격리(--home) → 운영 ~/.binggupack 미접촉. 실 ledger write 0.
 """
-import os, sys, argparse, tempfile
+import argparse
+import os
+import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))   # <repo>/binggupack/pack
 PKG = os.path.dirname(HERE)                          # <repo>/binggupack
