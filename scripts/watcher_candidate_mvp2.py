@@ -1,131 +1,60 @@
 # -*- coding: utf-8 -*-
-"""OpenBinggu Watcher MVP2 — Step2 Candidate (evidence_chunk → incoming_nodes, dry-run only).
+"""OpenBinggu Watcher MVP2 — Step2 Candidate (backward-compatible thin wrapper).
+
+v1.16 strangler Phase2: 순수 transform(_sha8/_has_secret/_meaningful/to_nodes +
+DOMAIN/REDACT_RE/GENERATED_BY/NODE_KEYS/PROP_KEYS/EVIDX_KEYS)은
+binggupack.pack.candidate_mvp2 로 이관됐고, 이 파일은 공개 심볼이 byte-identical 한 thin
+wrapper 다. 기존 호출처(import watcher_candidate_mvp2 as mvp2 → mvp2.to_nodes/_meaningful 등
+bare-name import; importer 5곳)는 그대로 동작한다.
 
 범위(MVP2 고정): evidence_chunk → incoming_nodes.jsonl + incoming_evidence_index.jsonl 만.
   - incoming_edges 생성 금지(MVP2.1 분리). Step3 merge preview(match_policy) 호출 금지.
   - 출력 = temp dir(BASE/tmp/watcher_mvp2/) only. 운영 store write 0.
-  - MVP1(watcher_capture_mvp1) 재사용해 evidence_chunk 생성 → 노드 변환.
 
-강제(전건): candidate=true / promotion_allowed=false / origin=watcher / domain=STAGING_UNASSIGNED /
-  evidence_refs=[item_id] + incoming_evidence_index 동시생성(매칭) / 출력 키 whitelist(forced_domain·
-  coverage·pattern_id·source_type 등 미생성).
-STOP: secret 3차 잔존 / redacted-only·6자미만·공백없는 짧은 sentence / (구조상) D1~D9 domain·whitelist 외 키 0.
-
-검증: v0.7 loader(localbinggu_incoming_loader) 7불변식 PASS + candidate 전건 true + promotion 전건 false
-  + evidence_refs 전건 index 매칭 + secret raw 잔존 0 + empty→노드0 + 2회 byte 동일 + 운영 store write 0
-  + Step3 호출 0(match_policy import 안 함).
+__file__ 경로상수(BASE/SCRIPTS/FIXTURE_DIR/TMP_OUT/SELFTEST_REPORT) + 파일 I/O 오케스트레이션
+(_write_jsonl/process_one/run_selftest/run_single/CLI)은 scripts/ 위치·tmp/reports 경로 의존이라
+이 wrapper 에 잔류. dry-run only(운영 store write 0).
 
 CLI:
   python watcher_candidate_mvp2.py --selftest
   python watcher_candidate_mvp2.py <diff_text_file>
 """
-import hashlib
 import json
-import re
+import os
 import sys
 from pathlib import Path
+
+HERE = os.path.dirname(os.path.abspath(__file__))   # <repo>/scripts
+ROOT = os.path.dirname(HERE)                         # <repo>
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)   # binggupack 패키지 import 경로
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)   # scripts 형제(importer 호환) 호환
+
+from binggupack.pack.candidate_mvp2 import *  # noqa: E402,F401,F403
+from binggupack.pack.candidate_mvp2 import (  # noqa: E402,F401  (전체 명시 re-export)
+    DOMAIN,
+    REDACT_RE,
+    GENERATED_BY,
+    NODE_KEYS,
+    PROP_KEYS,
+    EVIDX_KEYS,
+    _sha8,
+    _has_secret,
+    _meaningful,
+    to_nodes,
+    mvp1,
+    v011,
+    v07loader,
+    lkmap,
+    a0,
+)
 
 BASE = Path(__file__).resolve().parent.parent
 SCRIPTS = Path(__file__).resolve().parent
 FIXTURE_DIR = BASE / "tests" / "fixtures" / "watcher_mvp1"   # MVP1 diff fixture 재사용
 TMP_OUT = BASE / "tmp" / "watcher_mvp2"
 SELFTEST_REPORT = BASE / "reports" / "watcher_mvp2_selftest.json"
-
-sys.path.insert(0, str(SCRIPTS))
-import watcher_capture_mvp1 as mvp1            # Step0+1 (capture/to_evidence) 재사용
-import openbinggu_incoming_to_staging as v011  # secret 패턴 재사용 (_has_secret)
-import localbinggu_incoming_loader as v07loader  # v0.7 7불변식 검증 (Step3 아님)
-import openbinggu_label_kind_map as lkmap      # G0 — 5종 분류 + 한영 매핑 단일 정본
-import openbinggu_a0_node_dryrun as a0         # G0 — 노드 헌법 shadow 판정 (기록만, stop은 기존 가드)
-# 주의: localbinggu_match_policy(Step3) 는 import 하지 않는다.
-
-DOMAIN = "STAGING_UNASSIGNED"
-REDACT_RE = re.compile(r"\[REDACTED:\d+\]")
-
-# G0 — 생성 주체 attribution (PROV). 멱등 유지를 위해 timestamp 미포함(deterministic 값만).
-GENERATED_BY = {"extractor": "watcher_candidate_mvp2", "rule_version": "g0.1"}
-
-# 출력 키 whitelist (이 외 키는 절대 생성 안 함)
-NODE_KEYS = {"id", "space", "node_type", "label", "properties", "evidence_refs", "promotion_allowed"}
-PROP_KEYS = {"label_kind", "sentence", "domain", "candidate", "evidence_status", "origin",
-             "rule_id", "generated_by", "a0_verdict"}
-EVIDX_KEYS = {"evidence_id", "kind", "source_path", "domain", "promotion_allowed", "note"}
-
-
-def _sha8(s):
-    return hashlib.sha256(s.encode("utf-8")).hexdigest()[:8]
-
-
-def _has_secret(text):
-    return any(pat.search(text) for pat in v011.SECRET_PATTERNS)
-
-
-def _meaningful(sentence):
-    """redacted-only / 6자미만 / 공백없는 짧은 문장 거부 (loader 휴리스틱 + redacted 제거)."""
-    stripped = REDACT_RE.sub("", sentence).strip()
-    if len(stripped) < 6:
-        return False
-    if " " not in stripped and len(stripped) < 12:
-        return False
-    return True
-
-
-def to_nodes(chunks):
-    """evidence_chunk[] → (nodes, evidence_index, stops). 노드만(엣지 미생성)."""
-    nodes, ev_index, stops = [], [], []
-    for c in chunks:
-        item_id = c["item_id"]
-        sent = c["text"]
-        if not _meaningful(sent):
-            stops.append({"item_id": item_id, "reason": "short/redacted-only sentence"})
-            continue
-        if _has_secret(sent):  # 3차 재검사
-            stops.append({"item_id": item_id, "reason": "secret residual (3rd scan)"})
-            continue
-        # G0 — deterministic 5종 분류 (매칭 실패 = 판단 fallback, 현행 동일값)
-        kind, rule_id = lkmap.classify_label_kind(sent)
-        # node_type = OpenCrab space 노드타입(Document/Evidence/Concept/Claim) — v0.7 loader VALID_NTYPE 계약.
-        #   conv 경로의 KO2EN 5종 도장(state/judgment)과 다른 스키마 층: 여기 node_type 은 OpenCrab 적재용이므로
-        #   상태·판단→Claim 붕괴가 정상(loader 가 TitleCase 4종만 허용). 5종 도장은 A0 validator(아래 KO2EN) 전용.
-        space, ntype = lkmap.KIND_TO_SPACE_NTYPE[kind]
-        # G0 — A0 노드 헌법 shadow 판정 (기록만. 캡처 문장 품질 개선 전까지 stop 미적용)
-        a0_res = a0.classify_node(
-            {"id": "node:STAGING:wch:" + _sha8(item_id), "sentence": sent,
-             "node_type": lkmap.KO2EN[kind], "evidence_refs": [item_id]},
-            status="candidate")
-        node = {
-            "id": "node:STAGING:wch:" + _sha8(item_id),
-            "space": space,
-            "node_type": ntype,
-            "label": sent,
-            "properties": {
-                "label_kind": kind,
-                "sentence": sent,
-                "domain": DOMAIN,
-                "candidate": True,
-                "evidence_status": "partial",
-                "origin": "watcher",
-                "rule_id": rule_id,
-                "generated_by": dict(GENERATED_BY),
-                "a0_verdict": a0_res["verdict"],
-            },
-            "evidence_refs": [item_id],
-            "promotion_allowed": False,
-        }
-        ev = {
-            "evidence_id": item_id,
-            "kind": "file_pointer",
-            "source_path": c.get("evidence_meta", {}).get("raw_pointer", ""),
-            "domain": DOMAIN,
-            "promotion_allowed": False,
-            "note": "watcher capture pointer (원문 미복사)",
-        }
-        # whitelist 강제(이 외 키 차단)
-        assert set(node) <= NODE_KEYS and set(node["properties"]) <= PROP_KEYS, "node key whitelist 위반"
-        assert set(ev) <= EVIDX_KEYS, "evidence_index key whitelist 위반"
-        nodes.append(node)
-        ev_index.append(ev)
-    return nodes, ev_index, stops
 
 
 def _write_jsonl(path, rows):

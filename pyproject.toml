@@ -74,6 +74,10 @@ ignore = ["E501"]   # 라인 길이는 경고만(점진 도입).
 # strangler 이관 byte-identical impl — 원본 스타일(E702 세미콜론 다중문·E741 짧은 변수 l) 보존.
 # incoming_loader 는 자체 selftest 부재 → byte-identical 이 유일한 동등성 보증이라 스타일 변경 불가.
 "binggupack/pack/incoming_loader.py" = ["E702", "E741"]
+# transform-impl 이 import 한 sibling 모듈(mvp1/v07loader/mvp2)은 transform 본문엔 unused 로 보이나
+# scripts wrapper 의 process_one 오케스트레이션이 re-export 로 사용 → impl 에 보존 필수(F401 의도적).
+"binggupack/pack/candidate_mvp2.py" = ["F401"]
+"binggupack/pack/op_m0.py" = ["F401"]
 
 [tool.mypy]
 python_version = "3.10"

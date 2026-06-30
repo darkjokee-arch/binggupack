@@ -1,28 +1,50 @@
 # -*- coding: utf-8 -*-
-"""OpenBinggu Watcher 운영모드 M0 — 수동 1회 (capture → evidence → nodes → report, temp/staging only).
+"""OpenBinggu Watcher 운영모드 M0 — 수동 1회 (backward-compatible thin wrapper).
+
+v1.16 strangler Phase2: 순수 transform(_sha8/_has_secret/verify_step3_review_only/_per_run_gate)은
+binggupack.pack.op_m0 로 이관됐고, 이 파일은 공개 심볼이 byte-identical 한 thin wrapper 다. 기존
+호출처(import watcher_op_m0 as m0 → m0.process_one/_store_snapshot/_has_secret 등 bare-name import;
+importer = watcher_pack_builder_m0/watcher_batch_m1/openbinggu_pack_consumer_smoke/
+openbinggu_pack_review_e2e/openbinggu_scope_envelope_dryrun/binggupack_http_mcp_skeleton_selftest)는
+그대로 동작한다.
+
+__file__ 경로상수(BASE/SCRIPTS/FIXTURE_DIR/TMP_ROOT/REPORTS_DIR) + 운영 store 경로상수(ONTOLOGY/
+OPERATING_STORES, home 기준) + 파일 I/O 오케스트레이션(_store_snapshot/_write_jsonl/process_one/
+run_selftest/run_single/main/CLI)은 scripts/ 위치·tmp/reports·운영 store 경로 의존이라 이 wrapper
+에 잔류. dry-run only(운영 store write 0).
 
 설계: docs/BINGGUPACK_WATCHER_READONLY_OPERATING_MODE_DESIGN.md §2 (M0 수동 1회).
-범위(M0 고정):
-  - 입력 = git diff 텍스트 파일 1건(단일 소스). 라이브 git 호출/hook/daemon 없음.
-  - 흐름 = capture → evidence_chunk → incoming_nodes → report. **edge 생성 금지.**
-  - 출력 = BASE/tmp/watcher_op/<run>/ + BASE/reports/watcher_op_<run>.json (temp/staging only).
-  - MVP1(watcher_capture_mvp1) + MVP2(watcher_candidate_mvp2) to_nodes 재사용. 신규 변환 로직 0.
-  - Step3(match_policy) 는 **review-only 유지 검증용 read-only** 로만 호출(write/merge/apply 0).
-
+범위(M0 고정): git diff 텍스트 1건 → capture → evidence → nodes → report (edge 생성 금지),
+  출력 = BASE/tmp/watcher_op/<run>/ + BASE/reports/watcher_op_<run>.json (temp/staging only).
 강제(전건): candidate=true / promotion_allowed=false / origin=watcher / domain=STAGING_UNASSIGNED.
-금지: apply / store / DB / OpenCrab write / GitHub push / bid-engine 변경 / v09·ARMED 변경 / edge 생성 /
-  hook·daemon 등록 / 운영 store(_graph_merge·user_graph) write.
-STOP: secret raw 잔존 / temp 외 write / edge 생성 / candidate=false / promotion_allowed=true /
-  Step3 auto_merge 발생 / 운영 store mtime 변동 / 멱등 깨짐.
+Step3(match_policy) 는 review-only 유지 검증용 read-only 로만 호출(write/merge/apply 0).
 
 CLI:
   python watcher_op_m0.py --selftest        # fixture 3종(normal/empty/secret) + Step3 review-only + store 불변
   python watcher_op_m0.py <diff_text_file>  # 단일 운영 1회 (temp 산출)
 """
-import hashlib
 import json
+import os
 import sys
 from pathlib import Path
+
+HERE = os.path.dirname(os.path.abspath(__file__))   # <repo>/scripts
+ROOT = os.path.dirname(HERE)                         # <repo>
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)   # binggupack 패키지 import 경로
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)   # scripts 형제(importer 호환) 호환
+
+from binggupack.pack.op_m0 import *  # noqa: E402,F401,F403
+from binggupack.pack.op_m0 import (  # noqa: E402,F401  (전체 명시 re-export)
+    _sha8,
+    _has_secret,
+    verify_step3_review_only,
+    _per_run_gate,
+    mvp1,
+    mvp2,
+    mp,
+)
 
 BASE = Path(__file__).resolve().parent.parent
 SCRIPTS = Path(__file__).resolve().parent
@@ -30,18 +52,9 @@ FIXTURE_DIR = BASE / "tests" / "fixtures" / "watcher_mvp1"   # MVP1 diff fixture
 TMP_ROOT = BASE / "tmp" / "watcher_op"
 REPORTS_DIR = BASE / "reports"
 
-sys.path.insert(0, str(SCRIPTS))
-import watcher_capture_mvp1 as mvp1       # Step0+1 capture/to_evidence 재사용
-import watcher_candidate_mvp2 as mvp2     # Step2 to_nodes 재사용
-import localbinggu_match_policy as mp     # Step3 review-only 검증(read-only)
-
 # 운영 store (절대 write 금지 — mtime 불변 검증 대상). MVP1 의 BASE.parent.parent 경로 버그 회피, home 기준 정확 경로.
 ONTOLOGY = Path.home() / ".claude" / "memory" / "ontology"
 OPERATING_STORES = [ONTOLOGY / "_graph_merge.yaml", ONTOLOGY / "user_graph.yaml"]
-
-
-def _sha8(s):
-    return hashlib.sha256(s.encode("utf-8")).hexdigest()[:8]
 
 
 def _store_snapshot():
@@ -60,39 +73,6 @@ def _write_jsonl(path, rows):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(json.dumps(r, ensure_ascii=False, sort_keys=True) + "\n" for r in rows),
                     encoding="utf-8")
-
-
-def _has_secret(text):
-    return any(pat.search(text) for pat in mvp1.v011.SECRET_PATTERNS)
-
-
-def verify_step3_review_only(nodes):
-    """Step3(match_policy) read-only 호출로 watcher 노드의 auto_merge 자격 박탈(review 강등) 확인.
-       write/merge/apply 0. 반환: dict(검증 지표)."""
-    norm = mp.normalize_nodes(nodes)
-    # (a) 실제 capture 노드 페어와이즈: auto_merge 후보 0 이어야 함.
-    buckets, fuzzy, cda = mp.evaluate(norm)
-    s = mp.summarize(buckets, fuzzy, cda)
-    # (b) 합성 duplicate(동일 sentence watcher 노드 2개) → wrapper 강등 작동 직접 증명.
-    synth_auto, synth_review, synth_tested = None, None, False
-    if norm:
-        a = dict(norm[0])
-        b = dict(a)
-        b["id"] = a["id"] + ":synthdup"
-        b["evidence_refs"] = set(a["evidence_refs"])  # set 공유 회피
-        bs, bf, bc = mp.evaluate([a, b])
-        ss = mp.summarize(bs, bf, bc)
-        synth_auto = ss["auto_merge_allowed_count"]
-        synth_review = ss["localbinggu_review_candidate_count"]
-        synth_tested = True
-    return {
-        "capture_auto_merge_allowed": s["auto_merge_allowed_count"],
-        "capture_cross_domain_auto_merge": s["cross_domain_auto_merge_count"],
-        "synthetic_dup_tested": synth_tested,
-        "synthetic_dup_auto_merge": synth_auto,   # 0 기대 (watcher override 강등)
-        "synthetic_dup_review_candidate": synth_review,  # >=1 기대
-        "rapidfuzz_available": mp.RF,
-    }
 
 
 def process_one(diff_text, run):
@@ -144,25 +124,6 @@ def process_one(diff_text, run):
         "hook_daemon_registered": 0, "v09_or_armed_changed": 0,
     }
     return report, out_dir
-
-
-def _per_run_gate(report):
-    """단일 run 안전 게이트."""
-    s3 = report["step3_review_only"]
-    checks = {
-        "no_secret_residual": not report["any_secret_residual"],
-        "candidate_all_true": report["candidate_all_true"],
-        "promotion_all_false": report["promotion_all_false"],
-        "origin_all_watcher": report["origin_all_watcher"],
-        "domain_all_staging": report["domain_all_staging"],
-        "no_edges": report["edges_generated"] == 0,
-        "step3_capture_auto_merge_zero": s3["capture_auto_merge_allowed"] == 0,
-        "step3_synthetic_dup_review_only": (
-            (not s3["synthetic_dup_tested"])
-            or (s3["synthetic_dup_auto_merge"] == 0 and s3["synthetic_dup_review_candidate"] >= 1)),
-        "operating_store_unchanged": report["operating_store_unchanged"],
-    }
-    return checks
 
 
 def run_single(path):
