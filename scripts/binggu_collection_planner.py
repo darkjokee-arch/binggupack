@@ -228,7 +228,7 @@ def _fallback_aspects(topic, aspects_hint=None, max_aspects=_DEFAULT_MAX_ASPECTS
 
 # ── 실 ollama transport 팩토리(selftest 미사용·실 네트워크 전용) ───────────
 def default_ollama_transport(model="qwen2.5:32b-instruct-q4_K_M",
-                             url="http://localhost:11434", timeout=120):
+                             url="http://localhost:11434", timeout=600):
     """실 ollama generate transport 생성기(클로저) — **selftest 미사용·실 endpoint 전용**.
     반환 transport(prompt:str)->response:str. urllib 는 함수 내부 lazy(서드파티 0).
     네트워크/파싱 예외는 호출자(plan)가 흡수 — transport 자체는 호출되면 raise 가능(실 경로).
