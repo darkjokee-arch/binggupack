@@ -59,7 +59,7 @@ python scripts/openbinggu_batch_pack_loader.py --selftest    # 10/10 기대
 
 ✅ 기대: synthetic pack으로 **apply → read-back → rollback(원복)** 전 과정이 temp에서 자동 검증됩니다. 내 데이터 0.
 
-> **내 pack은 어디서 오나?** pack 생성은 이 repo의 빌더 `scripts/watcher_pack_builder_m0.py <입력 디렉터리>`(3단계에서 selftest로 본 그 스크립트)로 로컬에서 수행하고, BingguPack은 그렇게 만들어진 pack을 **검증·적재·preview**하는 쪽을 담당합니다. 흐름 개요는 [USER_DRIVEN_OPENCRAB_UPLOAD_FLOW](OPENBINGGU_USER_DRIVEN_OPENCRAB_UPLOAD_FLOW.md) 참고. (여기서 OpenCrab apply/finalize/upload를 실행하라는 뜻이 아닙니다 — 그 단계들은 별도 승인 영역이며 이 튜토리얼 범위 밖입니다.)
+> **내 pack은 어디서 오나?** pack 생성은 이 repo의 빌더 `scripts/watcher_pack_builder_m0.py <입력 디렉터리>`(3단계에서 selftest로 본 그 스크립트)로 로컬에서 수행하고, BingguPack은 그렇게 만들어진 pack을 **검증·적재·preview**하는 쪽을 담당합니다. 흐름 개요는 [USER_DRIVEN_OPENCRAB_UPLOAD_FLOW](BINGGUPACK_USER_DRIVEN_OPENCRAB_UPLOAD_FLOW.md) 참고. (여기서 OpenCrab apply/finalize/upload를 실행하라는 뜻이 아닙니다 — 그 단계들은 별도 승인 영역이며 이 튜토리얼 범위 밖입니다.)
 
 실제로 내 pack을 넣어보고 싶으면 (**명시 opt-in 필수**, 기본은 rollback 원복):
 
@@ -167,10 +167,10 @@ python binggu.py route "아까 그 판단 틀렸어"
 
 ## 7. 다음 단계
 
-- **여러 AI에 pack 넘기기**: [Multi-agent handoff guide](OPENBINGGU_PHASE3_MULTI_AGENT_HANDOFF_GUIDE.md)
-- **내 pack을 공개하기 전**: [실데이터 검증 절차](OPENBINGGU_REAL_DATA_VALIDATION_PROCEDURE.md) 필수 — `doctor --tree <공개 후보 트리>`가 CLEAN이어야 하고, 검출 1건이라도 있으면 공개가 차단(BLOCK)됩니다.
+- **여러 AI에 pack 넘기기**: [Multi-agent handoff guide](BINGGUPACK_PHASE3_MULTI_AGENT_HANDOFF_GUIDE.md)
+- **내 pack을 공개하기 전**: [실데이터 검증 절차](BINGGUPACK_REAL_DATA_VALIDATION_PROCEDURE.md) 필수 — `doctor --tree <공개 후보 트리>`가 CLEAN이어야 하고, 검출 1건이라도 있으면 공개가 차단(BLOCK)됩니다.
 
 ## 막혔을 때
 
 - `GATE: GO`가 안 나온다 → 종료코드와 마지막 요약(PASS/FAIL·reason_code)만 확인하세요. raw 경로/원문은 출력되지 않는 것이 정상입니다.
-- FTS 검색 결과에서 값이 안 보인다 → contentless FTS 설계입니다. [Promotion Preview 설계](OPENBINGGU_PROMOTION_PREVIEW_DESIGN.md) §contentless FTS 검증법 참조.
+- FTS 검색 결과에서 값이 안 보인다 → contentless FTS 설계입니다. [Promotion Preview 설계](BINGGUPACK_PROMOTION_PREVIEW_DESIGN.md) §contentless FTS 검증법 참조.

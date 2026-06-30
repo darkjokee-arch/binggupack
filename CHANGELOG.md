@@ -1,8 +1,27 @@
 # Changelog — BingguPack
 
-## Unreleased — 분류 SSOT 통합 + explicit 경로 + storage/MCP facade (2026-06-27)
+## v1.16.0 — 외부 리뷰 5건 정리: PII scan 버그·툴체인·브랜드 통일 (2026-06-30)
 
-preview/capture 분류를 단일 SSOT 게이트로 통합(자동 preview는 판단/교훈/선호/규칙만 후보), 명시 입력(`remember`/`pair`)은 판단-veto 면제(안전 게이트 유지), 100문장 golden 하네스 + doctor 회귀망 확장, `binggupack.storage`/`binggupack.mcp` facade(strangler 1단계).
+preview/capture 분류를 단일 SSOT 게이트로 통합(자동 preview는 판단/교훈/선호/규칙만 후보), 명시 입력(`remember`/`pair`)은 판단-veto 면제(안전 게이트 유지), 100문장 golden 하네스 + doctor 회귀망 확장, `binggupack.storage`/`binggupack.mcp` facade(strangler 1단계). 더해 외부 리뷰 5건(PII scan 버그·툴체인 점진 도입·브랜드 통일)을 정리했다.
+
+### Fixed
+- 공개 트리 PII scan이 빌드 산출물(dist/ build/ *.egg-info/)을 read_error 로 잡아 package_cli_selftest 후 같은 트리에서 BLOCK 되던 개발 UX 버그 수정 (scan ignore 패턴 추가)
+
+### Added
+- 표준 개발 툴체인 점진 도입: ruff/mypy/pytest 최소 설정(binggupack/ 패키지 한정) + requirements/dev.txt. 기존 자체 selftest 게이트와 공존.
+
+### Changed
+- 브랜드 통일: 사용자 대면 docs(OPENBINGGU_*.md → BINGGUPACK_*.md) 및 문서 본문 OpenBinggu→BingguPack. 외부 인터페이스(MCP 서버명 openbinggu-local, 스키마 $id, OPENBINGGU_* 환경변수)는 호환 유지.
+
+### Safety
+- scripts/openbinggu_*.py 내부 파일명·MCP 진입점·공개 스키마 $id URL 미변경 (기존 설치 호환성 보존).
+
+### Verified
+- 전체 회귀 selftest 30/30 PASS (REGRESSION=GO) — 브랜드 docs rename(31)·코드주석/메타 참조 정리(20)·툴체인·v1.16.0 bump·PII scan 수정 후 회귀 0.
+- `openbinggu_doctor --selftest` GATE GO (21/21 + 12/12, 운영 ledger write=0·mtime 불변).
+- PII tree-scan 재현 검증: build 산출물(dist/build/*.egg-info) ignore 실증 + 일반 소스 PII 탐지 능력 유지(BLOCK).
+- `version_consistency_selftest` 3/3 (pyproject == __about__ == 1.16.0).
+- 외부 인터페이스 보존 실측: MCP 서버명 `openbinggu-local`·`OPENBINGGU_*` 환경변수(10건)·`openbinggu_pack_contract.schema` $id(9건) 미변경.
 
 ### Known follow-up
 The current release introduces `binggupack.storage` and `binggupack.mcp` facades as the first strangler step. Implementation logic still remains in `scripts/` for compatibility and release stability. Phase 2 will migrate storage/MCP logic into package modules incrementally while keeping script shims. (마일스톤 blocker: `docs/BINGGUPACK_NEXT_IMPLEMENTATION_CANDIDATES.md`)

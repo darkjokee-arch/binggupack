@@ -588,7 +588,7 @@ def approve_queued_change(db, queue_id, ctx, ts=None):
 def rollback_to_snapshot(db, snapshot_path):
     """안전 작업 자동 롤백 — 스냅샷으로 main DB 원복(WAL/SHM 제거 후 복사).
 
-    docs/OPENBINGGU_REAL_STAGING_CYCLE_ROLLBACK_PROCEDURE.md 절차 코드화(temp staging 한정).
+    docs/BINGGUPACK_REAL_STAGING_CYCLE_ROLLBACK_PROCEDURE.md 절차 코드화(temp staging 한정).
     """
     if not os.path.exists(snapshot_path):
         return {"rolled_back": False, "reason": "snapshot_missing"}

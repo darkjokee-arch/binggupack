@@ -19,7 +19,7 @@ pack 이 지켜야 할 최소 안전 필드만 코드로 고정한다. 주제는
 
 | 파일 | 역할 |
 |---|---|
-| `docs/OPENBINGGU_PACK_CONTRACT.md` | 본 설계 문서 |
+| `docs/BINGGUPACK_PACK_CONTRACT.md` | 본 설계 문서 |
 | `schemas/openbinggu_pack_contract.schema.json` | JSON Schema(draft-07) — 계약 형식 정의 |
 | `scripts/openbinggu_pack_validate.py` | validator(자체 구현, 외부 의존 0) — dry-run only |
 | `tests/fixtures/openbinggu_pack_contract/*.json` | synthetic fixture 8개(GO 조건 대응) |

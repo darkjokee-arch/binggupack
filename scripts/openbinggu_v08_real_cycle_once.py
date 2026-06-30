@@ -11,7 +11,7 @@
      confirm="SAVE 1,2,3", 판단 1건 due
   4) diff 증빙: 테이블별 insert 수 + 기존 row 전건 불변(before ⊆ after) + audit 원문 전문 누설 0
   5) read-back + chain INTACT + confirmed/promotion 0 + 운영 store 불변
-rollback: docs/OPENBINGGU_REAL_STAGING_CYCLE_ROLLBACK_PROCEDURE.md (사전 갱신, checksum 원복 기실증).
+rollback: docs/BINGGUPACK_REAL_STAGING_CYCLE_ROLLBACK_PROCEDURE.md (사전 갱신, checksum 원복 기실증).
 
 모드 2종:
   (무인자)        real 모드 — private 설정 모듈(openbinggu_real_staging_apply_once, 공개 트리 미포함)이

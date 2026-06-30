@@ -6,7 +6,7 @@
 > ✅ **구현 완료 (owner GO 2026-06-11)** — `scripts/openbinggu_owner_accept_ux.py` (selftest 16/16 GO).
 > 최종 스키마는 owner 원칙이 본 문서 §2(current-view 단일행)를 일부 supersede: **append 전용 event 테이블**
 > (같은 node_id 다중 event·현재 상태=최신 event) — UNIQUE↔철회 보존 모순의 구조적 해소. 통합 실연:
-> `OPENBINGGU_V1_CANDIDATE_CYCLE_RESULT.md` (temp 17/17 + real 13/13).
+> `BINGGUPACK_V1_CANDIDATE_CYCLE_RESULT.md` (temp 17/17 + real 13/13).
 
 ## 1. 어휘 확정 (D7 해소)
 

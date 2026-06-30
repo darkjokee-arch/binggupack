@@ -17,7 +17,7 @@ byte-identical 하다(기능 변경 0). 순수 판정(write 0)·binggupack 외�
 범위: 경로 분석만. 실제 파일시스템 write 0. operating store/DB/production 미접근.
 CLI: python scripts/openbinggu_path_safety_gate.py --selftest
 
-설계 ref: OPENBINGGU_FIRST_RELEASE_4CLI_SYNTHESIS.md §3-A(S3)/§3-B(X1)
+설계 ref: BINGGUPACK_FIRST_RELEASE_4CLI_SYNTHESIS.md §3-A(S3)/§3-B(X1)
 """
 import sys
 import os

@@ -152,6 +152,8 @@ def _real_tree_scan(tree_root):
     # 주의: .env/credentials*/private_key* 는 scanner 의 "검출 대상"이므로 제외 금지(검출 무력화 방지)
     ignore = ["*.sqlite", "*.db", "*_graph.yaml", "reports/", "reviews/", "captures/",
               "tmp/", "__pycache__/", "*.bak_*",
+              # Python 빌드 산출물(pip install/-m build). run_all 의 PUBLIC_IGNORE 와 정합.
+              "dist/", "*/dist/*", "build/", "*/build/*", "*.egg-info/*", "*/*.egg-info/*",
               # gitignore 대상 비공개·미커밋 라이브 데이터 (path_private_pack_data 자기탐지 회피)
               "hosted/workers/data/", "data/packs.json"]
     return scan_public_tree(tree_root, ignore_globs=ignore)

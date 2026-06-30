@@ -1,4 +1,4 @@
-# OpenBinggu v1.0 — candidate management full-cycle verification result (2026-06-11)
+# BingguPack v1.0 — candidate management full-cycle verification result (2026-06-11)
 
 The v1.0 personal candidate-management UX is now complete and verified end-to-end:
 **view → reject → replace → accept → retract → feedback resolve**, exercised both on a temp

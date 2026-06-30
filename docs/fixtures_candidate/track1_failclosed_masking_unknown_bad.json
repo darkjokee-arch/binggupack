@@ -6,7 +6,7 @@
     "purpose": "트랙1 GitHub 공개 fail-closed 게이트1 검증 — 마스킹 결과 unknown(판단불가) 항목이 섞이면 공개가 fail-open(ALLOW)이 아니라 fail-closed(BLOCK)로 귀결되는지 확인",
     "raw_pii_included": false,
     "note": "진짜 PII/secret 미포함. unknown 유발은 합성 토큰 MASK_UNDECIDED_TOKEN 으로만 표현. 실행/selftest 는 별도 GO.",
-    "design_ref": "OPENBINGGU_TRACK1_FAILCLOSED_PUBLISH_GUARD_DESIGN.md §2 게이트1 / §4 / §6"
+    "design_ref": "BINGGUPACK_TRACK1_FAILCLOSED_PUBLISH_GUARD_DESIGN.md §2 게이트1 / §4 / §6"
   },
   "case_name": "track1_failclosed_masking_unknown_bad",
   "kind": "negative",

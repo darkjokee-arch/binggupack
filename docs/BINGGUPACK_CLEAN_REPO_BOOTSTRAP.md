@@ -2,11 +2,11 @@
 
 marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dry-run)
 
-# OpenBinggu 1차 배포 — clean repo 부트스트랩 절차 (S1)
+# BingguPack 1차 배포 — clean repo 부트스트랩 절차 (S1)
 
 > **상태: 절차 문서(2026-06-08). docs only · 실 repo 생성/push 0 · production write 0.**
-> 4CLI 선결 gate S1(git 히스토리 영속성) 흡수. 상세 `OPENBINGGU_FIRST_RELEASE_4CLI_SYNTHESIS.md`(internal design doc — not included in public repo) §3-A.
-> 상위: [RELEASE_REPO_LAYOUT](OPENBINGGU_RELEASE_REPO_LAYOUT.md) · [RELEASE_PREFLIGHT_CHECKLIST](OPENBINGGU_RELEASE_PREFLIGHT_CHECKLIST.md).
+> 4CLI 선결 gate S1(git 히스토리 영속성) 흡수. 상세 `BINGGUPACK_FIRST_RELEASE_4CLI_SYNTHESIS.md`(internal design doc — not included in public repo) §3-A.
+> 상위: [RELEASE_REPO_LAYOUT](BINGGUPACK_RELEASE_REPO_LAYOUT.md) · [RELEASE_PREFLIGHT_CHECKLIST](BINGGUPACK_RELEASE_PREFLIGHT_CHECKLIST.md).
 
 ---
 
@@ -29,10 +29,10 @@ marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dr
 > 본 문서는 절차 정의까지. 실제 repo 생성/push는 owner 명시 승인 후 별도 GO.
 
 1. **새 빈 repo 생성** — 기존 작업 repo와 분리된 새 디렉터리/원격(`git init` 새로). 기존 `.git` history 미반입.
-2. **공개 대상만 복사** — [REPO_LAYOUT](OPENBINGGU_RELEASE_REPO_LAYOUT.md) §1 트리에 해당하는 파일만 복사(scripts 4개·docs 공개분·examples/toy_project·tests/fixtures/synthetic·README·INSTALL·mcp.example·LICENSE 위치·.gitignore). 실 그래프/DB/reports/reviews/captures/evidence/.env/credential 미복사.
+2. **공개 대상만 복사** — [REPO_LAYOUT](BINGGUPACK_RELEASE_REPO_LAYOUT.md) §1 트리에 해당하는 파일만 복사(scripts 4개·docs 공개분·examples/toy_project·tests/fixtures/synthetic·README·INSTALL·mcp.example·LICENSE 위치·.gitignore). 실 그래프/DB/reports/reviews/captures/evidence/.env/credential 미복사.
 3. **.gitignore 먼저 배치** — 첫 `git add` 전에 [REPO_LAYOUT §3] .gitignore 적용. 추적 누락 검증(`git check-ignore`).
 4. **secret/PII scan** — 복사된 트리 전체 rglob + secret/PII 정규식 → **0건**(존재·길이만 보고, raw 미출력). 1건이라도 검출 시 중단.
-5. **source pointer 점검** — 공개 pack은 디폴트 source pointer 미포함([SANITIZER_POLICY_BLOCK_ONLY](OPENBINGGU_SANITIZER_POLICY_BLOCK_ONLY.md) §S2). dirty/unknown 잔존 시 BLOCK.
+5. **source pointer 점검** — 공개 pack은 디폴트 source pointer 미포함([SANITIZER_POLICY_BLOCK_ONLY](BINGGUPACK_SANITIZER_POLICY_BLOCK_ONLY.md) §S2). dirty/unknown 잔존 시 BLOCK.
 6. **첫 커밋 = clean** — 위 통과분만 단일 초기 커밋. 이 커밋이 repo history의 시작.
 7. **owner 명시 승인** — 공개 요약(무엇을·어디로·항목 수) 확인 후 1회 approve.
 8. **push** — 승인 후에만. 자동/일괄 금지.

@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 OpenBinggu Step 3 — synthetic staging write 구현 + selftest.
-기준: OPENBINGGU_PERSONAL_APPLY_ALLOWED_DESIGN.md(Step1) + OPENBINGGU_STAGING_SQLITE_SCHEMA_DESIGN.md(Step2).
+기준: BINGGUPACK_PERSONAL_APPLY_ALLOWED_DESIGN.md(Step1) + BINGGUPACK_STAGING_SQLITE_SCHEMA_DESIGN.md(Step2).
 
 안전: staging = temp 파일 SQLite(운영과 물리 분리). 운영 localcrab_index.sqlite/user_graph/_graph_merge
       connect 0·write 0(mtime 전후 대조). C-2 guard 통과 후에만 insert. apply(운영) 0.

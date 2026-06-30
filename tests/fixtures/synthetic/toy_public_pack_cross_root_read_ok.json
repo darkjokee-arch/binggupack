@@ -7,7 +7,7 @@
     "raw_pii_included": false,
     "private_data_included": false,
     "note": "실 데이터/실명/실 경로 0. 모든 식별자는 synthetic. source pointer는 상대경로/synthetic만(clean). 기존 scope_envelope_dryrun.py 의 vis_public_anyone_ok 케이스(make_pack(visibility='public') + grant_other)와 동형. 실제 자동 검증은 해당 selftest GATE=GO 가 대표.",
-    "design_ref": "OPENBINGGU_PERSONAL_TRACK_BASELINE_AND_GITHUB_PUBLISH.md §2-1 / OPENBINGGU_SCOPE_ENVELOPE_DRYRUN_RESULT.md vis_public_anyone_ok"
+    "design_ref": "BINGGUPACK_PERSONAL_TRACK_BASELINE_AND_GITHUB_PUBLISH.md §2-1 / BINGGUPACK_SCOPE_ENVELOPE_DRYRUN_RESULT.md vis_public_anyone_ok"
   },
   "case_name": "toy_public_pack_cross_root_read_ok",
   "kind": "positive",

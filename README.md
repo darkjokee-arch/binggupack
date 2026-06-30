@@ -155,7 +155,7 @@ python binggu.py doctor
 | 내 말 / AI 말 따로 저장 | [BINGGUPACK_SPEAKER_AXIS_DESIGN](docs/BINGGUPACK_SPEAKER_AXIS_DESIGN.md) |
 | 사람 승인과 안전 경계 | [BINGGUPACK_GOVERNANCE_DESIGN](docs/BINGGUPACK_GOVERNANCE_DESIGN.md) |
 | hosted inbox 경계 | [BINGGUPACK_HOSTED_BOUNDARY](docs/BINGGUPACK_HOSTED_BOUNDARY.md) |
-| 팩 형식 | [OPENBINGGU_PACK_CONTRACT](docs/OPENBINGGU_PACK_CONTRACT.md) |
+| 팩 형식 | [BINGGUPACK_PACK_CONTRACT](docs/BINGGUPACK_PACK_CONTRACT.md) |
 | 전체 문서 색인 | [docs/INDEX.md](docs/INDEX.md) |
 
 ## 개발자용 짧은 점검
@@ -166,7 +166,7 @@ python scripts/smoke_test.py --home ./_binggu_smoke_home
 python binggu.py --selftest
 ```
 
-문서와 스크립트 이름에 남아 있는 `OpenBinggu`는 예전 내부 코드네임입니다. 현재 공개 제품명은 BingguPack이고, 새로 읽을 문서는 `BINGGUPACK_*`와 `START_HERE`를 우선 보세요.
+스크립트 파일명(`scripts/openbinggu_*.py`)과 일부 외부 식별자에 남아 있는 `OpenBinggu`는 예전 내부 코드네임입니다. 현재 공개 제품명은 BingguPack이고, 문서는 이미 `BINGGUPACK_*`로 정리돼 있으니 새로 읽을 때는 `BINGGUPACK_*`와 `START_HERE`를 우선 보세요.
 
 ## License
 

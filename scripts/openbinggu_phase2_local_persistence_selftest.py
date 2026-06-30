@@ -3,7 +3,7 @@
 """
 BingguPack Phase 2-A — local persistence synthetic selftest (DESIGN→검증, sandbox only).
 
-기준: docs/OPENBINGGU_PHASE2_LOCAL_PERSISTENCE_DESIGN.md
+기준: docs/BINGGUPACK_PHASE2_LOCAL_PERSISTENCE_DESIGN.md
 범위: temp OPENBINGGU_HOME 기반 사용자 로컬 candidate 저장 흐름 synthetic 검증.
       기존 StagingDB/staging_apply 엔진(openbinggu_staging_write_selftest) 무수정 재사용 +
       HOME 위치 정책·multi-user 격리·write OFF·emergency stop 래퍼.

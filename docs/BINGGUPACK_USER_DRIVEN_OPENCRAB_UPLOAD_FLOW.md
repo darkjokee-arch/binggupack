@@ -2,10 +2,10 @@
 
 marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dry-run)
 
-# OpenBinggu 1차 배포 — 사용자 주도 OpenCrab 업로드 흐름 (FLOW)
+# BingguPack 1차 배포 — 사용자 주도 OpenCrab 업로드 흐름 (FLOW)
 
 > **상태: 흐름 정의 문서(2026-06-08). docs only · 실 업로드 0 · 업로드 도구 미구현(별도 GO).**
-> 상위: [FIRST_RELEASE_GITHUB_MCP_DESIGN](OPENBINGGU_FIRST_RELEASE_GITHUB_MCP_DESIGN.md) §2-4 · [RELEASE_PREFLIGHT_CHECKLIST](OPENBINGGU_RELEASE_PREFLIGHT_CHECKLIST.md) §3.
+> 상위: [FIRST_RELEASE_GITHUB_MCP_DESIGN](BINGGUPACK_FIRST_RELEASE_GITHUB_MCP_DESIGN.md) §2-4 · [RELEASE_PREFLIGHT_CHECKLIST](BINGGUPACK_RELEASE_PREFLIGHT_CHECKLIST.md) §3.
 
 ---
 
@@ -19,7 +19,7 @@ OpenCrab은 **각 사용자가 가입해서 자기 pack을 자기 의지로 올�
 
 | 구분 | 사용자 주도 OpenCrab 업로드 | 우리 시스템/운영자의 자동 store write |
 |---|---|---|
-| 누가 | 가입한 사용자 본인 | OpenBinggu 시스템/운영자 |
+| 누가 | 가입한 사용자 본인 | BingguPack 시스템/운영자 |
 | 트리거 | 사용자가 수동 승인 후 직접 실행 | 자동(파이프라인) |
 | 데이터 방향 | 사용자 → 자기 OpenCrab 계정 | 시스템 → 운영 그래프/store |
 | 판정 | **1차 포함 가능**(gate 통과 시) | **HOLD** |
@@ -57,7 +57,7 @@ OpenCrab은 **각 사용자가 가입해서 자기 pack을 자기 의지로 올�
 - ❌ user 승인 없는 업로드 / 자동·일괄 업로드.
 - ❌ dirty/unknown source pointer·raw PII/secret/private path 포함 pack 업로드.
 - ❌ 업로드 결과로 raw 값 출력.
-- ⚠️ 실제 업로드 도구(MCP/CLI)는 **미구현**([MCP_EXPOSURE](OPENBINGGU_MCP_EXPOSURE_CANDIDATE.md): 자동화 금지·수동 승인 후 사용자 실행 형태로만, 별도 GO).
+- ⚠️ 실제 업로드 도구(MCP/CLI)는 **미구현**([MCP_EXPOSURE](BINGGUPACK_MCP_EXPOSURE_CANDIDATE.md): 자동화 금지·수동 승인 후 사용자 실행 형태로만, 별도 GO).
 
 ## 4. 상태
 

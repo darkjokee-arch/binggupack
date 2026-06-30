@@ -6,7 +6,7 @@ BingguPack — promotion preview (read-only plan tool).
 batch pack(candidate)을 로컬 운영형 그래프 DB로 승격하기 **전에**, 어떤 변환·write가
 일어날지 미리 보여주는 **preview/plan 도구**입니다. 승격 실행기가 아닙니다.
 
-기준: docs/OPENBINGGU_PROMOTION_PREVIEW_DESIGN.md (D1~D4 변환 규칙 + target schema contract).
+기준: docs/BINGGUPACK_PROMOTION_PREVIEW_DESIGN.md (D1~D4 변환 규칙 + target schema contract).
 
 read-only 보장:
   - target DB는 항상 `mode=ro` URI로만 엽니다. INSERT/UPDATE/DELETE 코드 자체가 없습니다.

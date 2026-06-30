@@ -2,7 +2,7 @@
 
 # BingguPack Phase 2 — Local Persistence 결과 + v0.2.0-rc1 계획 (2026-06-09)
 
-> 설계: `OPENBINGGU_PHASE2_LOCAL_PERSISTENCE_DESIGN.md`. 결과: Phase 2-A(저장 흐름 selftest) + Phase 2-B(staging 재독 E2E).
+> 설계: `BINGGUPACK_PHASE2_LOCAL_PERSISTENCE_DESIGN.md`. 결과: Phase 2-A(저장 흐름 selftest) + Phase 2-B(staging 재독 E2E).
 > ⚠️ 전부 **synthetic / temp HOME / read-only(재독)**. (작성 당시 상태: 코드는 작업트리에만 존재, 공개 RC 미반영·push 0.)
 > 📌 **현재**: 이 기능은 **v0.2.0-rc1**로 공개 RC에 반영되어 있습니다. 본문의 "작업트리만/push 0" 표현은 작성 시점 기록입니다.
 > 표현 규칙: "100% 완성/보장/실유출 0" 금지. operating_store_unchanged·raw_leak=0·temp/synthetic 구분.

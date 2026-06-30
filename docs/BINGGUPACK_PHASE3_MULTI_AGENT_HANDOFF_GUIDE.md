@@ -4,7 +4,7 @@
 
 > 목적: 사용자가 만든 pack(또는 로컬 candidate memory)을 **Claude·Codex·ChatGPT·Gemini가 같은 맥락으로 이어받게** 하는 방법.
 > ⚠️ 문서/가이드만. 코드·write·push·OpenCrab·Neo4j·MCP write 0. 기준: v0.2.0-rc1(read/dry-run + pack validation + local persistence opt-in).
-> 관련: `OPENBINGGU_PACK_CONTRACT.md`(RC) · `OPENBINGGU_CONSUMER_READER_CONTRACT_DESIGN.md` · A3 reader 검증(`A3_REAL_READER_RESULT`·`A3_COMPLEX_READER_RESULT`).
+> 관련: `BINGGUPACK_PACK_CONTRACT.md`(RC) · `BINGGUPACK_CONSUMER_READER_CONTRACT_DESIGN.md` · A3 reader 검증(`A3_REAL_READER_RESULT`·`A3_COMPLEX_READER_RESULT`).
 
 ## 1. 한 줄
 pack = **핵심 문장 노드 + 동사형 edge + 모든 edge의 evidence_refs + evidence index**의 묶음(JSONL canonical). 여러 AI가 이 pack을 읽어 **evidence 기반으로** 동일 맥락을 이어받는다. pack은 candidate이며 받은 쪽이 자동 병합하지 않는다.

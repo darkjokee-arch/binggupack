@@ -2,10 +2,10 @@
 
 marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dry-run)
 
-# OpenBinggu 1차 배포 — MCP 기능 노출 후보 (D)
+# BingguPack 1차 배포 — MCP 기능 노출 후보 (D)
 
 > **상태: MCP 노출 후보(2026-06-08). docs only · MCP 서버 코드 구현 0 · 실 노출 0.**
-> 상위: [FIRST_RELEASE_GITHUB_MCP_DESIGN](OPENBINGGU_FIRST_RELEASE_GITHUB_MCP_DESIGN.md).
+> 상위: [FIRST_RELEASE_GITHUB_MCP_DESIGN](BINGGUPACK_FIRST_RELEASE_GITHUB_MCP_DESIGN.md).
 > 본 문서는 "무엇을 MCP 도구로 노출할지/하지 말지" 기준까지. 실제 MCP 서버 구현은 별도 GO.
 
 ---

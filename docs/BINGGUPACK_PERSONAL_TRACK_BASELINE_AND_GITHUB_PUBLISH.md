@@ -1,10 +1,10 @@
 > OpenBinggu is the legacy/internal codename for BingguPack.
 
-# OpenBinggu 작업 B — 개인용(트랙1) 기준 정렬 + GitHub 공개 대비 (DESIGN / 후보 ONLY)
+# BingguPack 작업 B — 개인용(트랙1) 기준 정렬 + GitHub 공개 대비 (DESIGN / 후보 ONLY)
 
 > **상태라인(표준):** `marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dry-run)`
 >
-> **§3 GitHub 공개 게이트 갱신(2026-06-08)**: source pointer dirty/unknown → publish BLOCK이 pack builder에 반영됨(selftest GATE=GO/EXIT=0). 정교 자동 sanitizer/치환은 HOLD. 실 GitHub push는 owner 승인 전 HOLD. 상세 `OPENBINGGU_TRACK1_FAILCLOSED_PUBLISH_GUARD_DESIGN.md`(internal design doc — not included in public repo).
+> **§3 GitHub 공개 게이트 갱신(2026-06-08)**: source pointer dirty/unknown → publish BLOCK이 pack builder에 반영됨(selftest GATE=GO/EXIT=0). 정교 자동 sanitizer/치환은 HOLD. 실 GitHub push는 owner 승인 전 HOLD. 상세 `BINGGUPACK_TRACK1_FAILCLOSED_PUBLISH_GUARD_DESIGN.md`(internal design doc — not included in public repo).
 >
 > **상태: DESIGN/후보 ONLY · enum 확정 아님 · 실수정 0.**
 > 본 문서는 신규 docs 1개 Write만. 기존 docs/scripts/fixture 수정 0 · production/OpenCrab/store/DB/server/bid-engine write 0 · apply/ingest/merge/push/v09/ARMED 0 · 실자료 외부전송 0 · raw PII/secret 출력 0.
@@ -13,8 +13,8 @@
 >
 > - 작성일: 2026-06-08
 > - scope: project:openbinggu / 트랙1 개인용(private/local)
-> - 상위: [PRODUCT_DIRECTION_TWO_TRACK](OPENBINGGU_PRODUCT_DIRECTION_TWO_TRACK.md) §1 트랙1 · §3 "트랙1 GitHub 공개 옵션 = 조건부 GO"
-> - 참조: [PUBLIC_RELEASE_CHECKLIST](OPENBINGGU_PUBLIC_RELEASE_CHECKLIST.md) · [PUBLIC_RELEASE_POLICY](OPENBINGGU_PUBLIC_RELEASE_POLICY.md) · [PACK_CONTRACT](OPENBINGGU_PACK_CONTRACT.md) · `OPENBINGGU_REAL_PACK_EXTERNAL_TRANSMISSION_POLICY.md`(internal design doc — not included in public repo) · `OPENBINGGU_SCOPE_ENVELOPE_DRYRUN_RESULT.md`(internal design doc — not included in public repo)
+> - 상위: [PRODUCT_DIRECTION_TWO_TRACK](BINGGUPACK_PRODUCT_DIRECTION_TWO_TRACK.md) §1 트랙1 · §3 "트랙1 GitHub 공개 옵션 = 조건부 GO"
+> - 참조: [PUBLIC_RELEASE_CHECKLIST](BINGGUPACK_PUBLIC_RELEASE_CHECKLIST.md) · [PUBLIC_RELEASE_POLICY](BINGGUPACK_PUBLIC_RELEASE_POLICY.md) · [PACK_CONTRACT](BINGGUPACK_PACK_CONTRACT.md) · `BINGGUPACK_REAL_PACK_EXTERNAL_TRANSMISSION_POLICY.md`(internal design doc — not included in public repo) · `BINGGUPACK_SCOPE_ENVELOPE_DRYRUN_RESULT.md`(internal design doc — not included in public repo)
 
 ---
 

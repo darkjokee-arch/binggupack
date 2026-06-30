@@ -3,7 +3,7 @@
 """
 OpenBinggu — reviewer 인증/세션 토큰 S1~S19 synthetic selftest (DESIGN→검증, sandbox only).
 
-설계: docs/OPENBINGGU_REVIEWER_AUTH_SESSION_TOKEN_DESIGN.md
+설계: docs/BINGGUPACK_REVIEWER_AUTH_SESSION_TOKEN_DESIGN.md
 범위: 토큰 발급/검증 mock + revocation mock + audit whitelist 검사 +
       enforce_access / ReviewResolver 연결 검증. 전부 in-memory / synthetic.
 

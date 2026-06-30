@@ -4,7 +4,7 @@
 
 조건 매핑: ①스냅샷 선확보 ②최소 1사이클(batch 1·확정 1·기각 1) ③승인 후 candidate 유지 확인
 ④볼펜 6종 매트릭스 통과 ⑤confirmed 0 ⑥rejected 경로+중복 확정 차단 재검증 ⑦read-back 수량 직접 확인
-⑧rollback 절차 사전 문서화(OPENBINGGU_REAL_STAGING_CYCLE_ROLLBACK_PROCEDURE.md — 본 실행 전 작성됨).
+⑧rollback 절차 사전 문서화(BINGGUPACK_REAL_STAGING_CYCLE_ROLLBACK_PROCEDURE.md — 본 실행 전 작성됨).
 
 불변: staging 한정(운영 write 0) · confirmed 승격 0 · deploy 0 · 자동 관계추론 0(동사는 owner 사이클 GO 범위 내 지정).
 """
@@ -154,7 +154,7 @@ def main():
     ok_all = all(o for _, o in checks)
     print("-" * 78)
     print("RESULT: %d/%d PASS  confirmed=0 deploy=0 자동관계추론=0" % (sum(1 for _, o in checks if o), len(checks)))
-    print("rollback 절차: docs/OPENBINGGU_REAL_STAGING_CYCLE_ROLLBACK_PROCEDURE.md (사전 문서화, snapshot=%s)"
+    print("rollback 절차: docs/BINGGUPACK_REAL_STAGING_CYCLE_ROLLBACK_PROCEDURE.md (사전 문서화, snapshot=%s)"
           % os.path.basename(snap))
     print("GATE:", "GO" if ok_all else "NO-GO")
     return 0 if ok_all else 1

@@ -1,6 +1,6 @@
 > OpenBinggu is the legacy/internal codename for BingguPack.
 
-# OpenBinggu 상위 설계 목표 — Multi-User × Multi-Agent Shared Pack System
+# BingguPack 상위 설계 목표 — Multi-User × Multi-Agent Shared Pack System
 
 - 작성일: 2026-06-07
 - 상태: **상위 목표 정의(설계 only)**. 코드 구현 0 / 실행 0 / OpenCrab write 0 / v09 freeze·ARMED OFF 유지.
@@ -11,7 +11,7 @@
 
 ## 0. 한 줄
 
-OpenBinggu는 **각 사용자가 자기 작업/문서/코드/대화에서 evidence를 추출해 자기 node/edge graph를 만들고, GraphMerge review를 거쳐 자기 OpenCrab pack으로 만든 뒤, 그 pack을 여러 AI 실행환경(Claude Code·Codex·ChatGPT·Antigravity·CLI 모델 등)이 공유 context로 읽고 이어받게 하는** multi-user × multi-agent shared pack 시스템이다. 특정 사용자·특정 모델 전용이 아니다.
+BingguPack는 **각 사용자가 자기 작업/문서/코드/대화에서 evidence를 추출해 자기 node/edge graph를 만들고, GraphMerge review를 거쳐 자기 OpenCrab pack으로 만든 뒤, 그 pack을 여러 AI 실행환경(Claude Code·Codex·ChatGPT·Antigravity·CLI 모델 등)이 공유 context로 읽고 이어받게 하는** multi-user × multi-agent shared pack 시스템이다. 특정 사용자·특정 모델 전용이 아니다.
 
 ---
 
@@ -55,7 +55,7 @@ OpenBinggu는 **각 사용자가 자기 작업/문서/코드/대화에서 eviden
 |---|---|---|
 | **private** | 본인 + 본인 에이전트들 | 기본값. review 통과만 |
 | **team** | 명시 초대된 구성원 | 사용자 명시 승인 + secret/PII redaction 재검증 |
-| **public** | 누구나 | 사용자 명시 승인 + `OPENBINGGU_PUBLIC_RELEASE_POLICY`/`_CHECKLIST` 전수 통과 + raw 운영데이터 0 |
+| **public** | 누구나 | 사용자 명시 승인 + `BINGGUPACK_PUBLIC_RELEASE_POLICY`/`_CHECKLIST` 전수 통과 + raw 운영데이터 0 |
 
 - 범위 승격(private→team→public)은 **별도 명시 승인 + redaction 재검증**. 자동 승격 없음.
 - **공유 금지 영구 불변**: secret·PII·credential·.env·browser state·raw 운영데이터(bid-engine 로그 등)·production graph raw. 어떤 범위로도 금지.
@@ -94,14 +94,14 @@ OpenBinggu는 **각 사용자가 자기 작업/문서/코드/대화에서 eviden
 
 | 컴포넌트 | 이 목표에서의 역할 | 상태 |
 |---|---|---|
-| **Watcher M0~M3 운영모드** (`OPENBINGGU_WATCHER_READONLY_OPERATING_MODE_DESIGN.md`(internal design doc — not included in public repo)) | 축 A 입력단 — 사용자 작업 → capture→evidence→node. 사용자별 격리된 evidence 생산자 | M0 구현 GO 완료 / M1~M3 HOLD |
-| **MVP2.1 edge** (`OPENBINGGU_MVP21_EDGE_SAFETY_FILTER_DESIGN.md`(internal design doc — not included in public repo)) | graph의 edge 절반 — node/edge graph 완성. R2 안전필터 | 설계 R2 / 구현 HOLD |
-| **pack contract + validator** ([PACK_CONTRACT](OPENBINGGU_PACK_CONTRACT.md)) | 모델 중립 pack(축 B) 의 최소 계약 게이트. private/team/public 공통 형식 보증 | 운영 중 |
+| **Watcher M0~M3 운영모드** (`BINGGUPACK_WATCHER_READONLY_OPERATING_MODE_DESIGN.md`(internal design doc — not included in public repo)) | 축 A 입력단 — 사용자 작업 → capture→evidence→node. 사용자별 격리된 evidence 생산자 | M0 구현 GO 완료 / M1~M3 HOLD |
+| **MVP2.1 edge** (`BINGGUPACK_MVP21_EDGE_SAFETY_FILTER_DESIGN.md`(internal design doc — not included in public repo)) | graph의 edge 절반 — node/edge graph 완성. R2 안전필터 | 설계 R2 / 구현 HOLD |
+| **pack contract + validator** ([PACK_CONTRACT](BINGGUPACK_PACK_CONTRACT.md)) | 모델 중립 pack(축 B) 의 최소 계약 게이트. private/team/public 공통 형식 보증 | 운영 중 |
 | **M0→pack 빌더** (`watcher_pack_builder_m0.py`) | capture~pack 직렬화 dry-run — 축 A 산출을 축 B 포맷으로 | dry-run GO 완료 |
-| **Common Bus** (`OPENBINGGU_COMMON_BUS.md`(internal design doc — not included in public repo)) | 축 B 실체 — 여러 모델이 같은 Core 통해 graph 기여/조회. 엔진 공개·데이터 private | 정의됨 |
-| **Public Release Policy/Checklist** ([POLICY](OPENBINGGU_PUBLIC_RELEASE_POLICY.md)·[CHECKLIST](OPENBINGGU_PUBLIC_RELEASE_CHECKLIST.md)) | public 범위 게이트 — raw 데이터 공유 금지 강제 | 정의됨 |
+| **Common Bus** (`BINGGUPACK_COMMON_BUS.md`(internal design doc — not included in public repo)) | 축 B 실체 — 여러 모델이 같은 Core 통해 graph 기여/조회. 엔진 공개·데이터 private | 정의됨 |
+| **Public Release Policy/Checklist** ([POLICY](BINGGUPACK_PUBLIC_RELEASE_POLICY.md)·[CHECKLIST](BINGGUPACK_PUBLIC_RELEASE_CHECKLIST.md)) | public 범위 게이트 — raw 데이터 공유 금지 강제 | 정의됨 |
 | **v0.11~v0.17 chain** (staging→review queue→decision→apply plan→e2e) | GraphMerge review~apply 백본 — 파이프라인 5단계 review 부분 | 설계/부분구현 |
-| **EVALUATION_PROTOCOL** (`OPENBINGGU_EVALUATION_PROTOCOL.md`(internal design doc — not included in public repo)) | pack/시스템 가치를 데이터 축적 후 고정 기준으로 측정 | 12질문 조건부 A_KEEP |
+| **EVALUATION_PROTOCOL** (`BINGGUPACK_EVALUATION_PROTOCOL.md`(internal design doc — not included in public repo)) | pack/시스템 가치를 데이터 축적 후 고정 기준으로 측정 | 12질문 조건부 A_KEEP |
 
 ---
 

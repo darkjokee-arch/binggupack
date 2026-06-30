@@ -12,7 +12,7 @@ OpenBinggu MCP path gate adapter (S3/X1 실연결 최소 구현 후보).
 범위: adapter + synthetic selftest. 실제 MCP 서버 공개/등록 0. FS write 0(경로 분석만, underlying tool 은 mock).
 CLI: python openbinggu_mcp_path_gate_adapter.py --selftest
 
-설계 ref: OPENBINGGU_MCP_EXPOSURE_CANDIDATE.md(경로 입력 안전) / OPENBINGGU_FIRST_RELEASE_4CLI_SYNTHESIS.md §3-A(S3)/§3-B(X1)
+설계 ref: BINGGUPACK_MCP_EXPOSURE_CANDIDATE.md(경로 입력 안전) / BINGGUPACK_FIRST_RELEASE_4CLI_SYNTHESIS.md §3-A(S3)/§3-B(X1)
 """
 import sys
 import os

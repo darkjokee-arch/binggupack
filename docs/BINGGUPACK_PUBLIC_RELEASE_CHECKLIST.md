@@ -1,6 +1,6 @@
 > OpenBinggu is the legacy/internal codename for BingguPack.
 
-# OpenBinggu Public Release Checklist
+# BingguPack Public Release Checklist
 
 > **상태라인(표준):** `marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dry-run)`
 >
@@ -9,12 +9,12 @@
 
 ## 0. fail-closed 공개 게이트 (2026-06-08 반영)
 
-> 트랙1 GitHub 공개의 선결 안전판. 상세 `OPENBINGGU_TRACK1_FAILCLOSED_PUBLISH_GUARD_DESIGN.md`(internal design doc — not included in public repo).
+> 트랙1 GitHub 공개의 선결 안전판. 상세 `BINGGUPACK_TRACK1_FAILCLOSED_PUBLISH_GUARD_DESIGN.md`(internal design doc — not included in public repo).
 
 - [ ] **source pointer dirty/unknown → publish BLOCK** — pack builder(`watcher_pack_builder_m0`)가 source pointer를 `clean | dirty | unknown` 판정. dirty(Windows 절대경로/`file://`·UNC·비공개 unix path·localhost·내부IP·내부도메인) 또는 unknown(빈값·토큰)이 1건이라도 있으면 공개 BLOCK(raw 경로 미출력·라벨·count만).
 - [x] **`scripts/openbinggu_scope_envelope_dryrun.py --selftest` GATE=GO / EXIT=0** (게이트1 마스킹 clean-only·게이트2 수동승인·회귀방지 R1~R3·source pointer 판정).
 - [x] **`scripts/watcher_pack_builder_m0.py --selftest` GATE=GO / EXIT=0** (source pointer 판정 → publish BLOCK 연결, operating_store 불변).
-- [ ] **자동 sanitizer/치환은 HOLD (정책 확정 = 차단만 유지)** — 자동 치환으로 공개 허용하지 않음. 차단 내역은 raw 없이 `reason_code`/`count`/`source_pointer_id`로만 확인. 사용자가 직접 확인·승인한 항목만 **수동 whitelist 예외**(기본 허용 아님, 범위·만료·승인자 기록 필수, 실제 구현 HOLD). 상세 [SANITIZER_POLICY_BLOCK_ONLY](OPENBINGGU_SANITIZER_POLICY_BLOCK_ONLY.md).
+- [ ] **자동 sanitizer/치환은 HOLD (정책 확정 = 차단만 유지)** — 자동 치환으로 공개 허용하지 않음. 차단 내역은 raw 없이 `reason_code`/`count`/`source_pointer_id`로만 확인. 사용자가 직접 확인·승인한 항목만 **수동 whitelist 예외**(기본 허용 아님, 범위·만료·승인자 기록 필수, 실제 구현 HOLD). 상세 [SANITIZER_POLICY_BLOCK_ONLY](BINGGUPACK_SANITIZER_POLICY_BLOCK_ONLY.md).
 - [ ] **실제 GitHub push는 owner 명시 승인 전 HOLD** — 게이트1 통과 + owner 1회 명시 approve(1 pack/1 push, 이전 승인 재사용 금지) 후에만 push 후보 진입.
 
 ## 공개 전 체크리스트
@@ -42,4 +42,4 @@
 # .gitignore 매칭 누락 파일 git check-ignore 검증
 ```
 
-> 참조: [OPENBINGGU_PUBLIC_RELEASE_POLICY.md](OPENBINGGU_PUBLIC_RELEASE_POLICY.md)
+> 참조: [BINGGUPACK_PUBLIC_RELEASE_POLICY.md](BINGGUPACK_PUBLIC_RELEASE_POLICY.md)

@@ -284,6 +284,10 @@ def _selftest():
 # 주의: .env/credentials*/private_key* 는 scanner 검출 대상이므로 여기 절대 추가 금지(검출 무력화 방지).
 PUBLIC_IGNORE = ["*.sqlite", "*.db", "*_graph.yaml", "reports/", "reviews/", "captures/",
                  "tmp/", "__pycache__/", "*.bak_*",
+                 # Python 빌드 산출물(pip install/-m build 생성). package_cli_selftest 후 같은 트리에서
+                 # scan 시 build 산출물이 read_error 로 잡혀 BLOCK 되던 개발 UX 버그 차단. .gitignore 정신상 제외.
+                 # 최상위는 prefix 매칭(dist/), 중첩·egg-info(이름가변)는 fnmatch 글롭(*/dist/* · *.egg-info/*).
+                 "dist/", "*/dist/*", "build/", "*/build/*", "*.egg-info/*", "*/*.egg-info/*",
                  # gitignore 대상 비공개·미커밋 라이브 데이터 (path_private_pack_data 자기탐지 회피)
                  "hosted/workers/data/", "data/packs.json",
                  # 서드파티 의존성(gitignore·미커밋) — CI/로컬에서 npm install 로 생성됨. 자기 코드 아님 → scan 제외.

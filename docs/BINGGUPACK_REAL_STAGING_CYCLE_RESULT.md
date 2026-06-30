@@ -12,7 +12,7 @@
 | ⑤ confirmed 0 | nodes·edges·proposals 전 테이블 위반 0 |
 | ⑥ rejected + 중복 차단 | PII 쌍 기각(사유 기록) / 동일 proposal 재확정 → already_finalized / 기각건 확정 시도 → proposal_rejected |
 | ⑦ read-back 수량 | nodes 9 · edges 10(EvidenceSupports 9 + refines 1) · evidence 9 · proposals 9(확정1/기각1/대기7) · audit 6 · chain INTACT |
-| ⑧ rollback 사전 문서화 | `OPENBINGGU_REAL_STAGING_CYCLE_ROLLBACK_PROCEDURE.md` (실행 전 작성) |
+| ⑧ rollback 사전 문서화 | `BINGGUPACK_REAL_STAGING_CYCLE_ROLLBACK_PROCEDURE.md` (실행 전 작성) |
 
 ## 변경
 - `scripts/openbinggu_real_staging_cycle_once.py` 신설 (G2·G2-B·G2-C 함수 재사용)

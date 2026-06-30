@@ -2,7 +2,7 @@
 
 marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dry-run)
 
-# OpenBinggu 1차 배포 — GitHub + MCP 방식 설계 (DESIGN, A 초안)
+# BingguPack 1차 배포 — GitHub + MCP 방식 설계 (DESIGN, A 초안)
 
 > **상태: 1차 배포 설계 문서(2026-06-08). docs only · 코드 구현 0 · 실 repo/push 0 · production write 0.**
 > 4CLI 토론 입력 A 초안. 결론·구현은 final 종합·별도 GO.
@@ -13,7 +13,7 @@ marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dr
 
 ## 0. 한 줄
 
-OpenBinggu 개인용 RC를 **GitHub 공개 + local MCP 서버** 형태로 1차 배포한다. 사용자는 repo를 받아 자기 MCP 클라이언트(Claude Code 등)에 등록하고, **자기 로컬 자료로 개인 pack을 만들고 검증**한다. **공개 repo에는 synthetic/example만** 들어가고 개인 데이터는 로컬에만 남는다. OpenCrab은 **각 사용자가 가입해서 자기 pack을 자기 의지로 업로드하는 곳**이며(우리가 데이터를 자동으로 쌓는 중앙 store 아님), **사용자 주도 업로드 경로는 1차 흐름에 포함 가능**하다. 다만 **우리 시스템/운영자가 OpenCrab store에 자동 write/apply/ingest 하는 경로는 계속 HOLD**다.
+BingguPack 개인용 RC를 **GitHub 공개 + local MCP 서버** 형태로 1차 배포한다. 사용자는 repo를 받아 자기 MCP 클라이언트(Claude Code 등)에 등록하고, **자기 로컬 자료로 개인 pack을 만들고 검증**한다. **공개 repo에는 synthetic/example만** 들어가고 개인 데이터는 로컬에만 남는다. OpenCrab은 **각 사용자가 가입해서 자기 pack을 자기 의지로 업로드하는 곳**이며(우리가 데이터를 자동으로 쌓는 중앙 store 아님), **사용자 주도 업로드 경로는 1차 흐름에 포함 가능**하다. 다만 **우리 시스템/운영자가 OpenCrab store에 자동 write/apply/ingest 하는 경로는 계속 HOLD**다.
 
 ---
 
@@ -84,7 +84,7 @@ OpenBinggu 개인용 RC를 **GitHub 공개 + local MCP 서버** 형태로 1차 �
 
 ## 4-2. 4CLI 토론 결과 반영 (2026-06-08, both_reject → 공개 GO 선결 gate)
 
-> 본 A 초안은 4CLI 토론에서 **방향 GO / "지금 공개 GO" HOLD-REFINE**(judge=both_reject) 판정됨. 상세 `OPENBINGGU_FIRST_RELEASE_4CLI_SYNTHESIS.md`(internal design doc — not included in public repo).
+> 본 A 초안은 4CLI 토론에서 **방향 GO / "지금 공개 GO" HOLD-REFINE**(judge=both_reject) 판정됨. 상세 `BINGGUPACK_FIRST_RELEASE_4CLI_SYNTHESIS.md`(internal design doc — not included in public repo).
 > 공개 push 전 선결 gate(전부 별도 GO, 현재 HOLD):
 > - **보안(C)**: S1 git 히스토리 영속성(새 clean repo 시작·history purge 절차) · S2 공개 pack 디폴트 source pointer 미포함 · S3 MCP path TOCTOU 포함 격리 · S4 합성 fixture 통과≠실데이터 안전 · S5 신규코드(stub/doctor) 공격면 최소화.
 > - **격리/효용(D)**: X1 bid-engine/인증서 등 타프로젝트 경로 deny(로컬 격리) · X2 OpenCrab 없이도 효용 보이는 toy end-to-end 시나리오(OpenCrab 통합은 2차 유지).

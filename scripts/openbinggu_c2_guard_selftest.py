@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 OpenBinggu C-2 Guard synthetic / in-memory selftest.
-기준: docs/OPENBINGGU_C2_GUARD_FINAL_SINGLE_CONTROL.md + OPENBINGGU_C2_GUARD_SELFTEST_SPEC.md
+기준: docs/BINGGUPACK_C2_GUARD_FINAL_SINGLE_CONTROL.md + BINGGUPACK_C2_GUARD_SELFTEST_SPEC.md
 
 안전: 전부 in-memory mock. 실제 SQLite/user_graph/_graph_merge write 0.
       operating store mtime 전후 대조로 불변 검증. apply_executed 항상 0(write 게이트 HOLD).

@@ -2,10 +2,10 @@
 
 marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dry-run)
 
-# OpenBinggu 1차 배포 — 배포 전 GO/BLOCK 체크리스트 (E)
+# BingguPack 1차 배포 — 배포 전 GO/BLOCK 체크리스트 (E)
 
 > **상태: preflight 체크리스트(2026-06-08). docs only · 실 push 0.**
-> 상위: [FIRST_RELEASE_GITHUB_MCP_DESIGN](OPENBINGGU_FIRST_RELEASE_GITHUB_MCP_DESIGN.md) · [REPO_LAYOUT](OPENBINGGU_RELEASE_REPO_LAYOUT.md) · [MCP_EXPOSURE](OPENBINGGU_MCP_EXPOSURE_CANDIDATE.md).
+> 상위: [FIRST_RELEASE_GITHUB_MCP_DESIGN](BINGGUPACK_FIRST_RELEASE_GITHUB_MCP_DESIGN.md) · [REPO_LAYOUT](BINGGUPACK_RELEASE_REPO_LAYOUT.md) · [MCP_EXPOSURE](BINGGUPACK_MCP_EXPOSURE_CANDIDATE.md).
 
 ---
 
@@ -46,16 +46,16 @@ marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dr
 ## 4. 현재 판정
 
 - P1·P2·P5·P6·P7·P8 = 현 시점 충족(설계/실측). P3·P4 = repo 구성·push 직전 실행 대상.
-- **선결 gate docs 기준 정리 완료(2026-06-08)**: S1 clean repo 절차([CLEAN_REPO_BOOTSTRAP](OPENBINGGU_CLEAN_REPO_BOOTSTRAP.md)) · S2 source pointer 미포함 디폴트([SANITIZER_POLICY_BLOCK_ONLY](OPENBINGGU_SANITIZER_POLICY_BLOCK_ONLY.md) §4-5) · X2 toy E2E([TOY_E2E_USER_SCENARIO](OPENBINGGU_TOY_E2E_USER_SCENARIO.md)) · S4 실데이터 검증 절차([REAL_DATA_VALIDATION_PROCEDURE](OPENBINGGU_REAL_DATA_VALIDATION_PROCEDURE.md)) · 사용자 주도 업로드 흐름([USER_DRIVEN_OPENCRAB_UPLOAD_FLOW](OPENBINGGU_USER_DRIVEN_OPENCRAB_UPLOAD_FLOW.md) — **docs 기준만, 실 업로드 기능 미구현**).
+- **선결 gate docs 기준 정리 완료(2026-06-08)**: S1 clean repo 절차([CLEAN_REPO_BOOTSTRAP](BINGGUPACK_CLEAN_REPO_BOOTSTRAP.md)) · S2 source pointer 미포함 디폴트([SANITIZER_POLICY_BLOCK_ONLY](BINGGUPACK_SANITIZER_POLICY_BLOCK_ONLY.md) §4-5) · X2 toy E2E([TOY_E2E_USER_SCENARIO](BINGGUPACK_TOY_E2E_USER_SCENARIO.md)) · S4 실데이터 검증 절차([REAL_DATA_VALIDATION_PROCEDURE](BINGGUPACK_REAL_DATA_VALIDATION_PROCEDURE.md)) · 사용자 주도 업로드 흐름([USER_DRIVEN_OPENCRAB_UPLOAD_FLOW](BINGGUPACK_USER_DRIVEN_OPENCRAB_UPLOAD_FLOW.md) — **docs 기준만, 실 업로드 기능 미구현**).
 - **S3·X1 path safety gate(2026-06-08)**: `scripts/openbinggu_path_safety_gate.py` — allow_root 격리 + 탈출(symlink/junction/UNC/ADS/8.3/parent) 차단 + denylist(bid-engine·NPKI/인증서·secret·OpenCrab store·타프로젝트), ALLOW/BLOCK+reason_code(raw 미출력). **selftest 15/15 GATE=GO/EXIT=0**.
 - **S3·X1 MCP 실연결 adapter(2026-06-08)**: `scripts/openbinggu_mcp_path_gate_adapter.py` — `guarded_tool_call`로 도구 실행 직전 재검사(TOCTOU 잔여 감소), BLOCK 시 underlying 미호출, raw 미출력. **selftest 10/10 GATE=GO/EXIT=0**(ALLOW만 underlying 실행). 남은 것 = 실제 MCP 서버 등록/공개(별도 GO).
 - **S5 openbinggu doctor 단일 진입점(2026-06-08)**: `scripts/openbinggu_doctor.py --selftest` — 6개 selftest(scope_envelope·builder·validate·consumer_smoke·path_safety·mcp_adapter)를 subprocess **호출만**(신규 로직 재구현 0=공격면 최소) + secret/PII scan dry-run stub + operating store 불변 확인. 요약(PASS/FAIL·reason_code·count)만, raw 미출력. **8/8 PASS GATE=GO/EXIT=0**.
-- **S4 실데이터 검증(2026-06-08)**: 절차 docs 정의 완료([REAL_DATA_VALIDATION_PROCEDURE](OPENBINGGU_REAL_DATA_VALIDATION_PROCEDURE.md)) + **실 트리 secret/PII 스캐너 결선 완료** — `scripts/openbinggu_public_tree_scan.py`(read-only, ignore_globs `.gitignore` 연동, count/reason_code/file_id만·raw 미출력) + `doctor --tree <ROOT>`(검출 1건↑ → verdict=BLOCK·GATE=NO-GO·exit 1). scanner selftest 3/3 GATE=GO, doctor 9/9 GATE=GO.
+- **S4 실데이터 검증(2026-06-08)**: 절차 docs 정의 완료([REAL_DATA_VALIDATION_PROCEDURE](BINGGUPACK_REAL_DATA_VALIDATION_PROCEDURE.md)) + **실 트리 secret/PII 스캐너 결선 완료** — `scripts/openbinggu_public_tree_scan.py`(read-only, ignore_globs `.gitignore` 연동, count/reason_code/file_id만·raw 미출력) + `doctor --tree <ROOT>`(검출 1건↑ → verdict=BLOCK·GATE=NO-GO·exit 1). scanner selftest 3/3 GATE=GO, doctor 9/9 GATE=GO.
 - **MCP 핸들러 결선 후보(2026-06-08)**: `scripts/openbinggu_mcp_server_handlers.py` — adapter `guarded_tool_call`을 read/dry-run 도구 핸들러(pack_build·pack_validate·consumer_smoke·publish_guard_dryrun·selftest)에 결선, path 입력 전부 gate 통과·BLOCK 시 미호출, 위험 도구(write/apply/push/upload/sanitizer/enum/team_billing/marketplace/db) 핸들러 부재→tool_not_exposed. **selftest 10/10 GATE=GO**, doctor 9/9 유지.
 - **MCP stdio JSON-RPC wrapper(2026-06-08)**: `scripts/openbinggu_mcp_server.py` — initialize/tools·list(read/dry-run only)/tools·call(handle_tool 라우팅), malformed 안전 처리, 응답 sanitize(raw 미출력). **selftest 13/13 GATE=GO**. `--serve`는 정의만, 실 등록/공개 미실행.
-- **clean repo 부트스트랩 계획(2026-06-08)**: 포함/제외 목록·doctor --tree 절차·승인 체크리스트·push 명령(실행 금지) 확정 → `OPENBINGGU_RELEASE_BOOTSTRAP_PLAN.md`(internal design doc — not included in public repo).
-- **의존 audit 결과(2026-06-08)**: `OPENBINGGU_RELEASE_DEPENDENCY_AUDIT.md`(internal design doc — not included in public repo) — import closure 21모듈. 1차 위험키워드는 대부분 false positive(denylist·가드·박제·temp/report write). 핵심 운영 모듈(`watcher_op_m0`·`watcher_pack_builder_m0`) 코드 read = **operating store write 0 확정**(store는 불변체크 읽기만). **"read/dry-run only 공개" 실질 성립, write 가드 코드 수정 불필요**.
-- **그룹 C 정밀 audit 완료(2026-06-08)**: `OPENBINGGU_RELEASE_GROUP_C_AUDIT.md`(internal design doc — not included in public repo) — 8개 모듈 ast+코드 read = **operating store/DB/apply write 0 확정**(import-time side effect=docstring 오탐, write=report/temp, run_selftest 'store!'=불변체크+report 공존 오탐). consumer_smoke→incoming_to_staging는 `SECRET_PATTERNS` 상수만 참조. **import closure 21모듈 전체 store write 0 → "read/dry-run only 공개" 완전 성립, blocker 없음.**
+- **clean repo 부트스트랩 계획(2026-06-08)**: 포함/제외 목록·doctor --tree 절차·승인 체크리스트·push 명령(실행 금지) 확정 → `BINGGUPACK_RELEASE_BOOTSTRAP_PLAN.md`(internal design doc — not included in public repo).
+- **의존 audit 결과(2026-06-08)**: `BINGGUPACK_RELEASE_DEPENDENCY_AUDIT.md`(internal design doc — not included in public repo) — import closure 21모듈. 1차 위험키워드는 대부분 false positive(denylist·가드·박제·temp/report write). 핵심 운영 모듈(`watcher_op_m0`·`watcher_pack_builder_m0`) 코드 read = **operating store write 0 확정**(store는 불변체크 읽기만). **"read/dry-run only 공개" 실질 성립, write 가드 코드 수정 불필요**.
+- **그룹 C 정밀 audit 완료(2026-06-08)**: `BINGGUPACK_RELEASE_GROUP_C_AUDIT.md`(internal design doc — not included in public repo) — 8개 모듈 ast+코드 read = **operating store/DB/apply write 0 확정**(import-time side effect=docstring 오탐, write=report/temp, run_selftest 'store!'=불변체크+report 공존 오탐). consumer_smoke→incoming_to_staging는 `SECRET_PATTERNS` 상수만 참조. **import closure 21모듈 전체 store write 0 → "read/dry-run only 공개" 완전 성립, blocker 없음.**
 - **examples/toy_project 생성 완료(2026-06-08)**: `examples/toy_project/{README.md,input/toy_notes.md,expected/toy_pack_summary.json}` synthetic. **`doctor --tree examples/toy_project` → real_tree_scan CLEAN(hits 0), 9/9 GATE=GO**. source pointer 미포함 디폴트·dirty/unknown BLOCK 설명·OpenCrab 업로드 docs 기준(실 API 미구현) 포함.
 - **남은 작업(별도 GO, 차단 아님)**: ① (선택) SECRET_PATTERNS 상수 분리·트리 최소화 import 정리 ② 실 MCP 설정 등록/공개 ③ 실 OpenCrab 업로드 기능/API/MCP 연결 ④ 실 GitHub repo push(owner 승인).
 - **1차 배포 = 방향 GO 후보**(설계·RC 기준). 실제 push/업로드는 owner/user 승인 + P3·P4 실행 + 코드 gate(S3·X1) 후.

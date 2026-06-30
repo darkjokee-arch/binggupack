@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """OpenBinggu Watcher MVP2.1 — evidence_supports edge producer (dry-run only).
 
-설계: docs/OPENBINGGU_MVP21_EDGE_SAFETY_FILTER_DESIGN.md (R2).
+설계: docs/BINGGUPACK_MVP21_EDGE_SAFETY_FILTER_DESIGN.md (R2).
 범위(MVP2.1 고정):
   - **evidence → node `evidence_supports` edge 1종만** 생성. 기존 evidence_refs 를 1급 edge 로 승격.
   - node→node 의미관계 자동추론 **전면 금지**. 신규 의미추론 0.

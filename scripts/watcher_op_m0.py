@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """OpenBinggu Watcher 운영모드 M0 — 수동 1회 (capture → evidence → nodes → report, temp/staging only).
 
-설계: docs/OPENBINGGU_WATCHER_READONLY_OPERATING_MODE_DESIGN.md §2 (M0 수동 1회).
+설계: docs/BINGGUPACK_WATCHER_READONLY_OPERATING_MODE_DESIGN.md §2 (M0 수동 1회).
 범위(M0 고정):
   - 입력 = git diff 텍스트 파일 1건(단일 소스). 라이브 git 호출/hook/daemon 없음.
   - 흐름 = capture → evidence_chunk → incoming_nodes → report. **edge 생성 금지.**

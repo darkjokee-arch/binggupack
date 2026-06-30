@@ -1,16 +1,16 @@
 > OpenBinggu is the legacy/internal codename for BingguPack.
 
-# OpenBinggu Public Release Policy — Public Skeleton / Private Data Separation
+# BingguPack Public Release Policy — Public Skeleton / Private Data Separation
 
 > ⚠️ **종속 고지 (2026-06-17):** `BINGGUPACK_CONSTITUTION_2026-06-17.md`(헌법)에 종속. 충돌 시 헌법 우선. 외부 수확·철학 필터(keep/challenge/discard)·점진 승격·각 사용자=자기 데이터 owner(edge actor=human 자기확정)는 헌법 §2·§3·§6 적용. 자동 수집물은 후보 스테이지까지만, 영구화는 사람 SAVE/승인.
 
-> OpenBinggu는 향후 GitHub에 **framework/skeleton**으로 공개될 수 있다.
+> BingguPack는 향후 GitHub에 **framework/skeleton**으로 공개될 수 있다.
 > 공개 대상은 **골조·정책·템플릿·검증기·워크플로 코드**이며, **작성자의 실제 데이터는 절대 포함하지 않는다.**
 > 이번 문서는 문서화만. production write·GitHub push·repo 생성 0.
 
 ## 1. 공개 원칙
 
-OpenBinggu를 공개할 경우 공개 저장소는 **framework/skeleton**이어야 한다. 작성자의 실제 로컬 evidence·graph·review decision·CLI log·production graph는 포함하지 않는다.
+BingguPack를 공개할 경우 공개 저장소는 **framework/skeleton**이어야 한다. 작성자의 실제 로컬 evidence·graph·review decision·CLI log·production graph는 포함하지 않는다.
 
 **공개 가능:**
 scripts · validators · merge adapter · match policy · apply gate · review workflow · transactional runner · production gate · watcher skeleton · docs · templates · synthetic fixtures · toy examples · default policies
@@ -25,11 +25,11 @@ reingest_pack_draft 실제 원본 · localcrab_index.sqlite · localbinggu_produ
 | **openbinggu-core** (공개) | framework · schema · validators · templates · synthetic tests · docs · default policies |
 | **openbinggu-private** (비공개 로컬) | user packs · real evidence · local production graph · local sqlite index · review decisions · transaction reports · raw/sanitized captures · CLI watcher outputs |
 
-→ **OpenBinggu Core는 배포 가능하지만, 사용자의 private graph는 각자 로컬에서 생성**해야 한다.
+→ **BingguPack Core는 배포 가능하지만, 사용자의 private graph는 각자 로컬에서 생성**해야 한다.
 
 ## 3. 다른 사용자의 사용 방식
 
-다른 사용자는 **작성자의 데이터를 그대로 쓰지 않는다.** 자기 OpenBinggu를 이 흐름으로 만든다:
+다른 사용자는 **작성자의 데이터를 그대로 쓰지 않는다.** 자기 BingguPack를 이 흐름으로 만든다:
 
 1. GitHub에서 `openbinggu-core` clone
 2. setup 실행
@@ -40,7 +40,7 @@ reingest_pack_draft 실제 원본 · localcrab_index.sqlite · localbinggu_produ
 7. 자기 review decision 기록
 8. 자기 production graph 생성
 
-→ OpenBinggu는 **"작성자의 기억을 배포하는 도구"가 아니라 "각 사용자가 자기 evidence/ontology bus를 만드는 framework"**다.
+→ BingguPack는 **"작성자의 기억을 배포하는 도구"가 아니라 "각 사용자가 자기 evidence/ontology bus를 만드는 framework"**다.
 
 ## 4. 설정값 분리
 
@@ -97,8 +97,8 @@ openbinggu/
 ├─ .gitignore
 ├─ docs/
 │  ├─ ARCHITECTURE.md
-│  ├─ OPENBINGGU_COMMON_BUS.md
-│  ├─ OPENBINGGU_PUBLIC_RELEASE_POLICY.md
+│  ├─ BINGGUPACK_COMMON_BUS.md
+│  ├─ BINGGUPACK_PUBLIC_RELEASE_POLICY.md
 │  ├─ LOCALBINGGU_OPENCRAB_FM_MAPPING.md
 │  ├─ LOCALBINGGU_PACK_STRATEGY.md
 │  ├─ LOCALBINGGU_AUTOMATION_POLICY.md
@@ -118,20 +118,20 @@ openbinggu/
 ## 7. README 문구
 
 **EN:**
-> OpenBinggu does not ship with the author's private evidence graph. This repository contains the framework, schemas, templates, validators, and workflow gates. Each user builds their own local evidence/ontology bus from their own data.
+> BingguPack does not ship with the author's private evidence graph. This repository contains the framework, schemas, templates, validators, and workflow gates. Each user builds their own local evidence/ontology bus from their own data.
 
 **KO:**
-> 이 저장소는 작성자의 실제 로컬 그래프나 evidence를 포함하지 않습니다. OpenBinggu는 각 사용자가 자기 데이터로 자기 로컬 evidence/ontology bus를 구축하는 프레임워크입니다.
+> 이 저장소는 작성자의 실제 로컬 그래프나 evidence를 포함하지 않습니다. BingguPack는 각 사용자가 자기 데이터로 자기 로컬 evidence/ontology bus를 구축하는 프레임워크입니다.
 
-## 8. OpenBinggu Common Bus와의 관계
+## 8. BingguPack Common Bus와의 관계
 
-OpenBinggu는 여러 모델 앱·CLI 도구가 공유하는 **common evidence/ontology bus**가 될 수 있다. 하지만 **GitHub 공개판은 이 bus의 엔진과 프로토콜만 제공**한다. 실제 bus 데이터는 각 사용자의 private data root에 저장된다.
+BingguPack는 여러 모델 앱·CLI 도구가 공유하는 **common evidence/ontology bus**가 될 수 있다. 하지만 **GitHub 공개판은 이 bus의 엔진과 프로토콜만 제공**한다. 실제 bus 데이터는 각 사용자의 private data root에 저장된다.
 
 | 구성 | 공개 |
 | --- | --- |
-| OpenBinggu Core | ✅ 공개 가능 |
+| BingguPack Core | ✅ 공개 가능 |
 | LocalBinggu Core | ✅ 공개 가능 |
-| OpenBinggu Watcher skeleton | ✅ 공개 가능 |
+| BingguPack Watcher skeleton | ✅ 공개 가능 |
 | MCP/REST/CLI tool layer | ✅ 공개 가능 |
 | User evidence/graph/reviews/reports | ❌ 비공개 |
 | Production graph | ❌ 비공개 |
@@ -145,4 +145,4 @@ OpenBinggu는 여러 모델 앱·CLI 도구가 공유하는 **common evidence/on
 
 ---
 
-> 참조: [OPENBINGGU_PUBLIC_RELEASE_CHECKLIST.md](OPENBINGGU_PUBLIC_RELEASE_CHECKLIST.md) · `OPENBINGGU_COMMON_BUS.md`(internal design doc — not included in public repo) · `OPENBINGGU_EVALUATION_PROTOCOL.md`(internal design doc — not included in public repo)
+> 참조: [BINGGUPACK_PUBLIC_RELEASE_CHECKLIST.md](BINGGUPACK_PUBLIC_RELEASE_CHECKLIST.md) · `BINGGUPACK_COMMON_BUS.md`(internal design doc — not included in public repo) · `BINGGUPACK_EVALUATION_PROTOCOL.md`(internal design doc — not included in public repo)

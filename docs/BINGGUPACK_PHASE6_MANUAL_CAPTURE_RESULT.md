@@ -2,7 +2,7 @@
 
 # BingguPack Phase 6 — Manual One-Shot Capture 결과 (2026-06-09)
 
-> 설계: `OPENBINGGU_PHASE6_AUTO_CAPTURE_PLAN.md`. 구현: `scripts/openbinggu_phase6_manual_capture_selftest.py`.
+> 설계: `BINGGUPACK_PHASE6_AUTO_CAPTURE_PLAN.md`. 구현: `scripts/openbinggu_phase6_manual_capture_selftest.py`.
 > ⚠️ 전부 **synthetic / temp / read-only selftest**. hook 설치·daemon 실행·실 홈 write·운영 store write·OpenCrab·Neo4j·confirmed **0**. (작성 당시 상태: 코드 작업트리만·RC 미반영·push 0.)
 > 📌 **현재**: 이 기능은 **v0.3.0-rc1**로 공개 RC에 반영되어 있습니다. 본문의 "작업트리만/push 0" 표현은 작성 시점 기록입니다.
 > 표현 규칙: "자동 적용/완료/보장"·"production 보장"·"실유출 0" 금지 → "synthetic 기준 GATE=GO", "현재 fixture/temp 기준 추가 노출 미검출".

@@ -2,11 +2,11 @@
 
 marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dry-run)
 
-# OpenBinggu 1차 배포 — toy 효용 end-to-end 시나리오 (X2)
+# BingguPack 1차 배포 — toy 효용 end-to-end 시나리오 (X2)
 
 > **상태: toy E2E 시나리오 문서(2026-06-08). docs only · 모든 데이터 synthetic/toy · 실 업로드/push 0.**
-> 4CLI 선결 gate X2(효용 증명, "껍데기" 탈피) 흡수. 상세 `OPENBINGGU_FIRST_RELEASE_4CLI_SYNTHESIS.md`(internal design doc — not included in public repo) §3-B.
-> 상위: [FIRST_RELEASE_GITHUB_MCP_DESIGN](OPENBINGGU_FIRST_RELEASE_GITHUB_MCP_DESIGN.md) · `OPENBINGGU_PUBLIC_README_DRAFT.md`(internal design doc — not included in public repo).
+> 4CLI 선결 gate X2(효용 증명, "껍데기" 탈피) 흡수. 상세 `BINGGUPACK_FIRST_RELEASE_4CLI_SYNTHESIS.md`(internal design doc — not included in public repo) §3-B.
+> 상위: [FIRST_RELEASE_GITHUB_MCP_DESIGN](BINGGUPACK_FIRST_RELEASE_GITHUB_MCP_DESIGN.md) · `BINGGUPACK_PUBLIC_README_DRAFT.md`(internal design doc — not included in public repo).
 
 ---
 

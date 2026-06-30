@@ -6,7 +6,7 @@
 - 커밋 3건 / 4 files, +668 insertions:
   | 커밋 | 내용 | 구분 |
   |---|---|---|
-  | `0b496f4` | v0.8: feedback resolve loop — 4-outcome verification runner (`openbinggu_v08_review_resolve_4values.py`) + 결과 문서(`OPENBINGGU_V08_RESOLVE_4VALUES_RESULT.md`) | 코드+문서 |
+  | `0b496f4` | v0.8: feedback resolve loop — 4-outcome verification runner (`openbinggu_v08_review_resolve_4values.py`) + 결과 문서(`BINGGUPACK_V08_RESOLVE_4VALUES_RESULT.md`) | 코드+문서 |
   | `a6e59da` | v1.0: candidate_list read-only view (filters, evidence links, no actions) | 코드 |
   | `4d796ae` | v1.0: deprecate UX — id8-bound confirm + list view id column | 코드(신규 write UX) |
 - 이번 라운드 예정(미커밋): replace(수정) 구현=**코드** / accepted 재설계 r2=**코드+문서** / OpenCrab preflight fixture 스펙=**문서**

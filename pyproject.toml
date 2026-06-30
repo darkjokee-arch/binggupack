@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "binggupack"
-version = "1.15.0"   # v1.15.0 — v1.14.0 위 owner 발화 a0 형식게이트 면제(speaker=owner 구어체 원문 보존·안전게이트 불변).
+version = "1.16.0"   # v1.16.0 — 외부 리뷰 5건 정리(PII scan 버그·툴체인 점진 도입·브랜드 통일). version SSOT = binggupack/__about__.py.
 description = "BingguPack — local-first, evidence-backed memory/context pack framework with an installable Claude Code MCP server (stdio JSON-RPC). Python stdlib only."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -26,7 +26,7 @@ search = ["ddgs>=9"]
 
 [project.urls]
 Homepage = "https://github.com/darkjokee-arch/binggupack"
-Release = "https://github.com/darkjokee-arch/binggupack/releases/tag/v1.15.0"
+Release = "https://github.com/darkjokee-arch/binggupack/releases/tag/v1.16.0"
 
 [project.scripts]
 # PyPI 설치 후 바로 쓰는 공개 CLI. clone 사용자는 기존 `python binggu.py ...` 그대로 동작한다.
@@ -55,3 +55,33 @@ hooks = ["settings.snippet.json"]
 #   python scripts/install_claude_mcp.py --sandbox --apply
 # 서버 직접 실행(설정 등록은 owner):
 #   python scripts/openbinggu_mcp_server.py --serve <REPO_ROOT>
+
+# ── 표준 개발 툴체인 (점진 도입) ─────────────────────────────────────────────
+# 거대 기존 코드(scripts/ 155개·hybrid_agi/·hosted/·_*)는 제외하고 신규 binggupack/ 패키지만
+# 보수적으로 린트/타입체크한다. 기존 자체 selftest 게이트(scripts/binggu_publish_run_all_selftests.py)는
+# 그대로 유지 — pytest 가 scripts 를 강제 수집하지 않도록 norecursedirs 로 제외한다.
+#   pip install -r requirements/dev.txt
+[tool.ruff]
+target-version = "py310"
+line-length = 110
+extend-exclude = ["scripts", "hybrid_agi", "_*", "hosted"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]   # 라인 길이는 경고만(점진 도입).
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+strict = false
+warn_unused_ignores = false
+
+[[tool.mypy.overrides]]
+module = ["scripts.*", "hybrid_agi.*"]
+ignore_errors = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["*_test.py", "test_*.py"]
+addopts = "-q"
+norecursedirs = ["scripts", "hybrid_agi", "_*", "hosted", ".git"]

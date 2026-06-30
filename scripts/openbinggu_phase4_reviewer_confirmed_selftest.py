@@ -3,7 +3,7 @@
 """
 BingguPack Phase 4 — reviewer/confirmed flow synthetic selftest (DESIGN→검증, sandbox only).
 
-기준: docs/OPENBINGGU_PHASE4_REVIEWER_CONFIRMED_FLOW_DESIGN.md
+기준: docs/BINGGUPACK_PHASE4_REVIEWER_CONFIRMED_FLOW_DESIGN.md
 흐름: candidate → review_pending → [token 검증 + reviewer] → CONFIRM_ALLOWED(preview)
       → (owner approval 후보) → confirmed plan. **confirmed 실제 생성/apply/promote 0.**
 

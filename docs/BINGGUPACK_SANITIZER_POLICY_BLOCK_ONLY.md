@@ -2,7 +2,7 @@
 
 marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dry-run)
 
-# OpenBinggu 트랙1 — sanitizer 정책: 차단만 유지 + 수동 해제(whitelist 예외) (POLICY)
+# BingguPack 트랙1 — sanitizer 정책: 차단만 유지 + 수동 해제(whitelist 예외) (POLICY)
 
 > **상태라인(표준):** `marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dry-run)`
 >
@@ -13,7 +13,7 @@ marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dr
 >
 > - 작성일: 2026-06-08
 > - scope: project:openbinggu / 트랙1 개인용 GitHub 공개 sanitizer 정책
-> - 상위: `OPENBINGGU_TRACK1_FAILCLOSED_PUBLISH_GUARD_DESIGN.md`(internal design doc — not included in public repo) · [PUBLIC_RELEASE_CHECKLIST](OPENBINGGU_PUBLIC_RELEASE_CHECKLIST.md) · [PERSONAL_TRACK_BASELINE](OPENBINGGU_PERSONAL_TRACK_BASELINE_AND_GITHUB_PUBLISH.md)
+> - 상위: `BINGGUPACK_TRACK1_FAILCLOSED_PUBLISH_GUARD_DESIGN.md`(internal design doc — not included in public repo) · [PUBLIC_RELEASE_CHECKLIST](BINGGUPACK_PUBLIC_RELEASE_CHECKLIST.md) · [PERSONAL_TRACK_BASELINE](BINGGUPACK_PERSONAL_TRACK_BASELINE_AND_GITHUB_PUBLISH.md)
 
 ---
 

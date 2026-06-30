@@ -57,4 +57,4 @@ python scripts/openbinggu_pack_consumer_smoke.py --selftest  # 읽기 smoke
 
 OpenCrab은 **각 사용자가 가입해서 자기 pack을 자기 의지로 올리는 곳**입니다(우리가 자동으로 쌓는 중앙 저장소가 아님). 업로드도 GitHub 공개와 **동일한 차단 기준 + 사용자 수동 승인**을 거칩니다.
 
-> ⚠️ 현재는 **docs 기준 흐름만 정의**돼 있고, **실제 OpenCrab 업로드 API/연결은 제공되지 않습니다(미구현)**. 자세한 흐름은 상위 `docs/OPENBINGGU_USER_DRIVEN_OPENCRAB_UPLOAD_FLOW.md` 참고.
+> ⚠️ 현재는 **docs 기준 흐름만 정의**돼 있고, **실제 OpenCrab 업로드 API/연결은 제공되지 않습니다(미구현)**. 자세한 흐름은 상위 `docs/BINGGUPACK_USER_DRIVEN_OPENCRAB_UPLOAD_FLOW.md` 참고.

@@ -1,4 +1,4 @@
-# OpenBinggu v0.8 — feedback resolve loop: 4-outcome verification result (2026-06-11)
+# BingguPack v0.8 — feedback resolve loop: 4-outcome verification result (2026-06-11)
 
 The v0.8 personal write loop ends with a human feedback step: a judgment node saved with a
 review due date is later resolved by a human with one of **4 outcomes** —

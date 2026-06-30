@@ -2,10 +2,10 @@
 
 marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dry-run)
 
-# OpenBinggu 1차 배포 — GitHub repo 구성 후보 (C)
+# BingguPack 1차 배포 — GitHub repo 구성 후보 (C)
 
 > **상태: repo 구성 후보(2026-06-08). docs only · 실 repo/push 0 · enum 확정 0.**
-> 상위: [FIRST_RELEASE_GITHUB_MCP_DESIGN](OPENBINGGU_FIRST_RELEASE_GITHUB_MCP_DESIGN.md).
+> 상위: [FIRST_RELEASE_GITHUB_MCP_DESIGN](BINGGUPACK_FIRST_RELEASE_GITHUB_MCP_DESIGN.md).
 
 ---
 
@@ -13,7 +13,7 @@ marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dr
 
 ```
 openbinggu/                         # 공개 repo 루트
-├── README.md                       # = OPENBINGGU_PUBLIC_README_DRAFT.md 기반
+├── README.md                       # = BINGGUPACK_PUBLIC_README_DRAFT.md 기반
 ├── LICENSE                         # 위치만 준비 (license enum 확정은 HOLD)
 ├── .gitignore                      # 공개 제외 목록 (§3)
 ├── INSTALL.md                      # 설치/실행/selftest 가이드
@@ -24,10 +24,10 @@ openbinggu/                         # 공개 repo 루트
 │   ├── openbinggu_pack_validate.py
 │   └── openbinggu_pack_consumer_smoke.py
 ├── docs/                           # 설계·정책·체크리스트 (공개 가능 문서만)
-│   ├── OPENBINGGU_PUBLIC_RELEASE_CHECKLIST.md
-│   ├── OPENBINGGU_SANITIZER_POLICY_BLOCK_ONLY.md
-│   ├── OPENBINGGU_PERSONAL_TRACK_BASELINE_AND_GITHUB_PUBLISH.md
-│   └── OPENBINGGU_RELEASE_PREFLIGHT_CHECKLIST.md
+│   ├── BINGGUPACK_PUBLIC_RELEASE_CHECKLIST.md
+│   ├── BINGGUPACK_SANITIZER_POLICY_BLOCK_ONLY.md
+│   ├── BINGGUPACK_PERSONAL_TRACK_BASELINE_AND_GITHUB_PUBLISH.md
+│   └── BINGGUPACK_RELEASE_PREFLIGHT_CHECKLIST.md
 ├── examples/
 │   └── toy_project/                # synthetic toy (개인 데이터 아님)
 └── tests/

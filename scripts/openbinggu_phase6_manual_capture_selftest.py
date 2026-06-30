@@ -3,7 +3,7 @@
 """
 BingguPack Phase 6 — manual one-shot capture(read-only) synthetic selftest.
 
-기준: docs/OPENBINGGU_PHASE6_AUTO_CAPTURE_PLAN.md
+기준: docs/BINGGUPACK_PHASE6_AUTO_CAPTURE_PLAN.md
 목표: 사용자가 명시한 파일/폴더만 read-only로 읽어 candidate capture 후보 생성.
       allowlist only · denylist > allowlist · raw 저장 0 · block-only · source pointer 공개 미포함 ·
       rate limit · kill switch · fail-closed · write opt-in 없으면 staging write 0 · hook/daemon NOT_STARTED.

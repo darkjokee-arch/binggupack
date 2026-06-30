@@ -4,12 +4,12 @@
 > ## 이 헌법이 대체·우선하는 기존 조항 (stale)
 > - `BINGGUPACK_USER_AGI_FULL_DESIGN.md`: "자동 후보 수집 = 꺼져 있음", 금지목록의 `dynamic_registry_sync`, "자동 저장 0" 표현 → 본 헌법 §1·§3·§6으로 대체.
 > - `BINGGUPACK_V08_PERSONAL_WRITE_LOOP_DESIGN.md`: "자동 승격 0", "자동 관찰 daemon/hook HOLD" → daemon은 HOLD 유지, trigger-based capture(후보)는 §2 허용. 점진 승격은 §2·§6(사람 승인 게이트).
-> - `OPENBINGGU_PUBLIC_RELEASE_POLICY.md` / `..._CHECKLIST.md` / `OPENBINGGU_SANITIZER_POLICY_BLOCK_ONLY.md`: 외부수확·철학필터·점진승격 미반영 → 본 헌법 §2·§3·§6 적용.
-> - `OPENBINGGU_PACK_CONTRACT.md`: `opencrab_ingest_allowed=false`, 자동 merge STOP → "자동 **영구** ingest 금지"로 해석. dry-run·후보 제안·사람 --execute는 허용.
+> - `BINGGUPACK_PUBLIC_RELEASE_POLICY.md` / `..._CHECKLIST.md` / `BINGGUPACK_SANITIZER_POLICY_BLOCK_ONLY.md`: 외부수확·철학필터·점진승격 미반영 → 본 헌법 §2·§3·§6 적용.
+> - `BINGGUPACK_PACK_CONTRACT.md`: `opencrab_ingest_allowed=false`, 자동 merge STOP → "자동 **영구** ingest 금지"로 해석. dry-run·후보 제안·사람 --execute는 허용.
 > - `BINGGUPACK_GRAPH_GRAMMAR_SPEC.md` / `BINGGUPACK_RATIONALE_EDGE_DESIGN.md`: edge actor/owner 모델·외부수확·철학필터 미반영 → 본 헌법으로 보완(각 사용자=자기 데이터 owner, actor=human 자기확정).
 > - `README.md` / `INSTALL.md`: P0·우선순위·철학필터 미반영 → 본 헌법 §5 우선순위로 갱신 예정.
 >
-> ## 충돌 없음(그대로 유지): OPENBINGGU_OVERALL_GOAL, OPENBINGGU_PRODUCT_DIRECTION_TWO_TRACK, BINGGUPACK_PERSONAL_ACCEPTED_STATE_DESIGN_R2, BINGGUPACK_SEMANTIC_CLASSIFIER_DESIGN, BINGGUPACK_CAPTURE_HOOK_SETUP — 핵심 원칙 이미 일치.
+> ## 충돌 없음(그대로 유지): BINGGUPACK_OVERALL_GOAL, BINGGUPACK_PRODUCT_DIRECTION_TWO_TRACK, BINGGUPACK_PERSONAL_ACCEPTED_STATE_DESIGN_R2, BINGGUPACK_SEMANTIC_CLASSIFIER_DESIGN, BINGGUPACK_CAPTURE_HOOK_SETUP — 핵심 원칙 이미 일치.
 
 ---
 

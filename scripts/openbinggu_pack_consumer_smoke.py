@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """OpenBinggu PoC P1 — 단일 로컬 pack consumer smoke (dry-run only, 모델 호출 0).
 
-목적: node+edge+evidence pack 후보를 모델 중립 소비 contract(docs/OPENBINGGU_MODEL_NEUTRAL_PACK_CONSUMER_CONTRACT.md)
+목적: node+edge+evidence pack 후보를 모델 중립 소비 contract(docs/BINGGUPACK_MODEL_NEUTRAL_PACK_CONSUMER_CONTRACT.md)
   기준으로 읽어 "모델이 공유할 context view"의 최소 형태를 만든다. 같은 pack을 2회/2 instance 로 읽었을 때
   같은 근거 집합을 도출하는지 확인(handoff 일치 메커니즘 — 실제 모델은 P2, 별도 GO).
 

@@ -2,11 +2,11 @@
 
 marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dry-run)
 
-# OpenBinggu 1차 배포 — 실데이터 검증 절차 (S4)
+# BingguPack 1차 배포 — 실데이터 검증 절차 (S4)
 
 > **상태: 절차 문서(2026-06-08). docs only · 실 업로드/push 0 · 실 트리 secret/PII scan 구현(`scripts/openbinggu_public_tree_scan.py` + `doctor --tree <ROOT>`, read-only·raw 미출력).**
-> 4CLI 선결 gate S4(합성 fixture 통과 ≠ 실 로컬데이터 안전) 흡수. 상세 `OPENBINGGU_FIRST_RELEASE_4CLI_SYNTHESIS.md`(internal design doc — not included in public repo) §3-A.
-> 상위: [CLEAN_REPO_BOOTSTRAP](OPENBINGGU_CLEAN_REPO_BOOTSTRAP.md) · [RELEASE_PREFLIGHT_CHECKLIST](OPENBINGGU_RELEASE_PREFLIGHT_CHECKLIST.md) · [SANITIZER_POLICY_BLOCK_ONLY](OPENBINGGU_SANITIZER_POLICY_BLOCK_ONLY.md).
+> 4CLI 선결 gate S4(합성 fixture 통과 ≠ 실 로컬데이터 안전) 흡수. 상세 `BINGGUPACK_FIRST_RELEASE_4CLI_SYNTHESIS.md`(internal design doc — not included in public repo) §3-A.
+> 상위: [CLEAN_REPO_BOOTSTRAP](BINGGUPACK_CLEAN_REPO_BOOTSTRAP.md) · [RELEASE_PREFLIGHT_CHECKLIST](BINGGUPACK_RELEASE_PREFLIGHT_CHECKLIST.md) · [SANITIZER_POLICY_BLOCK_ONLY](BINGGUPACK_SANITIZER_POLICY_BLOCK_ONLY.md).
 
 ---
 
@@ -33,7 +33,7 @@ marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dr
 
 > 이 절차는 **사용자 자기 머신에서만** 수행한다. 작성자/운영자가 사용자 데이터를 대신 스캔하지 않는다.
 
-1. **clean repo 후보 트리 선택** — [CLEAN_REPO_BOOTSTRAP](OPENBINGGU_CLEAN_REPO_BOOTSTRAP.md)에 따라 새 clean 트리에 공개 대상만 복사(실 그래프/DB/.env/credential 미복사).
+1. **clean repo 후보 트리 선택** — [CLEAN_REPO_BOOTSTRAP](BINGGUPACK_CLEAN_REPO_BOOTSTRAP.md)에 따라 새 clean 트리에 공개 대상만 복사(실 그래프/DB/.env/credential 미복사).
 2. **doctor 실행** — `python scripts/openbinggu_doctor.py --selftest` → 6 selftest + secret/PII scan + operating store 가드. 요약만(PASS/FAIL·reason_code·count), raw 미출력.
 3. **public tree secret/PII scan 실행** — 공개 후보 트리 전체 대상(현재 doctor는 **stub**, 실 트리 스캔은 §3 참조). 검출 시 **count·reason_code·path_id만**, raw 값 0.
 4. **source pointer dirty/unknown count 확인** — 공개 후보 pack의 source pointer 판정([path_safety_gate]/[scope_envelope publish guard]). dirty/unknown count 집계.

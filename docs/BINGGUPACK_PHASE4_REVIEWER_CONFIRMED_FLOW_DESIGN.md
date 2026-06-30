@@ -4,7 +4,7 @@
 
 > 목적: candidate를 **사람이 검토해 confirmed로 올리는** 실제 흐름 설계. **confirmed 생성/apply는 실행하지 않음**(설계만).
 > ⚠️ 코드·write·confirmed·apply·promote·push·OpenCrab·Neo4j 0. confirmed_created=0 불변.
-> 기준: reviewer auth/token selftest **20/20**(`OPENBINGGU_REVIEWER_AUTH_SESSION_TOKEN_DESIGN`·S1~S19) · review resolver preview · confirmed governance(candidate→review_pending→confirmed/rejected).
+> 기준: reviewer auth/token selftest **20/20**(`BINGGUPACK_REVIEWER_AUTH_SESSION_TOKEN_DESIGN`·S1~S19) · review resolver preview · confirmed governance(candidate→review_pending→confirmed/rejected).
 
 ## 1. 흐름 (candidate → confirmed, 사람 승인 게이트)
 ```

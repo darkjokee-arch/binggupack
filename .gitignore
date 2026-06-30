@@ -24,6 +24,12 @@ __pycache__/
 *.pyc
 *.pyo
 
+# python 빌드/패키징 산출물 (pip install/-m build 부산물 — 추적 금지, PII tree-scan 제외와 정합)
+build/
+**/build/
+*.egg-info/
+**/*.egg-info/
+
 # secrets / credentials
 .env
 *.env

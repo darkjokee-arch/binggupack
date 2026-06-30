@@ -183,7 +183,7 @@ def _sim_id(a, b):
 
 
 # ========== MVP2.1 edge filter (신규, 노드 로직 무수정 / 2차 소비처 차단) ==========
-# 설계: docs/OPENBINGGU_MVP21_EDGE_SAFETY_FILTER_DESIGN.md §4. node classify_pair wrapper 사상 복제.
+# 설계: docs/BINGGUPACK_MVP21_EDGE_SAFETY_FILTER_DESIGN.md §4. node classify_pair wrapper 사상 복제.
 EDGE_RELATION_ALLOWED = {"evidence_supports"}
 
 
