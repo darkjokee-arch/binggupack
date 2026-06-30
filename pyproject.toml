@@ -70,6 +70,11 @@ extend-exclude = ["scripts", "hybrid_agi", "_*", "hosted"]
 select = ["E", "F", "W", "I"]
 ignore = ["E501"]   # 라인 길이는 경고만(점진 도입).
 
+[tool.ruff.lint.per-file-ignores]
+# strangler 이관 byte-identical impl — 원본 스타일(E702 세미콜론 다중문·E741 짧은 변수 l) 보존.
+# incoming_loader 는 자체 selftest 부재 → byte-identical 이 유일한 동등성 보증이라 스타일 변경 불가.
+"binggupack/pack/incoming_loader.py" = ["E702", "E741"]
+
 [tool.mypy]
 python_version = "3.10"
 ignore_missing_imports = true
