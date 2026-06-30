@@ -401,7 +401,7 @@ def explore(root, transport, max_depth=3, max_nodes=300, breadth=8,
 
 
 # ── 실 ollama transport 팩토리(selftest 미사용·실 네트워크 전용·lazy) ──────
-def default_ollama_transport(model="qwen2.5:32b", url="http://localhost:11434", timeout=120):
+def default_ollama_transport(model="qwen2.5:32b-instruct-q4_K_M", url="http://localhost:11434", timeout=120):
     """실 ollama generate transport 생성기(클로저) — **selftest 미사용·실 endpoint 전용**.
     반환 transport(prompt:str)->json(파싱된 객체 또는 원문 문자열). urllib lazy(서드파티 0).
     ollama generate API: POST {url}/api/generate {model, prompt, format:'json', stream:false}.
