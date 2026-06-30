@@ -127,6 +127,11 @@ def _is_broken_label(label):
         return True
     if _REPEAT_RUN_RE.search(s):
         return True
+    # 한국어 라벨에 부적합한 스크립트(CJK 한자·태국·아랍 등) 혼합 = 깨진 다국어 출력
+    for ch in s:
+        o = ord(ch)
+        if (0x4E00 <= o <= 0x9FFF) or (0x3400 <= o <= 0x4DBF) or (0x0E00 <= o <= 0x0E7F) or (0x0600 <= o <= 0x06FF):
+            return True
     return False
 
 
@@ -182,7 +187,8 @@ def build_expand_prompt(node, root, path, breadth=8):
         "경로 맥락을 벗어난 해석(드리프트)은 금지한다. "
         "예) 경로가 여행 맥락이면 '패키지'를 소프트웨어 패키지로 해석하지 말 것.\n"
         "각 가지는 대상 노드를 한 단계 더 구체화한 것이어야 하며, 조상 노드와 중복되면 안 된다.\n"
-        "출력은 JSON 배열 [\"가지1\", \"가지2\", ...] 형식. 라벨만, 설명 없이."
+        "출력은 JSON 배열 [\"가지1\", \"가지2\", ...] 형식. 라벨만, 설명 없이.\n"
+        "각 라벨은 반드시 한국어로만 작성하라(한자·태국어 등 외국어·언어 혼합 금지·간결한 한국어 명사구)."
         % (str(root).strip(), chain, str(node).strip(), int(breadth))
     )
 
@@ -267,7 +273,7 @@ def score_relevance(label, root, path, transport=None):
 
 # ── 핵심: explore (재귀 BFS·메커니즘) ─────────────────────────────────────
 def explore(root, transport, max_depth=3, max_nodes=300, breadth=8,
-            relevance_min=0.5, relevance_transport=None):
+            relevance_min=0.0, relevance_transport=None):
     """1주제 → 재귀 분기 지식그래프. BFS 확장 + 경로맥락 드리프트 차단 + 관련성 가지치기 + budget.
 
     인자(폭발 제어 — 전부 메커니즘):
@@ -401,7 +407,7 @@ def explore(root, transport, max_depth=3, max_nodes=300, breadth=8,
 
 
 # ── 실 ollama transport 팩토리(selftest 미사용·실 네트워크 전용·lazy) ──────
-def default_ollama_transport(model="qwen2.5:32b-instruct-q4_K_M", url="http://localhost:11434", timeout=120):
+def default_ollama_transport(model="qwen2.5:32b-instruct-q4_K_M", url="http://localhost:11434", timeout=600):
     """실 ollama generate transport 생성기(클로저) — **selftest 미사용·실 endpoint 전용**.
     반환 transport(prompt:str)->json(파싱된 객체 또는 원문 문자열). urllib lazy(서드파티 0).
     ollama generate API: POST {url}/api/generate {model, prompt, format:'json', stream:false}.
