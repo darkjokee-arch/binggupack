@@ -305,7 +305,7 @@ def explore(root, transport, max_depth=3, max_nodes=300, breadth=8,
     try:
         relevance_min = float(relevance_min)
     except (TypeError, ValueError):
-        relevance_min = 0.5
+        relevance_min = 0.0
 
     root_label = "" if root is None else str(root).strip()
 
@@ -668,7 +668,7 @@ if __name__ == "__main__":
                       max_depth=_arg("--depth", 3, int),
                       max_nodes=_arg("--max-nodes", 300, int),
                       breadth=_arg("--breadth", 8, int),
-                      relevance_min=_arg("--rel-min", 0.5, float),
+                      relevance_min=_arg("--rel-min", 0.0, float),
                       relevance_transport=rel_tr)
         print(json.dumps(res, ensure_ascii=False, indent=2))
     else:
