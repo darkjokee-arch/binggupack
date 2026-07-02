@@ -306,12 +306,22 @@ def _dedupe(seq):
 
 
 # ───────────────────────────── T3 하드제외 게이트 (owner 양보 불가·최우선) ─────────────────────────────
+# 반출 payload arguments 에서 T3 검사 대상 자유텍스트 필드(하나라도 T3 → 전량 차단).
+# create_pack/pack_visibility/pack_category 는 구조 enum/bool 이라 검사 제외.
+_T3_TEXT_FIELDS = ("title", "content", "pack_title", "pack_description", "workspace_label")
+
+
 def _apply_t3_gate(payloads):
-    """T3(PII · 민감 과거사) 반출 절대금지 — payload content 검사 후 차단분 제거.
+    """T3(PII · 민감 과거사) 반출 절대금지 — payload 텍스트 필드 검사 후 차단분 제거.
 
     owner 결정([[feedback-binggupack-identity-personal-ontology-agi]] §부분개정): 사용자 온톨로지는
     헌법 §3 제외로 완전자동 업로드하되 **T3 만은 코드로 하드 차단**(양보 불가). dry-run/live 공통
-    최우선 게이트(삼중 게이트보다 앞). fail-closed: 필터 로드 실패 시 전량 차단(안전).
+    최우선 게이트(삼중 게이트보다 앞).
+
+    검사 범위: content 뿐 아니라 title/pack_title/pack_description/workspace_label 등 arguments 로
+    실리는 모든 자유텍스트 필드(_T3_TEXT_FIELDS). 하나라도 T3 이면 해당 payload 전량 차단.
+    fail-closed 이중: ① 필터 로드 실패 → 전량 차단. ② content 미추출(키/구조 손상)도 차단
+    (기존 content="" fail-open 제거 — 안전 판정 불가 = 반출 금지).
     반환 (kept, blocked[{source,title,report}])."""
     try:
         from binggu_t3_filter import is_t3_blocked, t3_report
@@ -323,12 +333,22 @@ def _apply_t3_gate(payloads):
     kept, blocked = [], []
     for p in payloads:
         try:
-            content = p["payload"]["params"]["arguments"]["content"]
+            args = p["payload"]["params"]["arguments"]
+            content = args["content"]              # 키 부재/비dict → except(fail-closed)
+            if not isinstance(content, str):
+                raise TypeError("content not str")
         except Exception:
-            content = ""
-        if is_t3_blocked(content):
+            # 추출 실패 = 안전 판정 불가 → fail-CLOSED 차단(content="" fail-open 금지)
             blocked.append({"source": p.get("source"), "title": p.get("title"),
-                            "report": t3_report(content)})
+                            "report": {"blocked": True, "error": "T3_EXTRACT_FAILED"}})
+            continue
+        # content + title/pack_*/workspace_label 등 자유텍스트 전부 결합 검사(over-block=안전)
+        texts = [str(args[k]) for k in _T3_TEXT_FIELDS
+                 if isinstance(args.get(k), str) and args.get(k)]
+        combined = "\n".join(texts)
+        if is_t3_blocked(combined):
+            blocked.append({"source": p.get("source"), "title": p.get("title"),
+                            "report": t3_report(combined)})
         else:
             kept.append(p)
     return kept, blocked
@@ -599,6 +619,57 @@ def _selftest():
     chk("T3G-3 안전 텍스트만이면 T3 게이트 통과(전량 계획)",
         ingest_pack([_mk_one("ok", ["짧게 결론부터", "유연함이 능력이다"])],
                     env={})["planned_calls"] == 1)
+
+    # ── T3 게이트: title/pack_*/workspace_label PII 검사 + 추출실패 fail-CLOSED(직접 유닛) ──
+    def _mk_payload(source, title, content, **extra):
+        args = {"title": title, "content": content, "create_pack": True,
+                "pack_visibility": "private", "pack_category": "mcp"}
+        args.update(extra)
+        return {"title": title, "content": content, "chars": len(content), "source": source,
+                "payload": {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                            "params": {"name": INGEST_TOOL, "arguments": args}}}
+
+    # content 깨끗 + title 에 PII → 차단(기존엔 content 만 봐서 통과되던 fail-open 봉쇄)
+    k_t, b_t = _apply_t3_gate([_mk_payload("s", "연락처 010-1234-5678 김철수", "깨끗한 본문입니다")])
+    chk("T3G-4 title PII(content 깨끗) → 차단(fail-safe)",
+        len(k_t) == 0 and len(b_t) == 1 and b_t[0]["report"].get("blocked") is True)
+
+    # pack_description 과거사 · workspace_label PII → 차단
+    k_pd, b_pd = _apply_t3_gate([_mk_payload("s", "안전 제목", "안전 본문",
+                                             pack_description="이혼 소송 진행 중")])
+    chk("T3G-5 pack_description 과거사 → 차단", len(k_pd) == 0 and len(b_pd) == 1)
+    k_ws, b_ws = _apply_t3_gate([_mk_payload("s", "안전", "안전",
+                                             workspace_label="test@example.com")])
+    chk("T3G-5b workspace_label PII → 차단", len(k_ws) == 0 and len(b_ws) == 1)
+    k_pt, b_pt = _apply_t3_gate([_mk_payload("s", "안전", "안전",
+                                             pack_title="주민 900101-1234567 자료")])
+    chk("T3G-5c pack_title PII → 차단", len(k_pt) == 0 and len(b_pt) == 1)
+
+    # 전 필드 안전 → 통과(kept)
+    k_ok, b_ok = _apply_t3_gate([_mk_payload("s", "여행 제목", "여행 본문",
+                                             pack_title="여행 팩", pack_description="봄 여행",
+                                             workspace_label="travel")])
+    chk("T3G-6 전 필드 안전 → 통과(kept)", len(k_ok) == 1 and len(b_ok) == 0)
+
+    # content 키 누락(추출 except) → content="" fail-open 아님 · fail-CLOSED 차단
+    bad_nocontent = {"title": "t", "source": "s",
+                     "payload": {"params": {"arguments": {"title": "안전 제목",
+                                                          "pack_visibility": "private"}}}}
+    k_nc, b_nc = _apply_t3_gate([bad_nocontent])
+    chk("T3G-7 content 키 누락 → fail-CLOSED 차단(fail-open 봉쇄)",
+        len(k_nc) == 0 and len(b_nc) == 1
+        and b_nc[0]["report"].get("blocked") is True
+        and b_nc[0]["report"].get("error") == "T3_EXTRACT_FAILED")
+
+    # arguments 자체 부재/구조 손상 → fail-CLOSED
+    bad_noargs = {"title": "t", "source": "s", "payload": {"params": {}}}
+    k_na, b_na = _apply_t3_gate([bad_noargs])
+    chk("T3G-8 arguments 부재 → fail-CLOSED 차단", len(k_na) == 0 and len(b_na) == 1)
+
+    # 통합: ingest_pack ingest_opts(pack_description) PII → 전 payload 차단
+    r_pd = ingest_pack(docs, env={}, pack_description="담당자 연락처 010-9876-5432")
+    chk("T3G-9 ingest_pack pack_description PII → 전 payload 차단(planned=0·blocked=번들수)",
+        r_pd["planned_calls"] == 0 and len(r_pd["t3_blocked"]) == 2)
 
     # ── run_mcp_session 직접: initialize protocolVersion/clientInfo 존재 ──
     captured = []

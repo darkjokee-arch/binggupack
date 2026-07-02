@@ -86,8 +86,15 @@ def load_state():
 
 
 def save_state(content_hash, count, uploaded_hashes=None):
+    """상태 저장. uploaded_hashes=None 이면 기존 값을 보존한다(어느 경로에서도 silent
+    wipe 금지 — 불변식). full/delta 모드 혼용 시 baseline·confirm 이 델타 추적 상태를
+    지워 재-baseline(신규 문장 무업로드 흡수=데이터 손실)을 유발하던 결함 차단."""
     st = {"pack_id": PACK_ID, "content_hash": content_hash, "count": count}
-    if uploaded_hashes is not None:
+    if uploaded_hashes is None:
+        prev = load_state().get("uploaded_hashes")
+        if prev is not None:
+            st["uploaded_hashes"] = sorted(set(prev))
+    else:
         st["uploaded_hashes"] = sorted(set(uploaded_hashes))
     with open(_state_path(), "w", encoding="utf-8") as f:
         json.dump(st, f, ensure_ascii=False, indent=2)
@@ -98,9 +105,14 @@ def _hash(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
+# 문장 hash 길이 — 64bit(16자). 과거 48bit(12자)은 충돌 시 신규 문장을 기존으로 오인해
+# skip(silent 누락)할 위험이 있어 확대. 저장된 12자 hash 는 16자 hash 의 접두사라 호환.
+_SENT_HASH_LEN = 16
+
+
 def _sent_hash(s):
     """문장 단위 짧은 hash — 델타(신규 문장) 추적용."""
-    return hashlib.sha256(s.encode("utf-8")).hexdigest()[:12]
+    return hashlib.sha256(s.encode("utf-8")).hexdigest()[:_SENT_HASH_LEN]
 
 
 def sync(baseline=False, write_text=None, ledger=None):
@@ -158,7 +170,15 @@ def sync_delta(write_text=None, ledger=None):
         return {"status": "DELTA_BASELINE_SET", "pack_id": PACK_ID, "count": len(sentences),
                 "blocked": blocked, "hash": full_hash, "absorbed": len(cur), "delta_count": 0}
     uploaded = set(uploaded)
-    new = [(h, s) for h, s in cur if h not in uploaded]
+    # 레거시 hash 호환: 과거 12자 hash 는 현재 16자 hash 의 접두사이므로 길이별 접두사로
+    # 매칭한다. hash 폭 확대(12→16) 시 저장분을 신규로 오인→전량 재업로드(pack_update
+    # 재파싱 중복 노드 누적)를 막는다. 무손실(접두사 일치는 동일 문장 보장).
+    ulens = sorted({len(x) for x in uploaded}) or [_SENT_HASH_LEN]
+
+    def _seen(h):
+        return any(h[:n] in uploaded for n in ulens)
+
+    new = [(h, s) for h, s in cur if not _seen(h)]
     if not new:
         return {"status": "NO_CHANGE", "pack_id": PACK_ID, "count": len(sentences),
                 "hash": full_hash, "delta_count": 0}
@@ -273,6 +293,44 @@ def _selftest():
         m1 = os.path.getmtime(ledger)
         sync_delta()
         check(os.path.getmtime(ledger) == m1, "Td7 델타 sync 후 ledger mtime 불변(read-only)")
+
+        # ---- 결함 회귀 (Fix D) ----
+        # Tf1 (defect 3): 문장 hash 폭 64bit(16자↑) — 48bit 충돌 시 신규 문장 skip 방지
+        check(len(_sent_hash("아무 문장이든")) >= 16, "Tf1 _sent_hash 16자(64bit) 이상")
+
+        # Tf2 (defect 1·2): 델타 운용 중 full baseline 이 uploaded_hashes 를 wipe 하지 않음
+        up_before = set(load_state().get("uploaded_hashes") or [])
+        check(len(up_before) == 4, "Tf2a 델타 상태 uploaded_hashes 4개(o1~o4)")
+        sync(baseline=True)  # full baseline(업로드 안 함) — 예전엔 여기서 uploaded_hashes 소실
+        up_after = set(load_state().get("uploaded_hashes") or [])
+        check(up_after == up_before, "Tf2b full baseline 후 uploaded_hashes 보존(wipe 0)")
+
+        # Tf3 (defect 1): baseline 이후 추가된 문장이 재-baseline 흡수(무업로드=손실) 없이 델타 검출
+        add("o5", "새 원칙: 위험을 먼저 말한다")
+        rf = sync_delta()
+        check(rf["status"] == "DELTA_UPDATE" and rf["delta_count"] == 1
+              and rf["delta_sentences"] == ["새 원칙: 위험을 먼저 말한다"],
+              "Tf3 baseline 후 신규 문장 델타 검출(흡수·손실 없음)")
+
+        # Tf4 (defect 2): full 모드 confirm 도 uploaded_hashes 를 wipe 하지 않음
+        prev_up = load_state().get("uploaded_hashes")
+        confirm(rf["hash"], rf["count"])  # full confirm — 예전엔 델타 추적 상태 소실
+        cur_up = load_state().get("uploaded_hashes")
+        check(cur_up is not None and set(cur_up) == set(prev_up),
+              "Tf4 full confirm 후 uploaded_hashes 보존(재-baseline·재업로드 방지)")
+
+        # Tf5 (defect 3 마이그레이션): 저장된 12자 레거시 hash 도 무손실 매칭(전량 재업로드 방지)
+        sents, _b = _owner_sentences()
+        legacy = [hashlib.sha256(s.encode("utf-8")).hexdigest()[:12] for s in sents]
+        save_state(_hash(_render_pack(sents)), len(sents), uploaded_hashes=legacy)
+        rmig = sync_delta()
+        check(rmig["status"] == "NO_CHANGE" and rmig.get("delta_count") == 0,
+              "Tf5a 레거시 12자 hash 접두사 매칭 → 재업로드 없음(NO_CHANGE)")
+        add("o6", "새 원칙: 방법은 무조건 있다")
+        rmig2 = sync_delta()
+        check(rmig2["status"] == "DELTA_UPDATE" and rmig2["delta_count"] == 1
+              and rmig2["delta_sentences"] == ["새 원칙: 방법은 무조건 있다"],
+              "Tf5b 레거시 상태에서도 신규 문장은 정상 검출")
 
         con.close()
         print(f"\nGATE={'GO' if ok else 'NO-GO'}")

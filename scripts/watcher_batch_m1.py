@@ -54,6 +54,24 @@ _NR = r"(?![0-9])"    # 우 숫자 경계
 # 명확한 PII shape (무하이픈/공백/점/+82 변형 포함). 형태가 명확하므로 도메인 문맥과 무관하게 마스킹.
 # 이메일 TLD: ASCII(2+) | punycode(xn--..) | 한글 TLD(.한국 등). 신용카드/AKIA/vendor 토큰은 secret 계열.
 _EMAIL_TLD = r"(?:[A-Za-z]{2,}|xn--[A-Za-z0-9-]+|[가-힣]{2,})"
+
+# ---- 한국 주소/이름 PII (Fix B) ----
+# 시/도 화이트리스트(고정 17 + 전체명). bare("서울")·suffixed("서울시") 둘 다. 문법어 오탐 억제 위해 화이트리스트로 앵커.
+_SIDO = (r"(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주"
+         r"|충청북|충청남|전라북|전라남|경상북|경상남|강원특별자치)"
+         r"(?:특별자치시|특별자치도|특별시|광역시|자치시|자치도|도|시)?")
+# 행정/도로 토큰: …구/군/시/읍/면/동/로/길, 뒤가 한글이 아니어야 함(우리집·처리·활동 부분매칭 차단). '리/가' 제외(우리/거리·조사 오탐).
+_ADDR_TOKEN = r"(?:\s*[가-힣A-Za-z0-9]{1,12}(?:구|군|시|읍|면|동|로|길)(?![가-힣]))"
+# 계층 주소: 시/도 + 토큰1+ + 지번/도로번호(필수, 오탐 억제 핵심) [+ 동/호]. 번호 없으면 주소로 보지 않음.
+_KR_ADDRESS = re.compile(
+    _SIDO + _ADDR_TOKEN + r"+"
+    + r"\s*\d{1,5}(?:-\d{1,4})?(?:번지)?"
+    + r"(?:\s*\d{1,4}동)?(?:\s*\d{1,4}호)?")
+# 아파트/건물 동·호 쌍 — 시/도 없이도 거주지 식별(숫자+동+숫자+호). "101동 202호".
+_KR_DONGHO = re.compile(r"(?<![0-9])\d{1,4}동\s*\d{1,4}호(?![0-9])")
+# 이름: 강한 라벨(이름/성명/성함) + 구분자(콜론/조사+공백/공백) + 2~4자 한글. group(1)만 마스킹(보수적, 라벨 오탐 최소).
+_KR_NAME = re.compile(r"(?:이름|성명|성함)(?:\s*[:：=]\s*|\s*(?:은|는|이|가)\s+|\s+)([가-힣]{2,4})(?![가-힣])")
+
 PII_SHAPES = [
     ("rrn",            re.compile(_NL + r"\d{6}[-\s.]?\d{7}" + _NR)),                                  # 주민(13)
     ("phone_mobile",   re.compile(_NL + r"(?:\+?82[-\s.]?)?0?1[016789][-\s.]?\d{3,4}[-\s.]?\d{4}" + _NR)),
@@ -69,6 +87,9 @@ PII_SHAPES = [
     ("bearer_token",   re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._\-]{16,}")),
     # 긴 base64-ish secret (>=32, 영숫자+/=_-). 카드/주민 등 숫자열은 먼저 매칭되어 제외됨.
     ("b64_secret",     re.compile(r"\b[A-Za-z0-9+/=_-]{32,}\b")),
+    # 한국 주소(계층/동호). full-span 마스킹 — 기존 겹침정리 로직이 서브스팬 흡수.
+    ("kr_address",     _KR_ADDRESS),
+    ("kr_dongho",      _KR_DONGHO),
 ]
 
 # 도메인 식별자 형태 — 문맥이 명확히 일치할 때만 보존(아니면 마스킹+review_flag).
@@ -136,6 +157,10 @@ def batch_redact(text, field_name=""):
     for m in BIZNO_SHAPE.finditer(red):
         if not _in_preserve(m.start(), m.end()):
             cands.append((m.start(), m.end(), "bizno_ambiguous"))
+    # 한국 이름(라벨 문맥): 라벨 제외 이름 group(1)만 마스킹
+    for m in _KR_NAME.finditer(red):
+        if not _in_preserve(m.start(1), m.end(1)):
+            cands.append((m.start(1), m.end(1), "kr_name"))
 
     # 3단계: 겹침 정리(좌→우, 긴 것 우선) 후 우→좌 치환
     cands.sort(key=lambda c: (c[0], -(c[1] - c[0])))
@@ -173,6 +198,10 @@ _SCAN_SHAPES = [
     ("scan_kv",       re.compile(r"(?i)(?:api[_-]?key|token|secret|password|passwd)\s*[:=]\s*['\"]?[A-Za-z0-9_\-+/=.]{4,}")),
     # 긴 base64-ish secret.
     ("scan_b64",      re.compile(r"\b[A-Za-z0-9+/=_-]{32,}\b")),
+    # 한국 주소/이름 잔존 검증(redactor와 동일 shape 공유 — 신규 PII 타입은 형태 자체가 판정근거).
+    ("scan_kr_address", _KR_ADDRESS),
+    ("scan_kr_dongho",  _KR_DONGHO),
+    ("scan_kr_name",    _KR_NAME),
 ]
 
 
@@ -416,7 +445,8 @@ def ensure_fixtures():
     wr("pii_boundary/positive.txt",
        "담당자 주민" + "901010" + "-1234567 확인 바람.\n\n"
        "전화010 1234 5678 또는 국제 +82-10-9876-5432 로 연락.\n\n"
-       "무하이픈 " + "010" + "55556666 와 이메일 hong@test.co.kr 도 본문에 노출됨.\n")
+       "무하이픈 " + "010" + "55556666 와 이메일 hong@test.co.kr 도 본문에 노출됨.\n\n"
+       "거주지 주소는 서울시 강남구 테헤란로 123 456동 789호 이고 이름은 홍길동 이라고 적혀 있다.\n")
     wr("pii_boundary/negative.txt",
        "이 건의 공고번호 20240101234 를 참조하라.\n\n"
        "사업자등록번호 123-45-67890 으로 등록된 업체가 낙찰했다.\n\n"
@@ -458,6 +488,26 @@ def _boundary_inline_check():
     # 애매 숫자열(도메인 문맥 없음): raw 보존 금지 → 마스킹 + review_flag
     reda, _, reva = batch_redact("그 번호는 123-45-67890 였다")
     res["ambiguous_masked_review"] = ("123-45-67890" not in reda) and bool(reva)
+    # 한국 주소(시/도+구/군+로+지번+동/호): 전부 마스킹 + scanner 잔존 0 (Fix B 실증 케이스)
+    addr = "집 주소는 서울시 강남구 테헤란로 123 456동 789호"
+    reda2, ha, _ = batch_redact(addr)
+    res["kr_address_masked"] = (all(x not in reda2 for x in ("강남구", "테헤란로", "789호"))
+                                and len(scan_residual_pii(reda2)) == 0 and ha >= 1)
+    # 아파트 동/호 쌍(시/도 없이)도 마스킹
+    redap, _, _ = batch_redact("아파트 101동 202호로 이사했다")
+    res["kr_dongho_masked"] = "101동 202호" not in redap
+    # scanner 독립성: raw 주소/동호를 scanner가 직접 탐지
+    res["kr_scanner_catches_raw"] = (len(scan_residual_pii("서울시 강남구 테헤란로 123")) > 0
+                                     and len(scan_residual_pii("101동 202호")) > 0)
+    # 이름(강한 라벨 문맥) 마스킹 — 라벨은 남고 이름만 제거
+    redn2, _, _ = batch_redact("이름은 홍길동 이고 연락 바람")
+    res["kr_name_masked"] = ("홍길동" not in redn2) and ("이름" in redn2)
+    # 과탐 억제: 시/도 유사어·문법 '로'·'이름값' 등 정상 문장은 원문 보존(변경 0)
+    fps = ["그러므로 123번을 눌렀고 회의는 정해진 대로 진행됐다",
+           "서울 도시 문제를 연구했고 경기 침체 대응을 논의했다",
+           "이름값을 계산하는 함수 3개를 추가했다",
+           "부산 국제시장 3곳을 둘러봤다"]
+    res["kr_no_false_positive"] = all(batch_redact(t)[0] == t and not scan_residual_pii(t) for t in fps)
     return res
 
 
@@ -503,6 +553,11 @@ def run_selftest():
         "boundary_denylist_masked": bnd["denylist_masked"],
         "boundary_scanner_catches_raw": bnd["scanner_catches_raw"],
         "boundary_ambiguous_masked_review": bnd["ambiguous_masked_review"],
+        "boundary_kr_address_masked": bnd["kr_address_masked"],
+        "boundary_kr_dongho_masked": bnd["kr_dongho_masked"],
+        "boundary_kr_scanner_catches_raw": bnd["kr_scanner_catches_raw"],
+        "boundary_kr_name_masked": bnd["kr_name_masked"],
+        "boundary_kr_no_false_positive": bnd["kr_no_false_positive"],
         "pii_boundary_fixture_GO": "pii_boundary" in by and by["pii_boundary"]["gate"] == "GO",
     }
     # duplicate dedup 정확 판정: dup 2 source 동일 내용 → md 문단 수만큼 node, 2배 안 됨

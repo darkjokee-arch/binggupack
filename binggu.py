@@ -633,6 +633,56 @@ def cmd_reflect(a):
     return 0
 
 
+def _gate_log_for_ledger(ledger):
+    """gate scope 를 ledger scope 에 고정(split-brain 차단·hermetic). 운영에선 ledger dir==home 이라
+    gate_path() 와 동일 경로. --ledger 격리/selftest 에선 gate 도 그 dir 를 따른다. 파일명은
+    save_gate 모듈에서 취해 하드코딩 회피."""
+    import binggu_save_gate as _sg
+    return os.path.join(os.path.dirname(os.path.abspath(ledger)),
+                        os.path.basename(_sg.gate_path()))
+
+
+def _resolve_human_ctx(ledger, sents, confirm):
+    """운영 ledger write 의 'human' 주장을 신뢰 신호로 검증해 실제 actor ctx 를 만든다.
+
+    Fix E: 종전엔 CLI 가 actor="human" 을 하드코딩해 위조방지 기록장(save_gate.gate_human_for)이
+    write 경로에서 미소비였다(텍스트만 알면 preview_id·confirm 을 AI 도 합성 가능 → 사람 확인 없이
+    운영 저장). 이제 write 직전 게이트를 실제로 소비한다. ★오버블록 회피(회귀0):
+      1) 게이트 기록 존재(사람 SAVE 발화를 hook 이 append — AI 위조 불가) → human 확정(save_gate)
+      2) 대화형 TTY(사장님 키보드) 또는 명시 신뢰 플래그(BINGGU_TRUSTED_CLI) → human 유지 + 감사표식
+      3) 비대화형(자동화/파이프) + 게이트 기록 없음 = 사람 확인 미검증 → 기본은 경고+감사(강등 안 함,
+         정당한 대화형 저장·pair 를 안 깨기 위함), BINGGU_STRICT_HUMAN_GATE=1 이면 비-human 으로
+         강등해 기존 G4_no_auto BLOCK 으로 **코드 강제**(opt-in).
+    """
+    ctx = {"actor": "human", "confirm": confirm}
+    # 1) 위조방지 기록장 대조 (hook 이 쓴 사람 SAVE 발화 hash — AI 는 UserPromptSubmit 를 못 거쳐 위조 불가)
+    try:
+        import binggu_save_gate as _sg
+        if sents and _sg.gate_human_for(sents, path=_gate_log_for_ledger(ledger)):
+            ctx["actor_source"] = "save_gate"
+            return ctx
+    except Exception:
+        pass  # 게이트 부재/오류 → 아래 신뢰 신호로 판단(default 는 오버블록 회피)
+    # 2) 대화형 터미널(사장님이 직접 타이핑) / 명시 신뢰 플래그
+    trusted = os.environ.get("BINGGU_TRUSTED_CLI", "").strip().lower() in ("1", "true", "yes", "on")
+    try:
+        interactive = sys.stdin.isatty()
+    except Exception:
+        interactive = False
+    if interactive or trusted:
+        ctx["actor_source"] = "tty" if interactive else "trust_flag"
+        return ctx
+    # 3) 비대화형 + 게이트 기록 없음 = 사람 확인 미검증
+    if os.environ.get("BINGGU_STRICT_HUMAN_GATE", "").strip().lower() in ("1", "true", "yes", "on"):
+        ctx["actor"] = "cli_unverified"          # → save_selected/save_paired 의 G4_no_auto BLOCK
+        ctx["actor_source"] = "strict_block"
+    else:
+        ctx["actor_source"] = "unverified_noninteractive"
+        print("WARN: 사람 확인 미검증(비대화형·게이트 기록 없음) — actor_source=unverified_noninteractive "
+              "로 진행합니다. 코드 강제 차단은 BINGGU_STRICT_HUMAN_GATE=1.")
+    return ctx
+
+
 def cmd_save(a):
     # 화자 페어 가드: owner 발화를 평면 save 로 저장하면 ai 발화와의 페어 연결(엣지)이 빠져
     # 노드가 흩어진다(화자축 본질 상실). owner 화자 저장은 pair 로만 — pair 가 페어/단독 둘 다 커버.
@@ -661,9 +711,18 @@ def cmd_save(a):
         return 1
     db, snap_dir = _open(a.ledger)
     idx = [int(x) for x in a.pick.split(",") if x.strip()]
-    r = save_selected(db, a.text, idx, {"actor": "human", "confirm": a.confirm},
+    _explicit = getattr(a, "explicit", False)
+    # 저장될 문장(선택 후보) = 위조방지 게이트 대조 대상. save_selected 내부 재실행과 동일 인덱싱.
+    try:
+        _cands = capture_preview(a.text, explicit=_explicit)["candidates"]
+        _sents = [_cands[i - 1]["sentence"] for i in idx
+                  if isinstance(i, int) and 1 <= i <= len(_cands)]
+    except Exception:
+        _sents = []
+    ctx = _resolve_human_ctx(a.ledger, _sents, a.confirm)
+    r = save_selected(db, a.text, idx, ctx,
                       snap_dir, due_date=a.due, speaker=getattr(a, "speaker", None),
-                      explicit=getattr(a, "explicit", False))
+                      explicit=_explicit)
     # --accept: 저장과 동시에 owner_accepted 확정 — 별도 ACCEPT 문구 면제(SAVE confirm 이 이미 사람 확인).
     # 인정=SAVE 통합(2트랙 설계) — candidate→accept 한 명령. pair --accept 동형(accept_by_node_id).
     if r.get("applied") and getattr(a, "accept", False):
@@ -684,7 +743,20 @@ def cmd_pair(a):
     from binggupack.storage import save_paired   # 트랙 C: storage facade 경유
     db, snap_dir = _open(a.ledger)
     rel = getattr(a, "by", "ai") + "_" + a.relation  # 반응 주체: ai(AI가 사용자 발화를) / owner(사용자가 AI 발화를)
-    r = save_paired(db, a.owner_text, a.ai_text, {"actor": "human", "confirm": a.confirm},
+    # 저장될 문장(owner/ai pick) = 위조방지 게이트 대조 대상(_pick_one_node 와 동일 explicit 인덱싱).
+    _psents = []
+    try:
+        _oc = capture_preview(a.owner_text, explicit=True)["candidates"]
+        if isinstance(a.owner_pick, int) and 1 <= a.owner_pick <= len(_oc):
+            _psents.append(_oc[a.owner_pick - 1]["sentence"])
+        if a.ai_text:
+            _ac = capture_preview(a.ai_text, explicit=True)["candidates"]
+            if isinstance(a.ai_pick, int) and 1 <= a.ai_pick <= len(_ac):
+                _psents.append(_ac[a.ai_pick - 1]["sentence"])
+    except Exception:
+        _psents = []
+    ctx = _resolve_human_ctx(a.ledger, _psents, a.confirm)
+    r = save_paired(db, a.owner_text, a.ai_text, ctx,
                     snap_dir, relation_kind=rel, owner_pick=a.owner_pick, ai_pick=a.ai_pick, due_date=a.due)
     acc_note = ""
     if r.get("applied") and getattr(a, "accept", False):
@@ -902,6 +974,60 @@ def selftest():
     rows = list_candidates(db)["rows"]
     db.close()
     ck("4_list_3건", len(rows) == 3 and cmd_list(args(status=None, kind=None)) == 0)
+
+    # ---- Fix E: CLI 'human' 주장 → 위조방지 게이트(save_gate) write 경로 소비 ----
+    # 종전엔 actor="human" 하드코딩이라 gate_human_for 가 미소비(AI 가 preview_id·confirm 합성 시
+    # 사람 확인 없이 운영 저장 가능). 이제 write 직전 게이트를 실제 소비 + 비대화형 자동화 강제차단(opt-in).
+    # 결정성 위해 sys.stdin 을 비-TTY 로 치환(실제 실행 터미널 TTY 여부와 무관).
+    import io as _io
+    fe_ledger = os.path.join(tmp, "fixE.sqlite")
+    cmd_init(args(ledger=fe_ledger))
+    FE_TEXT = "다음 배포는 회귀 위험이 커서 반드시 백업 후 진행하기로 결정했다."
+    FE_TEXT2 = "이 거래처는 납기 지연 이력이 있어 다음부터 우선순위를 낮추기로 했다."
+    fe_gate = _gate_log_for_ledger(fe_ledger)
+    _env_keep = {k: os.environ.get(k) for k in ("BINGGU_STRICT_HUMAN_GATE", "BINGGU_TRUSTED_CLI")}
+    _stdin_keep = sys.stdin
+
+    def _fe_nodes():
+        _d, _ = _open(fe_ledger)
+        _n = _d.con.execute("SELECT count(*) FROM nodes").fetchone()[0]
+        _d.close()
+        return _n
+    try:
+        sys.stdin = _io.StringIO()  # 비대화형 강제(결정적)
+        os.environ.pop("BINGGU_TRUSTED_CLI", None)
+        # FE1: strict + 게이트 기록 없음 → 비-human 강등 → G4_no_auto BLOCK(저장 0·코드 강제)
+        os.environ["BINGGU_STRICT_HUMAN_GATE"] = "1"
+        _feA = cmd_save(args(ledger=fe_ledger, text=FE_TEXT, preview_id=_preview_id(FE_TEXT),
+                             pick="1", confirm="SAVE 1", due=None))
+        ck("FE1_strict+게이트없음→BLOCK(저장0)", _feA == 1 and _fe_nodes() == 0)
+        # FE2: strict + 사람 SAVE 발화 게이트 기록 존재 → human 확정 → 저장 성공(게이트 실제 소비)
+        import binggu_save_gate as _sgfe
+        _fc = capture_preview(FE_TEXT, explicit=False)["candidates"]
+        _sgfe.gate_record([_fc[0]["sentence"]], path=fe_gate)
+        _feB = cmd_save(args(ledger=fe_ledger, text=FE_TEXT, preview_id=_preview_id(FE_TEXT),
+                             pick="1", confirm="SAVE 1", due=None))
+        ck("FE2_strict+게이트기록→저장성공(gate 소비)", _feB == 0 and _fe_nodes() == 1)
+        # FE3: 기본(비-strict) + 비대화형 + 게이트 없음 → 오버블록 안 함(경고+저장) — 회귀0 보증
+        os.environ.pop("BINGGU_STRICT_HUMAN_GATE", None)
+        _feC = cmd_save(args(ledger=fe_ledger, text=FE_TEXT2, preview_id=_preview_id(FE_TEXT2),
+                             pick="1", confirm="SAVE 1", due=None))
+        ck("FE3_기본_비대화형_오버블록없음(경고+저장)", _feC == 0 and _fe_nodes() == 2)
+        # FE4: 신뢰 플래그(BINGGU_TRUSTED_CLI) → strict 여도 human 유지(대화형 동치)
+        os.environ["BINGGU_STRICT_HUMAN_GATE"] = "1"
+        os.environ["BINGGU_TRUSTED_CLI"] = "1"
+        FE_TEXT3 = "이 계약은 조건이 불리해서 이번에는 포기하기로 결정했다."
+        _feD = cmd_save(args(ledger=fe_ledger, text=FE_TEXT3, preview_id=_preview_id(FE_TEXT3),
+                             pick="1", confirm="SAVE 1", due=None))
+        ck("FE4_신뢰플래그→strict여도_저장성공", _feD == 0 and _fe_nodes() == 3)
+    finally:
+        sys.stdin = _stdin_keep
+        for _k, _v in _env_keep.items():
+            if _v is None:
+                os.environ.pop(_k, None)
+            else:
+                os.environ[_k] = _v
+
     # ---- 회상(L4~L6 · read-only) — recall/trace/preflight CLI 래퍼 + use_count++ ----
     # 빈 그래프(미존재 ledger) graceful — 에러 0
     _empty = os.path.join(tmp, "no_ledger.sqlite")
