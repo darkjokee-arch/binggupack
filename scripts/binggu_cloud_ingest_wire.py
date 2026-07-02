@@ -305,6 +305,35 @@ def _dedupe(seq):
     return res
 
 
+# ───────────────────────────── T3 하드제외 게이트 (owner 양보 불가·최우선) ─────────────────────────────
+def _apply_t3_gate(payloads):
+    """T3(PII · 민감 과거사) 반출 절대금지 — payload content 검사 후 차단분 제거.
+
+    owner 결정([[feedback-binggupack-identity-personal-ontology-agi]] §부분개정): 사용자 온톨로지는
+    헌법 §3 제외로 완전자동 업로드하되 **T3 만은 코드로 하드 차단**(양보 불가). dry-run/live 공통
+    최우선 게이트(삼중 게이트보다 앞). fail-closed: 필터 로드 실패 시 전량 차단(안전).
+    반환 (kept, blocked[{source,title,report}])."""
+    try:
+        from binggu_t3_filter import is_t3_blocked, t3_report
+    except Exception:
+        # 안전 판정 자체 불가 → 전량 차단(반출 열어두지 않음)
+        return [], [{"source": p.get("source"), "title": p.get("title"),
+                     "report": {"blocked": True, "error": "T3_FILTER_UNAVAILABLE"}}
+                    for p in payloads]
+    kept, blocked = [], []
+    for p in payloads:
+        try:
+            content = p["payload"]["params"]["arguments"]["content"]
+        except Exception:
+            content = ""
+        if is_t3_blocked(content):
+            blocked.append({"source": p.get("source"), "title": p.get("title"),
+                            "report": t3_report(content)})
+        else:
+            kept.append(p)
+    return kept, blocked
+
+
 # ───────────────────────────── 오케스트레이터 (메인 진입점) ─────────────────────────────
 def ingest_pack(pack_or_documents, *, transport=None, env=None, config_path=None, home=None,
                 dry_run=True, confirm=None, create_workflow=False, workflow_spec=None,
@@ -324,6 +353,8 @@ def ingest_pack(pack_or_documents, *, transport=None, env=None, config_path=None
     """
     cfg = load_cloud_config(env=env, config_path=config_path, home=home)
     payloads = build_ingest_payloads(pack_or_documents, **ingest_opts)
+    # T3 하드제외 게이트(owner 양보 불가·최우선) — PII/과거사 반출 절대금지. dry-run/live 공통.
+    payloads, t3_blocked = _apply_t3_gate(payloads)
     confirmed = _is_confirmed(dry_run, confirm)
 
     wf_payload = None
@@ -334,7 +365,8 @@ def ingest_pack(pack_or_documents, *, transport=None, env=None, config_path=None
 
     base = {"enabled": cfg["enabled"], "confirmed": confirmed,
             "planned_calls": len(payloads),
-            "token_fingerprint": cfg["token_fingerprint"], "source": cfg["source"]}
+            "token_fingerprint": cfg["token_fingerprint"], "source": cfg["source"],
+            "t3_blocked": t3_blocked}
 
     # dry-run: 계획만(네트워크 0) — transport 가 주입돼 있어도 호출 안 함
     if dry_run:
@@ -538,6 +570,35 @@ def _selftest():
                            workflow_spec={"action": "create", "name": "WF"})
     chk("D6b dry-run workflow 계획 포함(맨끝)",
         r_wf_dry["payloads"][-1]["payload"]["params"]["name"] == WORKFLOW_TOOL)
+
+    # ── T3 하드제외 게이트: PII/과거사 번들 반출 차단(owner 양보불가·최우선) ──
+    def _mk_one(src, texts):
+        chunks = [{"item_id": "EVX-%s-%d" % (src, i), "text": t,
+                   "source": "harvest :: url :: %s" % src, "evidence_meta": {"raw_pointer": "p"}}
+                  for i, t in enumerate(texts)]
+        return {"nodes": [], "evidence_index": [], "evidence_chunks": chunks}
+
+    t3_docs = [_mk_one("safe", ["결론부터 짧게 답한다는 원칙을 지킨다"]),
+               _mk_one("piix", ["연락처는 010-1234-5678 이다"]),
+               _mk_one("pastx", ["작년에 빚 때문에 파산 신청했다"])]
+    r_t3d = ingest_pack(t3_docs, env={})   # dry-run
+    t3_srcs = [p.get("source") for p in r_t3d["payloads"]]
+    chk("T3G-1 dry-run: PII/과거사 번들 제외·안전 번들만 계획(planned=1·blocked=2)",
+        r_t3d["planned_calls"] == 1 and len(r_t3d["t3_blocked"]) == 2
+        and all("safe" in (s or "") for s in t3_srcs))
+    spyt = {"n": 0}
+
+    def spyt_transport(payload):
+        spyt["n"] += 1
+        return {"result": {"isError": False}}
+
+    r_t3l = ingest_pack(t3_docs, transport=spyt_transport, env=live_env,
+                        dry_run=False, confirm=True)
+    chk("T3G-2 live: T3 차단분 전송 0(안전 1건만 tools/call)·t3_blocked 보존",
+        r_t3l["results"]["calls"] == 1 and len(r_t3l["t3_blocked"]) == 2)
+    chk("T3G-3 안전 텍스트만이면 T3 게이트 통과(전량 계획)",
+        ingest_pack([_mk_one("ok", ["짧게 결론부터", "유연함이 능력이다"])],
+                    env={})["planned_calls"] == 1)
 
     # ── run_mcp_session 직접: initialize protocolVersion/clientInfo 존재 ──
     captured = []
