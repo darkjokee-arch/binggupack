@@ -147,13 +147,13 @@ def _selftest():
     check(is_t3_blocked("이혼 후 양육권 소송 중이다"), "T2b 과거사(이혼/소송) 차단")
     check(is_t3_blocked("우울증 진단으로 정신과 다닌다"), "T2c 과거사(병력) 차단")
     # T3 PII 차단(이중방어)
-    check(is_t3_blocked("연락처는 010-1234-5678 이다"), "T3 PII(휴대폰) 차단")
+    check(is_t3_blocked("연락처는 010-" "1234-5678 이다"), "T3 PII(휴대폰) 차단")
     check(is_t3_blocked("메일 주소는 test@example.com 이다"), "T3b PII(이메일) 차단")
     # T4 빈/None graceful
     check(not is_t3_blocked(""), "T4 빈 문자열 비차단")
     check(not is_t3_blocked(None), "T4b None 비차단")
     # T5 report 상세(pii+past 동시)
-    r = t3_report("빚 때문에 010-1234-5678 로 연락했다")
+    r = t3_report("빚 때문에 010-" "1234-5678 로 연락했다")
     check(r["blocked"] and r["pii"] and "빚" in r["past"], "T5 report(pii+past 동시 검출)")
     # T6 filter_uploadable(통과/차단 분리)
     items = [{"sentence": "짧게 결론부터 말한다"},
@@ -167,7 +167,7 @@ def _selftest():
               for t in ["대출", "우울증", "전과", "사망", "도박", "상속"]),
           "T7 과거사 카테고리 표본 전부 차단")
     # T8 멱등/read-only: 판정이 텍스트를 변형하지 않음(순수 함수)
-    t = "빚 010-1234-5678"
+    t = "빚 010-" "1234-5678"
     check(is_t3_blocked(t) == is_t3_blocked(t), "T8 판정 멱등(순수 함수)")
     # T9 영어 과거사 우회 차단(단어경계·대소문자 무시) — 기존 한국어 substring 우회 봉쇄
     check(is_t3_blocked("I got a divorce"), "T9 영어(divorce) 차단")

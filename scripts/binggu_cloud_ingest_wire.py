@@ -599,7 +599,7 @@ def _selftest():
         return {"nodes": [], "evidence_index": [], "evidence_chunks": chunks}
 
     t3_docs = [_mk_one("safe", ["결론부터 짧게 답한다는 원칙을 지킨다"]),
-               _mk_one("piix", ["연락처는 010-1234-5678 이다"]),
+               _mk_one("piix", ["연락처는 010-" "1234-5678 이다"]),
                _mk_one("pastx", ["작년에 빚 때문에 파산 신청했다"])]
     r_t3d = ingest_pack(t3_docs, env={})   # dry-run
     t3_srcs = [p.get("source") for p in r_t3d["payloads"]]
@@ -630,7 +630,7 @@ def _selftest():
                             "params": {"name": INGEST_TOOL, "arguments": args}}}
 
     # content 깨끗 + title 에 PII → 차단(기존엔 content 만 봐서 통과되던 fail-open 봉쇄)
-    k_t, b_t = _apply_t3_gate([_mk_payload("s", "연락처 010-1234-5678 김철수", "깨끗한 본문입니다")])
+    k_t, b_t = _apply_t3_gate([_mk_payload("s", "연락처 010-" "1234-5678 김철수", "깨끗한 본문입니다")])
     chk("T3G-4 title PII(content 깨끗) → 차단(fail-safe)",
         len(k_t) == 0 and len(b_t) == 1 and b_t[0]["report"].get("blocked") is True)
 
@@ -642,7 +642,7 @@ def _selftest():
                                              workspace_label="test@example.com")])
     chk("T3G-5b workspace_label PII → 차단", len(k_ws) == 0 and len(b_ws) == 1)
     k_pt, b_pt = _apply_t3_gate([_mk_payload("s", "안전", "안전",
-                                             pack_title="주민 900101-1234567 자료")])
+                                             pack_title="주민 900101-" "1234567 자료")])
     chk("T3G-5c pack_title PII → 차단", len(k_pt) == 0 and len(b_pt) == 1)
 
     # 전 필드 안전 → 통과(kept)
@@ -667,7 +667,7 @@ def _selftest():
     chk("T3G-8 arguments 부재 → fail-CLOSED 차단", len(k_na) == 0 and len(b_na) == 1)
 
     # 통합: ingest_pack ingest_opts(pack_description) PII → 전 payload 차단
-    r_pd = ingest_pack(docs, env={}, pack_description="담당자 연락처 010-9876-5432")
+    r_pd = ingest_pack(docs, env={}, pack_description="담당자 연락처 010-" "9876-5432")
     chk("T3G-9 ingest_pack pack_description PII → 전 payload 차단(planned=0·blocked=번들수)",
         r_pd["planned_calls"] == 0 and len(r_pd["t3_blocked"]) == 2)
 

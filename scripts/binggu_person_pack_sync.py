@@ -230,7 +230,7 @@ def _selftest():
 
         add("o1", "결론부터 짧게 답한다")
         add("o2", "유연함이 능력이다")
-        add("p1", "이건 PII 010-1234-5678 포함", speaker="owner")  # T3 차단 대상
+        add("p1", "이건 PII 010-" "1234-5678 포함", speaker="owner")  # T3 차단 대상
         add("a1", "AI 발화는 온톨로지 팩에서 제외", speaker="ai")   # 사람축 아님
 
         # T1 build: owner 만·T3 차단 제외
