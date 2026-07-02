@@ -91,6 +91,44 @@ def render_block(res, max_remember=5, max_avoid=5, claim_cap=100):
     return "\n".join(out)
 
 
+def _render_trust(ledger_path):
+    """양방향 신뢰도(owner 직감 / ai 반박·수용 적중률)를 상단 블록에 표시(참고·강제 0).
+
+    회수 3단 회로의 상시(1단) 신호 편입 — preflight 자동주입에 hit_stats 를 연결한다.
+    read-only(sqlite mode=ro · SELECT 만) — hit_events 가 없거나 표본 부족(N<N_MIN)이면
+    None(소음 0). guard3: 적중률은 '표시 신호'일 뿐 정렬/자동결정 입력 아님(맹종 아님·헌법)."""
+    try:
+        import sqlite3
+        sd = str(_scripts_dir())
+        if sd not in sys.path:
+            sys.path.insert(0, sd)
+        import binggu_hit_stats as HS
+
+        class _RO:  # hit_stats 는 db.con.execute 만 사용 → ro connection wrapper 로 충분
+            pass
+
+        uri = "file:" + str(ledger_path).replace("\\", "/") + "?mode=ro"
+        con = sqlite3.connect(uri, uri=True)
+        try:
+            db = _RO()
+            db.con = con
+            bs = HS.both_sides(db)   # 전역(domain 무관) — 도메인 분리는 표본이 더 쪼개짐
+        finally:
+            con.close()
+    except Exception:
+        return None  # hit_events 테이블 부재(신규)·조회 실패 → 소음 0
+    lines = []
+    for side, label in (("owner", "내 직감(owner)"), ("ai", "AI 반박·수용(ai)")):
+        s = bs.get(side) or {}
+        if s.get("enough") and isinstance(s.get("rate"), (int, float)):
+            lines.append("  - %s 적중률 %.0f%% (표본 %d · 시간감쇠 반영)"
+                         % (label, s["rate"] * 100, s["n"]))
+    if not lines:
+        return None  # 양쪽 다 표본 부족 → 소음 0
+    return ("## 양방향 신뢰도 (참고 가중치 · 맹종 아님 · 최종 판단은 사람+근거)\n"
+            + "\n".join(lines))
+
+
 def _run(data):
     # 1) 기본 OFF 빠른 차단 (import 전 — 플래그 없으면 타 세션에 부담 0)
     try:
@@ -121,7 +159,11 @@ def _run(data):
         cwd = data.get("cwd") or os.getcwd()
         res = RC.preflight_context(str(ledger), prompt=prompt, cwd=cwd)
         _maybe_record_trace(prompt, res)  # Phase 2: opt-in 일 때만 회상 메타 기록(원문 0·실패 흡수)
-        return render_block(res)
+        block = render_block(res)
+        trust = _render_trust(str(ledger))  # 회수 1단: 양방향 신뢰도(표본 충분 시만·read-only·소음 0)
+        if trust:
+            block = (block + "\n\n" + trust) if block else trust
+        return block
     except Exception:
         return None
 
@@ -201,7 +243,9 @@ def _selftest():
                 "CREATE TABLE evidence(evidence_id TEXT, sentence TEXT, source_pointer_id TEXT,"
                 " source_hash TEXT);"
                 "CREATE TABLE edges(edge_id TEXT, relation TEXT, source TEXT, target TEXT,"
-                " candidate INT, state TEXT, evidence_refs TEXT);")
+                " candidate INT, state TEXT, evidence_refs TEXT);"
+                "CREATE TABLE hit_events(node_id TEXT, speaker TEXT, kind TEXT, outcome TEXT,"
+                " subtype TEXT, ts TEXT, domain TEXT, context_hash TEXT, decision_id TEXT);")
 
             def add(nid, ntype, sent, sub, used=0):
                 con.execute(
@@ -317,6 +361,28 @@ def _selftest():
         check("검증 없이 바로 배포하면 실패한다".encode("utf-8") not in tb,
               "T13c 회상 노드 원문이 trace store 에 미저장(PII 0)")
         RT.set_trace_flag(False, home=str(home))
+
+        # ── T14/T15 회수 1단: 양방향 신뢰도 trust 블록(hit_events 표본 충분 시만·read-only) ──
+        # owner 직감 hit 5건(N_MIN=5) → trust 블록 주입. build_ledger 에 hit_events 테이블 존재.
+        con = sqlite3.connect(str(ledger))
+        for i in range(5):
+            con.execute(
+                "INSERT INTO hit_events(node_id,speaker,kind,outcome,subtype,ts,"
+                "domain,context_hash,decision_id) VALUES(?,?,?,?,?,?,?,?,?)",
+                ("node:HIT:%d" % i, "owner", "직감", "hit", "결정",
+                 "2026-06-20T00:00:00Z", None, None, "dec-%d" % i))
+        con.commit()
+        con.close()
+        r = call({"hook_event_name": "UserPromptSubmit",
+                  "prompt": "검증 없이 바로 배포 endpoint", "cwd": repo_cwd})
+        check("양방향 신뢰도" in r.stdout and "내 직감(owner) 적중률" in r.stdout,
+              "T14 hit_events 표본 충분(N>=5) → 양방향 신뢰도 trust 블록 주입(회수 1단)")
+        # T15 trust 조회도 read-only(sqlite mode=ro) — ledger mtime/size 불변
+        mt0 = (ledger.stat().st_mtime_ns, ledger.stat().st_size)
+        call({"hook_event_name": "UserPromptSubmit",
+              "prompt": "검증 없이 배포 endpoint", "cwd": repo_cwd})
+        mt1 = (ledger.stat().st_mtime_ns, ledger.stat().st_size)
+        check(mt0 == mt1, "T15 trust(both_sides) 조회 후 ledger 불변(read-only · write 0)")
 
         print(f"\nGATE={'GO' if ok else 'NO-GO'}")
         return 0 if ok else 1
