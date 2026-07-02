@@ -44,7 +44,7 @@ from openbinggu_conversation_capture_preview import capture_preview  # noqa: E40
 from openbinggu_candidate_deprecate_ux import deprecate_from_list  # noqa: E402
 from openbinggu_candidate_replace_ux import replace_from_list  # noqa: E402
 from openbinggu_owner_accept_ux import (  # noqa: E402
-    open_accept, accept_from_list, unaccept_from_list, accepted_view)
+    open_accept, accept_from_list, unaccept_from_list, accepted_view, accept_by_node_id)
 from binggu_capture_profile import (  # noqa: E402
     init_profile, pause as cap_pause, resume as cap_resume,
     disable_capture as cap_disable, enable_capture as cap_enable,
@@ -663,10 +663,16 @@ def cmd_pair(a):
     rel = getattr(a, "by", "ai") + "_" + a.relation  # 반응 주체: ai(AI가 사용자 발화를) / owner(사용자가 AI 발화를)
     r = save_paired(db, a.owner_text, a.ai_text, {"actor": "human", "confirm": a.confirm},
                     snap_dir, relation_kind=rel, owner_pick=a.owner_pick, ai_pick=a.ai_pick, due_date=a.due)
+    acc_note = ""
+    if r.get("applied") and getattr(a, "accept", False):
+        # 저장과 동시에 owner_accepted 확정 — 별도 ACCEPT 문구 면제(PAIR confirm 이 이미 사람 확인)
+        ar = accept_by_node_id(db, r["owner_node_id"],
+                               "pair --accept 통합 확정(PAIR confirm 편승)", {"actor": "human"})
+        acc_note = " · 확정 OK" if ar.get("applied") else (" · 확정 실패(%s)" % ar.get("reason"))
     db.close()
     if r.get("applied"):
         tail = (" (%s 연결)" % r["relation"]) if r.get("paired") else " (owner 단독)"
-        print("OK: 저장 %d건%s · pack=%s" % (r["saved"], tail, r.get("pack_id")))
+        print("OK: 저장 %d건%s · pack=%s%s" % (r["saved"], tail, r.get("pack_id"), acc_note))
         return 0
     return _show(r)
 
@@ -1241,6 +1247,7 @@ def main():
     pp.add_argument("--owner-pick", type=int, default=1, dest="owner_pick")
     pp.add_argument("--ai-pick", type=int, default=1, dest="ai_pick")
     pp.add_argument("--confirm", required=True); pp.add_argument("--due", default=None)
+    pp.add_argument("--accept", action="store_true")  # 저장과 동시에 owner_accepted 확정(별도 ACCEPT 문구 면제)
     tp = sub.add_parser("trust"); tp.add_argument("--subtype", default=None)  # 양방향 신뢰도(read-only)
     rtp = sub.add_parser("route"); rtp.add_argument("text")  # 저장 의도 라우팅(신규/수정/결과 read-only 안내)
     sp = sub.add_parser("reminders"); sp.add_argument("--today", default=None)

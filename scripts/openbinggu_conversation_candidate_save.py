@@ -308,6 +308,7 @@ def save_paired(db, owner_text, ai_text, ctx, snap_dir,
                     due_set += 1
     return {"applied": True, "saved": len(nodes_pack), "reason": None, "pack_id": pack["pack_id"],
             "paired": paired, "relation": relation_kind if paired else None,
+            "owner_node_id": own["id"],   # pair --accept 통합용(저장 직후 확정 대상)
             "snapshot": r.get("snapshot"), "due_set": due_set}
 
 

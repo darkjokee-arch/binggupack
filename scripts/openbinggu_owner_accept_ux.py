@@ -56,6 +56,36 @@ def latest_event(db, node_id):
     return row[0] if row else None
 
 
+def accept_by_node_id(db, node_id, reason, ctx, ts=None):
+    """저장 직후 알려진 node_id 를 직접 수용 기록(pair --accept 통합 전용).
+    _gate(목록 재실행·id8·confirm 재검증)를 건너뛴다 — 호출측(pair PAIR confirm)이 이미
+    사람 확인을 수행했으므로 이중 확인은 과잉. 검증(actor·active·중복·audit)은 accept_from_list 동형."""
+    db.con.executescript(ACCEPT_SCHEMA)          # 스키마 보장(멱등)
+    db.con.commit()
+    before = db.store_checksum()
+
+    def block(rc):
+        db.audit_append(ctx.get("actor", "human"), "owner_accept", node_id, "BLOCK", rc, before, before)
+        return {"applied": False, "reason": rc}
+
+    if ctx.get("actor", "").strip().lower() != "human":
+        return block("G4_no_auto")
+    if not (reason or "").strip():
+        return block("reason_required")
+    st = db.con.execute("SELECT state FROM nodes WHERE node_id=?", (node_id,)).fetchone()
+    if not st or st[0] != "active":
+        return block("target_not_active")          # deprecated wins
+    if latest_event(db, node_id) == "owner_accepted":
+        return block("already_accepted")
+    with db.write_lock():
+        db.con.execute("INSERT INTO owner_acceptances(node_id,event,reason,ts) VALUES(?,?,?,?)",
+                       (node_id, "owner_accepted", reason[:200], _now_iso(ts)))
+        db.con.commit()
+        db.audit_append(ctx.get("actor", "human"), "owner_accept", node_id,
+                        "ALLOW", reason[:80], before, db.store_checksum(), ts=ts)
+    return {"applied": True, "node_id": node_id, "event": "owner_accepted"}
+
+
 def accepted_view(db):
     """현재 수용 상태 = node 별 최신 event. 반환 {node_id: True(accepted)} — read-only."""
     out = {}
