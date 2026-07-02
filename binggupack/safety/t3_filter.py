@@ -6,27 +6,19 @@ owner 결정(2026-07-02·[[feedback-binggupack-identity-personal-ontology-agi]] 
 사용자 온톨로지는 헌법 §3(반출 명시승인) 제약을 제외하고 완전자동 업로드하되,
 **T3(PII·민감 과거사)만은 코드로 하드 차단**(owner 명시·양보 불가).
 
-- PII: 기존 정본(watcher_batch_m1.batch_redact + scan_residual_pii 이중방어) 재사용.
+- PII: 정본(binggupack.safety.pii → binggupack.pack.batch_m1: batch_redact + scan_residual_pii 이중방어) 재사용.
 - 과거사: 민감 개인사 키워드 — 과잉차단=안전(owner 명시: 과소차단이 위험).
 - fail-closed: 판정 중 예외/불확실 → 차단(True). 반출 안전을 열어두지 않는다.
 - read-only: ledger/운영 store write 0. 순수 판정 함수.
 
 strangler: 순수 정본(past_hits · _pii_present · is_t3_blocked · t3_report · filter_uploadable)은
-이 모듈로 byte-identical 이관됐다. 판정 로직은 1바이트도 변하지 않았다. _pii_present 런타임 경로의
-watcher_batch_m1(미이관·bare-name) lazy import 를 위해 scripts/ 를 sys.path 에 얹는다(원본이
-scripts/ 에서 하던 것과 동일 의도 — 진입점 shim 없이 패키지 직접 import 시에도 해소).
+이 모듈로 byte-identical 이관됐다. 판정 로직은 1바이트도 변하지 않았다. _pii_present 는 PII 정본
+binggupack.safety.pii(→ binggupack.pack.batch_m1)를 직접 참조하므로 임시 scripts/ sys.path 삽입은
+제거됐다(bare-name `import watcher_batch_m1` 의존 소멸 — 동일 심볼·동일 판정).
 """
-import os
 import re
 import sys
 import unicodedata
-
-# _pii_present 런타임의 `import watcher_batch_m1`(미이관·bare-name) 해소 — 원본이 자기 위치(scripts/)를
-# 얹던 것을 패키지 위치에서 scripts/ 로 재계산해 동일 효과. shim 경유/직접 import 양쪽 모두 안전.
-_SCRIPTS = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "scripts")
-if _SCRIPTS not in sys.path:
-    sys.path.insert(0, _SCRIPTS)
 
 # 민감 과거사(T3) — 보수적으로 넓게(과잉차단=안전). 하나라도 매치 시 반출 제외.
 # owner 개인사 반출 시 해가 되는 카테고리. 단독 오탐이 심한 초단문(예: "암")은 제외하고
@@ -93,7 +85,7 @@ def past_hits(text):
 def _pii_present(text):
     """PII 존재 여부(이중방어): 원문 직접 scan + 마스킹 후 잔존 scan.
     어느 쪽이든 걸리면 True(원문에 PII 가 있었다는 신호)."""
-    import watcher_batch_m1 as M1
+    from binggupack.safety import pii as M1
     if M1.scan_residual_pii(text):
         return True
     red = M1.batch_redact(text)[0]   # (redacted, hits, review)
@@ -207,6 +199,14 @@ def _selftest():
 
 
 if __name__ == "__main__":
+    # 직접 실행(python binggupack/safety/t3_filter.py) 시 sys.path[0]=이 파일 디렉터리라
+    # 자기 패키지(binggupack)가 미해소 → _pii_present 의 `from binggupack.safety import pii`
+    # 가 실패해 fail-closed 로 전부 차단된다. CLI 진입점에서만 repo 루트를 얹어 해소한다
+    # (패키지 import 경로에는 영향 0 — 이미 해소된 경우 no-op).
+    import os as _os
+    _ROOT = _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+    if _ROOT not in sys.path:
+        sys.path.insert(0, _ROOT)
     if "--selftest" in sys.argv:
         sys.exit(_selftest())
     print("binggu_t3_filter: --selftest 로 검증 실행")

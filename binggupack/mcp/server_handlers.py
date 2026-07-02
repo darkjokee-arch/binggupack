@@ -14,22 +14,17 @@ OpenBinggu MCP 서버 도구 핸들러 결선 (정본 in-package, 트랙 C stran
 정본 이관(v1.11.x): 로직은 여기(binggupack/mcp/server_handlers.py)가 정본이고
 scripts/openbinggu_mcp_server_handlers.py 는 공개 심볼을 재노출하는 thin shim 이다.
 내부 참조: guarded_tool_call 은 in-package(.path_gate_adapter), classify 는 정본
-binggupack.classifier.capture_classifier — scripts 재진입 없음(순환 해소). 함수내 lazy 의존
-(conversation_capture_preview·save_gate·candidate_save·deprecate_g3·staging_write_selftest)은
-아직 scripts 잔류 → 상단에서 절대경로 _SCRIPTS 를 sys.path 에 보장.
+binggupack.classifier.capture_classifier — scripts 재진입 없음(순환 해소). 함수내 lazy 의존은
+전부 in-package facade 경유(capture→binggupack.capture.preview, save_gate→binggupack.safety.save_gate,
+open_g3/save_selected→binggupack.storage, OPERATING_PATHS→binggupack.paths) → server_handlers 는
+scripts 를 직접 import 하지 않는다(_SCRIPTS 부트스트랩 책임은 각 facade 로 이동). facade 정본 본문
+일부는 아직 scripts 잔류하나 그 부트스트랩은 facade 내부에서 처리.
 
 범위: 핸들러 함수 + 디스패치 테이블 + synthetic selftest.
 CLI: python scripts/openbinggu_mcp_server_handlers.py --selftest
 """
 import sys
 import os
-
-# lazy scripts import(conversation_capture_preview·save_gate·candidate_save·deprecate_g3·
-# staging_write_selftest)는 scripts 잔류 → 절대경로로 <repo>/scripts 를 sys.path 에 보장.
-# (__file__ 가 binggupack/mcp 라 repo/scripts 는 자동 포함되지 않음.)
-_SCRIPTS = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "scripts")
-if _SCRIPTS not in sys.path:
-    sys.path.insert(0, _SCRIPTS)
 
 from .path_gate_adapter import guarded_tool_call
 from binggupack.classifier.capture_classifier import classify
@@ -73,11 +68,11 @@ def _u_capture_preview(params=None):
     params = params or {}
     utts = params.get("utterances") or []
     text = "\n".join(u for u in utts if isinstance(u, str))
-    import openbinggu_conversation_capture_preview as cvp
+    from binggupack.capture import preview as cvp
     result = cvp.capture_preview(text)
     # 사람-발화 게이트(0-A): 후보 hash 만 영속(원문 0) → SAVE hook 이 'SAVE n' 대조용으로 읽음.
     try:
-        import binggu_save_gate as sgate
+        import binggupack.safety.save_gate as sgate
         sgate.write_last_preview(result.get("candidates", []))
     except Exception:
         pass  # 영속 실패해도 preview 반환엔 무영향(read 도구)
@@ -109,7 +104,7 @@ def _u_save_candidate(params=None):
     # confirm 정확일치만 사람-선택 증거. (auto/reader 는 save_selected G4_no_auto 가 항상 발동)
     actor = "reader"
 
-    import openbinggu_conversation_capture_preview as cvp
+    from binggupack.capture import preview as cvp
     pv = cvp.capture_preview(text)
     cands = pv["candidates"]
     expected = "SAVE " + ",".join(str(i) for i in indices)
@@ -131,8 +126,7 @@ def _u_save_candidate(params=None):
 
     # 실 write 경로 — temp DB(open_g3) 강제. MCP는 경로 입력을 일절 받지 않음(운영 ledger 차단).
     import tempfile
-    from openbinggu_deprecate_and_remind_g3 import open_g3
-    from openbinggu_conversation_candidate_save import save_selected
+    from binggupack.storage import open_g3, save_selected
     work = tempfile.mkdtemp(prefix="obg_mcp_save_")
     # ledger_path 등 외부 경로 입력 무시 — MCP는 temp staging 전용(default-deny). 운영 ledger 경로 주입 불가.
     db_path = os.path.join(work, "s.sqlite")
@@ -274,7 +268,7 @@ def _selftest():
               % ("OK" if ok else "FAIL", name, tool, executed, verdict, rc))
 
     # ----- save 도구 전용 검증 (실 ledger write 0 보장: temp DB·dry-run·mock만) -----
-    from openbinggu_staging_write_selftest import OPERATING_PATHS
+    from binggupack.paths import OPERATING_PATHS
     op_before = {p: (os.path.getmtime(p) if os.path.exists(p) else None) for p in OPERATING_PATHS}
     save_ok = True
     save_notes = []
