@@ -20,7 +20,6 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from openbinggu_mcp_path_gate_adapter import guarded_tool_call  # noqa: E402
 from binggu_capture_classifier import classify  # noqa: E402
-from binggu_capture_buffer import CaptureBuffer  # noqa: E402
 
 
 # ---- underlying 도구(dry-run mock, FS write 0) ----

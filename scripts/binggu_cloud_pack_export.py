@@ -84,7 +84,6 @@ def build_cloud_pack(out_dir, nodes, evidence, graph_preview, graph_confirm,
         os.makedirs(os.path.join(out_dir, sub), exist_ok=True)
 
     nodes_by_id = {n["id"]: n for n in nodes}
-    ev_by_id = {e["id"]: e for e in evidence}
 
     # ---- documents / chunks (Evidence chunk = chunk) ----
     documents = [{"doc_id": "DOC-synthetic-1", "title": "[SYNTHETIC] BingguPack fixture document",
@@ -151,7 +150,6 @@ def build_cloud_pack(out_dir, nodes, evidence, graph_preview, graph_confirm,
     nodes_with_id = all(n.get("id") for n in graph_nodes)
     edges_have_endpoints = all((e.get("source") and e.get("target")) or (e.get("from") and e.get("to"))
                                for e in graph_edges)
-    jsonl_ok = True   # 아래 write 시 json.dumps 라 valid 보장(이중 확인은 _validate_jsonl)
     readable_docs = sum(1 for d in documents if d.get("readable") and (d.get("text") or "").strip())
     nonempty = all((c.get("text") or "").strip() for c in chunks)
 

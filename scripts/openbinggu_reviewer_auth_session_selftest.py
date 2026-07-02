@@ -26,7 +26,6 @@ BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "scripts"))
 
 from openbinggu_runtime_access_engine import enforce_access          # noqa: E402
-from openbinggu_review_resolver_sandbox import ReviewResolver        # noqa: E402
 
 # ── audit whitelist (설계 §5 정합) — 이 키만 audit 에 허용. raw 0. ──────────────
 AUDIT_WHITELIST = {

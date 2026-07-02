@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.join(BASE, "scripts"))
 
 from openbinggu_staging_write_selftest import OPERATING_PATHS  # noqa: E402
 from openbinggu_deprecate_and_remind_g3 import (  # noqa: E402
-    open_g3, deprecate_item, set_review_due, resolve_review)
+    open_g3, deprecate_item, resolve_review)
 from openbinggu_conversation_candidate_save import save_selected  # noqa: E402
 from openbinggu_label_kind_map import classify_label_kind, KIND_KO, EN2KO  # noqa: E402
 

@@ -248,7 +248,7 @@ def run_selftest():
         nb, _, ncda = mp.evaluate(nn)
         ns2 = mp.summarize(nb, [], ncda)
         node_regression_ok = (ns2["auto_merge_allowed_count"] == 0)  # watcher 동일노드 → 강등(0)
-    except Exception as e:
+    except Exception:
         node_regression_ok = False
 
     checks = {

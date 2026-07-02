@@ -34,7 +34,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # comp3 단일 진실 — Merkle leaf/_canon/root 를 여기서 import(중복정의 금지).
-from binggu_merkle_anchor import merkle_root, _leaf_hash, _canon_event, _LEAF_EVENT_COLS  # noqa: E402
+from binggu_merkle_anchor import merkle_root, _leaf_hash, _LEAF_EVENT_COLS  # noqa: E402
 import binggu_hit_stats as hs  # noqa: E402
 
 RAW_SCHEMA_VER = "binggu-hit-raw-v1"

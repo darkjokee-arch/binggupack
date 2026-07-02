@@ -459,7 +459,6 @@ def ensure_fixtures():
 
 def _fanout_inline_check():
     """fanout_exceed: batch 통합 구조상 1:1이라 자연발생 X → edge producer build_edges 직접 합성으로 cap STOP 확인."""
-    nodes = [edgemod.mvp2.to_nodes.__self__ if False else None]  # noop
     # 합성: 동일 ev_id 를 9 node 가 참조 → fan-out 9 > 8 cap
     synth_nodes = []
     for i in range(9):

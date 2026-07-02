@@ -35,7 +35,7 @@ BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "scripts"))
 
 from openbinggu_staging_write_selftest import (  # noqa: E402
-    StagingDB, staging_apply, OPERATING_PATHS, _hash,
+    StagingDB, OPERATING_PATHS, _hash,
 )
 from openbinggu_phase2_local_persistence_selftest import (  # noqa: E402
     resolve_home, user_staging_path, phase2_apply,

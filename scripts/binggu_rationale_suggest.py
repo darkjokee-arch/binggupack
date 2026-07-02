@@ -178,7 +178,6 @@ def _selftest():
     ck(len(r5["suggested_edges"]) == 0, "판단 target 없음 → edge 0")
 
     # 7) hallucination 0 — 추천 source/target 은 입력 text 에서만
-    in_texts = {c["text"][:40] for c in cands}
     ck(all(e["source"] in {t[:40] for t in [cands[0]["text"]]} or e["source"][:40] in [c["text"][:40] for c in cands]
            for e in r["suggested_edges"]), "edge source/target = 입력 노드만(새 노드 생성 0)")
 

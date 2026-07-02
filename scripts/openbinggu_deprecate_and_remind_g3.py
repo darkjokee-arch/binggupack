@@ -17,7 +17,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from openbinggu_staging_write_selftest import StagingDB, OPERATING_PATHS, _hash, _now_iso  # 무수정 재사용
+from openbinggu_staging_write_selftest import OPERATING_PATHS, _hash, _now_iso  # 무수정 재사용
 from openbinggu_proposal_batch_approval_g2b import open_staging  # edge_proposals 테이블 보장
 try:  # 설정값(challenge_threshold) — base 안전벨트/설정 로더 재사용
     from binggu_p1_config import challenge_threshold as _cfg_challenge_threshold

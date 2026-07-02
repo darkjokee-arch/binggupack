@@ -33,9 +33,9 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from openbinggu_staging_write_selftest import StagingDB, OPERATING_PATHS, _hash, _now_iso  # noqa: E402
+from openbinggu_staging_write_selftest import OPERATING_PATHS, _hash, _now_iso  # noqa: E402
 from openbinggu_deprecate_and_remind_g3 import (  # noqa: E402
-    open_g3, philosophy_review_signals, philosophy_diversity_signals, CHALLENGE_OUTCOME)
+    open_g3, philosophy_review_signals, philosophy_diversity_signals)
 try:  # 설정값(challenge_threshold = 반복 임계 단일 원천) 재사용
     from binggu_p1_config import challenge_threshold as _cfg_challenge_threshold
     from binggu_p1_config import is_confirm_actor

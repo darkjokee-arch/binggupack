@@ -17,7 +17,6 @@ import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from openbinggu_a0_node_dryrun import LAYER  # noqa: E402
 
 ALLOWED_STATUS = {"candidate", "review_pending", "confirmed", "rejected"}
 # 허용 전이

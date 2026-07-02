@@ -288,7 +288,6 @@ def _selftest():
                    "result" in r_next and r_next["result"].get("tools") is not None))
 
     # raw 미출력: 전 응답 직렬화 후 민감 substring 검사
-    probe_paths = ["../outside", "NPKI", ".env", "safety-app", "bid-engine"]
     for cid in range(1, 14):
         pass
     # 위 모든 call 결과를 한 번 더 모아 검사

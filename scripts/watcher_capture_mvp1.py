@@ -126,10 +126,6 @@ def run_selftest():
         "no_secret_residual_anywhere": all(not c["any_secret_residual"] for c in cases),
     }
     # 운영 store write 0 확인 (스크립트는 tmp/ + reports/ 만 write)
-    operating_stores = [
-        BASE.parent.parent / ".claude" / "memory" / "ontology" / "_graph_merge.yaml",
-        BASE.parent.parent / ".claude" / "memory" / "ontology" / "user_graph.yaml",
-    ]
     # (write 자체를 안 하므로 mtime 변화 없음 — 존재 여부만 기록, 미접촉)
     gate = "GO" if all(checks.values()) else "STOP"
     report = {

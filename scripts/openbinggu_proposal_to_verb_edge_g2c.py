@@ -21,7 +21,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from openbinggu_staging_write_selftest import StagingDB, OPERATING_PATHS, _hash  # 무수정 재사용
+from openbinggu_staging_write_selftest import OPERATING_PATHS, _hash  # 무수정 재사용
 from openbinggu_proposal_batch_approval_g2b import open_staging, build_batch, decide_batch  # G2-B 재사용
 import openbinggu_verb_edge_schema as schema
 import openbinggu_label_kind_map as lkmap
