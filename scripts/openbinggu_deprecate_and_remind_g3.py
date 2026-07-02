@@ -10,7 +10,6 @@ owner 조건 고정:
 write = staging SQLite 한정 (StagingDB 운영경로 거부 재사용). confirmed 0 · deploy 0.
 CLI: python openbinggu_deprecate_and_remind_g3.py --selftest
 """
-import json
 import os
 import re
 import shutil

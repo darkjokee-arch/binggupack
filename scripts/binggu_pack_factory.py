@@ -12,7 +12,6 @@ import os
 import re
 import sys
 import json
-import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import openbinggu_pack_validate as PV  # noqa: E402  (manifest 계약 검증 — 완료 기준)

@@ -17,7 +17,6 @@ import re
 import sys
 import json
 import time
-import hashlib
 
 # harvest 재사용(생산자/소비자 분리) — source_id·등록·공개안전성 게이트를 그대로 빌려 씀.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

@@ -11,7 +11,6 @@
 CLI: python openbinggu_conversation_candidate_save.py --selftest
 """
 import hashlib
-import json
 import os
 import re
 import shutil

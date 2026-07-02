@@ -182,7 +182,6 @@ def _fake_embed_factory():
 
 
 def run_selftest():
-    import tempfile
     results = []
 
     def rec(d, ok):

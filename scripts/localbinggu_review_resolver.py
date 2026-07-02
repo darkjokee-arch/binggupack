@@ -99,7 +99,7 @@ def write_reports(name, audit, buckets, decision, why, extra=None):
     if extra:
         reviewed.update(extra)
     (reports / f"{name}.json").write_text(json.dumps(reviewed, ensure_ascii=False, indent=2), encoding="utf-8")
-    md = [f"# {name}\n", f"- decision: **{decision}** — {why}", f"- production_write: False\n", "## audit"]
+    md = [f"# {name}\n", f"- decision: **{decision}** — {why}", "- production_write: False\n", "## audit"]
     for a in audit:
         md.append(f"- [{a['result']}] {a['review_id']} ({a['kind']}) decision={a['decision'] or '없음'}: {a['reason']}")
     (reports / f"{name}.md").write_text("\n".join(md), encoding="utf-8")
@@ -163,7 +163,7 @@ def main():
             print(f"  [{a['result']}] {a['review_id']} decision={a['decision'] or '없음'}")
         print(f"\nbuckets: {buckets}")
         print(f"Decision: {decision} — {why}")
-        print(f"reports: localbinggu_apply_plan.reviewed.json/.md + localbinggu_review_audit.json/.md")
+        print("reports: localbinggu_apply_plan.reviewed.json/.md + localbinggu_review_audit.json/.md")
         return
 
     print("usage: --apply-plan <json> --decisions <jsonl>  또는  --fixture-dir <dir>")

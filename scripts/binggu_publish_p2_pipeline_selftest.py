@@ -3,7 +3,6 @@
 temp 전용. cloud upload 0 / DB insert 0 / 운영 mtime 불변.
 GATE=GO 조건: 전 항목 PASS.
 """
-import copy
 import json
 import os
 import sys

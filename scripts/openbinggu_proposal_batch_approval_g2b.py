@@ -12,7 +12,6 @@
 
 CLI: python openbinggu_proposal_batch_approval_g2b.py --selftest
 """
-import hashlib
 import json
 import os
 import re

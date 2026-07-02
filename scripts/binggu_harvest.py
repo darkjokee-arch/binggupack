@@ -41,7 +41,9 @@ import os
 import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(_HERE))   # binggupack 패키지 import 경로(config 로더)
+sys.path.insert(0, _HERE)
 import binggu_platform as _plat
 import binggu_paths                                # 경로 정본(_home 위임)
 import binggu_schema                               # 스키마 정본(apply_schema)
@@ -112,8 +114,19 @@ def source_id_for(url):
 
 
 def load_sources(path=None):
-    """화이트리스트 로드 → list[dict]. 부재/손상 = 빈 목록(fail-closed: 수확 0)."""
-    path = path or sources_path()
+    """화이트리스트 로드 → list[dict]. 부재/손상 = 빈 목록(fail-closed: 수확 0).
+
+    기본 경로(path=None)는 binggupack.config 단일 로더 경유(부재/손상 방어·{"sources":[]}
+    기본값 재사용). 명시 path(테스트/격리 호출)는 기존 직접 읽기 경로를 그대로 보존.
+    어느 경로든 URL 없는 항목 필터는 여기서 유지(화이트리스트 불변식)."""
+    if path is None:
+        try:
+            from binggupack.config import load_config
+            d = load_config("harvest_sources", use_cache=False)
+        except Exception:
+            return []
+        src = d.get("sources") if isinstance(d, dict) else d
+        return [s for s in (src or []) if isinstance(s, dict) and s.get("url")]
     if not os.path.exists(path):
         return []
     try:

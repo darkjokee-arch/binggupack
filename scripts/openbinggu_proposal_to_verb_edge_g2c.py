@@ -16,7 +16,6 @@ CLI: python openbinggu_proposal_to_verb_edge_g2c.py --selftest
 """
 import json
 import os
-import re
 import shutil
 import sys
 import tempfile

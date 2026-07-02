@@ -12,7 +12,6 @@ owner 조건부 GO 반영:
 backend 가용성은 런타임 탐지. MarkItDown/KorDoc 미설치면 PARSER_MISSING typed error +
 텍스트류는 plain 폴백. 바이너리(PDF/HWP 등)는 plain 폴백 금지(깨진 텍스트 방지).
 """
-import io
 import os
 import re
 import shutil

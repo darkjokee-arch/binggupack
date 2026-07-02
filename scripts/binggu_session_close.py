@@ -37,8 +37,10 @@ import sys
 from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-if HERE not in sys.path:
-    sys.path.insert(0, HERE)
+ROOT = os.path.dirname(HERE)                          # binggupack 패키지 import 경로(config 로더)
+for _p in (ROOT, HERE):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 
 def _home(home=None):
@@ -55,12 +57,13 @@ def _home(home=None):
 
 def _load_close_phrases(home=None):
     """사용자별 세션 마무리 표현 등록(opt-in). close_phrases.json 부재 → 빈 리스트(graceful).
-    형식: {"phrases": ["오늘 여기까지", "마무리하자", ...]}. 정확 일치(부분 키워드 매칭 아님)."""
+    형식: {"phrases": ["오늘 여기까지", "마무리하자", ...]}. 정확 일치(부분 키워드 매칭 아님).
+
+    로드는 binggupack.config 단일 로더 경유(부재/손상 방어·기본값 병합 재사용). 항상 fresh
+    (use_cache=False)로 기존 매 호출 파일 재읽기 동작을 그대로 보존한다."""
     try:
-        p = _home(home) / "close_phrases.json"
-        if not p.exists():
-            return []
-        data = json.loads(p.read_text(encoding="utf-8"))
+        from binggupack.config import load_config
+        data = load_config("close_phrases", home, use_cache=False)
         phrases = data.get("phrases", []) if isinstance(data, dict) else []
         return [str(x).strip() for x in phrases if str(x).strip()]
     except Exception:

@@ -157,7 +157,6 @@ def ingest_zip(zip_path, execute=False, allow_synthetic=False, extract_dir=None)
 
 # ----------------------------------------------------------------- selftest
 def _selftest():
-    import io
     gates = []
 
     def chk(name, cond):

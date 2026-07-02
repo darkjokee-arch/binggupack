@@ -17,7 +17,6 @@ ledger read-only(P4 재사용). 실 ledger write 0.
 from __future__ import annotations
 
 import hashlib
-import io
 import json
 import os
 import re
