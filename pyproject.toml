@@ -81,6 +81,12 @@ ignore = ["E501"]   # 라인 길이는 경고만(점진 도입).
 # hit_stats 이관 — byte-identical selftest 원본 스타일(E401 다중 import·E702 세미콜론 다중문·
 # I001 import 정렬) 보존. 로직 무변경이라 스타일 변경 불가.
 "binggupack/pack/hit_stats.py" = ["E401", "E702", "I001"]
+# branch_explorer 이관 — byte-identical impl 원본 스타일(E741 짧은 변수 l·I001 import 정렬) 보존.
+# selftest 72/72 가 동등성 보증이라 스타일 변경 불가.
+"binggupack/pack/branch_explorer.py" = ["E741", "I001"]
+# edge_mvp21 이관 — build_edges 본문 byte-identical(E713 `not (src in ev_ids)` 원본 스타일) 보존.
+# selftest 12 checks GATE=GO 가 동등성 보증이라 스타일 변경 불가.
+"binggupack/pack/edge_mvp21.py" = ["E713"]
 
 [tool.mypy]
 python_version = "3.10"

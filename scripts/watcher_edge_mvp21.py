@@ -1,29 +1,55 @@
 # -*- coding: utf-8 -*-
-"""OpenBinggu Watcher MVP2.1 — evidence_supports edge producer (dry-run only).
+"""OpenBinggu Watcher MVP2.1 — evidence_supports edge producer (backward-compatible thin wrapper).
+
+v1.16 strangler Phase2: 순수 transform(build_edges/_sha8/_has_secret/_freshness_from_chunks +
+EVIDENCE_FANOUT_CAP/NODE_INDEGREE_CAP/EDGE_KEYS/EDGE_PROP_KEYS/REDACT_RE 상수)은
+binggupack.pack.edge_mvp21 로 이관됐고, 이 파일은 공개 심볼이 byte-identical 한 thin wrapper 다.
+기존 호출처(import watcher_edge_mvp21 as ... → build_edges 등 bare-name; pack_builder_m0)는 그대로
+동작한다.
+
+__file__ 경로상수(BASE/SCRIPTS/FIXTURE_DIR/TMP_OUT/SELFTEST_REPORT) + 파일 I/O 오케스트레이션
+(_write_jsonl/process_from_diff/_emit/selftest fixture/run_selftest/run_single/CLI)은 scripts/ 위치·
+tmp/reports 경로 의존이라 이 wrapper 에 잔류. dry-run only(운영 store write 0).
 
 설계: docs/BINGGUPACK_MVP21_EDGE_SAFETY_FILTER_DESIGN.md (R2).
-범위(MVP2.1 고정):
-  - **evidence → node `evidence_supports` edge 1종만** 생성. 기존 evidence_refs 를 1급 edge 로 승격.
-  - node→node 의미관계 자동추론 **전면 금지**. 신규 의미추론 0.
+범위(MVP2.1 고정): evidence → node `evidence_supports` edge 1종만 생성. node→node 의미추론 전면 금지.
   - 출력 = BASE/tmp/watcher_edge_mvp21/<run>/incoming_edges.jsonl only (temp/staging).
-  - MVP1(capture/evidence) + MVP2(to_nodes) 재사용해 입력 nodes/evidence 생성.
-
-1차 차단(생산자 가드): dangling(evidence/node 미존재) · self-loop · fan-out cap(evidence 8 / node indegree 16) ·
-  direction(evidence→node 단방향) · freshness(evidence timestamp 필수) · duplicate(동일 src/tgt/relation) · secret raw.
-2차 차단(소비처): localbinggu_match_policy.classify_edge_pair (origin=watcher edge auto_merge 자격 박탈 → review).
-
-강제(전건): relation=evidence_supports / origin=watcher / candidate=true / promotion_allowed=false / evidence_refs 필수.
-STOP: 위 1차 가드 위반 1건이라도 / 멱등 깨짐 / temp 외 write / 운영 store mtime 변동 / watcher edge auto_merge>0.
+2차 차단(소비처): localbinggu_match_policy(policy.match).classify_edge_pair (origin=watcher edge
+  auto_merge 자격 박탈 → review).
 
 CLI:
   python watcher_edge_mvp21.py --selftest
   python watcher_edge_mvp21.py <diff_text_file>   # M0 흐름으로 nodes 생성 후 edge
 """
-import hashlib
 import json
-import re
+import os
 import sys
 from pathlib import Path
+
+HERE = os.path.dirname(os.path.abspath(__file__))   # <repo>/scripts
+ROOT = os.path.dirname(HERE)                         # <repo>
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)   # binggupack 패키지 import 경로
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)   # scripts 형제(importer 호환) 호환
+
+from binggupack.pack.edge_mvp21 import *  # noqa: E402,F401,F403
+from binggupack.pack.edge_mvp21 import (  # noqa: E402,F401  (밑줄 내부 심볼 + 전체 명시 re-export)
+    EVIDENCE_FANOUT_CAP,
+    NODE_INDEGREE_CAP,
+    EDGE_KEYS,
+    EDGE_PROP_KEYS,
+    REDACT_RE,
+    _sha8,
+    _has_secret,
+    _freshness_from_chunks,
+    build_edges,
+    v011,
+)
+
+import binggupack.pack.capture_mvp1 as mvp1       # capture / to_evidence
+import binggupack.pack.candidate_mvp2 as mvp2     # to_nodes
+import binggupack.policy.match as mp              # 2차 소비처 필터 (classify_edge_pair)
 
 BASE = Path(__file__).resolve().parent.parent
 SCRIPTS = Path(__file__).resolve().parent
@@ -31,108 +57,11 @@ FIXTURE_DIR = BASE / "tests" / "fixtures" / "watcher_mvp1"
 TMP_OUT = BASE / "tmp" / "watcher_edge_mvp21"
 SELFTEST_REPORT = BASE / "reports" / "watcher_edge_mvp21_selftest.json"
 
-sys.path.insert(0, str(SCRIPTS))
-import watcher_capture_mvp1 as mvp1       # capture / to_evidence
-import watcher_candidate_mvp2 as mvp2     # to_nodes
-import openbinggu_incoming_to_staging as v011   # secret 패턴
-import localbinggu_match_policy as mp     # 2차 소비처 필터 (classify_edge_pair)
-
-EVIDENCE_FANOUT_CAP = 8     # evidence 1개가 만들 수 있는 supports edge 수
-NODE_INDEGREE_CAP = 16      # node 1개가 받는 incoming supports edge 수
-EDGE_KEYS = {"id", "edge_type", "source", "target", "properties", "evidence_refs", "promotion_allowed"}
-EDGE_PROP_KEYS = {"relation", "domain", "candidate", "origin", "sentence"}
-REDACT_RE = re.compile(r"\[REDACTED:\d+\]")
-
-
-def _sha8(s):
-    return hashlib.sha256(s.encode("utf-8")).hexdigest()[:8]
-
-
-def _has_secret(text):
-    return any(pat.search(text) for pat in v011.SECRET_PATTERNS)
-
-
-def build_edges(nodes, ev_index, freshness_map):
-    """nodes + evidence_index + freshness_map → (edges, stops). 1차 안전가드 전수.
-       freshness_map: {evidence_id: timestamp}. 위반 1건이라도 있으면 stops 에 기록(전체 STOP 신호)."""
-    edges, stops = [], []
-    ev_ids = {e["evidence_id"] for e in ev_index}
-    node_ids = {n["id"] for n in nodes}
-    ev_fanout = {}      # evidence_id -> 생성 edge 수
-    node_indeg = {}     # node_id -> incoming edge 수
-    seen_edge_ids = set()
-
-    for n in nodes:
-        tgt = n["id"]
-        sentence = n.get("properties", {}).get("sentence", n.get("label", ""))
-        for ev_id in n.get("evidence_refs", []):
-            src = ev_id
-            # direction: source=evidence(EVC-), target=node(node:)
-            if not (src in ev_ids):
-                stops.append({"reason": "dangling evidence_ref (evidence 미존재)", "src": src, "tgt": tgt})
-                continue
-            if tgt not in node_ids:
-                stops.append({"reason": "dangling node (target 미존재)", "src": src, "tgt": tgt})
-                continue
-            if src == tgt:
-                stops.append({"reason": "self-loop", "src": src, "tgt": tgt})
-                continue
-            if not src.startswith("EVC-") or not tgt.startswith("node:"):
-                stops.append({"reason": "direction 위반(evidence→node 아님)", "src": src, "tgt": tgt})
-                continue
-            # freshness: evidence timestamp 필수
-            ts = freshness_map.get(ev_id)
-            if not ts:
-                stops.append({"reason": "freshness stamp 누락", "src": src, "tgt": tgt})
-                continue
-            # secret raw (node sentence 기준)
-            if _has_secret(sentence):
-                stops.append({"reason": "secret residual in node sentence", "src": src, "tgt": tgt})
-                continue
-            # fan-out cap
-            ev_fanout[src] = ev_fanout.get(src, 0) + 1
-            node_indeg[tgt] = node_indeg.get(tgt, 0) + 1
-            if ev_fanout[src] > EVIDENCE_FANOUT_CAP:
-                stops.append({"reason": f"evidence fan-out cap 초과(>{EVIDENCE_FANOUT_CAP})", "src": src, "tgt": tgt})
-                continue
-            if node_indeg[tgt] > NODE_INDEGREE_CAP:
-                stops.append({"reason": f"node indegree cap 초과(>{NODE_INDEGREE_CAP})", "src": src, "tgt": tgt})
-                continue
-            eid = "edge:STAGING:wch:" + _sha8(src + "→" + tgt)
-            # duplicate (동일 src/tgt/relation → 동일 id)
-            if eid in seen_edge_ids:
-                stops.append({"reason": "duplicate relation (동일 src/tgt/relation)", "src": src, "tgt": tgt})
-                continue
-            seen_edge_ids.add(eid)
-            domain = n.get("properties", {}).get("domain", "STAGING_UNASSIGNED")
-            edge = {
-                "id": eid,
-                "edge_type": "EvidenceSupports",
-                "source": src,
-                "target": tgt,
-                "properties": {
-                    "relation": "evidence_supports",
-                    "domain": domain,
-                    "candidate": True,
-                    "origin": "watcher",
-                    "sentence": "evidence가 노드를 뒷받침한다",
-                },
-                "evidence_refs": [ev_id],
-                "promotion_allowed": False,
-            }
-            assert set(edge) <= EDGE_KEYS and set(edge["properties"]) <= EDGE_PROP_KEYS, "edge key whitelist 위반"
-            edges.append(edge)
-    return edges, stops
-
 
 def _write_jsonl(path, rows):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(json.dumps(r, ensure_ascii=False, sort_keys=True) + "\n" for r in rows),
                     encoding="utf-8")
-
-
-def _freshness_from_chunks(chunks):
-    return {c["item_id"]: c.get("evidence_meta", {}).get("timestamp") for c in chunks}
 
 
 def process_from_diff(diff_text, run):
