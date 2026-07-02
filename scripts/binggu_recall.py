@@ -66,6 +66,7 @@ def _selftest():
 
     sys.path.insert(0, HERE)
     from openbinggu_staging_write_selftest import OPERATING_PATHS
+    from binggu_schema import apply_schema  # 정본 스키마(temp fixture 도 정본 상위집합 사용)
 
     ok = True
 
@@ -93,13 +94,7 @@ def _selftest():
         # ── 실제 그래프 구성(temp ledger) ──
         ledger = os.path.join(tmp, "ledger.sqlite")
         con = sqlite3.connect(ledger)
-        con.executescript(
-            "CREATE TABLE nodes(node_id TEXT PRIMARY KEY, node_type TEXT, sentence TEXT,"
-            " candidate INT, state TEXT, content_hash TEXT, created_at TEXT,"
-            " semantic_subtype TEXT, use_count INTEGER DEFAULT 0);"
-            "CREATE TABLE evidence(evidence_id TEXT, sentence TEXT, source_pointer_id TEXT, source_hash TEXT);"
-            "CREATE TABLE edges(edge_id TEXT, relation TEXT, source TEXT, target TEXT,"
-            " candidate INT, state TEXT, evidence_refs TEXT);")
+        apply_schema(con)  # 정본 스키마(nodes/edges/evidence 상위집합) — 아래 INSERT 는 컬럼 명시
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         def add_node(nid, ntype, sent, sub, used=0, cand=0, state="active"):
@@ -107,7 +102,8 @@ def _selftest():
                 "INSERT INTO nodes(node_id,node_type,sentence,candidate,state,content_hash,"
                 "created_at,semantic_subtype,use_count) VALUES(?,?,?,?,?,?,?,?,?)",
                 (nid, ntype, sent, cand, state, "h", now, sub, used))
-            con.execute("INSERT INTO evidence VALUES(?,?,?,?)",
+            con.execute("INSERT INTO evidence(evidence_id,sentence,source_pointer_id,source_hash)"
+                        " VALUES(?,?,?,?)",
                         ("EVC-CONV-" + nid.split(":")[-1], sent, "ptr", "sh"))
 
         # 위험패턴(버그패턴): "검증 없이 바로 배포해서 실패" — 배포 작업과 닮음.
@@ -124,7 +120,8 @@ def _selftest():
         # 선호
         add_node("node:CONV:ee05", "judgment", "배포 작업은 항상 백업 먼저 한다", "선호")
         # supports_judgment edge: 증거(dd04) → 판단(aa01)
-        con.execute("INSERT INTO edges VALUES(?,?,?,?,?,?,?)",
+        con.execute("INSERT INTO edges(edge_id,relation,source,target,candidate,state,evidence_refs)"
+                    " VALUES(?,?,?,?,?,?,?)",
                     ("edge:1", "supports_judgment", "node:CONV:dd04", "node:CONV:aa01",
                      0, "active", "[]"))
         con.commit()
@@ -194,13 +191,7 @@ def _selftest():
         # 별도 temp ledger — 어휘가 전혀 겹치지 않는 동의 개념 쌍을 심는다.
         sem_ledger = os.path.join(tmp, "sem_ledger.sqlite")
         scon = sqlite3.connect(sem_ledger)
-        scon.executescript(
-            "CREATE TABLE nodes(node_id TEXT PRIMARY KEY, node_type TEXT, sentence TEXT,"
-            " candidate INT, state TEXT, content_hash TEXT, created_at TEXT,"
-            " semantic_subtype TEXT, use_count INTEGER DEFAULT 0);"
-            "CREATE TABLE evidence(evidence_id TEXT, sentence TEXT, source_pointer_id TEXT, source_hash TEXT);"
-            "CREATE TABLE edges(edge_id TEXT, relation TEXT, source TEXT, target TEXT,"
-            " candidate INT, state TEXT, evidence_refs TEXT);")
+        apply_schema(scon)  # 정본 스키마(아래 nodes INSERT 는 컬럼 명시)
         # 버그패턴: query("프로세스 종료") 와 토큰이 전혀 겹치지 않지만 같은 개념.
         scon.execute(
             "INSERT INTO nodes(node_id,node_type,sentence,candidate,state,content_hash,"

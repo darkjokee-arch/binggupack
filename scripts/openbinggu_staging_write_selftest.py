@@ -7,7 +7,7 @@ OpenBinggu Step 3 — synthetic staging write 구현 + selftest.
 안전: staging = temp 파일 SQLite(운영과 물리 분리). 운영 localcrab_index.sqlite/user_graph/_graph_merge
       connect 0·write 0(mtime 전후 대조). C-2 guard 통과 후에만 insert. apply(운영) 0.
 """
-import os, re, json, hashlib, sqlite3, tempfile, shutil
+import os, sys, re, json, hashlib, sqlite3, tempfile, shutil
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
@@ -15,15 +15,15 @@ CUR_REDACTION_POLICY = "v1"
 # 운영 store 경로(거부 대상). 공개본은 작성자 절대경로를 포함하지 않는다.
 # 사용자가 자기 운영 경로를 거부 대상으로 등록하려면 아래 env 를 설정한다.
 # 미설정 시 temp 의 dummy 경로(존재하지 않아도 됨)로, "거부 대상 표식" 의미만 유지한다.
-_TMP = tempfile.gettempdir()
 # 운영 store 경로(거부 대상) = OpenCrab user_graph/graph_merge 등. env 미설정 시 temp dummy(거부 표식).
 # 주의: ledger.sqlite/capture_buffer.sqlite 는 StagingDB 의 정상 운영 대상(binggu.py 가 직접 연다) → 거부 목록 금지.
 # MCP 경로 입력 차단은 핸들러(_u_save_candidate)가 ledger_path 입력 자체를 무시하는 방식으로 처리(과방어 회피).
-OPERATING_PATHS = [
-    os.environ.get("OPENBINGGU_USER_GRAPH",  os.path.join(_TMP, "openbinggu_user_graph_dummy.yaml")),
-    os.environ.get("OPENBINGGU_GRAPH_MERGE", os.path.join(_TMP, "openbinggu_graph_merge_dummy.yaml")),
-    os.environ.get("OPENBINGGU_OPERATING_DB", os.path.join(_TMP, "openbinggu_operating_dummy.sqlite")),
-]
+# 정본: scripts/binggu_paths.py (셀프테스트 결합 해소 — 프로덕션 상수를 셀프테스트 파일에 두지 않음).
+# 기존 `from openbinggu_staging_write_selftest import OPERATING_PATHS` 호출자 호환 위해 이 이름 재노출 유지.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+from binggu_paths import OPERATING_PATHS  # noqa: E402,F401
 
 def _canon(s): return re.sub(r"\s+", " ", str(s)).strip().encode("utf-8", "replace")
 def _hash(s): return hashlib.sha256(_canon(s)).hexdigest()[:16]

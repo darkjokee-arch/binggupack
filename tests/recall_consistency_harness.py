@@ -35,6 +35,10 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
 _FIXTURE = os.path.join(_HERE, "fixtures", "recall_consistency", "recall_golden.json")
 
+# 정본 스키마 (Phase1) — scripts sys.path 확보 후 import.
+sys.path.insert(0, os.path.join(_ROOT, "scripts"))
+from binggu_schema import apply_schema
+
 _VALID_RISK = ("낮음", "중간", "높음")
 _VALID_SUBTYPE = ("버그패턴", "교훈", "선호", "결정", "사실")
 
@@ -53,13 +57,7 @@ def _load_fixture():
 def _build_ledger(corpus, ledger_path):
     """fixture corpus → temp ledger(운영 selftest 와 동일 스키마). write 는 temp 한정."""
     con = sqlite3.connect(ledger_path)
-    con.executescript(
-        "CREATE TABLE nodes(node_id TEXT PRIMARY KEY, node_type TEXT, sentence TEXT,"
-        " candidate INT, state TEXT, content_hash TEXT, created_at TEXT,"
-        " semantic_subtype TEXT, use_count INTEGER DEFAULT 0);"
-        "CREATE TABLE evidence(evidence_id TEXT, sentence TEXT, source_pointer_id TEXT, source_hash TEXT);"
-        "CREATE TABLE edges(edge_id TEXT, relation TEXT, source TEXT, target TEXT,"
-        " candidate INT, state TEXT, evidence_refs TEXT);")
+    apply_schema(con)  # 정본 스키마 (상위집합) — 아래 INSERT 는 명시 컬럼 지정.
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     for n in corpus["nodes"]:
         con.execute(
@@ -67,11 +65,15 @@ def _build_ledger(corpus, ledger_path):
             "created_at,semantic_subtype,use_count) VALUES(?,?,?,?,?,?,?,?,?)",
             (n["node_id"], n["node_type"], n["sentence"], 1, "active", "h", now,
              n["semantic_subtype"], n.get("use_count", 0)))
-        con.execute("INSERT INTO evidence VALUES(?,?,?,?)",
-                    ("EVC-" + n["node_id"].split(":")[-1], n["sentence"], "ptr", "sh"))
+        con.execute(
+            "INSERT INTO evidence(evidence_id,sentence,source_pointer_id,source_hash)"
+            " VALUES(?,?,?,?)",
+            ("EVC-" + n["node_id"].split(":")[-1], n["sentence"], "ptr", "sh"))
     for e in corpus.get("edges", []):
-        con.execute("INSERT INTO edges VALUES(?,?,?,?,?,?,?)",
-                    (e["edge_id"], e["relation"], e["source"], e["target"], 0, "active", "[]"))
+        con.execute(
+            "INSERT INTO edges(edge_id,relation,source,target,candidate,state,evidence_refs)"
+            " VALUES(?,?,?,?,?,?,?)",
+            (e["edge_id"], e["relation"], e["source"], e["target"], 0, "active", "[]"))
     con.commit()
     con.close()
 

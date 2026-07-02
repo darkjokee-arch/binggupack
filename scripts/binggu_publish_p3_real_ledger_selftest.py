@@ -11,6 +11,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import binggu_publish_p3_real_ledger as P3
+from binggu_schema import apply_schema  # 정본 스키마 (Phase1)
 
 results = []
 
@@ -20,20 +21,9 @@ def check(name, cond):
     print(f"[{'PASS' if cond else 'FAIL'}] {name}")
 
 
-_LEDGER_SCHEMA = """
-CREATE TABLE nodes (node_id TEXT PRIMARY KEY, node_type TEXT, sentence TEXT, candidate INTEGER,
-                    promotion_allowed INTEGER, state TEXT, supersedes TEXT, pack_id TEXT,
-                    content_hash TEXT, created_at TEXT);
-CREATE TABLE edges (edge_id TEXT PRIMARY KEY, relation TEXT, source TEXT, target TEXT, candidate INTEGER,
-                    state TEXT, evidence_refs TEXT, pack_id TEXT, content_hash TEXT, created_at TEXT);
-CREATE TABLE evidence (evidence_id TEXT PRIMARY KEY, sentence TEXT, source_pointer_id TEXT,
-                       source_hash TEXT, redaction_policy TEXT, pack_id TEXT, created_at TEXT);
-"""
-
-
 def _make_ledger(path, nodes):
     conn = sqlite3.connect(path)
-    conn.executescript(_LEDGER_SCHEMA)
+    apply_schema(conn)
     for i, (nid, ntype, sent, cand, state) in enumerate(nodes):
         conn.execute("INSERT INTO nodes(node_id,node_type,sentence,candidate,state,content_hash,created_at)"
                      " VALUES(?,?,?,?,?,?,?)", (nid, ntype, sent, cand, state, "h%d" % i, "t0"))

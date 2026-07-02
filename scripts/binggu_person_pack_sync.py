@@ -21,6 +21,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sqlite3  # noqa: E402
+import binggu_paths  # noqa: E402  경로 정본(_home/_ledger/_state_path 위임)
 from binggu_t3_filter import filter_uploadable  # noqa: E402
 
 # owner 온톨로지 팩(2026-07-02 최초 업로드) — 갱신 대상 고정.
@@ -30,15 +31,15 @@ PACK_TITLE = "사장님 의사결정 원칙 온톨로지"
 
 
 def _home():
-    return os.environ.get("BINGGU_HOME") or os.path.join(os.path.expanduser("~"), ".binggupack")
+    return binggu_paths.home()
 
 
 def _ledger():
-    return os.environ.get("BINGGU_LEDGER") or os.path.join(_home(), "ledger.sqlite")
+    return binggu_paths.ledger()
 
 
 def _state_path():
-    return os.path.join(_home(), STATE_FILE)
+    return binggu_paths.state_path(STATE_FILE)
 
 
 _PACK_HEADER = ["# 사장님(owner) 의사결정 원칙·판단 온톨로지", "",
@@ -220,8 +221,8 @@ def _selftest():
         os.environ["BINGGU_HOME"] = home
         os.environ["BINGGU_LEDGER"] = ledger
         con = sqlite3.connect(ledger)
-        con.execute("CREATE TABLE nodes(node_id TEXT PRIMARY KEY, node_type TEXT, sentence TEXT,"
-                    " state TEXT, semantic_subtype TEXT, speaker TEXT)")
+        from binggu_schema import apply_schema  # 정본 스키마 위임(인라인 CREATE TABLE 제거)
+        apply_schema(con)
 
         def add(nid, sent, speaker="owner", state="active"):
             con.execute("INSERT INTO nodes(node_id,node_type,sentence,state,semantic_subtype,speaker)"

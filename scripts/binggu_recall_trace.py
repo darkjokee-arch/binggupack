@@ -34,6 +34,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import binggu_p1_config as CFG  # recall_config["trace_enabled"] opt-in  # noqa: E402
+from binggu_schema import apply_schema  # 정본 스키마(recall_traces/recall_outcomes 포함)  # noqa: E402
 
 VALID_VERDICTS = ("used", "ignored", "corrected")
 
@@ -72,14 +73,9 @@ def _open_store(home=None):
     if d:
         os.makedirs(d, exist_ok=True)
     con = sqlite3.connect(p)
-    con.executescript(
-        "CREATE TABLE IF NOT EXISTS recall_traces("
-        " trace_id TEXT PRIMARY KEY, kind TEXT, query_sha TEXT, domain TEXT,"
-        " recalled_json TEXT, top1_node_id TEXT, risk_level TEXT,"
-        " needs_question INTEGER, ts TEXT);"
-        "CREATE TABLE IF NOT EXISTS recall_outcomes("
-        " outcome_id TEXT PRIMARY KEY, trace_id TEXT, node_id TEXT, verdict TEXT,"
-        " reason_code TEXT, actor TEXT, ts TEXT, UNIQUE(trace_id, node_id));")
+    # 정본 스키마 위임(recall_traces/recall_outcomes 는 상위집합에 동일 컬럼 + UNIQUE 포함).
+    # idempotent · IF NOT EXISTS 이므로 기존 trace store 비파괴. 추가 테이블은 빈 채로 무해.
+    apply_schema(con)
     return con
 
 
@@ -553,13 +549,7 @@ def _selftest():
         set_trace_flag(True, home=home5)
         led5 = os.path.join(home5, "ledger.sqlite")
         lcon = sqlite3.connect(led5)
-        lcon.executescript(
-            "CREATE TABLE nodes(node_id TEXT PRIMARY KEY, node_type TEXT, sentence TEXT,"
-            " candidate INT, state TEXT, content_hash TEXT, created_at TEXT,"
-            " semantic_subtype TEXT, use_count INTEGER DEFAULT 0);"
-            "CREATE TABLE evidence(evidence_id TEXT, sentence TEXT, source_pointer_id TEXT, source_hash TEXT);"
-            "CREATE TABLE edges(edge_id TEXT, relation TEXT, source TEXT, target TEXT,"
-            " candidate INT, state TEXT, evidence_refs TEXT);")
+        apply_schema(lcon)  # 정본 스키마(claim-join 용 ledger fixture · 아래 INSERT 컬럼 명시)
         lcon.execute("INSERT INTO nodes(node_id,node_type,sentence,candidate,state,content_hash,"
                      "created_at,semantic_subtype,use_count) VALUES"
                      "('node:CONV:p1','judgment','배포 전 live endpoint 확인',0,'active','h',?, '교훈',2)", (TS,))

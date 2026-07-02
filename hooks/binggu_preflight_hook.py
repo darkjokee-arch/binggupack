@@ -265,6 +265,9 @@ def _selftest():
         home = tmp / ".binggupack"
         home.mkdir(parents=True)
         scripts = str(_scripts_dir())
+        if scripts not in sys.path:
+            sys.path.insert(0, scripts)
+        from binggu_schema import apply_schema  # 정본 스키마 위임(fixture 인라인 CREATE TABLE 제거)
         self_path = str(Path(__file__).resolve())
         ledger = home / "ledger.sqlite"
         base_env = {**os.environ, "BINGGU_HOME": str(home),
@@ -283,24 +286,17 @@ def _selftest():
         #   (evidence=evidence_id/sentence/source_pointer_id/source_hash · node_type='judgment').
         def build_ledger():
             con = sqlite3.connect(str(ledger))
-            con.executescript(
-                "CREATE TABLE nodes(node_id TEXT PRIMARY KEY, node_type TEXT, sentence TEXT,"
-                " candidate INT, state TEXT, content_hash TEXT, created_at TEXT,"
-                " semantic_subtype TEXT, use_count INTEGER DEFAULT 0, speaker TEXT);"
-                "CREATE TABLE evidence(evidence_id TEXT, sentence TEXT, source_pointer_id TEXT,"
-                " source_hash TEXT);"
-                "CREATE TABLE edges(edge_id TEXT, relation TEXT, source TEXT, target TEXT,"
-                " candidate INT, state TEXT, evidence_refs TEXT);"
-                "CREATE TABLE hit_events(node_id TEXT, speaker TEXT, kind TEXT, outcome TEXT,"
-                " subtype TEXT, ts TEXT, domain TEXT, context_hash TEXT, decision_id TEXT);")
+            apply_schema(con)  # 정본 스키마 위임(인라인 CREATE TABLE 제거·superset)
 
             def add(nid, ntype, sent, sub, used=0):
                 con.execute(
                     "INSERT INTO nodes(node_id,node_type,sentence,candidate,state,content_hash,"
                     "created_at,semantic_subtype,use_count) VALUES(?,?,?,?,?,?,?,?,?)",
                     (nid, ntype, sent, 0, "active", "h", "2026-06-01T00:00:00Z", sub, used))
-                con.execute("INSERT INTO evidence VALUES(?,?,?,?)",
-                            ("EVC-" + nid.split(":")[-1], sent, "ptr", "sh"))
+                con.execute(
+                    "INSERT INTO evidence(evidence_id,sentence,source_pointer_id,source_hash)"
+                    " VALUES(?,?,?,?)",
+                    ("EVC-" + nid.split(":")[-1], sent, "ptr", "sh"))
             # 버그패턴(위험) · 교훈 · 선호 · 무관 노드 (node_type='judgment' = JUDGMENT_KINDS)
             add("node:CONV:aa01", "judgment",
                 "검증 없이 바로 배포하면 실패한다 selftest live endpoint 확인 누락", "버그패턴", used=5)

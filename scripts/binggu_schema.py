@@ -1,0 +1,340 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""정본 ledger 스키마 (canonical schema).
+
+프로젝트 전반에 복붙돼 서로 컬럼이 갈리던 CREATE TABLE(nodes/edges/evidence/hit_events/
+owner_acceptances/recall_traces/…)의 **상위집합(superset)** 을 한 곳에 모은 단일 정본이다.
+Phase2 위임자는 각 파일의 인라인 CREATE TABLE 을 `apply_schema(con)` 호출로 교체한다.
+
+설계 원칙
+  - 모든 CREATE 는 `IF NOT EXISTS` → 기존 ledger 를 절대 파괴하지 않음(idempotent).
+  - 컬럼 타입/DEFAULT 는 가장 관대하게(INTEGER DEFAULT 0, 전부 NULL 허용). 어느 기존
+    호출부에도 결여 컬럼이 없도록 각 테이블 컬럼의 합집합을 취함.
+  - 구 ledger(컬럼 결여) 대비 경량 마이그레이션 — user_version < SCHEMA_VERSION 이면
+    누락 컬럼을 ALTER TABLE ADD COLUMN 으로 비파괴 보강(실패는 무해 무시).
+  - CREATE INDEX IF NOT EXISTS — 실제 쿼리 패턴 기반(nodes(state/semantic_subtype/
+    candidate), edges(source/target/relation), owner_acceptances(node_id,event_id),
+    hit_events(node_id)).
+
+import 경로 (양쪽 호환)
+  - scripts/ sys.path 경유 bare-name:  `from binggu_schema import apply_schema, SCHEMA_VERSION`
+  - 패키지 경로 shim:                   `from binggupack.storage.schema import apply_schema`
+
+CLI: python scripts/binggu_schema.py --selftest
+"""
+from __future__ import annotations
+
+import sqlite3
+
+# user_version(PRAGMA)로 기록되는 정본 스키마 버전. 마이그레이션 게이트 키.
+SCHEMA_VERSION = 1
+
+# ── 테이블 정본 정의 ──────────────────────────────────────────────────────────
+# 각 테이블: 컬럼 DDL 리스트(합집합). 첫 항목은 대개 PRIMARY KEY.
+# NOTE: candidate/promotion_allowed/use_count 는 INTEGER DEFAULT 0(관대),
+#       state 는 TEXT DEFAULT 'active'. 나머지는 전부 NULL 허용 TEXT.
+
+_TABLE_COLUMNS = {
+    "nodes": [
+        "node_id TEXT PRIMARY KEY",
+        "node_type TEXT",
+        "sentence TEXT",
+        "candidate INTEGER DEFAULT 0",
+        "promotion_allowed INTEGER DEFAULT 0",
+        "state TEXT DEFAULT 'active'",
+        "supersedes TEXT",
+        "pack_id TEXT",
+        "content_hash TEXT",
+        "created_at TEXT",
+        "semantic_subtype TEXT",
+        "use_count INTEGER DEFAULT 0",
+        "speaker TEXT",
+    ],
+    "edges": [
+        "edge_id TEXT PRIMARY KEY",
+        "relation TEXT",
+        "source TEXT",
+        "target TEXT",
+        "candidate INTEGER DEFAULT 0",
+        "state TEXT DEFAULT 'active'",
+        "evidence_refs TEXT",
+        "pack_id TEXT",
+        "content_hash TEXT",
+        "created_at TEXT",
+    ],
+    "evidence": [
+        "evidence_id TEXT PRIMARY KEY",
+        "sentence TEXT",
+        "source_pointer_id TEXT",
+        "source_hash TEXT",
+        "redaction_policy TEXT",
+        "pack_id TEXT",
+        "created_at TEXT",
+    ],
+    "owner_acceptances": [
+        # 관대판: production CHECK(event IN(...)) 은 신규 ledger 에서 제외(호환·관대성 우선).
+        # 기존 ledger 는 IF NOT EXISTS 로 자신의 CHECK 유지(비파괴).
+        "event_id INTEGER PRIMARY KEY AUTOINCREMENT",
+        "node_id TEXT",
+        "event TEXT",
+        "reason TEXT",
+        "ts TEXT",
+    ],
+    "hit_events": [
+        "event_id INTEGER PRIMARY KEY AUTOINCREMENT",
+        "node_id TEXT",
+        "speaker TEXT",
+        "kind TEXT",
+        "outcome TEXT",
+        "subtype TEXT",
+        "ts TEXT",
+        "domain TEXT",
+        "context_hash TEXT",
+        "decision_id TEXT",
+    ],
+    "recall_traces": [
+        "trace_id TEXT PRIMARY KEY",
+        "kind TEXT",
+        "query_sha TEXT",
+        "domain TEXT",
+        "recalled_json TEXT",
+        "top1_node_id TEXT",
+        "risk_level TEXT",
+        "needs_question INTEGER",
+        "ts TEXT",
+    ],
+    "recall_outcomes": [
+        "outcome_id TEXT PRIMARY KEY",
+        "trace_id TEXT",
+        "node_id TEXT",
+        "verdict TEXT",
+        "reason_code TEXT",
+        "actor TEXT",
+        "ts TEXT",
+    ],
+    "applied_registry": [
+        "pack_id TEXT",
+        "content_hash TEXT",
+        "applied_at TEXT",
+    ],
+    "audit_log": [
+        "seq INTEGER PRIMARY KEY AUTOINCREMENT",
+        "ts TEXT",
+        "actor TEXT",
+        "action TEXT",
+        "pack_id TEXT",
+        "result TEXT",
+        "reason_code TEXT",
+        "before_hash TEXT",
+        "after_hash TEXT",
+        "prev_audit_hash TEXT",
+        "entry_hash TEXT",
+        "chain_ver TEXT",
+    ],
+    "audit_meta": [
+        "key TEXT PRIMARY KEY",
+        "value TEXT",
+    ],
+    "hit_event_chain": [
+        "sequence_no INTEGER PRIMARY KEY",
+        "event_id INTEGER",
+        "raw_json TEXT",
+        "snapshot_hash TEXT",
+        "external_ts TEXT",
+        "prev_hash TEXT",
+        "entry_hash TEXT",
+        "chain_ver TEXT DEFAULT 'm1'",
+    ],
+    "hit_event_anchor": [
+        "key TEXT PRIMARY KEY",
+        "value TEXT",
+    ],
+}
+
+# 복합 PK / UNIQUE 등 컬럼 리스트로 표현 못하는 테이블 제약을 별도 부여.
+_TABLE_CONSTRAINTS = {
+    "recall_outcomes": ["UNIQUE(trace_id, node_id)"],
+    "applied_registry": ["PRIMARY KEY(pack_id, content_hash)"],
+}
+
+# ── 인덱스 정본 (실제 WHERE/JOIN 쿼리 패턴 기반) ──────────────────────────────
+_INDEXES = [
+    ("idx_nodes_state", "nodes", "state"),
+    ("idx_nodes_semantic_subtype", "nodes", "semantic_subtype"),
+    ("idx_nodes_candidate", "nodes", "candidate"),
+    ("idx_edges_source", "edges", "source"),
+    ("idx_edges_target", "edges", "target"),
+    ("idx_edges_relation", "edges", "relation"),
+    ("idx_owner_acceptances_node", "owner_acceptances", "node_id, event_id"),
+    ("idx_hit_events_node", "hit_events", "node_id"),
+]
+
+# ALTER TABLE ADD COLUMN 으로 안전하게 보강 가능한 컬럼만(제약/AUTOINCREMENT/PK 제외).
+_ADDABLE_DEFAULT_NONCONST = ("PRIMARY KEY", "AUTOINCREMENT", "UNIQUE", "NOT NULL")
+
+
+def _create_table_sql(table: str) -> str:
+    cols = list(_TABLE_COLUMNS[table])
+    cols += _TABLE_CONSTRAINTS.get(table, [])
+    return "CREATE TABLE IF NOT EXISTS %s(%s)" % (table, ", ".join(cols))
+
+
+def _addable_columns(table: str):
+    """마이그레이션으로 ALTER ADD 가능한 (col_name, ddl) 목록.
+
+    PK/AUTOINCREMENT/UNIQUE/NOT NULL 컬럼은 ALTER ADD 불가 → 제외(신규 테이블에서만 존재).
+    """
+    out = []
+    for ddl in _TABLE_COLUMNS[table]:
+        name = ddl.split()[0]
+        upper = ddl.upper()
+        if any(tok in upper for tok in _ADDABLE_DEFAULT_NONCONST):
+            continue
+        out.append((name, ddl))
+    return out
+
+
+def _existing_columns(con, table):
+    try:
+        return {row[1] for row in con.execute("PRAGMA table_info(%s)" % table)}
+    except sqlite3.Error:
+        return set()
+
+
+def _migrate(con):
+    """구 ledger(컬럼 결여) 비파괴 보강. 실패는 무해 무시."""
+    for table in _TABLE_COLUMNS:
+        have = _existing_columns(con, table)
+        if not have:
+            continue  # 테이블 자체가 없으면(방금 CREATE 됐어야 함) skip
+        for name, ddl in _addable_columns(table):
+            if name in have:
+                continue
+            try:
+                con.execute("ALTER TABLE %s ADD COLUMN %s" % (table, ddl))
+            except sqlite3.Error:
+                pass  # 무해 무시(관대성)
+
+
+def _user_version(con) -> int:
+    return int(con.execute("PRAGMA user_version").fetchone()[0])
+
+
+def apply_schema(con):
+    """정본 스키마를 con 에 idempotent 하게 적용.
+
+    - 전 테이블 CREATE IF NOT EXISTS + 인덱스 CREATE IF NOT EXISTS.
+    - user_version < SCHEMA_VERSION 이면 누락 컬럼 경량 마이그레이션.
+    - PRAGMA user_version 을 SCHEMA_VERSION 으로 설정.
+    반환: 적용 후 user_version(int).
+    """
+    for table in _TABLE_COLUMNS:
+        con.execute(_create_table_sql(table))
+    # 인덱스가 참조하는 컬럼이 구 ledger 에 없을 수 있으므로 마이그레이션을 먼저 수행.
+    if _user_version(con) < SCHEMA_VERSION:
+        _migrate(con)
+        con.execute("PRAGMA user_version = %d" % SCHEMA_VERSION)
+    for name, table, cols in _INDEXES:
+        con.execute("CREATE INDEX IF NOT EXISTS %s ON %s(%s)" % (name, table, cols))
+    con.commit()
+    return _user_version(con)
+
+
+def schema_version(con) -> int:
+    """con 의 현재 user_version 조회."""
+    return _user_version(con)
+
+
+# ── selftest ──────────────────────────────────────────────────────────────────
+def _selftest() -> int:
+    import os
+    import tempfile
+
+    fails = []
+
+    def ck(name, cond):
+        print("[%s] %s" % ("PASS" if cond else "FAIL", name))
+        if not cond:
+            fails.append(name)
+
+    tmp = tempfile.mkdtemp(prefix="binggu_schema_st_")
+    dbp = os.path.join(tmp, "ledger.sqlite")
+    con = sqlite3.connect(dbp)
+
+    # 1) apply 2회 idempotent (에러 0)
+    v1 = apply_schema(con)
+    v2 = apply_schema(con)
+    ck("apply_schema idempotent 2회 (에러 0)", v1 == SCHEMA_VERSION and v2 == SCHEMA_VERSION)
+
+    # 2) 전 테이블 존재
+    have_tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    ck("전 정본 테이블 생성", set(_TABLE_COLUMNS).issubset(have_tables))
+
+    # 3) 각 테이블 정본 컬럼 전부 존재
+    all_cols_ok = True
+    for table, ddls in _TABLE_COLUMNS.items():
+        want = {d.split()[0] for d in ddls}
+        have = _existing_columns(con, table)
+        if not want.issubset(have):
+            all_cols_ok = False
+            print("   missing in %s: %s" % (table, want - have))
+    ck("각 테이블 정본 컬럼 전부 존재", all_cols_ok)
+
+    # 4) 인덱스 존재
+    have_idx = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+    want_idx = {n for n, _, _ in _INDEXES}
+    ck("정본 인덱스 전부 생성", want_idx.issubset(have_idx))
+
+    # 5) user_version 기록
+    ck("user_version == SCHEMA_VERSION", schema_version(con) == SCHEMA_VERSION)
+    con.close()
+
+    # 6) 구 ledger(컬럼 결여) 비파괴 마이그레이션 — 기존 행 보존 + 누락 컬럼 보강
+    legacy = os.path.join(tmp, "legacy.sqlite")
+    lc = sqlite3.connect(legacy)
+    lc.executescript(
+        "CREATE TABLE nodes(node_id TEXT PRIMARY KEY, node_type TEXT, sentence TEXT,"
+        " candidate INT, state TEXT, content_hash TEXT);"
+        "CREATE TABLE edges(edge_id TEXT, relation TEXT, source TEXT, target TEXT);"
+    )
+    lc.execute("INSERT INTO nodes(node_id,node_type,sentence,candidate,state)"
+               " VALUES('old1','judgment','옛 노드',0,'active')")
+    lc.commit()
+    apply_schema(lc)
+    ncols = _existing_columns(lc, "nodes")
+    row = lc.execute("SELECT sentence, semantic_subtype, use_count, speaker FROM nodes"
+                     " WHERE node_id='old1'").fetchone()
+    ck("legacy nodes 누락컬럼 ALTER 보강(비파괴)",
+       {"semantic_subtype", "use_count", "speaker", "created_at", "pack_id"}.issubset(ncols)
+       and row[0] == "옛 노드" and row[1] is None and row[2] in (0, None))
+    ecols = _existing_columns(lc, "edges")
+    ck("legacy edges 누락컬럼 ALTER 보강",
+       {"candidate", "state", "evidence_refs", "pack_id", "content_hash", "created_at"}.issubset(ecols))
+    ck("legacy user_version 승격", schema_version(lc) == SCHEMA_VERSION)
+    lc.close()
+
+    # 7) 관대 INSERT — 최소 컬럼만 지정해도 삽입 성공(DEFAULT 채움)
+    con2 = sqlite3.connect(os.path.join(tmp, "insert.sqlite"))
+    apply_schema(con2)
+    try:
+        con2.execute("INSERT INTO nodes(node_id) VALUES('n1')")
+        con2.commit()
+        r = con2.execute("SELECT candidate, promotion_allowed, use_count, state FROM nodes"
+                         " WHERE node_id='n1'").fetchone()
+        ins_ok = r == (0, 0, 0, "active")
+    except sqlite3.Error as e:
+        ins_ok = False
+        print("   insert err:", e)
+    ck("관대 DEFAULT(candidate=0/state='active') INSERT", ins_ok)
+    con2.close()
+
+    print("GATE=%s (%d fail)" % ("GO" if not fails else "STOP", len(fails)))
+    return 0 if not fails else 1
+
+
+if __name__ == "__main__":
+    import sys
+    if "--selftest" in sys.argv:
+        raise SystemExit(_selftest())
+    print("binggu_schema: SCHEMA_VERSION=%d, tables=%d, indexes=%d"
+          % (SCHEMA_VERSION, len(_TABLE_COLUMNS), len(_INDEXES)))

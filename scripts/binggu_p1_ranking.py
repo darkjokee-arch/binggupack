@@ -25,6 +25,7 @@ ROOT = os.path.dirname(HERE)                         # <repo>
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)   # binggupack 패키지 import 경로
 
+from binggupack.storage.schema import apply_schema  # noqa: E402  스키마 정본(selftest ledger)
 from binggupack.pack.p1_ranking import *  # noqa: E402,F401,F403
 from binggupack.pack.p1_ranking import (  # noqa: E402,F401  (전체 명시 re-export)
     FRESHNESS_HALFLIFE_DAYS,
@@ -122,9 +123,7 @@ def _selftest():
         # ── record_use: 로컬 ledger use_count++ ──
         lp = os.path.join(tmp, "ledger.sqlite")
         con = sqlite3.connect(lp)
-        con.executescript("CREATE TABLE nodes(node_id TEXT PRIMARY KEY, node_type TEXT, sentence TEXT,"
-                          " candidate INT, state TEXT, content_hash TEXT, created_at TEXT,"
-                          " semantic_subtype TEXT, use_count INTEGER DEFAULT 0);")
+        apply_schema(con)   # 정본 스키마(nodes 상위집합 — use_count/semantic_subtype 포함) 적용
         con.execute("INSERT INTO nodes(node_id,node_type,sentence,candidate,state,use_count)"
                     " VALUES('n1','judgment','문장',0,'active',0)")
         con.commit()

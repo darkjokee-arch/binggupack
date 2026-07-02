@@ -43,6 +43,8 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import binggu_platform as _plat
+import binggu_paths                                # 경로 정본(_home 위임)
+import binggu_schema                               # 스키마 정본(apply_schema)
 import watcher_capture_mvp1 as mvp1                  # redact_text/_has_secret/SCOPE 재사용(capture 미사용)
 import watcher_candidate_mvp2 as mvp2                # to_nodes (candidate 불변식 단일 글루)
 import openbinggu_scope_envelope_dryrun as SP        # classify_source_pointer (게이트 마스킹)
@@ -59,7 +61,7 @@ def _redact_all(text):
 
 # ── 경로 (BINGGU_HOME 우선 — cross-platform 정합) ──────────────────
 def _home():
-    return _plat.binggu_home()
+    return binggu_paths.home()   # 정본 위임(== _plat.binggu_home())
 
 
 def sources_path(home=None):
@@ -726,13 +728,10 @@ def _selftest():
     sp = sources_path(home)
     lp = os.path.join(work, "ledger.sqlite")
 
-    # 빈 환경 ledger(nodes 테이블 — 운영 스키마 모사)
+    # 빈 환경 ledger(nodes 테이블 — 정본 스키마 apply_schema 로 운영 스키마 모사)
     def make_ledger(p):
         c = sqlite3.connect(p)
-        c.executescript(
-            "CREATE TABLE nodes(node_id TEXT,node_type TEXT,sentence TEXT,candidate INT,"
-            "state TEXT,content_hash TEXT,promotion_allowed INT);")
-        c.commit()
+        binggu_schema.apply_schema(c)   # 정본 스키마(nodes 상위집합) 적용·commit
         c.close()
     make_ledger(lp)
 

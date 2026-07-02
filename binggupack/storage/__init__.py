@@ -25,7 +25,7 @@ from openbinggu_conversation_candidate_save import save_selected, save_paired
 from binggu_capture_to_save import commit_selected
 from openbinggu_deprecate_and_remind_g3 import (
     open_g3, set_review_due, resolve_review, list_due_reminders)
-from openbinggu_staging_write_selftest import OPERATING_PATHS
+from binggupack.paths import OPERATING_PATHS  # 정본(셀프테스트 결합 해소)
 
 __all__ = ["save_selected", "save_paired", "commit_selected", "open_g3",
            "set_review_due", "resolve_review", "list_due_reminders", "OPERATING_PATHS"]

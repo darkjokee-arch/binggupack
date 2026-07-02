@@ -48,14 +48,15 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import binggu_platform as _plat
+import binggu_paths  # 경로 정본(single source of truth) — _home 위임
 import binggu_publish_p3_real_ledger as P3
 import binggu_realpack_build as RP
 import binggu_save_gate as SGATE
 
 # ── 경로 (BINGGU_HOME 우선 — cross-platform 정합) ──────────────────
+# 정본 위임: binggu_paths.home()(내부 _plat.binggu_home()) == 기존 동작. 중복 정의 해소.
 def _home():
-    return _plat.binggu_home()
+    return binggu_paths.home()
 
 
 def published_cache_path(home=None):
