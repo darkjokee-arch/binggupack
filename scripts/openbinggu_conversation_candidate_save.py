@@ -176,7 +176,8 @@ def save_selected(db, text, indices, ctx, snap_dir, due_date=None, speaker=None,
 
     return {"applied": True, "saved": len(saved_items), "skipped_existing": skipped,
             "rejected": rejected, "reason": None, "pack_id": pack_id,
-            "snapshot": r.get("snapshot"), "due_set": due_set}
+            "snapshot": r.get("snapshot"), "due_set": due_set,
+            "node_ids": [it["nid"] for it in saved_items]}  # save --accept 통합용(저장 노드 id)
 
 
 # ===== 페어 저장 (owner 발화 ↔ ai 요약 독립 노드 + 연결 엣지) =====

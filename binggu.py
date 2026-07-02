@@ -664,6 +664,16 @@ def cmd_save(a):
     r = save_selected(db, a.text, idx, {"actor": "human", "confirm": a.confirm},
                       snap_dir, due_date=a.due, speaker=getattr(a, "speaker", None),
                       explicit=getattr(a, "explicit", False))
+    # --accept: 저장과 동시에 owner_accepted 확정 — 별도 ACCEPT 문구 면제(SAVE confirm 이 이미 사람 확인).
+    # 인정=SAVE 통합(2트랙 설계) — candidate→accept 한 명령. pair --accept 동형(accept_by_node_id).
+    if r.get("applied") and getattr(a, "accept", False):
+        accepted = 0
+        for nid in r.get("node_ids", []):
+            ar = accept_by_node_id(db, nid, "save --accept 통합 확정(SAVE confirm 편승)",
+                                   {"actor": "human"})
+            if ar.get("applied"):
+                accepted += 1
+        r["accepted"] = accepted
     db.close()
     return _show(r)
 
@@ -1216,6 +1226,7 @@ def main():
     sp.add_argument("--due", default=None)
     sp.add_argument("--speaker", choices=["owner", "ai"], default=None)  # 화자 칸(owner=사용자 발화/ai=AI 요약)
     sp.add_argument("--explicit", action="store_true")  # remember(명시 입력) preview 로 본 후보 저장 — 판단-veto 면제
+    sp.add_argument("--accept", action="store_true")  # 저장과 동시에 owner_accepted 확정(별도 ACCEPT 문구 면제·2트랙 인정=SAVE 통합)
     sp = sub.add_parser("list"); sp.add_argument("--status", default=None)
     sp.add_argument("--kind", default=None)
     # 회상(L4~L6 · read-only) — recall(why_search) / trace(judgment_trace) / preflight
