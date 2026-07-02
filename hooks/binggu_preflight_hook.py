@@ -129,6 +129,52 @@ def _render_trust(ledger_path):
             + "\n".join(lines))
 
 
+def _render_person_principles(ledger_path, prompt, cwd, RC, max_n=4):
+    """사람축(speaker=owner) 원칙·판단을 작업 관련도 순으로 표시(회수 1단·상시).
+
+    preflight remember 는 rank(신선도×활용도) 정렬이라 오래된 owner 원칙/가치관이 상위에서
+    밀린다 → 사람축 전용 섹션으로 상시 노출(UGI 회수 1단: 원칙을 답변 맥락에 주입).
+    read-only(sqlite mode=ro). speaker 컬럼 부재(구 ledger)·관련 owner 노드 0 → None(소음 0)."""
+    try:
+        import sqlite3
+        uri = "file:" + str(ledger_path).replace("\\", "/") + "?mode=ro"
+        con = sqlite3.connect(uri, uri=True)
+        try:
+            ncols = [c[1] for c in con.execute("PRAGMA table_info(nodes)")]
+            if "speaker" not in ncols:
+                return None
+            rows = con.execute(
+                "SELECT sentence FROM nodes WHERE speaker='owner' AND state='active'"
+            ).fetchall()
+        finally:
+            con.close()
+    except Exception:
+        return None
+    try:
+        dom = RC._domain_from_cwd(cwd, None)
+    except Exception:
+        dom = None
+    work_text = " ".join(p for p in [prompt, dom] if p)
+    try:
+        qtok = RC._tokens(work_text)
+        scored = []
+        for (sent,) in rows:
+            if not sent:
+                continue
+            rel = RC._relevance(qtok, sent)
+            if rel > 0.0:
+                scored.append((rel, sent))
+    except Exception:
+        return None
+    if not scored:
+        return None  # 관련 owner 원칙 없음 → 소음 0
+    scored.sort(key=lambda x: -x[0])
+    lines = ["## 사용자 원칙·판단 (owner 화자 · 상시 회수 · 참고 · 강제 아님)"]
+    for _rel, sent in scored[:max_n]:
+        lines.append("  - %s" % sent[:100])
+    return "\n".join(lines)
+
+
 def _run(data):
     # 1) 기본 OFF 빠른 차단 (import 전 — 플래그 없으면 타 세션에 부담 0)
     try:
@@ -160,10 +206,11 @@ def _run(data):
         res = RC.preflight_context(str(ledger), prompt=prompt, cwd=cwd)
         _maybe_record_trace(prompt, res)  # Phase 2: opt-in 일 때만 회상 메타 기록(원문 0·실패 흡수)
         block = render_block(res)
-        trust = _render_trust(str(ledger))  # 회수 1단: 양방향 신뢰도(표본 충분 시만·read-only·소음 0)
-        if trust:
-            block = (block + "\n\n" + trust) if block else trust
-        return block
+        # 회수 1단(상시): 사람축 원칙(owner) + 양방향 신뢰도(hit_stats) — read-only·관련 없으면 소음 0
+        person = _render_person_principles(str(ledger), prompt, cwd, RC)
+        trust = _render_trust(str(ledger))
+        parts = [b for b in (block, person, trust) if b]
+        return "\n\n".join(parts) if parts else None
     except Exception:
         return None
 
@@ -239,7 +286,7 @@ def _selftest():
             con.executescript(
                 "CREATE TABLE nodes(node_id TEXT PRIMARY KEY, node_type TEXT, sentence TEXT,"
                 " candidate INT, state TEXT, content_hash TEXT, created_at TEXT,"
-                " semantic_subtype TEXT, use_count INTEGER DEFAULT 0);"
+                " semantic_subtype TEXT, use_count INTEGER DEFAULT 0, speaker TEXT);"
                 "CREATE TABLE evidence(evidence_id TEXT, sentence TEXT, source_pointer_id TEXT,"
                 " source_hash TEXT);"
                 "CREATE TABLE edges(edge_id TEXT, relation TEXT, source TEXT, target TEXT,"
@@ -383,6 +430,25 @@ def _selftest():
               "prompt": "검증 없이 배포 endpoint", "cwd": repo_cwd})
         mt1 = (ledger.stat().st_mtime_ns, ledger.stat().st_size)
         check(mt0 == mt1, "T15 trust(both_sides) 조회 후 ledger 불변(read-only · write 0)")
+
+        # ── T16 회수 1단: 사람축(speaker=owner) 원칙 상시 노출(관련도 순·소음 0) ──
+        con = sqlite3.connect(str(ledger))
+        con.execute(
+            "INSERT INTO nodes(node_id,node_type,sentence,candidate,state,content_hash,"
+            "created_at,semantic_subtype,use_count,speaker) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            ("node:OWN:p1", "judgment", "검증 없이 배포하지 않고 백업을 먼저 하는 것을 선호한다",
+             0, "active", "h", "2026-06-01T00:00:00Z", "선호", 0, "owner"))
+        con.commit()
+        con.close()
+        r = call({"hook_event_name": "UserPromptSubmit",
+                  "prompt": "검증 없이 배포 백업 먼저", "cwd": repo_cwd})
+        check("사용자 원칙" in r.stdout and "owner 화자" in r.stdout,
+              "T16 사람축(speaker=owner) 원칙 → 상시 회수 블록 주입(회수 1단)")
+        # T16b 무관 작업엔 사람축 블록 없음(소음 0) — owner 원칙과 무관한 prompt
+        r2 = call({"hook_event_name": "UserPromptSubmit",
+                   "prompt": "오늘 점심 메뉴 추천", "cwd": "C:/tmp"})
+        check("사용자 원칙" not in r2.stdout,
+              "T16b 무관 작업 → 사람축 블록 미노출(관련도 0·소음 0)")
 
         print(f"\nGATE={'GO' if ok else 'NO-GO'}")
         return 0 if ok else 1
