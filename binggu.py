@@ -537,6 +537,19 @@ def cmd_preflight(a):
         print("(주의: 과거 위험패턴과 일부 닮음 — 참고하세요)")
     if not (res["remember"] or res["avoid_patterns"] or res["preferences"]):
         print("(관련 기억 없음 — 새로운 작업이거나 그래프가 비어 있습니다)")
+    # P1-② use_count++ — --record 명시 시에만(사람의 '이 회상 유용했다' 신호). 기본 preflight 는 read-only.
+    if getattr(a, "record", False):
+        import binggu_p1_ranking as RANK
+        db, _ = _open(ledger)
+        seen = set()
+        for group in (res["remember"], res["avoid_patterns"], res["preferences"]):
+            for n in group:
+                nid = n.get("node_id")
+                if nid and nid not in seen:
+                    seen.add(nid)
+                    RANK.record_use(db, nid)
+        db.close()
+        print("\n(use_count 기록됨 %d건 · 유용성 신호 · 도장/문장 불변)" % len(seen))
     return 0
 
 
@@ -1223,6 +1236,7 @@ def main():
     pfp.add_argument("--cwd", default=None)
     pfp.add_argument("--domain", default=None)
     pfp.add_argument("--files", default=None)  # 콤마 구분 변경 파일명
+    pfp.add_argument("--record", action="store_true", dest="record")  # use_count++ (기본 read-only)
     pfp.add_argument("--settings", default=None)  # hook 등록 대상 settings.json (기본 OS별)
     pfp.add_argument("--install", action="store_true")    # 자동주입 hook 등록
     pfp.add_argument("--uninstall", action="store_true")  # 자동주입 hook 제거

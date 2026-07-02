@@ -210,7 +210,9 @@ def main_selftest():
         print("  [%s] %-52s %s" % ("OK" if ok else "FAIL", name, detail))
 
     db = open_accept(os.path.join(tmp, "s.sqlite"))
-    r0 = save_selected(db, T1, [1, 2, 3], {"actor": "human", "confirm": "SAVE 1,2,3"}, snap_dir)
+    # selftest 픽스처는 판단+상태+개념 3종 다양성을 요구(216~ kind 검사) — capture SSOT 게이트
+    # (6/27 추가)가 순수 상태/개념을 막으므로, 프로그램적 셋업은 explicit=True 로 게이트 우회.
+    r0 = save_selected(db, T1, [1, 2, 3], {"actor": "human", "confirm": "SAVE 1,2,3"}, snap_dir, explicit=True)
     ck("0_시나리오_구성(후보3건)", r0["applied"] and r0["saved"] == 3)
     rows0 = list_candidates(db)["rows"]
     j_nid = next(r["node_id"] for r in rows0 if r["kind"] == "판단")
