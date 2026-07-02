@@ -173,8 +173,13 @@ _INDEXES = [
 _ADDABLE_DEFAULT_NONCONST = ("PRIMARY KEY", "AUTOINCREMENT", "UNIQUE", "NOT NULL")
 
 
-def _create_table_sql(table: str) -> str:
+def _create_table_sql(table: str, staging: bool = False) -> str:
     cols = list(_TABLE_COLUMNS[table])
+    # staging(미확정 스테이징 ledger): nodes.candidate 기본값을 1(=미확정)로.
+    # 정본(production)은 DEFAULT 0. 그 외 컬럼/제약은 완전히 동일(상위집합 유지).
+    if staging and table == "nodes":
+        cols = ["candidate INTEGER DEFAULT 1" if c.startswith("candidate ") else c
+                for c in cols]
     cols += _TABLE_CONSTRAINTS.get(table, [])
     return "CREATE TABLE IF NOT EXISTS %s(%s)" % (table, ", ".join(cols))
 
@@ -220,16 +225,19 @@ def _user_version(con) -> int:
     return int(con.execute("PRAGMA user_version").fetchone()[0])
 
 
-def apply_schema(con):
+def apply_schema(con, staging=False):
     """정본 스키마를 con 에 idempotent 하게 적용.
 
     - 전 테이블 CREATE IF NOT EXISTS + 인덱스 CREATE IF NOT EXISTS.
     - user_version < SCHEMA_VERSION 이면 누락 컬럼 경량 마이그레이션.
     - PRAGMA user_version 을 SCHEMA_VERSION 으로 설정.
+    - staging=True: nodes.candidate DEFAULT 1(미확정 스테이징 의미). 그 외 전부 동일.
+      기존 apply_schema(con) 호출(default False)은 정본(DEFAULT 0)으로 불변.
+      DEFAULT 는 CREATE 시점 신규 테이블에만 적용(IF NOT EXISTS·기존 테이블 불변).
     반환: 적용 후 user_version(int).
     """
     for table in _TABLE_COLUMNS:
-        con.execute(_create_table_sql(table))
+        con.execute(_create_table_sql(table, staging=staging))
     # 인덱스가 참조하는 컬럼이 구 ledger 에 없을 수 있으므로 마이그레이션을 먼저 수행.
     if _user_version(con) < SCHEMA_VERSION:
         _migrate(con)
@@ -327,6 +335,37 @@ def _selftest() -> int:
         print("   insert err:", e)
     ck("관대 DEFAULT(candidate=0/state='active') INSERT", ins_ok)
     con2.close()
+
+    # 8) staging=True — nodes.candidate DEFAULT 1(미확정), 그 외 정본과 동일
+    con3 = sqlite3.connect(os.path.join(tmp, "staging.sqlite"))
+    apply_schema(con3, staging=True)
+    try:
+        con3.execute("INSERT INTO nodes(node_id) VALUES('s1')")
+        con3.commit()
+        r = con3.execute("SELECT candidate, promotion_allowed, use_count, state FROM nodes"
+                         " WHERE node_id='s1'").fetchone()
+        # candidate DEFAULT 1(staging), 나머지 DEFAULT 는 정본과 동일
+        stg_ok = r == (1, 0, 0, "active")
+        # edges.candidate 는 staging 에서도 DEFAULT 0(정본 유지) — nodes 만 변경 확인
+        con3.execute("INSERT INTO edges(edge_id) VALUES('se1')")
+        con3.commit()
+        ec = con3.execute("SELECT candidate FROM edges WHERE edge_id='se1'").fetchone()
+        stg_edge_ok = ec == (0,)
+    except sqlite3.Error as e:
+        stg_ok = stg_edge_ok = False
+        print("   staging insert err:", e)
+    ck("staging=True → nodes.candidate DEFAULT 1", stg_ok)
+    ck("staging=True → edges.candidate 는 DEFAULT 0(정본 유지·nodes만 변경)", stg_edge_ok)
+    con3.close()
+
+    # 9) default(staging=False) 는 정본 DEFAULT 0 불변 재확인(회귀 봉인)
+    con4 = sqlite3.connect(os.path.join(tmp, "prod.sqlite"))
+    apply_schema(con4)  # 기존 시그니처 호출 = staging 미지정
+    con4.execute("INSERT INTO nodes(node_id) VALUES('p1')")
+    con4.commit()
+    prod_cand = con4.execute("SELECT candidate FROM nodes WHERE node_id='p1'").fetchone()
+    ck("default(staging 생략) → nodes.candidate DEFAULT 0(정본 불변)", prod_cand == (0,))
+    con4.close()
 
     print("GATE=%s (%d fail)" % ("GO" if not fails else "STOP", len(fails)))
     return 0 if not fails else 1

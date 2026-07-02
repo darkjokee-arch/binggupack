@@ -24,6 +24,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 from binggu_paths import OPERATING_PATHS  # noqa: E402,F401
+from binggu_schema import apply_schema  # noqa: E402  정본 스키마 위임(staging=True)
 
 def _canon(s): return re.sub(r"\s+", " ", str(s)).strip().encode("utf-8", "replace")
 def _hash(s): return hashlib.sha256(_canon(s)).hexdigest()[:16]
@@ -35,31 +36,13 @@ def _now_iso(ts=None):
 
 
 class StagingDB:
-    """temp 파일 staging SQLite. 운영 경로 거부. WAL + transaction + checksum."""
-    SCHEMA = """
-    CREATE TABLE IF NOT EXISTS nodes(node_id TEXT PRIMARY KEY, node_type TEXT, sentence TEXT,
-        candidate INTEGER DEFAULT 1, promotion_allowed INTEGER DEFAULT 0, state TEXT DEFAULT 'active',
-        supersedes TEXT, pack_id TEXT, content_hash TEXT, created_at TEXT, semantic_subtype TEXT,
-        use_count INTEGER DEFAULT 0, speaker TEXT);
-    CREATE TABLE IF NOT EXISTS edges(edge_id TEXT PRIMARY KEY, relation TEXT, source TEXT, target TEXT,
-        candidate INTEGER DEFAULT 1, state TEXT DEFAULT 'active', evidence_refs TEXT,
-        pack_id TEXT, content_hash TEXT, created_at TEXT);
-    CREATE TABLE IF NOT EXISTS evidence(evidence_id TEXT PRIMARY KEY, sentence TEXT, source_pointer_id TEXT,
-        source_hash TEXT, redaction_policy TEXT, pack_id TEXT, created_at TEXT);
-    CREATE TABLE IF NOT EXISTS applied_registry(pack_id TEXT, content_hash TEXT, applied_at TEXT,
-        PRIMARY KEY(pack_id, content_hash));
-    CREATE TABLE IF NOT EXISTS audit_log(seq INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, actor TEXT,
-        action TEXT, pack_id TEXT, result TEXT, reason_code TEXT, before_hash TEXT, after_hash TEXT,
-        prev_audit_hash TEXT, entry_hash TEXT, chain_ver TEXT);
-    CREATE TABLE IF NOT EXISTS audit_meta(key TEXT PRIMARY KEY, value TEXT);
-    CREATE TABLE IF NOT EXISTS hit_events(event_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        node_id TEXT, speaker TEXT, kind TEXT, outcome TEXT, subtype TEXT, ts TEXT,
-        domain TEXT, context_hash TEXT, decision_id TEXT);
-    CREATE TABLE IF NOT EXISTS hit_event_chain(sequence_no INTEGER PRIMARY KEY,
-        event_id INTEGER NOT NULL, raw_json TEXT NOT NULL, snapshot_hash TEXT NOT NULL,
-        external_ts TEXT NOT NULL, prev_hash TEXT NOT NULL, entry_hash TEXT NOT NULL,
-        chain_ver TEXT DEFAULT 'm1');
-    CREATE TABLE IF NOT EXISTS hit_event_anchor(key TEXT PRIMARY KEY, value TEXT);
+    """temp 파일 staging SQLite. 운영 경로 거부. WAL + transaction + checksum.
+
+    스키마 정본: scripts/binggu_schema.py apply_schema(con, staging=True).
+    staging=True → nodes.candidate DEFAULT 1(미확정 스테이징). 정본은 상위집합이라
+    owner_acceptances/recall_traces/recall_outcomes 등 미사용 테이블도 함께 생성되나
+    store_checksum(nodes/edges/evidence 한정)·audit anchor 에 무영향(추가 테이블 무해).
+    checksum 대상 컬럼 순서(nodes/edges/evidence)는 정본과 완전 일치 확인.
     """
     def __init__(self, path):
         # 운영 경로 거부 (대상 한정)
@@ -71,7 +54,7 @@ class StagingDB:
         self.con = sqlite3.connect(path)
         self.con.execute("PRAGMA journal_mode=WAL")
         self.con.execute("PRAGMA busy_timeout=5000")
-        self.con.executescript(self.SCHEMA)
+        apply_schema(self.con, staging=True)  # 정본 스키마 위임(nodes.candidate DEFAULT 1)
         # 기존 장부(v1) 마이그레이션 — chain_ver 컬럼 없으면 추가(기존 행은 NULL=v1 검증)
         cols = [c[1] for c in self.con.execute("PRAGMA table_info(audit_log)")]
         if "chain_ver" not in cols:
