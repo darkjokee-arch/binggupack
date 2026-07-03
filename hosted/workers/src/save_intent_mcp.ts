@@ -99,8 +99,19 @@ function rpcError(id: any, code: number, message: string): Response {
   });
 }
 
+// 신뢰 채팅 도메인 allowlist — Origin 없음(서버-서버 pull) 또는 claude.ai/chatgpt/openai 계열만 허용.
+// 그 외 브라우저 Origin 은 403(CSRF 방어 유지). MCP 커넥터가 Origin 을 붙여도 신뢰 도메인이면 통과.
+const ALLOWED_ORIGIN_HOSTS = new Set(["claude.ai", "chatgpt.com", "chat.openai.com", "openai.com"]);
 function originOk(request: Request): boolean {
-  return request.headers.get("Origin") === null;
+  const o = request.headers.get("Origin");
+  if (o === null) return true;                        // 서버-서버 (PC 러너 pull 등) — 기존 동작 유지
+  try {
+    const h = new URL(o).hostname.toLowerCase();
+    return ALLOWED_ORIGIN_HOSTS.has(h)
+      || h.endsWith(".claude.ai") || h.endsWith(".openai.com") || h.endsWith(".chatgpt.com");
+  } catch {
+    return false;                                     // 파싱 불가 Origin = 차단
+  }
 }
 
 // HMAC 검증 단일 출처 = save_common.verifySig (신형 method+path 우선 · 구형 하위호환)
