@@ -496,7 +496,7 @@ def _selftest():
 
     # ── K13: max_nodes 안전 캡 ──
     called["n"] = 0
-    capped = collect_nodes(g, "all", enabled=True, collect_fn=_mock_collect, max_nodes=2)
+    collect_nodes(g, "all", enabled=True, collect_fn=_mock_collect, max_nodes=2)  # 반환 미사용·호출 횟수만 검증
     chk("K13 max_nodes=2 → collect 2회만", called["n"] == 2)
 
     # ── K14: 직렬화 + 통계 ──

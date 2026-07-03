@@ -268,7 +268,7 @@ def _selftest():
 
     # write roundtrip
     out = tempfile.mkdtemp(prefix="packfac_")
-    r5 = build_pack("쓰기", docs, out_dir=out)
+    build_pack("쓰기", docs, out_dir=out)  # 반환 미사용·파일 write side-effect만 검증
     chk("F9 5파일 write", os.path.exists(os.path.join(out, "manifest.json"))
         and os.path.exists(os.path.join(out, "nodes.jsonl")))
     mani = json.load(open(os.path.join(out, "manifest.json"), encoding="utf-8"))

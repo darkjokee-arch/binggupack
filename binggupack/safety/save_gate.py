@@ -30,6 +30,9 @@ def __getattr__(name):  # noqa: D401 - PEP 562: 미이관 심볼은 scripts 정�
     return getattr(_sg, name)
 
 
+# has_trigger_token·TRIGGER_TOKENS 는 위 __getattr__(PEP 562)로 scripts/binggu_save_gate 에
+# 런타임 위임된다(정본 존재 확인: TRIGGER_TOKENS/def has_trigger_token). ruff 정적분석은 이
+# lazy 위임을 못 봐 F822(undefined-export)로 오탐하므로 noqa 로 억제한다(실제 접근 정상).
 __all__ = ["gate_record", "gate_human_for", "write_last_preview", "gate_record_from_prompt",
            "gate_home", "gate_path", "last_preview_path", "GATE_WINDOW_SEC",
-           "has_trigger_token", "TRIGGER_TOKENS"]
+           "has_trigger_token", "TRIGGER_TOKENS"]  # noqa: F822
