@@ -42,6 +42,8 @@ function argsReject(a: any): string | null {
   if (!a.indices.every((i: any) => i <= CANDIDATE_MAX)) return "index_above_candidate_max";
   if (typeof a.confirm !== "string") return "confirm_invalid";
   if (a.confirm !== "SAVE " + a.indices.join(",")) return "confirm_phrase_mismatch";
+  // 화자 축(선택): 사용자 본인 발화 저장이면 "owner"(내 온톨로지 팩 반영), AI 요약이면 "ai". 생략 시 미지정.
+  if (a.speaker !== undefined && a.speaker !== "owner" && a.speaker !== "ai") return "speaker_invalid";
   return null;
 }
 
@@ -64,13 +66,16 @@ const SAVE_TOOL = {
   name: "save_intent",
   description: "대화에서 사용자가 명시적으로 'SAVE n,m' 을 발화했을 때만 호출. " +
     "선택한 후보 인덱스를 저장 대기함(inbox)에 적재한다. 자동/추론 호출 금지 — " +
-    "사용자 발화 confirm 문구가 정확히 일치해야 한다. 실제 저장은 사용자 PC의 게이트에서 확정된다.",
+    "사용자 발화 confirm 문구가 정확히 일치해야 한다. 실제 저장은 사용자 PC의 게이트에서 확정된다. " +
+    "저장 대상이 사용자 본인의 판단·교훈이면 speaker='owner' 를 함께 보내라 — 그래야 사용자 온톨로지 팩에 반영된다.",
   inputSchema: {
     type: "object",
     properties: {
       text: { type: "string", description: "후보 미리보기 대상 대화 원문" },
       indices: { type: "array", items: { type: "integer" }, description: "1-base 선택 인덱스" },
       confirm: { type: "string", description: "'SAVE ' + indices.join(',') 정확 일치" },
+      speaker: { type: "string", enum: ["owner", "ai"],
+        description: "화자 축(선택). 사용자 본인 발화 저장='owner'(내 온톨로지 팩 반영) / AI 요약='ai'. 생략 시 미지정(NULL)." },
     },
     required: ["text", "indices", "confirm"],
   },
@@ -149,10 +154,12 @@ async function handleMcp(rpc: any, env: SaveMcpEnv, stub: DurableObjectStub): Pr
     }
     const nowS = Math.floor(Date.now() / 1000);
     const iid = await intentHash(args.text, args.indices, args.confirm);
-    const it = {
+    const it: Record<string, unknown> = {
       schema_ver: SCHEMA_VER, intent_id: iid, text: args.text, indices: args.indices,
       confirm: args.confirm, created_ts: nowS, ttl_s: DEFAULT_TTL_S, source: "hosted",
     };
+    // 화자 축을 payload 로만 실어보낸다(intentHash 재료 text|indices|confirm 은 불변 → 러너 intent_id 재해시 호환).
+    if (args.speaker === "owner" || args.speaker === "ai") it.speaker = args.speaker;
     const cap = (env.SAVE_INBOX_CAP ?? "").trim() || String(DEFAULT_INBOX_CAP);
     const r = await stub.fetch("https://do/put", {
       method: "POST", body: JSON.stringify(it), headers: { "X-Inbox-Cap": cap },

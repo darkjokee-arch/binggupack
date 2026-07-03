@@ -205,8 +205,12 @@ def process_outbox(db, outbox_dir, ctx, snap_dir, now_ts):
             continue
 
         # 게이트 5 — save_selected 전체 게이트 위임 (A0·PII·duplicate·confirm·rollback 그대로)
+        # 화자 축: hosted intent 의 speaker(owner/ai/None) 를 save_selected 에 전달.
+        # 채팅(hosted) 사용자가 명시 저장한 것은 owner 발화 → speaker=owner 로 적재돼야 팩(WHERE speaker='owner')에 반영.
+        # save_selected 는 speaker 정식 지원(선처리 selftest 통과)·owner 단독이라 페어 엣지 불필요(flat-save 가드 취지 무관).
         r = _convsave.save_selected(db, text, indices,
-                                    {"actor": actor, "confirm": confirm}, snap_dir)
+                                    {"actor": actor, "confirm": confirm}, snap_dir,
+                                    speaker=it.get("speaker"))
         if not r.get("applied"):
             reject("save:" + str(r.get("reason")), {"save_rejected": r.get("rejected", {})})
             continue
