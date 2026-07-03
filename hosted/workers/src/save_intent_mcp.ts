@@ -64,10 +64,11 @@ const PREVIEW_TOOL = {
 
 const SAVE_TOOL = {
   name: "save_intent",
-  description: "대화에서 사용자가 명시적으로 'SAVE n,m' 을 발화했을 때만 호출. " +
-    "선택한 후보 인덱스를 저장 대기함(inbox)에 적재한다. 자동/추론 호출 금지 — " +
-    "사용자 발화 confirm 문구가 정확히 일치해야 한다. 실제 저장은 사용자 PC의 게이트에서 확정된다. " +
-    "저장 대상이 사용자 본인의 판단·교훈이면 speaker='owner' 를 함께 보내라 — 그래야 사용자 온톨로지 팩에 반영된다.",
+  description: "사용자의 판단·교훈을 빙구팩에 저장하는 쓰기(write) 도구. " +
+    "사용자가 '저장해' / 'SAVE n' 등 저장 의사를 밝히면 이 도구를 호출해 선택 후보를 저장 대기함(inbox)에 적재하라 — 이것이 저장의 시작 단계다. " +
+    "(사용자가 요청하지 않았는데 자동/추론으로 호출하는 것만 금지.) " +
+    "confirm 은 'SAVE ' + indices.join(',') 정확 일치. 적재 후 사용자 PC 러너가 최종 확정한다. " +
+    "저장 대상이 사용자 본인 발화면 speaker='owner' 를 함께 보내라(사용자 온톨로지 팩 반영).",
   inputSchema: {
     type: "object",
     properties: {
@@ -87,16 +88,25 @@ function denyJson(status: number, msg: string): Response {
   });
 }
 
-function rpcResult(id: any, result: any): Response {
-  return new Response(JSON.stringify({ jsonrpc: "2.0", id, result }), {
-    status: 200, headers: { "Content-Type": "application/json" },
-  });
+// MCP Streamable HTTP: 클라이언트가 Accept: text/event-stream 을 보내면(claude.ai 등) 응답을
+// SSE 이벤트로 감싼다. 아니면 단순 JSON. 둘 다 스펙상 유효하나 일부 클라이언트는 SSE 응답만 처리한다.
+function jsonRpcBody(id: any, body: any): string {
+  return JSON.stringify({ jsonrpc: "2.0", id, ...body });
 }
-
-function rpcError(id: any, code: number, message: string): Response {
-  return new Response(JSON.stringify({ jsonrpc: "2.0", id, error: { code, message } }), {
-    status: 200, headers: { "Content-Type": "application/json" },
-  });
+function wrap(payload: string, sse: boolean): Response {
+  if (sse) {
+    return new Response(`event: message\ndata: ${payload}\n\n`, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
+    });
+  }
+  return new Response(payload, { status: 200, headers: { "Content-Type": "application/json" } });
+}
+function rpcResult(id: any, result: any, sse = false): Response {
+  return wrap(jsonRpcBody(id, { result }), sse);
+}
+function rpcError(id: any, code: number, message: string, sse = false): Response {
+  return wrap(jsonRpcBody(id, { error: { code, message } }), sse);
 }
 
 // 신뢰 채팅 도메인 allowlist — Origin 없음(서버-서버 pull) 또는 claude.ai/chatgpt/openai 계열만 허용.
@@ -124,9 +134,10 @@ interface SaveMcpEnv {
   INBOX: DurableObjectNamespace;
 }
 
-async function handleMcp(rpc: any, env: SaveMcpEnv, stub: DurableObjectStub): Promise<Response> {
+async function handleMcp(rpc: any, env: SaveMcpEnv, stub: DurableObjectStub, sse: boolean): Promise<Response> {
   const id = rpc.id ?? null;
   const method = rpc.method ?? "";
+  console.log(`[MCP] method=${method} id=${JSON.stringify(id)} sse=${sse}`);   // 진단: claude.ai 핸드셰이크 추적
   if (id === null) return new Response(null, { status: 202 }); // notification
   if (method === "initialize") {
     const reqVer = (rpc.params ?? {}).protocolVersion;
@@ -134,10 +145,10 @@ async function handleMcp(rpc: any, env: SaveMcpEnv, stub: DurableObjectStub): Pr
       protocolVersion: SUPPORTED_PROTOCOL_VERSIONS.includes(reqVer) ? reqVer : PROTOCOL_VERSION,
       capabilities: { tools: { listChanged: false } },
       serverInfo: SERVER_INFO,
-    });
+    }, sse);
   }
-  if (method === "ping") return rpcResult(id, {});
-  if (method === "tools/list") return rpcResult(id, { tools: [PREVIEW_TOOL, SAVE_TOOL] });
+  if (method === "ping") return rpcResult(id, {}, sse);
+  if (method === "tools/list") return rpcResult(id, { tools: [PREVIEW_TOOL, SAVE_TOOL] }, sse);
   if (method === "tools/call") {
     const params = rpc.params ?? {};
     const toolName = params.name ?? "";
@@ -147,21 +158,21 @@ async function handleMcp(rpc: any, env: SaveMcpEnv, stub: DurableObjectStub): Pr
     if (toolName === "conversation_capture_preview") {
       if (typeof args.text !== "string" || !args.text.trim()) {
         return rpcResult(id, { content: [{ type: "text", text: JSON.stringify({ error: "text_invalid" }) }],
-                               isError: true });
+                               isError: true }, sse);
       }
       // max 고정 — 폰이 임의 개수를 보내도 무시(PC 러너 기본 10과 동일성 강제)
       const out = capturePreview(args.text, CANDIDATE_MAX);
       return rpcResult(id, { content: [{ type: "text", text: out.preview_markdown }],
-                             structuredContent: out, isError: false });
+                             structuredContent: out, isError: false }, sse);
     }
 
     if (toolName !== "save_intent") {
-      return rpcError(id, -32602, "unknown tool: " + toolName);
+      return rpcError(id, -32602, "unknown tool: " + toolName, sse);
     }
     const reason = argsReject(args);
     if (reason !== null) {
       return rpcResult(id, { content: [{ type: "text", text: JSON.stringify({ error: reason }) }],
-                             isError: true });
+                             isError: true }, sse);
     }
     const nowS = Math.floor(Date.now() / 1000);
     const iid = await intentHash(args.text, args.indices, args.confirm);
@@ -177,13 +188,13 @@ async function handleMcp(rpc: any, env: SaveMcpEnv, stub: DurableObjectStub): Pr
     });
     const body = await r.json() as any;
     if (r.status !== 200) {
-      return rpcResult(id, { content: [{ type: "text", text: JSON.stringify(body) }], isError: true });
+      return rpcResult(id, { content: [{ type: "text", text: JSON.stringify(body) }], isError: true }, sse);
     }
     const out = { intent_id: iid, ttl_s: DEFAULT_TTL_S }; // text echo 0
     return rpcResult(id, { content: [{ type: "text", text: JSON.stringify(out) }],
-                           structuredContent: out, isError: false });
+                           structuredContent: out, isError: false }, sse);
   }
-  return rpcError(id, -32601, "method not found: " + method);
+  return rpcError(id, -32601, "method not found: " + method, sse);
 }
 
 export function makeSaveMcpHandler() {
@@ -197,6 +208,7 @@ export function makeSaveMcpHandler() {
 
       // 적재 (폰, MCP) — Origin 가드 + 경로키
       if (url.pathname === "/mcp2/" + pathKey) {
+        console.log(`[REQ] mcp2 method=${request.method} origin=${request.headers.get("Origin")} accept=${request.headers.get("Accept")}`);  // 진단: transport 협상
         if (request.method !== "POST") return denyJson(405, "POST only");
         if (!originOk(request)) return denyJson(403, "origin not allowed");
         let rpc: any;
@@ -204,10 +216,11 @@ export function makeSaveMcpHandler() {
         if (rpc === null || typeof rpc !== "object" || Array.isArray(rpc)) {
           return denyJson(400, "invalid json");
         }
+        const wantsSSE = (request.headers.get("Accept") ?? "").includes("text/event-stream");
         try {
-          return await handleMcp(rpc, env, stub);
+          return await handleMcp(rpc, env, stub, wantsSSE);
         } catch { // 미상 예외 — 내부 정보 미노출 정적 -32603 (index.ts 패턴 재사용)
-          return rpcError(rpc.id ?? null, -32603, "internal error");
+          return rpcError(rpc.id ?? null, -32603, "internal error", wantsSSE);
         }
       }
 
