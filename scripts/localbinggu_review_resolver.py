@@ -1,83 +1,35 @@
 # -*- coding: utf-8 -*-
-"""LocalBinggu review resolver v0.8 (read-only, production write 금지).
+"""LocalBinggu review resolver v0.8 (read-only, production write 금지 · backward-compatible wrapper).
 
 review decision 을 apply_plan 에 반영해 reviewed plan + audit 을 생성.
-모드: 실제(--apply-plan --decisions) / 테스트(--fixture-dir).
+모드: 실제(--apply-plan --decisions) / 테스트(--fixture-dir) / 순수검증(--selftest).
+
+strangler: 순수 라우팅(resolve·items_from_plan + APPROVE/HOLD_DECISIONS)은
+binggupack.review.resolver 로 byte-identical 이관됐고, 이 파일은 그를 re-export 하며
+파일 I/O(load_decisions·write_reports·run_fixtures·CLI·BASE/reports 경로)를 잔류시킨
+wrapper 다. 이관 시 순수 라우팅 _selftest 를 신설해 --selftest 로 검증수단을 부여했다.
 """
 import argparse
 import json
+import os
+import sys
 from pathlib import Path
 
+HERE = os.path.dirname(os.path.abspath(__file__))   # <repo>/scripts
+ROOT = os.path.dirname(HERE)                         # <repo>
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)   # binggupack 패키지 import 경로
+
+from binggupack.review.resolver import *  # noqa: E402,F401,F403
+from binggupack.review.resolver import (  # noqa: E402,F401  (전체 명시 re-export — _ 심볼 포함)
+    APPROVE,
+    HOLD_DECISIONS,
+    resolve,
+    items_from_plan,
+    _selftest,
+)
+
 BASE = Path(__file__).resolve().parent.parent
-APPROVE = {"approve_safe_merge", "approve_insert"}
-HOLD_DECISIONS = {"defer", "edit_required", ""}
-
-
-def resolve(items, decisions):
-    """items: [{review_id, kind, node}] (kind: review|d9_protected|cross_domain|insert)
-    decisions: {review_id: decision}
-    반환: audit(list), buckets, decision"""
-    audit = []
-    applied, excluded, held, stopped = [], [], [], []
-
-    for it in items:
-        rid = it["review_id"]
-        kind = it.get("kind", "review")
-        dec = decisions.get(rid, "")
-        result, reason = None, None
-
-        if dec in APPROVE:
-            if kind == "d9_protected":
-                result, reason = "STOPPED", "D9 protected 는 approve 불가 (보호 상태 변경 금지)"
-                stopped.append(rid)
-            elif kind == "cross_domain":
-                result, reason = "STOPPED", "cross-domain rejected 는 approve 불가"
-                stopped.append(rid)
-            else:
-                # safety: promotion_allowed=false 유지, evidence_refs 유지 가정(노드 자체 미변경)
-                result, reason = "APPLIED", f"{dec} 승인 → apply candidate"
-                applied.append(rid)
-        elif dec == "reject":
-            result, reason = "EXCLUDED", "reject → 적용 제외"
-            excluded.append(rid)
-        elif dec in HOLD_DECISIONS:
-            result, reason = "HELD", ("미결정 → HOLD 유지" if dec == "" else f"{dec} → HOLD 유지")
-            held.append(rid)
-        else:
-            result, reason = "HELD", f"알 수 없는 decision '{dec}' → HOLD 유지"
-            held.append(rid)
-
-        audit.append({"review_id": rid, "kind": kind, "node": it.get("node"),
-                      "decision": dec, "result": result, "reason": reason,
-                      "promotion_allowed": False})
-
-    if stopped:
-        decision, why = "STOP", f"approve 불가 항목 approve 시도: {stopped}"
-    elif held:
-        decision, why = "HOLD", f"미해결(defer/edit_required/미결정) 항목 잔존: {held}"
-    else:
-        decision, why = "GO", "review-only 전부 approve/reject 처리, 잔여 HOLD 없음, STOP 신호 없음"
-
-    return audit, {"applied": applied, "excluded": excluded, "held": held, "stopped": stopped}, decision, why
-
-
-def items_from_plan(plan):
-    rw = plan.get("review_workflow", {})
-    items = []
-    for it in rw.get("review_items", []):
-        items.append({"review_id": None, "kind": "review", "node": it.get("a"), "raw": it})
-    for it in rw.get("d9_protected_items", []):
-        items.append({"review_id": None, "kind": "d9_protected", "node": it.get("a"), "raw": it})
-    for it in rw.get("cross_domain_items", []):
-        items.append({"review_id": None, "kind": "cross_domain", "node": it.get("a"), "raw": it})
-    # review_id 부여 (review-only 만 REV-, 나머지는 참고용 id)
-    rev = 1
-    for it in items:
-        if it["kind"] == "review":
-            it["review_id"] = f"REV-{rev:03d}"; rev += 1
-        else:
-            it["review_id"] = f"{it['kind'].upper()}-{it['node']}"
-    return items
 
 
 def load_decisions(path):
@@ -125,7 +77,11 @@ def main():
     ap.add_argument("--decisions", default=None)
     ap.add_argument("--fixture-dir", default=None)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--selftest", action="store_true")   # 순수 라우팅 인메모리 검증(이관 신설)
     args = ap.parse_args()
+
+    if args.selftest:
+        sys.exit(_selftest())
 
     if args.fixture_dir:
         fdir = (BASE / args.fixture_dir) if not Path(args.fixture_dir).is_absolute() else Path(args.fixture_dir)
@@ -142,7 +98,6 @@ def main():
         (BASE / "reports" / "localbinggu_review_fixture_result.json").write_text(
             json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"\nfixtures: {'ALL PASS' if allp else 'FAIL 있음'}")
-        import sys
         sys.exit(0 if allp else 1)
 
     if args.apply_plan and args.decisions:
@@ -166,7 +121,7 @@ def main():
         print("reports: localbinggu_apply_plan.reviewed.json/.md + localbinggu_review_audit.json/.md")
         return
 
-    print("usage: --apply-plan <json> --decisions <jsonl>  또는  --fixture-dir <dir>")
+    print("usage: --apply-plan <json> --decisions <jsonl>  또는  --fixture-dir <dir>  또는  --selftest")
 
 
 if __name__ == "__main__":
