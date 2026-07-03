@@ -69,7 +69,7 @@ if __name__ == "__main__":
         tr = default_ollama_transport()
         rel_tr = tr if "--llm-relevance" in sys.argv else None
         res = explore(root, tr,
-                      max_depth=_arg("--depth", 3, int),
+                      max_depth=_arg("--depth", 4, int),
                       max_nodes=_arg("--max-nodes", 300, int),
                       breadth=_arg("--breadth", 8, int),
                       relevance_min=_arg("--rel-min", 0.0, float),

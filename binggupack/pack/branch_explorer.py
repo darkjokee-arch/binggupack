@@ -272,7 +272,7 @@ def score_relevance(label, root, path, transport=None):
 
 
 # ── 핵심: explore (재귀 BFS·메커니즘) ─────────────────────────────────────
-def explore(root, transport, max_depth=3, max_nodes=300, breadth=8,
+def explore(root, transport, max_depth=4, max_nodes=300, breadth=8,
             relevance_min=0.0, relevance_transport=None):
     """1주제 → 재귀 분기 지식그래프. BFS 확장 + 경로맥락 드리프트 차단 + 관련성 가지치기 + budget.
 
@@ -299,7 +299,7 @@ def explore(root, transport, max_depth=3, max_nodes=300, breadth=8,
             return int(v)
         except (TypeError, ValueError):
             return default
-    max_depth = max(0, _int(max_depth, 3))
+    max_depth = max(0, _int(max_depth, 4))
     max_nodes = max(1, _int(max_nodes, 300))
     breadth = max(0, _int(breadth, 8))
     try:
