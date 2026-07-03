@@ -2,7 +2,7 @@
 
 **AI와 일하면서 쌓이는 내 판단, 실수, 취향, 규칙을 내 PC 안의 기억 장부로 바꾸는 로컬 우선 AI 작업 메모리입니다.**
 
-> 현재 `main`: 분류 기준 통합, `remember`/`pair` 명시 입력 경로, 회상 효용 trace, `storage`/`mcp` facade, ruff/mypy 툴체인·브랜드 통일까지 반영.
+> 현재 `main`: 분류 기준 통합, `remember`/`pair` 명시 입력 경로, 회상 효용 trace, `storage`/`mcp` facade, 코어 로직 `binggupack/` 패키지 이관(strangler·[ARCHITECTURE](docs/BINGGUPACK_ARCHITECTURE.md)), ruff/mypy 툴체인·브랜드 통일까지 반영.
 > 최신 소스(git clone): **v1.16.0** · [Release](https://github.com/darkjokee-arch/binggupack/releases/tag/v1.16.0)
 > PyPI 현재 배포: **1.15.0** · [PyPI](https://pypi.org/project/binggupack/) — `pip install binggupack`로 받는 버전입니다. v1.16.0 기능은 아래 `git clone`으로 사용하세요.
 > 로컬 우선 · 자동 저장 없음 · 내가 고른 것만 저장 · MIT License
@@ -157,6 +157,7 @@ python binggu.py doctor
 | 사람 승인과 안전 경계 | [BINGGUPACK_GOVERNANCE_DESIGN](docs/BINGGUPACK_GOVERNANCE_DESIGN.md) |
 | hosted inbox 경계 | [BINGGUPACK_HOSTED_BOUNDARY](docs/BINGGUPACK_HOSTED_BOUNDARY.md) |
 | 팩 형식 | [BINGGUPACK_PACK_CONTRACT](docs/BINGGUPACK_PACK_CONTRACT.md) |
+| 코어 구조(개발자) | [BINGGUPACK_ARCHITECTURE](docs/BINGGUPACK_ARCHITECTURE.md) |
 | 전체 문서 색인 | [docs/INDEX.md](docs/INDEX.md) |
 
 ## 개발자용 짧은 점검
@@ -168,6 +169,8 @@ python binggu.py --selftest
 ```
 
 스크립트 파일명(`scripts/openbinggu_*.py`)과 일부 외부 식별자에 남아 있는 `OpenBinggu`는 예전 내부 코드네임입니다. 현재 공개 제품명은 BingguPack이고, 문서는 이미 `BINGGUPACK_*`로 정리돼 있으니 새로 읽을 때는 `BINGGUPACK_*`와 `START_HERE`를 우선 보세요.
+
+코어 로직은 `binggupack/` 패키지로 이관 중입니다(strangler-fig). 순수 판정·변환·안전 규칙은 패키지 정본으로 옮기고, `scripts/`의 레거시 파일은 정본을 재노출하는 얇은 위임(shim)으로 바뀌므로 기존 실행/임포트는 그대로 동작합니다. 코어 지도는 [BINGGUPACK_ARCHITECTURE](docs/BINGGUPACK_ARCHITECTURE.md)를 보세요.
 
 ## License
 
