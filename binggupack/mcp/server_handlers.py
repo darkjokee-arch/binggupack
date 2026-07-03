@@ -100,9 +100,10 @@ def _u_save_candidate(params=None):
     confirm = params.get("confirm", "")
     dry_run = params.get("dry_run", True)  # 기본 dry-run (비가역 write default-deny)
 
-    # 입력 actor 불신 — MCP 경유 호출은 정의상 사람 직접발화가 아님 → reader 하드 오버라이드.
-    # confirm 정확일치만 사람-선택 증거. (auto/reader 는 save_selected G4_no_auto 가 항상 발동)
-    actor = "reader"
+    # read-only 해제(owner 명시 2026-07-04): confirm='SAVE n' 정확일치 = 사용자가 preview 인덱스를
+    # 직접 재현한 사람-선택 증거이므로 그 경우에만 actor=human 으로 승격해 실 write 허용.
+    # confirm 불일치/부재는 reader 유지 → save_selected G4_no_auto 가 여전히 BLOCK(자동/추론 저장 방지 불변).
+    actor = "human" if (confirm and confirm == "SAVE " + ",".join(str(i) for i in indices)) else "reader"
 
     from binggupack.capture import preview as cvp
     pv = cvp.capture_preview(text)
@@ -124,28 +125,26 @@ def _u_save_candidate(params=None):
                 "executed_write": False, "reason": "confirm_phrase_mismatch",
                 "confirm_expected": expected}
 
-    # 실 write 경로 — temp DB(open_g3) 강제. MCP는 경로 입력을 일절 받지 않음(운영 ledger 차단).
-    import tempfile
+    # 실 write 경로 — read-only 해제: 운영 ledger(BINGGU_HOME 우선·없으면 ~/.binggupack)에 저장.
+    # MCP 외부 경로 입력은 여전히 무시(경로 주입 차단) — 운영 ledger 경로는 서버가 결정한다.
     from binggupack.storage import open_g3, save_selected
-    work = tempfile.mkdtemp(prefix="obg_mcp_save_")
-    # ledger_path 등 외부 경로 입력 무시 — MCP는 temp staging 전용(default-deny). 운영 ledger 경로 주입 불가.
-    db_path = os.path.join(work, "s.sqlite")
-    snap_dir = os.path.join(work, "snap")
-    os.makedirs(snap_dir, exist_ok=True)  # staging_apply snapshot 복사 대상 폴더 보장(없으면 FileNotFoundError로 stdio 루프 사망)
+    home = os.environ.get("BINGGU_HOME") or os.path.join(os.path.expanduser("~"), ".binggupack")
+    db_path = os.path.join(home, "ledger.sqlite")
+    snap_dir = os.path.join(home, "snapshots")
+    os.makedirs(snap_dir, exist_ok=True)  # staging_apply snapshot 복사 대상 폴더 보장
     db = open_g3(db_path)
     try:
         r = save_selected(db, text, indices, {"actor": actor, "confirm": confirm},
                           snap_dir, due_date=params.get("due_date"))
     finally:
         db.close()
-    # actor=reader 하드 오버라이드 → save_selected 가 G4_no_auto 로 항상 BLOCK.
-    # 즉 MCP 단독 dry_run=False 호출은 confirm 통과해도 실저장 0(사람 직접발화 actor 증거 부재).
+    # confirm='SAVE n' 정확일치(사람 직접선택 증거) → actor=human → 실 write. 불일치/부재 → reader → G4 BLOCK(자동저장 방지 불변).
     return {"action": "save_candidate", "mode": "write-gated",
             "verdict": "ALLOW" if r.get("applied") else "BLOCK",
             "executed_write": bool(r.get("applied")),
             "saved": r.get("saved"), "skipped_existing": r.get("skipped_existing"),
             "rejected": r.get("rejected"), "reason": r.get("reason"),
-            "pack_id": r.get("pack_id"), "ledger": "temp_only"}
+            "pack_id": r.get("pack_id"), "ledger": "operating"}
 
 
 # ---- 노출 도구 테이블(read/dry-run 만). 위험 도구는 의도적으로 부재 ----
