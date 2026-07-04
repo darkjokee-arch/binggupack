@@ -63,6 +63,12 @@ __pycache__/
 _backup/
 **/_backup/
 
+# BINGGU_HOME 격리 테스트/평가 홈 (last_preview_candidates.json 뿐, ledger 없음 — 추적 금지)
+_*_home/
+
+# 런타임 로그 (추적 금지)
+logs/
+
 # 로컬 키 사본 — 절대 커밋 금지
 .dev.vars*
 
