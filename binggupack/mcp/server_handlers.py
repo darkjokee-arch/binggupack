@@ -465,6 +465,94 @@ def _u_replace(params=None):
             "new_node_id": r.get("new_node_id"), "ledger": "operating"}
 
 
+# ==== Phase 2 배치 C: 작업 도구 — reflect(회고→후보·read) + harvest(외부 소스 관리) ====
+# reflect: capture_preview 재사용(저장 0·read). 이어서 save_candidate 로 도장.
+# harvest: 사람이 등록한 소스 화이트리스트 관리. list=read·add/remove=write-gated(confirm 정확일치).
+#   ★harvest_run(실 네트워크 fetch)은 MCP 미노출 — 실 fetch 는 owner 스케줄러 전용(자동 fetch 위험 차단·_FORBIDDEN 등재).
+def _u_reflect(params=None):
+    """회고·자가평가 텍스트 → 지식 후보 preview(저장 0·read). preview_id 로 이어서 save_candidate."""
+    params = params or {}
+    text = params.get("text", "")
+    if not (text or "").strip():
+        return {"action": "reflect", "mode": "read", "error": "text_required"}
+    _ensure_scripts_path()
+    import hashlib
+    from binggupack.capture import preview as cvp
+    pv = cvp.capture_preview(text)
+    cands = pv.get("candidates", [])
+    pid = hashlib.sha256(text.encode("utf-8")).hexdigest()[:8]
+    return {"action": "reflect", "mode": "read", "preview_id": pid, "count": len(cands),
+            "candidates": [{"index": j + 1, "label_kind": c["label_kind"], "sentence": c["sentence"]}
+                           for j, c in enumerate(cands)],
+            "save_hint": "남길 교훈만 골라 save_candidate(text, indices, confirm='SAVE <번호>')"}
+
+
+def _u_harvest_list(params=None):
+    """등록된 외부 수확 소스 화이트리스트 목록(read). 빈 시작·owner 가 채움."""
+    _ensure_scripts_path()
+    import binggu_harvest as HV
+    home = _operating_home()
+    srcs = HV.load_sources(HV.sources_path(home))
+    disabled = os.path.exists(HV.harvest_disabled_path(home))
+    return {"action": "harvest_list", "mode": "read", "count": len(srcs), "disabled": disabled,
+            "sources": [{"source_id": s.get("source_id"), "kind": s.get("kind"),
+                         "url": s.get("url"), "keyword": s.get("keyword")} for s in srcs]}
+
+
+def _u_harvest_add(params=None):
+    """외부 소스 등록(write-gated). dry_run 기본·'HARVEST_ADD <kind> <url>' confirm 정확일치.
+    add_source 가 kind(arxiv/github/rss/url) 검증 + URL 공개안전성(비공개/내부 URL 거부) + 멱등 보장."""
+    params = params or {}
+    kind = params.get("kind", "")
+    url = params.get("url", "")
+    keyword = params.get("keyword")
+    confirm = params.get("confirm", "")
+    dry_run = params.get("dry_run", True)
+    if not kind or not url:
+        return {"action": "harvest_add", "mode": "write-gated", "verdict": "REJECT",
+                "executed_write": False, "reason": "kind_and_url_required"}
+    expected = "HARVEST_ADD %s %s" % (kind, url)
+    if dry_run:
+        return {"action": "harvest_add", "mode": "dry-run", "verdict": "PREVIEW",
+                "executed_write": False, "would_write": False, "confirm_expected": expected,
+                "note": "실제 등록 시 add_source 가 kind + URL 공개안전성(비공개/내부 URL 거부) 검증"}
+    if confirm != expected:
+        return {"action": "harvest_add", "mode": "write-gated", "verdict": "REJECT",
+                "executed_write": False, "reason": "confirm_phrase_mismatch", "confirm_expected": expected}
+    _ensure_scripts_path()
+    import binggu_harvest as HV
+    r = HV.add_source(kind, url, keyword=keyword, path=HV.sources_path(_operating_home()))
+    ok = r.get("status") == "OK"
+    return {"action": "harvest_add", "mode": "write-gated",
+            "verdict": "ALLOW" if ok else "BLOCK", "executed_write": ok,
+            "source_id": r.get("source_id"), "reason": r.get("reason")}
+
+
+def _u_harvest_remove(params=None):
+    """외부 소스 제거(write-gated). dry_run 기본·'HARVEST_REMOVE <source_id>' confirm 정확일치."""
+    params = params or {}
+    source_id = params.get("source_id", "")
+    confirm = params.get("confirm", "")
+    dry_run = params.get("dry_run", True)
+    if not source_id:
+        return {"action": "harvest_remove", "mode": "write-gated", "verdict": "REJECT",
+                "executed_write": False, "reason": "source_id_required"}
+    expected = "HARVEST_REMOVE %s" % source_id
+    if dry_run:
+        return {"action": "harvest_remove", "mode": "dry-run", "verdict": "PREVIEW",
+                "executed_write": False, "would_write": False, "confirm_expected": expected}
+    if confirm != expected:
+        return {"action": "harvest_remove", "mode": "write-gated", "verdict": "REJECT",
+                "executed_write": False, "reason": "confirm_phrase_mismatch", "confirm_expected": expected}
+    _ensure_scripts_path()
+    import binggu_harvest as HV
+    r = HV.remove_source(source_id, path=HV.sources_path(_operating_home()))
+    removed = r.get("removed", 0)
+    return {"action": "harvest_remove", "mode": "write-gated",
+            "verdict": "ALLOW" if removed else "BLOCK", "executed_write": bool(removed),
+            "removed": removed, "reason": r.get("reason")}
+
+
 # ---- 노출 도구 테이블(read/dry-run 만). 위험 도구는 의도적으로 부재 ----
 TOOLS = {
     "pack_build":           {"path_params": ["input_dir"], "underlying": _u_pack_build,          "mode": "dry-run"},
@@ -538,6 +626,23 @@ TOOLS = {
                          "new_sentence": {"type": "string"}, "reason": {"type": "string"},
                          "confirm": {"type": "string"}, "dry_run": {"type": "boolean"}},
                       "required": ["index", "id8", "new_sentence"]}},
+    # ---- Phase 2 배치 C: 작업 도구(reflect read + harvest 소스 관리). harvest_run 은 미노출(실 fetch owner 전용) ----
+    "reflect":        {"path_params": [], "underlying": _u_reflect, "mode": "read",
+                       "input_schema": {"properties": {"text": {"type": "string"}},
+                                        "required": ["text"]}},
+    "harvest_list":   {"path_params": [], "underlying": _u_harvest_list, "mode": "read",
+                       "input_schema": {"properties": {}, "required": []}},
+    "harvest_add":    {"path_params": [], "underlying": _u_harvest_add, "mode": "write-gated",
+                       "input_schema": {"properties": {
+                           "kind": {"type": "string"}, "url": {"type": "string"},
+                           "keyword": {"type": "string"}, "confirm": {"type": "string"},
+                           "dry_run": {"type": "boolean"}},
+                        "required": ["kind", "url"]}},
+    "harvest_remove": {"path_params": [], "underlying": _u_harvest_remove, "mode": "write-gated",
+                       "input_schema": {"properties": {
+                           "source_id": {"type": "string"}, "confirm": {"type": "string"},
+                           "dry_run": {"type": "boolean"}},
+                        "required": ["source_id"]}},
 }
 
 # 노출 금지(핸들러 부재로 자동 차단되지만, 명시 거부 목록으로 의도 박제)
@@ -545,6 +650,7 @@ _FORBIDDEN = {
     "opencrab_write", "opencrab_apply", "opencrab_ingest", "store_write",
     "github_push", "opencrab_upload", "sanitizer_replace", "enum_set",
     "team_billing", "marketplace_publish", "db_write",
+    "harvest_run",  # 실 네트워크 fetch — MCP 자동 fetch 위험, owner 스케줄러/CLI 전용
 }
 
 
@@ -626,6 +732,13 @@ def _selftest():
         ("deprecate_dryrun",     "deprecate",            {"index": 1, "id8": "abcd1234"},              True,  "dry-run write0"),
         ("replace_dryrun",       "replace",              {"index": 1, "id8": "abcd1234",
                                                           "new_sentence": "수정된 문장"},              True,  "dry-run write0"),
+        # Phase 2 배치 C 작업(reflect read + harvest 소스 관리). harvest_run 은 forbidden(실 fetch owner 전용).
+        ("reflect_read_ok",      "reflect",              {"text": _SAVE_CONVO},                        True,  "read"),
+        ("harvest_list_read_ok", "harvest_list",         {},                                           True,  "read"),
+        ("harvest_add_dryrun",   "harvest_add",          {"kind": "arxiv",
+                                                          "url": "https://arxiv.org/abs/2401.1"},      True,  "dry-run write0"),
+        ("harvest_remove_dryrun", "harvest_remove",      {"source_id": "src_test"},                    True,  "dry-run write0"),
+        ("harvest_run_forbidden", "harvest_run",         {},                                           False, "tool_not_exposed:forbidden"),
     ]
 
     import json as _json
@@ -644,6 +757,12 @@ def _selftest():
             # (save 와 동형). id8=사용자가 list 에서 본 node hash8 — 경로/secret 아님, confirm 생성용.
             if tool in ("pair", "deprecate", "replace") and k in ("owner_text", "ai_text",
                                                                   "new_sentence", "confirm", "id8"):
+                continue
+            # 배치 C: reflect 후보 sentence·harvest confirm_expected 의 kind/url 등은 사용자 입력(공개값) 노출 의도.
+            if tool == "reflect" and k == "text":
+                continue
+            if tool in ("harvest_add", "harvest_remove") and k in ("kind", "url", "keyword",
+                                                                   "source_id", "confirm"):
                 continue
             if isinstance(v, str) and v.strip() and v.strip() in blob:
                 raw_leak = True
@@ -710,6 +829,14 @@ def _selftest():
     s7 = (tr.get("executed_write") is False)
     save_ok = save_ok and s7
     save_notes.append(("replace_mismatch_write0", s7))
+
+    # S8) harvest_add confirm 불일치 + dry_run=False → write 0(소스 화이트리스트 미변경).
+    r = handle_tool("harvest_add", {"kind": "url", "url": "https://example.org/x",
+                                    "confirm": "wrong", "dry_run": False}, allow_root)
+    tr = r.get("tool_result") or {}
+    s8 = (tr.get("executed_write") is False)
+    save_ok = save_ok and s8
+    save_notes.append(("harvest_add_mismatch_write0", s8))
 
     # S4) 운영 store(OPERATING_PATHS) mtime 불변 — 실 ledger write 0 입증.
     op_after = {p: (os.path.getmtime(p) if os.path.exists(p) else None) for p in OPERATING_PATHS}

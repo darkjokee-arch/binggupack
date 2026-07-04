@@ -44,6 +44,10 @@ _TOOL_DESC = {
     "pair": "owner 발화(+ai 요약) 화자축 페어 저장(dry-run 기본·PAIR confirm 정확일치·자동차단)",
     "deprecate": "목록 인덱스 1건 기각(dry-run 기본·DEPRECATE <n> <id8> confirm·자동차단)",
     "replace": "목록 인덱스 1건 교체(dry-run 기본·REPLACE <n> <id8> WITH <new> confirm·자동차단)",
+    "reflect": "회고·자가평가 → 지식 후보 preview(read·저장 0)",
+    "harvest_list": "등록된 외부 수확 소스 목록(read)",
+    "harvest_add": "외부 소스 등록(dry-run 기본·HARVEST_ADD <kind> <url> confirm·URL 안전검증)",
+    "harvest_remove": "외부 소스 제거(dry-run 기본·HARVEST_REMOVE <source_id> confirm)",
 }
 
 
