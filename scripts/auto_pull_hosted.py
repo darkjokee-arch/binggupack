@@ -12,9 +12,35 @@ inbox 회수(drain)는 HMAC 서명(.dev.vars.save_mcp)으로만 가능 — 인�
 import subprocess
 import re
 import os
+import datetime
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PY = os.environ.get("BINGGU_PYTHON", r"C:/Users/PC/AppData/Local/Programs/Python/Python314/python")
+HOME_DIR = os.environ.get("BINGGU_HOME") or os.path.join(os.path.expanduser("~"), ".binggupack")
+
+# Windows: 이 프로세스가 띄우는 모든 자식 콘솔 창 억제.
+# 스케줄러(5분 주기)가 이 스크립트를 pythonw 로 실행해도, 자식(binggu.py 등)이
+# 새 콘솔 창을 할당하면 cmd 가 깜빡인다. subprocess.Popen 을 CREATE_NO_WINDOW 로
+# 전역 패치해 subprocess.run/call/check_output 전부에 적용(무인 실행 창 0).
+if os.name == "nt":
+    _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+    _orig_popen_init = subprocess.Popen.__init__
+
+    def _no_window_popen_init(self, *a, **k):
+        k["creationflags"] = k.get("creationflags", 0) | _CREATE_NO_WINDOW
+        _orig_popen_init(self, *a, **k)
+
+    subprocess.Popen.__init__ = _no_window_popen_init
+
+
+def _log(msg):
+    """pythonw 실행 시 stdout 이 안 보이므로 결과를 로그 파일에 남긴다(무인 추적)."""
+    try:
+        os.makedirs(HOME_DIR, exist_ok=True)
+        with open(os.path.join(HOME_DIR, "auto_pull.log"), "a", encoding="utf-8") as f:
+            f.write("%s %s\n" % (datetime.datetime.now().isoformat(timespec="seconds"), msg))
+    except Exception:
+        pass
 
 
 def _run(args):
@@ -36,6 +62,7 @@ def main():
             if "applied=1" in (r.stdout or ""):
                 committed += 1
     print("=== auto_pull 완료: %d 건 로컬 반영 ===" % committed)
+    _log("auto_pull done committed=%d" % committed)
 
 
 if __name__ == "__main__":

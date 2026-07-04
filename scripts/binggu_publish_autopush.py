@@ -44,8 +44,22 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import time
+
+# Windows: 자식 콘솔 창 억제(스케줄러 10분 주기 무인 실행 시 npx/wrangler cmd 깜빡임 제거).
+# subprocess.Popen 을 CREATE_NO_WINDOW 로 전역 패치 → _real_wrangler_runner 의 npx 호출 포함
+# 모든 subprocess 에 적용. 함수 내부의 `import subprocess` 는 패치된 동일 모듈을 재참조한다.
+if os.name == "nt":
+    _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+    _orig_popen_init = subprocess.Popen.__init__
+
+    def _no_window_popen_init(self, *a, **k):
+        k["creationflags"] = k.get("creationflags", 0) | _CREATE_NO_WINDOW
+        _orig_popen_init(self, *a, **k)
+
+    subprocess.Popen.__init__ = _no_window_popen_init
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import binggu_paths  # 경로 정본(single source of truth) — _home 위임
