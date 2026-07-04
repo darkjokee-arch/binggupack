@@ -3,9 +3,11 @@
 """offline smoke 핵심 로직 (Lane B 모듈화).
 
 scripts/smoke_test.py 가 이 모듈의 run_smoke_cli() 를 호출하는 backward-compatible
-wrapper 다. 동작/출력/exit code 는 v1.10.0 과 byte-identical 하게 유지한다.
+wrapper 다. save gate 동작 변경(read-only 해제 f9a9c61: confirm 정확일치 시 human
+승격 저장)에 맞춰 케이스 9(confirm 부재→confirm_phrase_mismatch REJECT)/9b(정확일치→
+격리 write) 를 갱신했다. 나머지 명령/출력/exit code 규약은 유지.
 
-handle_tool 직접 호출로 8도구 + save gate(G4_no_auto) 검증.
+handle_tool 직접 호출로 8도구 + save gate(confirm-gated) 검증.
 BINGGU_HOME 격리(--home) → 운영 ~/.binggupack 미접촉. 실 ledger write 0.
 """
 import argparse
@@ -79,12 +81,22 @@ def run_smoke(home=None):
         tr.get("executed_write") is False and tr.get("would_write_ledger") is False
         and tr.get("verdict") == "PREVIEW")
 
-    # 9. actual save 시도 → AI/reader actor 이므로 G4_no_auto BLOCK (이게 PASS).
+    # 9. actual save 시도(confirm 부재) → 자동/무단 저장 차단(confirm_phrase_mismatch, write 0).
+    #    read-only 해제(f9a9c61) 이후 방어선이 G4_no_auto → confirm_phrase_mismatch 로 이동(handler selftest 와 정합).
+    #    SYN(영문 합성)은 후보 0(nothing_to_save)이라 게이트를 못 태우므로 후보가 생기는 한국어 판단문 사용.
+    KO = "이 입찰은 마진이 낮아 보류하기로 결정했다."
     r = handle_tool("save_candidate",
-                    {"text": SYN, "indices": [1], "dry_run": False, "confirm": "SAVE 1"}, allow_root)
+                    {"text": KO, "indices": [1], "dry_run": False}, allow_root)
     tr = r.get("tool_result") or {}
-    chk("9.save_actual_G4_no_auto_BLOCK",
-        tr.get("executed_write") is False and tr.get("reason") == "G4_no_auto")
+    chk("9.save_no_confirm_REJECT_write0",
+        tr.get("executed_write") is False and tr.get("reason") == "confirm_phrase_mismatch")
+
+    # 9b. confirm 정확일치("SAVE 1") → human 승격 저장(격리 BINGGU_HOME 에만). 운영 ledger 불변은 케이스 10 이 검증.
+    r = handle_tool("save_candidate",
+                    {"text": KO, "indices": [1], "dry_run": False, "confirm": "SAVE 1"}, allow_root)
+    tr = r.get("tool_result") or {}
+    chk("9b.save_exact_confirm_isolated_write",
+        tr.get("executed_write") is True and tr.get("saved") == 1)
 
     op_after = {p: (os.path.getmtime(p) if os.path.exists(p) else None) for p in OPERATING_PATHS}
     chk("10.operating_ledger_write_0", op_before == op_after)

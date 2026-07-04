@@ -31,7 +31,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Smoke test — 8 tools + save gate (10/10 PASS, G4_no_auto, real home 0)
+      - name: Smoke test — 8 tools + save gate (11/11 PASS, confirm-gated, real home 0)
         run: python scripts/smoke_test.py --home "${{ runner.temp }}/binggu_ci_home"
 
       - name: Installer dry-run — claude mcp add command synthesis
