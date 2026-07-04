@@ -553,6 +553,60 @@ def _u_harvest_remove(params=None):
             "removed": removed, "reason": r.get("reason")}
 
 
+# ==== 트랙 B: OpenCrab 클라우드 read 조회(egress-only) — cloud_recall / cloud_packs ====
+# 안전 원칙(egress-only·로컬 write 0):
+#   - cloud_query_wire.run_query 만 호출 → read 전용 화이트리스트(query/search/status)만 payload 생성.
+#     write RPC(ingest/pack_update/pack_qa/workflow_manage)는 정본에서 구조적으로 생성 불가.
+#   - open_g3/save_selected/ledger/state 일절 미접촉(로컬 write 0). 조회 결과는 PII 마스킹 후에만 노출.
+#   - transport 는 운영 설정(env/operating home)에서 read-only 로 구성. 미설정 시 None →
+#     run_query 가 NO_CLOUD_CONFIG/NO_TRANSPORT graceful(네트워크 0). raw 토큰 미노출(fingerprint 만).
+def _cloud_transport():
+    """운영 설정(env/operating home)에서 실 http transport 구성(read-only 설정 조회).
+    미설정 시 None → run_query 가 graceful. 로컬 write 0·raw 토큰 반환 안 함."""
+    from binggupack.pack.cloud_query_wire import load_cloud_config, default_http_transport
+    cfg = load_cloud_config(env=os.environ, home=_operating_home())
+    if not cfg.get("url") or cfg.get("reason") == "NO_TOKEN":
+        return None
+    return default_http_transport(cfg["url"], cfg["token"])
+
+
+def _cloud_result_view(r):
+    """run_query 결과 → 핸들러 노출 뷰. raw 토큰/경로 없음·PII 마스킹된 text 만."""
+    if not r.get("ok"):
+        return {"ok": False, "error": r.get("reason"), "source": r.get("source")}
+    return {"ok": True, "text": r.get("text", ""), "pii_hits": r.get("pii_hits"),
+            "residual": r.get("residual"), "source": r.get("source")}
+
+
+def _u_cloud_recall(params=None):
+    """OpenCrab 클라우드 지식 조회(opencrab_query 래핑·read egress-only). 미설정 시 graceful."""
+    params = params or {}
+    query = (params.get("query") or "").strip()
+    if not query:
+        return {"action": "cloud_recall", "mode": "read", "ok": False, "error": "query_required"}
+    from binggupack.pack import cloud_query_wire as CQ
+    args = {"query": query}
+    if isinstance(params.get("top_k"), int) and not isinstance(params.get("top_k"), bool):
+        args["top_k"] = params["top_k"]
+    r = CQ.run_query("opencrab_query", args, transport=_cloud_transport(),
+                     env=os.environ, home=_operating_home())
+    return {"action": "cloud_recall", "mode": "read", **_cloud_result_view(r)}
+
+
+def _u_cloud_packs(params=None):
+    """OpenCrab 클라우드 팩 검색(opencrab_search_packs 래핑·read egress-only). 미설정 시 graceful."""
+    params = params or {}
+    from binggupack.pack import cloud_query_wire as CQ
+    args = {}
+    if (params.get("query") or "").strip():
+        args["query"] = params["query"].strip()
+    if (params.get("category") or "").strip():
+        args["category"] = params["category"].strip()
+    r = CQ.run_query("opencrab_search_packs", args, transport=_cloud_transport(),
+                     env=os.environ, home=_operating_home())
+    return {"action": "cloud_packs", "mode": "read", **_cloud_result_view(r)}
+
+
 # ---- 노출 도구 테이블(read/dry-run 만). 위험 도구는 의도적으로 부재 ----
 TOOLS = {
     "pack_build":           {"path_params": ["input_dir"], "underlying": _u_pack_build,          "mode": "dry-run"},
@@ -643,6 +697,15 @@ TOOLS = {
                            "source_id": {"type": "string"}, "confirm": {"type": "string"},
                            "dry_run": {"type": "boolean"}},
                         "required": ["source_id"]}},
+    # ---- 트랙 B: OpenCrab 클라우드 read 조회(egress-only). path 입력 없음·write RPC 미생성·PII 마스킹·미설정 graceful ----
+    "cloud_recall": {"path_params": [], "underlying": _u_cloud_recall, "mode": "read",
+                     "input_schema": {"properties": {"query": {"type": "string"},
+                                                     "top_k": {"type": "integer"}},
+                                      "required": ["query"]}},
+    "cloud_packs":  {"path_params": [], "underlying": _u_cloud_packs, "mode": "read",
+                     "input_schema": {"properties": {"query": {"type": "string"},
+                                                     "category": {"type": "string"}},
+                                      "required": []}},
 }
 
 # 노출 금지(핸들러 부재로 자동 차단되지만, 명시 거부 목록으로 의도 박제)
@@ -651,6 +714,9 @@ _FORBIDDEN = {
     "github_push", "opencrab_upload", "sanitizer_replace", "enum_set",
     "team_billing", "marketplace_publish", "db_write",
     "harvest_run",  # 실 네트워크 fetch — MCP 자동 fetch 위험, owner 스케줄러/CLI 전용
+    # 트랙 B egress-only: 클라우드 write 계열 도구는 노출 금지(read cloud_recall/cloud_packs 만 허용).
+    # ★opencrab_pack_qa 는 write 가능(assess_and_update/reverse_ingest)이라 절대 노출 금지.
+    "opencrab_pack_update", "opencrab_pack_qa", "opencrab_workflow_manage",
 }
 
 
@@ -695,6 +761,10 @@ def _selftest():
     # 운영 ledger 미접촉을 위해 존재하지 않는 temp 홈으로 강제(→ read 도구는 graceful empty 반환).
     os.environ["BINGGU_HOME"] = os.path.join(os.environ.get("TEMP", "/tmp"),
                                              "binggu_selftest_home_readonly_none")
+    # 트랙 B 클라우드 조회는 os.environ 로 설정을 읽는다. selftest 네트워크 0 보장 위해 앰비언트
+    # 클라우드 env(있을 수 있음)를 제거 → load_cloud_config=NO_CLOUD_CONFIG(transport 미구성).
+    for _k in ("BINGGU_CLOUD_MCP_URL", "BINGGU_CLOUD_MCP_TOKEN"):
+        os.environ.pop(_k, None)
 
     print("=" * 72)
     print("OpenBinggu MCP server handlers 결선 후보 (synthetic / selftest)")
@@ -739,6 +809,13 @@ def _selftest():
                                                           "url": "https://arxiv.org/abs/2401.1"},      True,  "dry-run write0"),
         ("harvest_remove_dryrun", "harvest_remove",      {"source_id": "src_test"},                    True,  "dry-run write0"),
         ("harvest_run_forbidden", "harvest_run",         {},                                           False, "tool_not_exposed:forbidden"),
+        # 트랙 B 클라우드 read(egress-only) — 미설정(BINGGU_HOME=temp·클라우드 env 제거) → graceful(executed=True·write 0).
+        ("cloud_recall_read_ok",  "cloud_recall",        {"query": "여행 팁"},                          True,  "read no-path graceful"),
+        ("cloud_packs_read_ok",   "cloud_packs",         {"query": "신혼여행"},                         True,  "read no-path graceful"),
+        # 클라우드 write 계열은 노출 금지(_FORBIDDEN). ★pack_qa 는 write 가능 → 절대 노출 금지.
+        ("cloud_pack_qa_forbidden",     "opencrab_pack_qa",         {},                               False, "tool_not_exposed:forbidden"),
+        ("cloud_pack_update_forbidden", "opencrab_pack_update",     {},                               False, "tool_not_exposed:forbidden"),
+        ("cloud_workflow_forbidden",    "opencrab_workflow_manage", {},                               False, "tool_not_exposed:forbidden"),
     ]
 
     import json as _json
@@ -837,6 +914,22 @@ def _selftest():
     s8 = (tr.get("executed_write") is False)
     save_ok = save_ok and s8
     save_notes.append(("harvest_add_mismatch_write0", s8))
+
+    # S9) 트랙 B 클라우드 read — 미설정 graceful(ok False·NO_CLOUD_CONFIG)·네트워크 0·로컬 write 0.
+    #     BINGGU_HOME=temp + 클라우드 env 제거 상태라 transport 미구성 → run_query 가 NO_CLOUD_CONFIG.
+    r = handle_tool("cloud_recall", {"query": "여행 팁"}, allow_root)
+    tr = r.get("tool_result") or {}
+    s9 = (r.get("executed") is True and tr.get("ok") is False
+          and tr.get("error") == "NO_CLOUD_CONFIG")
+    save_ok = save_ok and s9
+    save_notes.append(("cloud_recall_unconfigured_graceful", s9))
+
+    # S10) 클라우드 write 계열(pack_qa/pack_update/workflow_manage) 노출 금지(egress-only 불변).
+    s10 = all(handle_tool(t, {}, allow_root).get("executed") is False
+              and handle_tool(t, {}, allow_root).get("reason_code", "").endswith("forbidden")
+              for t in ("opencrab_pack_qa", "opencrab_pack_update", "opencrab_workflow_manage"))
+    save_ok = save_ok and s10
+    save_notes.append(("cloud_write_tools_forbidden", s10))
 
     # S4) 운영 store(OPERATING_PATHS) mtime 불변 — 실 ledger write 0 입증.
     op_after = {p: (os.path.getmtime(p) if os.path.exists(p) else None) for p in OPERATING_PATHS}

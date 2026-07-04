@@ -48,6 +48,8 @@ _TOOL_DESC = {
     "harvest_list": "등록된 외부 수확 소스 목록(read)",
     "harvest_add": "외부 소스 등록(dry-run 기본·HARVEST_ADD <kind> <url> confirm·URL 안전검증)",
     "harvest_remove": "외부 소스 제거(dry-run 기본·HARVEST_REMOVE <source_id> confirm)",
+    "cloud_recall": "OpenCrab 클라우드 지식 조회(read·egress-only·PII 마스킹·미설정 graceful)",
+    "cloud_packs": "OpenCrab 클라우드 팩 검색(read·egress-only·PII 마스킹·미설정 graceful)",
 }
 
 
@@ -193,6 +195,9 @@ def _selftest():
     # 조회(read) 도구가 운영 ledger 미접촉·결정성 갖도록 BINGGU_HOME 을 존재하지 않는 temp 로 강제.
     os.environ["BINGGU_HOME"] = os.path.join(os.environ.get("TEMP", "/tmp"),
                                              "binggu_selftest_home_readonly_none")
+    # 트랙 B 클라우드 조회 네트워크 0 보장 — 앰비언트 클라우드 env 제거(→ NO_CLOUD_CONFIG graceful).
+    for _k in ("BINGGU_CLOUD_MCP_URL", "BINGGU_CLOUD_MCP_TOKEN"):
+        os.environ.pop(_k, None)
     print("=" * 72)
     print("OpenBinggu MCP server (stdio JSON-RPC) wrapper (synthetic / selftest)")
     print("=" * 72)
@@ -286,6 +291,15 @@ def _selftest():
     checks.append(("pair_call_dryrun_write0",
                    res.get("executed") is True and tr.get("executed_write") is False
                    and tr.get("verdict") == "PREVIEW"))
+
+    # 9g) cloud_recall read tools/call — 미설정(BINGGU_HOME=temp·클라우드 env 제거) graceful·executed=True·ALLOW·write 0.
+    r = call({"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+              "params": {"name": "cloud_recall", "arguments": {"query": "여행 팁"}}})
+    res = r.get("result", {})
+    tr = res.get("tool_result") or {}
+    checks.append(("cloud_recall_read_call_graceful",
+                   res.get("executed") is True and res.get("verdict") == "ALLOW"
+                   and tr.get("ok") is False and tr.get("error") == "NO_CLOUD_CONFIG"))
 
     # 10) malformed: missing method
     r = call({"jsonrpc": "2.0", "id": 10})

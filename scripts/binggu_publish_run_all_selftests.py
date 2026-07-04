@@ -52,6 +52,7 @@ GATES = [
     ("created_at backfill","binggu_created_at_backfill.py",            ["--selftest"], "GATE: GO"),
     ("cloud_pack export", "binggu_cloud_pack_export.py",               ["--selftest"], "GATE=GO"),
     ("cloud_ingest_wire", "binggu_cloud_ingest_wire.py",               ["--selftest"], "GATE=GO"),
+    ("cloud_query_wire",  "binggu_cloud_query_wire.py",                ["--selftest"], "GATE=GO"),
     ("workspace organize","binggu_workspace_organize.py",              ["--selftest"], "GATE=GO"),
     ("local ingest",      "localbinggu_ingest_executor.py",            ["--selftest"], "GATE=GO"),
     ("harvest inbound",   "binggu_harvest.py",                         ["--selftest"], "GATE: GO"),
