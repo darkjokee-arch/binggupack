@@ -2,6 +2,7 @@
 
 > 최신 소스(git clone): `v1.16.0` (외부 리뷰 5건 정리 — PII scan 버그·ruff/mypy 툴체인 점진 도입·브랜드 통일).
 > PyPI 현재 배포: `1.15.0` — `pip install binggupack`는 **PyPI의 1.15.0**을 설치합니다. v1.16.0 기능은 아래 `git clone`으로 사용하세요.
+> 현재 `main`에는 v1.16.0 태그 이후 미배포 변경이 포함됩니다: **MCP 24도구 · HTTP 모드(웹/앱 커넥터) · ChatGPT 저장 채널 · 클라우드 read 도구** — [CHANGELOG](CHANGELOG.md) v1.17.0(pending) 참조.
 
 > `scripts/`·`docs/`의 `openbinggu_`/`OPENBINGGU_` 접두사는 레거시 내부 코드네임입니다(BingguPack과 동일 프로젝트).
 
@@ -58,7 +59,7 @@ cd binggupack
 
 ```bash
 python scripts/smoke_test.py --home ./_binggu_test_home
-#  기대: 10/10 PASS · save_actual_G4_no_auto_BLOCK PASS · operating_ledger_write_0 PASS
+#  기대: 11/11 PASS · 9.save_no_confirm_REJECT_write0 PASS · 9b.save_exact_confirm_isolated_write PASS · 10.operating_ledger_write_0 PASS
 
 python scripts/openbinggu_doctor.py --selftest                  # GATE=GO (운영 정합, write 0)
 python scripts/openbinggu_doctor.py --tree examples/toy_project # CLEAN
@@ -84,29 +85,54 @@ MCP 도구는 **세션 시작 시 고정**됩니다. 등록 후 **Claude Code를
 
 ## Confirm MCP tools
 
-재시작 후 sandbox 서버 연결과 8도구 노출을 확인합니다:
+재시작 후 sandbox 서버 연결과 24도구 노출을 확인합니다:
 
 ```bash
 claude mcp list
 claude mcp get openbinggu-local-sandbox    # Status: Connected · env BINGGU_HOME 확인
 ```
 
-노출되어야 하는 8 MCP 도구:
-`selftest` · `capture_classify` · `capture_preview` · `pack_build` · `pack_validate` · `publish_guard_dryrun` · `consumer_smoke` · `save_candidate`
+노출되어야 하는 **24 MCP 도구**:
+
+- **조회(read · 16)**: `selftest` · `status` · `list` · `recall` · `preflight` · `trace_review` · `trace_show` · `reminders` · `reflect` · `capture_classify` · `capture_preview` · `pack_validate` · `consumer_smoke` · `harvest_list` · `cloud_recall` · `cloud_packs`
+- **dry-run(2)**: `pack_build` · `publish_guard_dryrun`
+- **쓰기(write-gated · 6 · 도구별 confirm 문구 정확 일치 시에만 실행)**: `save_candidate` · `pair` · `deprecate` · `replace` · `harvest_add` · `harvest_remove`
+
+`harvest_run`(실 네트워크 수확) 등 위험 도구 15종은 MCP에 노출되지 않습니다(차단 목록).
 
 ## Confirm save gate
 
-AI/reader actor의 실저장은 차단되어야 정상입니다. `save_candidate`를 `dry_run=false`로 호출하면:
+자동/무단 저장은 차단되어야 정상입니다. `save_candidate`는 `dry_run` 기본이고, `dry_run=false`로 호출해도:
 
-- **`G4_no_auto` BLOCK** · `executed_write=false` · `ledger=temp_only`
+- confirm 부재/불일치 → **REJECT** (`confirm_phrase_mismatch`) · `executed_write=false` · write 0
+- `"SAVE n"` **정확 일치**(사람 승인 증거)일 때만 human 승격 실 저장 — 저장 위치는 `BINGGU_HOME` 장부(sandbox 등록이면 sandbox home, 운영 ledger 불변)
 
-이건 실패가 아니라 PASS입니다. 저장은 오직 사람의 `SAVE n` 승인 게이트에서만 일어납니다.
+confirm 없이 차단되는 건 실패가 아니라 PASS입니다. 쓰기 도구 6종(`save_candidate`/`pair`/`deprecate`/`replace`/`harvest_add`/`harvest_remove`) 전부 같은 방식의 confirm 게이트(도구별 문구 정확 일치)를 씁니다.
 
 ## Operating home vs sandbox home
 
 - **운영 home** (`~/.binggupack`) — 실제 장부 `ledger.sqlite`. installer/sandbox는 여기를 **건드리지 않습니다**.
 - **sandbox/test home** (`--home` 으로 지정) — preview/cache 흔적만 남습니다.
 - 분리 원칙: `BINGGU_HOME`을 sandbox 경로로 주입하므로, sandbox MCP 호출이 운영 ledger에 durable write를 남기지 않습니다(smoke_test의 `operating_ledger_write_0`이 강제).
+
+## Web/app connector — HTTP 모드 (optional)
+
+Claude 웹/앱 커넥터에서 로컬 24도구를 그대로 쓰려면, 로컬 MCP 서버를 HTTP 모드로 열고 터널 뒤에 둡니다:
+
+```bash
+BINGGU_MCP_PATH_TOKEN=<경로토큰> python scripts/openbinggu_mcp_server.py --http <PORT> <ROOT>
+```
+
+- `127.0.0.1`에만 바인딩됩니다. 외부 노출은 Cloudflare Tunnel 등 터널을 앞에 두는 구성을 전제합니다.
+- 경로 토큰은 `BINGGU_MCP_PATH_TOKEN` env로만 주입합니다(코드/설정 평문 0).
+- stdio 등록과 같은 도구·같은 게이트입니다(쓰기 6종은 여기서도 confirm 정확 일치 필수).
+
+## ChatGPT 저장 채널 (optional · hosted)
+
+ChatGPT 채팅에서 `SAVE n`으로 승인한 것만 hosted inbox에 잠깐 적재되고, 내 PC가 서명키로 pull해 로컬 장부에 반영합니다(자동 저장 0 유지 · PII 백스톱 reject).
+
+- 무인 반영: `scripts/auto_pull_hosted.py`(후보 있으면 자동 반영) + `scripts/register_autopull.ps1`(Windows 스케줄러 등록).
+- hosted 경로 설계·경계: [docs/BINGGUPACK_SAVE_INTENT_V2A_MCP_CONNECTOR_DESIGN.md](docs/BINGGUPACK_SAVE_INTENT_V2A_MCP_CONNECTOR_DESIGN.md) · [docs/BINGGUPACK_HOSTED_BOUNDARY.md](docs/BINGGUPACK_HOSTED_BOUNDARY.md).
 
 ## Troubleshooting
 

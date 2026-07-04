@@ -48,6 +48,7 @@ from binggu_rationale_suggest import _SUBTYPE_WHY  # 결정적 반문 문구 토
 
 from binggupack.pack import p1_ranking as RANK  # node_rank_score · record_use  # noqa: E402
 from binggupack.safety import p1_config as CFG  # recall_config(설정값)         # noqa: E402
+from binggupack.workspace import platform as _plat  # binggu_home(BINGGU_HOME 존중) # noqa: E402
 
 # 위험 신호 subtype 가중 — 버그패턴(반복 결함)이 교훈보다 강한 위험 신호.
 # 그 외 subtype 은 위험 매칭 후보 아님(0.0 = 매칭 제외).
@@ -149,7 +150,8 @@ _SEMANTIC_FLOOR = 0.55
 # 별도 sqlite(recall_embed_cache) — 운영 ledger 불변(순수 파생 데이터). 키 = sentence sha256 + model_digest
 # → 문장 변경/모델 교체 시 자동 miss·재계산(stale 0). leak_guard 통과 텍스트만 캐시(PII embed 0).
 def _embed_cache_path(home=None):
-    base = home or os.path.join(os.path.expanduser("~"), ".binggupack")
+    # 격리 존중: home 미지정 시 BINGGU_HOME 우선(binggu_home) — 운영 홈 하드코딩 폴백 제거.
+    base = home or _plat.binggu_home()
     return os.path.join(base, "recall_embed_cache.sqlite")
 
 

@@ -328,7 +328,8 @@ def cmd_recall(a):
     if not os.path.exists(ledger):
         print("장부가 없습니다(회상할 기억 없음): %s · 먼저 python binggu.py init" % ledger)
         return 0  # 빈 그래프 graceful
-    res = RC.why_search(ledger, a.query, limit=getattr(a, "limit", None))
+    res = RC.why_search(ledger, a.query, limit=getattr(a, "limit", None),
+                        home=os.path.dirname(ledger))
     if not res["relevant_nodes"]:
         print("관련 기억이 없습니다: \"%s\"" % a.query)
         return 0
@@ -364,7 +365,7 @@ def _judgment_trace_show(ledger, node_id):
     if not os.path.exists(ledger):
         print("장부가 없습니다: %s · 먼저 python binggu.py init" % ledger)
         return 0
-    res = RC.judgment_trace(ledger, node_id)
+    res = RC.judgment_trace(ledger, node_id, home=os.path.dirname(ledger))
     if not res["found"]:
         print("노드를 찾을 수 없습니다: %s (binggu.py list 로 node_id 확인)" % node_id)
         return 0
@@ -513,7 +514,8 @@ def cmd_preflight(a):
         print("장부가 없습니다(신규 사용자 — 회상할 기억 없음): %s" % ledger)
         return 0  # 빈 그래프 graceful
     res = RC.preflight_context(ledger, prompt=getattr(a, "prompt", None), cwd=cwd,
-                               domain=getattr(a, "domain", None), files_changed=files)
+                               domain=getattr(a, "domain", None), files_changed=files,
+                               home=os.path.dirname(ledger))
     print("# preflight — 이번 작업 전 회상 (read-only · candidate)")
     if res["remember"]:
         print("\n## 기억할 것")

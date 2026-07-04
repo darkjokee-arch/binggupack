@@ -41,6 +41,7 @@ if HERE not in sys.path:
 
 import binggu_p1_config as CFG  # recall_config["trace_enabled"] opt-in  # noqa: E402
 from binggu_schema import apply_schema  # 정본 스키마(recall_traces/recall_outcomes 포함)  # noqa: E402
+import binggu_platform as _plat  # binggu_home(BINGGU_HOME 존중 · 격리 폴백)  # noqa: E402
 
 VALID_VERDICTS = ("used", "ignored", "corrected")
 
@@ -69,7 +70,7 @@ _DRIFT_RATIO = 0.5
 
 def trace_store_path(home=None):
     """trace store 경로 = <binggu_home>/recall_trace.sqlite (ledger.sqlite sibling · 운영 불변)."""
-    base = home or os.path.join(os.path.expanduser("~"), ".binggupack")
+    base = home or _plat.binggu_home()
     return os.path.join(base, "recall_trace.sqlite")
 
 
@@ -87,7 +88,7 @@ def _open_store(home=None):
 
 def review_snapshot_path(home=None):
     """review 번호→(trace_id,node_id) 매핑 스냅샷 경로. 메타만(원문 0). mark 의 N shift 방지."""
-    base = home or os.path.join(os.path.expanduser("~"), ".binggupack")
+    base = home or _plat.binggu_home()
     return os.path.join(base, "recall_trace_review.json")
 
 
@@ -95,7 +96,7 @@ def review_snapshot_path(home=None):
 
 def _flag_path(home=None):
     """opt-in 파일플래그 경로 — preflight_enabled 와 동일 패턴(파일 존재=ON). UX 통일."""
-    base = home or os.path.join(os.path.expanduser("~"), ".binggupack")
+    base = home or _plat.binggu_home()
     return os.path.join(base, "recall_trace_enabled")
 
 

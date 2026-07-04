@@ -114,12 +114,13 @@ def model_digest():
 
 # ---------------- centroid 분류기 (결정적·#6) ----------------
 class SemanticShadow:
-    def __init__(self, seed_path=SEED_PATH, embed_fn=None):
+    def __init__(self, seed_path=SEED_PATH, embed_fn=None, centroids=None):
         self.embed_fn = embed_fn or _embed
         self.rows = [json.loads(l) for l in open(seed_path, encoding="utf-8") if l.strip()]
         self.digest = model_digest()
         self.build_hash = self._build_hash(seed_path)
-        self.centroids = self._centroids()
+        # centroids 주입(영속 캐시 hit) 시 ~62 seed embed 재계산 스킵 — 콜드 프로세스 저장 병목 제거.
+        self.centroids = centroids if centroids is not None else self._centroids()
 
     def _build_hash(self, seed_path):
         # #8 재현성 — seed 내용 + 임계 + model_digest
@@ -192,24 +193,65 @@ class SemanticShadow:
         return {"sem_subtype": best, "sem_conf": round(bs, 4), "band": band}
 
 
-# ---------------- preview 캐시 (프로세스 내 메모리만 · 파일/DB write 0 · stale 방지) ----------------
+# ---------------- centroid 캐시 (프로세스 인메모리 + 홈 디스크 영속 · stale 방지) ----------------
 _SHADOW_CACHE = {}  # key -> SemanticShadow. 단일 엔트리 유지(model/seed 변경 시 옛 것 폐기)
 
 
-def get_cached_shadow(seed_path=SEED_PATH, embed_fn=None):
-    """preview용 SemanticShadow를 프로세스 내 1회만 생성(centroid ~60 embed 병목 제거).
-    cache key = seed 내용 + 임계(BAND_HI/LO) + 현재 model_digest → 이 중 하나라도 바뀌면 miss(stale 방지).
-    파일/DB write 0. embed_fn 주입 시(테스트 mock) 캐시 우회 — 결정성/격리 보장."""
+def _centroid_cache_path(home=None):
+    """centroid 영속 캐시 경로 = <home>/semantic/shadow_centroids.json (BINGGU_HOME 존중 · 격리)."""
+    return os.path.join(home or _plat.binggu_home(), "semantic", "shadow_centroids.json")
+
+
+def _load_persisted_centroids(key, home=None):
+    """디스크에 저장된 centroid 로드 — key(seed+임계+model_digest) 일치 + 6 subtype 완비만 채택.
+    불일치/파손/부재 → None(재빌드). centroid 벡터는 seed 문장 파생물(원문 아님·PII 0)."""
+    try:
+        with open(_centroid_cache_path(home), encoding="utf-8") as f:
+            d = json.load(f)
+        cent = d.get("centroids") if d.get("key") == key else None
+        if cent and set(cent.keys()) == set(SUBTYPES):
+            return cent
+    except Exception:
+        pass
+    return None
+
+
+def _persist_centroids(key, centroids, home=None):
+    """centroid 를 홈에 원자적 저장(멱등). 실패는 조용히 무시(캐시는 최적화일 뿐 정확성 무관)."""
+    if not centroids or set(centroids.keys()) != set(SUBTYPES):
+        return
+    try:
+        p = _centroid_cache_path(home)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        tmp = p + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"key": key, "centroids": centroids}, f)
+        os.replace(tmp, p)               # atomic
+    except Exception:
+        pass
+
+
+def get_cached_shadow(seed_path=SEED_PATH, embed_fn=None, home=None):
+    """preview용 SemanticShadow를 재사용(centroid ~62 embed 병목 제거).
+    cache key = seed 내용 + 임계(BAND_HI/LO) + 현재 model_digest → 하나라도 바뀌면 miss(stale 방지).
+    2단 캐시: (1)프로세스 인메모리 (2)홈 디스크 영속 — 콜드 프로세스(hook/CLI 저장)도 embed 0.
+    embed_fn 주입 시(테스트 mock) 캐시 우회 — 결정성/격리 보장."""
     if embed_fn is not None:
         return SemanticShadow(seed_path, embed_fn)
     with open(seed_path, "rb") as f:
         seed_hash = hashlib.sha256(f.read()).hexdigest()[:16]
     key = "%s|%s|%s|%s" % (seed_hash, BAND_HI, BAND_LO, model_digest())
-    inst = _SHADOW_CACHE.get(key)
-    if inst is None:
+    inst = _SHADOW_CACHE.get(key)                 # (1) 웜 프로세스 인메모리
+    if inst is not None:
+        return inst
+    cent = _load_persisted_centroids(key, home)   # (2) 콜드 프로세스 디스크 영속(embed 0)
+    if cent is not None:
+        inst = SemanticShadow(seed_path, centroids=cent)
+    else:                                          # 최초 1회만 ~62 embed → 디스크 저장
         inst = SemanticShadow(seed_path)
-        _SHADOW_CACHE.clear()            # model/seed 변경 → 옛 인스턴스 폐기(stale 차단)
-        _SHADOW_CACHE[key] = inst
+        _persist_centroids(key, inst.centroids, home)
+    _SHADOW_CACHE.clear()            # model/seed 변경 → 옛 인스턴스 폐기(stale 차단)
+    _SHADOW_CACHE[key] = inst
     return inst
 
 

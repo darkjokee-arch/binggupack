@@ -1,5 +1,41 @@
 # Changelog — BingguPack
 
+## v1.17.0 (미배포 · pending) — MCP 24도구 · 웹/앱 커넥터 · ChatGPT 저장 채널 (2026-07-05)
+
+v1.16.0 태그 이후 `main`에 쌓인 56커밋 묶음(태그/배포 전 — pyproject 버전은 아직 1.16.0). 로컬 MCP를 8→**24도구**로 전면 확장하고, 웹/앱 커넥터(HTTP 모드)와 ChatGPT 채팅 저장 채널을 열었다. 저장은 여전히 사람 confirm(도구별 문구 정확 일치)만.
+
+### Added
+- **MCP 24도구 전면 노출** (기존 8 → 24): 조회 7종(`recall`/`preflight`/`trace_review`/`trace_show`/`status`/`list`/`reminders`) + 쓰기 3종(`pair`/`deprecate`/`replace` — dry-run 기본·confirm 정확 일치 시에만 실행) + 작업 4종(`reflect`/`harvest_list`/`harvest_add`/`harvest_remove`) + 클라우드 read 2종(아래). `harvest_run`(실 네트워크 수확) 등 위험 도구 15종은 MCP 노출 금지 유지.
+- **클라우드 read 도구**: `cloud_recall`/`cloud_packs` — OpenCrab 클라우드 지식·팩 조회(read 전용·PII 마스킹·미설정 시 graceful 통과).
+- **로컬 MCP HTTP 모드**: `openbinggu_mcp_server.py --http <PORT> <ROOT>` — Cloudflare Tunnel 뒤에서 Claude 웹/앱 커넥터에 로컬 24도구를 그대로 노출. 경로 토큰은 `BINGGU_MCP_PATH_TOKEN` env 주입(코드 평문 0).
+- **ChatGPT 채팅 저장 채널**: ChatGPT 대화 중 `SAVE n` 승인분만 hosted inbox에 적재 → PC가 서명키로 pull → 로컬 장부 반영. 자동 pull 스케줄러 스크립트(`scripts/auto_pull_hosted.py`·`scripts/register_autopull.ps1`) 동반. confirm 없으면 저장 0.
+- **채팅(MCP) 저장 화자 축**: hosted 저장 경로에 `speaker`(owner/ai) 전달 — 채팅 저장분도 사용자 온톨로지 팩 대상.
+- `save --accept` / `pair --accept` — 저장+owner 확정을 한 번에. preflight에 양방향 신뢰도(hit_stats) 블록·owner 원칙 상시 노출 섹션 편입.
+- 수확 확장: 탐색 깊이 기본 3→4, 현지어 수집 `lang` 파라미터(discover→오케스트레이터→CLI), 수집→적재 정제기+관련성 게이트 연결.
+
+### Changed
+- **`save_candidate` read-only 해제**: MCP 쓰기 방어선이 무조건 BLOCK(`G4_no_auto`) → confirm 게이트로 이동. `dry_run=false`라도 confirm 부재/불일치면 REJECT(`confirm_phrase_mismatch`)·write 0, `SAVE n` **정확 일치**(사람 승인 증거) 시에만 human 승격 실 저장. 자동 저장 0 불변.
+- **smoke test 10→11 케이스**: 케이스 9(confirm 부재→REJECT)/9b(정확 confirm→격리 홈 실 저장) 분리 — confirm-gated 방어선과 정합.
+- 코어 이관(strangler) 대규모 진행: 배치 1~6으로 30+ 모듈 `binggupack/` 정본화(스키마 단일화·경로 중앙화·PII 정본·pytest 래퍼), `scripts/`는 thin shim 유지. 전체 회귀 selftest 30/30 유지.
+- 문서 재구성: ARCHITECTURE 신설, 결과보고 44건 `docs/_archive/` 이동, README 비전문가용 재구성(온톨로지 6단계 파이프라인 설명 포함).
+
+### Fixed
+- CI `MCP Cross-Platform Install`(ubuntu/macos/windows 3-OS) 초록화 — smoke 케이스 9를 confirm-gated 방어선에 정합.
+- hosted `save_intent`: SSE transport 지원 + Origin 가드 allowlist 완화(claude.ai/chatgpt 커넥터 허용) + 쓰기 도구 설명 명확화.
+- 자동 pull/push 스케줄러 무인 실행 시 cmd 창 깜빡임 제거.
+- P4 label tie-break 허위실패, gate21/24 격리 오탐·잠재 write 봉합, 파서 temp 디렉토리 누수 차단, 수확 탐색 픽스(branch_explorer 모델명·재귀 다방향·`--rel-min` 기본 0.0·ollama timeout 확대).
+
+### Security
+- 적대적 검증(Fable5) findings 6건 수정: T3 필터 다국어 우회(영어·한자·NFKC 정규화) 차단, cloud wire 전 필드 검사+content 추출 실패 fail-closed, actor 게이트 실소비, 한국 주소/이름 마스킹 보강, 델타 업로드 `uploaded_hashes` 보존.
+- hosted `save_intent` **PII 백스톱 reject** + 무인 pull PII skip — 채팅 저장 채널에 PII 이중 방어.
+- T3 하드제외 필터 + ingest 파이프 게이트 — 온톨로지 팩 업로드에서 PII·개인사 반출 절대금지.
+- tree-scan 위생: selftest fixture PII 리터럴을 런타임 조립로 바꿔 정적 스캔 CLEAN.
+
+### Verified
+- `smoke_test.py` **11/11 PASS** 실측(temp home·`operating_ledger_write_0` PASS·운영 ledger 불변).
+- MCP 노출 도구 **24종** — `binggupack.mcp` TOOLS 레지스트리 실측(read 16 · dry-run 2 · write-gated 6), 위험 도구 15종 노출 금지 확인.
+- CI 3-OS clean-install green(케이스 9 정합 후).
+
 ## v1.16.0 — 외부 리뷰 5건 정리: PII scan 버그·툴체인·브랜드 통일 (2026-06-30)
 
 preview/capture 분류를 단일 SSOT 게이트로 통합(자동 preview는 판단/교훈/선호/규칙만 후보), 명시 입력(`remember`/`pair`)은 판단-veto 면제(안전 게이트 유지), 100문장 golden 하네스 + doctor 회귀망 확장, `binggupack.storage`/`binggupack.mcp` facade(strangler 1단계). 더해 외부 리뷰 5건(PII scan 버그·툴체인 점진 도입·브랜드 통일)을 정리했다.

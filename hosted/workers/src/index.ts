@@ -11,7 +11,7 @@
 // 불변: read-only 6 tool · synthetic toy pack 전용 · JSON-only(GET 405) · stateless ·
 //   fail-closed 누출 스캔(SANITIZE_BLOCK) · 배포/OAuth/등록 0 (wrangler dev 로컬 전용).
 
-import { capturePreview, scanPii } from "./capture_preview";
+import { capturePreview, scanPii, hasSecret } from "./capture_preview";
 import { capturePreviewSemantic, Centroids } from "./capture_preview_semantic";
 import centroidsData from "./centroids_canonical_5.json";
 // write 도구 save_intent 재사용(단일 출처 — intentHash 는 PC 러너와 바이트 동일 의무).
@@ -651,6 +651,14 @@ async function toolSaveIntent(_store: PackStore, args: Record<string, any>, env?
   if (!env || !env.INBOX) throw new ToolError("NOT_CONFIGURED", "inbox binding absent");
   const reason = argsReject(args);
   if (reason !== null) throw new ToolError("INVALID_ARGUMENT", reason);
+  // C1 백스톱: put 직전 text 전체 PII/secret 재검사(원문 클라우드/디스크 잔존 방지) — save_intent_mcp.ts 와 동일 패턴.
+  // 로그는 kind만 — 원문/매치값 0. intentHash 입력·confirm 게이트 무변경.
+  const piiKinds = scanPii(args.text);
+  const secretHit = hasSecret(args.text);
+  if (piiKinds.length || secretHit) {
+    console.log(`[MCP] save_intent backstop block: pii_kinds=${JSON.stringify(piiKinds)} secret=${secretHit}`);
+    throw new ToolError("PII_IN_TEXT", "pii_in_text");
+  }
   const nowS = Math.floor(Date.now() / 1000);
   const iid = await intentHash(args.text, args.indices, args.confirm);
   const it: Record<string, unknown> = {

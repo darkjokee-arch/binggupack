@@ -18,7 +18,7 @@
 - 🔎 하나의 주제를 **깊이 파고들어** 관련된 걸 넓게 찾아요
 - 🕸️ 기억들을 서로 연결해 **지도처럼** 묶어요
 - 📦 그 지도가 **오픈크랩(익스퍼트플랜)에 자동으로 팩(전문가 지식 묶음)으로** 만들어져요
-- 🔌 Claude Code에 자동으로 붙고, 폰·웹에 적어둔 메모도 가져와요
+- 🔌 Claude Code에 자동으로 붙고, 폰·웹·ChatGPT 채팅에서 승인한 메모도 가져와요
 
 **왜 믿을 만한가 — 빙구팩만의 강점**
 
@@ -31,7 +31,7 @@
 > 전부 **자동 저장 없이, 내가 승인한 것만, 로컬 우선**입니다.
 > 명령어·용어까지 자세히는 아래 [기능 전체 지도](#기능-전체-지도)를 보세요.
 
-> 현재 `main`: 분류 기준 통합, `remember`/`pair` 명시 입력 경로, 회상 효용 trace, `storage`/`mcp` facade, 코어 로직 `binggupack/` 패키지 이관(strangler·[ARCHITECTURE](docs/BINGGUPACK_ARCHITECTURE.md)), ruff/mypy 툴체인·브랜드 통일까지 반영.
+> 현재 `main`: 분류 기준 통합, `remember`/`pair` 명시 입력 경로, 회상 효용 trace, `storage`/`mcp` facade, 코어 로직 `binggupack/` 패키지 이관(strangler·[ARCHITECTURE](docs/BINGGUPACK_ARCHITECTURE.md)), ruff/mypy 툴체인·브랜드 통일에 더해 — v1.16.0 태그 이후 **MCP 24도구 확장 · HTTP 모드(웹/앱 커넥터) · ChatGPT 저장 채널 · 클라우드 read 도구**까지 반영(미배포 · [CHANGELOG](CHANGELOG.md) v1.17.0 pending).
 > 최신 소스(git clone): **v1.16.0** · [Release](https://github.com/darkjokee-arch/binggupack/releases/tag/v1.16.0)
 > PyPI 현재 배포: **1.15.0** · [PyPI](https://pypi.org/project/binggupack/) — `pip install binggupack`로 받는 버전입니다. v1.16.0 기능은 아래 `git clone`으로 사용하세요.
 > 로컬 우선 · 자동 저장 없음 · 내가 고른 것만 저장 · MIT License
@@ -106,6 +106,12 @@ BingguPack은 모든 대화를 긁어모으는 도구가 아닙니다.
 - 🧹 **기억 고치기** — *"이 기억 이제 틀렸어, 바꿔줘"* / *"이건 폐기해"* 하면 돼요
 - ⏰ **알림** — *"이건 나중에 다시 보자"* 하면 다시 볼 때 알려줘요
 
+### 웹·앱·ChatGPT에서도 씁니다
+
+- 🌐 **웹/앱 커넥터(HTTP 모드)** — 로컬 MCP 서버를 HTTP 모드(`--http`)로 열고 Cloudflare Tunnel 뒤에 두면, Claude 웹/앱 커넥터에서도 같은 **24도구**를 그대로 씁니다. 접근은 경로 토큰(`BINGGU_MCP_PATH_TOKEN`)으로 보호돼요.
+- 💬 **ChatGPT 저장 채널** — ChatGPT 채팅 중 `SAVE n`으로 승인한 것만 클라우드 inbox에 잠깐 담기고, 내 PC가 서명키로 가져와(pull) 로컬 장부에 반영해요. 여기서도 자동 저장은 없어요.
+- ☁️ **클라우드 읽기 도구** — `cloud_recall`/`cloud_packs`로 오픈크랩의 지식·팩을 조회만 해요(읽기 전용 · 민감정보 마스킹 · 미설정 시 조용히 통과).
+
 ## 기능 전체 지도
 
 > 위 "빙구팩이 해주는 일"을 명령어·용어와 함께 정리한 개발자용 목록입니다.
@@ -121,8 +127,8 @@ BingguPack은 모든 대화를 긁어모으는 도구가 아닙니다.
 - **깊이 탐색(explore `--depth`)**: 주제 하나에서 하위 개념을 재귀(BFS)로 `--depth`만큼 파고들어, 관련 소스·기억 후보를 넓게 찾아냅니다(폭 `--breadth`·관련도 `--rel-min`도 조절).
 - **그래프·팩(graph/pack)**: 기억을 근거로 연결해 그래프를 만들고, 팩 형식으로 묶어 내보냅니다. 근거는 2층(추천)·3층(그래프)·5층(사람 승인)으로 깊이를 더할 수 있습니다.
 - **클라우드 팩(오픈크랩/익스퍼트플랜)**: 묶은 그래프·팩을 오픈크랩(ExpertPlan)에 전문가 지식 팩으로 자동 생성합니다.
-- **Claude Code 연결(hook·MCP)**: 캡처/회상 hook과 MCP 8도구로 Claude Code에 붙습니다.
-- **폰·웹 동기화(hosted)**: 다른 기기에서 잠깐 받아둔 메모를 로컬 장부로 가져옵니다.
+- **Claude Code 연결(hook·MCP)**: 캡처/회상 hook과 MCP 24도구(stdio + HTTP 모드)로 Claude Code·웹/앱 커넥터에 붙습니다.
+- **폰·웹·ChatGPT 동기화(hosted)**: 다른 기기·ChatGPT 채팅에서 승인해 잠깐 받아둔 메모를 로컬 장부로 가져옵니다.
 - **안전장치(governance/selftest)**: PII·secret 차단, 사람 승인 경계, 자체 검증으로 안전을 강제합니다.
 
 전체 기능을 길게 펼치면 오히려 안 읽히기 때문에, 아래처럼 한 장으로 압축했습니다.
@@ -135,8 +141,8 @@ BingguPack은 모든 대화를 긁어모으는 도구가 아닙니다.
 | **작업 전 회상** | `ask/recall/why`, `preflight`, `trace`, 회상 근거·효용 기록 |
 | **기억 정리** | `deprecate`, `replace`, `accept/unaccept`, `due`, `reminders`, `resolve`, `route` |
 | **내 말 vs AI 말** | `pair`, `trust`, owner/ai 화자 분리, 수용·반박·수정 관계, 직감 적중률 |
-| **Claude Code 연결** | `capture` hook, `preflight` hook, save-gate hook, stdio MCP 서버, MCP 8도구 |
-| **폰·웹·클라우드 보조** | `hosted inbox/pull`, `setup-cloud`, Cloudflare Worker save-intent, TTL/HMAC/purge 경계 |
+| **Claude Code·커넥터 연결** | `capture` hook, `preflight` hook, save-gate hook, stdio MCP 서버, HTTP 모드(`--http`·터널 뒤 웹/앱 커넥터), MCP 24도구(read 16 · dry-run 2 · confirm 게이트 쓰기 6) |
+| **폰·웹·클라우드 보조** | `hosted inbox/pull`, `setup-cloud`, Cloudflare Worker save-intent, ChatGPT 저장 채널(inbox→서명키 pull), `cloud_recall`/`cloud_packs`(read), TTL/HMAC/purge 경계 |
 | **외부 소스·그래프·팩** | `harvest`, `confirm-edges`, graph schema, pack contract, local ingest, watcher 계열 |
 | **안전·개발자 도구** | path safety, match policy, classifier, interactive save, session close, governance, selftest, publish/export, reviewed plan, hybrid AGI 실험 모듈 |
 

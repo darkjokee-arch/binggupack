@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import binggu_publish_p4_label as P4
 import binggu_cloud_pack_export as EXP
 from binggu_schema import apply_schema  # 정본 스키마 (Phase1)
+import binggu_platform as _plat  # default_ledger(BINGGU_HOME 존중 · 격리 판단 일치)
 
 results = []
 
@@ -40,8 +41,9 @@ def _make_ledger(path, nodes):
 
 def main():
     tmp = tempfile.mkdtemp(prefix="bgp_p4_")
-    home = os.path.expanduser("~")
-    real_led = os.path.join(home, ".binggupack", "ledger.sqlite")
+    # 격리 존중: build_real_pack 이 실제 읽는 ledger(default_ledger·BINGGU_HOME 우선)와 동일 경로로
+    # 분기 판단해야 격리(BINGGU_HOME=temp)에서 오탐 없음 — expanduser 하드코딩 제거(P4 gate 14 수정).
+    real_led = _plat.default_ledger()
     real_mtime = os.path.getmtime(real_led) if os.path.exists(real_led) else None
 
     # ── 1. data_class 인자화 4종 (build_cloud_pack) ──
@@ -103,7 +105,7 @@ def main():
     # ── 14. 실 ledger 라벨 정정 (현 상태 candidate 4) ──
     out14 = os.path.join(tmp, "out14"); db14 = os.path.join(tmp, "q14.sqlite")
     # 상태 독립 — candidate>0이면 real_candidate, active>0이면 real_active, 0이면 NO_REAL
-    _cn = P4.extract_by_state(os.path.join(home, ".binggupack", "ledger.sqlite"))
+    _cn = P4.extract_by_state(real_led)
     if _cn["candidate_rows"]:
         r_real = P4.build_real_pack(out_dir=out14, db_path=db14, state="candidate")
         check("14.실 ledger candidate → real_candidate DRYRUN_OK",

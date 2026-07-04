@@ -22,12 +22,18 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import binggu_semantic_shadow as S  # noqa: E402
+import binggu_platform as _plat  # binggu_home(BINGGU_HOME 존중 · 격리 폴백)  # noqa: E402
 
 KINDS = ["문서", "증거", "개념", "상태", "판단"]
 SEED_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
                          "tests", "fixtures", "semantic", "seed_canonical_5.jsonl")
-FLAG = os.path.join(os.path.expanduser("~"), ".binggupack", "semantic_label_enabled")
-CACHE_DIR = os.path.join(os.path.expanduser("~"), ".binggupack", "cache")
+def _flag_path(home=None):
+    # 격리 존중: 모듈 import 시점 고정 대신 런타임 BINGGU_HOME 우선(운영 홈 하드코딩 제거).
+    return os.path.join(home or _plat.binggu_home(), "semantic_label_enabled")
+
+
+def _cache_dir(home=None):
+    return os.path.join(home or _plat.binggu_home(), "cache")
 
 
 def _seed_sha(seed_path):
@@ -63,7 +69,7 @@ def enabled():
     영구금지26 정합: 활성돼도 cos 는 도장 '제안'만 — should_capture/confirm/자동저장 결정엔 안 씀."""
     if os.environ.get("BINGGU_SEMANTIC_OFF") == "1":
         return False
-    return os.path.exists(FLAG) or ollama_available()
+    return os.path.exists(_flag_path()) or ollama_available()
 
 
 class CanonicalSemantic:
@@ -78,7 +84,7 @@ class CanonicalSemantic:
         # key = seed 내용 + band 임계 + model_digest → 하나라도 바뀌면 miss(stale 방지)
         raw = "%s|%s|%s|%s" % (_seed_sha(self.seed_path), S.BAND_HI, S.BAND_LO, self.digest)
         key = hashlib.sha256(raw.encode()).hexdigest()[:16]
-        return os.path.join(CACHE_DIR, "canonical_centroids_%s.json" % key)
+        return os.path.join(_cache_dir(), "canonical_centroids_%s.json" % key)
 
     def _load_or_build(self, use_cache):
         # 실 embed(_embed)일 때만 디스크 캐싱(centroid 벡터=원문 아님). 주입 embed는 항상 재빌드.
@@ -95,7 +101,7 @@ class CanonicalSemantic:
         cent = self._centroids()
         if use_cache and real and set(cent.keys()) == set(KINDS):
             try:
-                os.makedirs(CACHE_DIR, exist_ok=True)
+                os.makedirs(_cache_dir(), exist_ok=True)
                 tmp = cf + ".tmp"
                 with open(tmp, "w", encoding="utf-8") as f:
                     json.dump(cent, f)
