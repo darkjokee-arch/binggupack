@@ -27,10 +27,12 @@ import sys
 from binggupack import paths as binggu_paths
 from binggupack.safety.t3_filter import filter_uploadable
 
-# owner 온톨로지 팩(2026-07-02 최초 업로드) — 갱신 대상 고정.
-PACK_ID = "4da76877-e286-449f-8116-569be4056838"
+# owner 온톨로지 팩(2026-07-02 최초 업로드) — 갱신 대상.
+# 사용자별 일반화: 다른 사용자는 BINGGU_PACK_ID/BINGGU_PACK_TITLE 환경변수로 자기 팩을 지정.
+# 미설정 시 owner 기본값 유지(기존 동작 회귀 0).
+PACK_ID = os.environ.get("BINGGU_PACK_ID") or "4da76877-e286-449f-8116-569be4056838"
 STATE_FILE = "person_pack_last.json"
-PACK_TITLE = "사장님 의사결정 원칙 온톨로지"
+PACK_TITLE = os.environ.get("BINGGU_PACK_TITLE") or "사장님 의사결정 원칙 온톨로지"
 
 
 def _home():
