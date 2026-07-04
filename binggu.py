@@ -1080,6 +1080,36 @@ def cmd_setup_cloud(a):
     return 0 if res["halted_at"] is None else 2
 
 
+def cmd_backup(a):
+    """backup — 장부를 일관 스냅샷으로 복사(운영 write 0). 기본 <home>/_backup/ledger_<ts>.sqlite."""
+    from binggupack.workspace import archive as AR
+    ledger, _ = _ledger_paths(a.ledger)
+    res = AR.backup_ledger(ledger, out_path=getattr(a, "out", None), home=os.path.dirname(ledger))
+    if res["status"] == "NO_LEDGER":
+        print("장부가 없습니다: %s · 먼저 python binggu.py init" % ledger)
+        return 2
+    print("# 백업 완료 → %s" % res["out_path"])
+    print("  노드 %d · 엣지 %d · %d bytes · sha256 %s…"
+          % (res["nodes"], res["edges"], res["size"], res["sha256"][:16]))
+    return 0
+
+
+def cmd_export(a):
+    """export — 장부를 markdown/json 으로 내보낸다(데이터 주권 · read-only). --out 없으면 stdout."""
+    from binggupack.workspace import archive as AR
+    ledger, _ = _ledger_paths(a.ledger)
+    res = AR.export_ledger(ledger, fmt=getattr(a, "fmt", "md"), out=getattr(a, "out", None))
+    if res.get("out_path"):
+        print("# 내보내기 완료(%s) → %s · 노드 %d · 엣지 %d"
+              % (res["format"], res["out_path"], res["nodes"], res["edges"]))
+    else:
+        try:
+            sys.stdout.write(res["text"])
+        except BrokenPipeError:
+            pass  # `| head` 등 파이프 조기 종료 — 정상(traceback 억제)
+    return 0
+
+
 def main():
     if sys.argv[1:] == ["--selftest"]:
         sys.exit(selftest())
@@ -1186,6 +1216,11 @@ def main():
     scp = sub.add_parser("setup-cloud")     # cloud 셋업 1개 진입점(멱등·실패정지·dry-run 기본)
     scp.add_argument("--apply", action="store_true")     # 실제 변경(미지정=점검만)
     scp.add_argument("--deploy", action="store_true")    # (--apply 와) wrangler deploy 까지 — 비가역
+    bkp = sub.add_parser("backup")   # 장부 백업(일관 스냅샷 복사 · 운영 write 0)
+    bkp.add_argument("--out", default=None)
+    exp = sub.add_parser("export")   # 장부 내보내기(md/json · 데이터 주권)
+    exp.add_argument("--format", dest="fmt", choices=["md", "json"], default="md")
+    exp.add_argument("--out", default=None)
     a = p.parse_args()
     fn = {"init": cmd_init, "start": cmd_init, "status": cmd_status, "doctor": cmd_status,
           "preview": cmd_preview, "remember": lambda a: cmd_preview(a, explicit=True),  # remember=명시 입력
@@ -1196,7 +1231,7 @@ def main():
           "recall": cmd_recall, "why": cmd_recall, "ask": cmd_recall, "trace": cmd_trace, "preflight": cmd_preflight,
           "hosted": cmd_hosted, "harvest": cmd_harvest, "setup-cloud": cmd_setup_cloud,
           "confirm-edges": cmd_confirm_edges, "pair": cmd_pair, "trust": cmd_trust,
-          "route": cmd_route}[a.cmd]
+          "route": cmd_route, "backup": cmd_backup, "export": cmd_export}[a.cmd]
     sys.exit(fn(a))
 
 
