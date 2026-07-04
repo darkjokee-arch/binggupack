@@ -34,6 +34,13 @@ _TOOL_DESC = {
     "capture_classify": "발화 1건 캡처 판정(read·메모리 순수)",
     "capture_preview": "대화 발췌 도장 미리보기(read·저장 0)",
     "save_candidate": "선택 후보 staging 저장(dry-run 기본·SAVE n confirm·actor 하드 reader·자동호출 차단)",
+    "recall": "query 관련 기억 회상(read·랭킹순·저장 0)",
+    "preflight": "작업 전 회상 — 기억할 것+위험패턴+선호(read)",
+    "trace_review": "미판정 회상 목록(효용 판정 대기·read)",
+    "trace_show": "판단 노드 근거 사슬 다홉(read·node_id 필요)",
+    "status": "장부 요약 — active/deprecated/검증예정/수용/audit chain(read)",
+    "list": "저장 후보 목록(status/kind 필터·read)",
+    "reminders": "due 경과 판단 리마인더(read)",
 }
 
 
@@ -176,6 +183,9 @@ def serve_stdio(allow_root):
 def _selftest():
     allow_root = os.path.normpath(os.path.join(os.environ.get("TEMP", "/tmp"),
                                                "openbinggu_path_safety_allow_root"))
+    # 조회(read) 도구가 운영 ledger 미접촉·결정성 갖도록 BINGGU_HOME 을 존재하지 않는 temp 로 강제.
+    os.environ["BINGGU_HOME"] = os.path.join(os.environ.get("TEMP", "/tmp"),
+                                             "binggu_selftest_home_readonly_none")
     print("=" * 72)
     print("OpenBinggu MCP server (stdio JSON-RPC) wrapper (synthetic / selftest)")
     print("=" * 72)
@@ -246,6 +256,20 @@ def _selftest():
     tr = (r.get("result", {}).get("tool_result")) or {}
     checks.append(("save_call_confirm_mismatch_write0",
                    tr.get("executed_write") is False and tr.get("reason") == "confirm_phrase_mismatch"))
+
+    # 9d) status read tools/call — ledger 서버 결정(BINGGU_HOME=temp)·empty graceful·executed=True.
+    r = call({"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+              "params": {"name": "status", "arguments": {}}})
+    res = r.get("result", {})
+    checks.append(("status_read_call_ok",
+                   res.get("executed") is True and res.get("verdict") == "ALLOW"))
+
+    # 9e) recall read tools/call — query 필수·ledger 없으면 empty·executed=True.
+    r = call({"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+              "params": {"name": "recall", "arguments": {"query": "배포 절차"}}})
+    res = r.get("result", {})
+    checks.append(("recall_read_call_ok",
+                   res.get("executed") is True and res.get("verdict") == "ALLOW"))
 
     # 10) malformed: missing method
     r = call({"jsonrpc": "2.0", "id": 10})

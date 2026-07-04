@@ -147,6 +147,175 @@ def _u_save_candidate(params=None):
             "pack_id": r.get("pack_id"), "ledger": "operating"}
 
 
+# ==== Phase 2 배치 A: 조회(read) 도구 — CLI recall/preflight/trace/status/list/reminders 노출 ====
+# 안전 원칙(save_candidate 와 동일):
+#   - ledger 경로는 서버가 결정(BINGGU_HOME 우선·없으면 ~/.binggupack). MCP 입력 경로 일절 무시(주입 차단).
+#   - 전부 read-only 순수함수(why_search/preflight_context/judgment_trace/list_pending/list_candidates/
+#     list_due_reminders) 호출 → ledger write 0. use_count++ 같은 사람-신호 기록은 노출 안 함(순수 read).
+#   - ledger 없으면 graceful(빈 결과·에러 아님). raw 경로/secret 미포함(claim=사용자 자기 기억, 조회 목적 노출).
+def _operating_home():
+    return os.environ.get("BINGGU_HOME") or os.path.join(os.path.expanduser("~"), ".binggupack")
+
+
+def _operating_ledger():
+    return os.path.join(_operating_home(), "ledger.sqlite")
+
+
+def _ensure_scripts_path():
+    """scripts 정본 모듈(binggu_recall 등) import 보장. storage facade 도 동일 부트스트랩을 하지만
+    read 도구 단독 진입(핸들러 selftest) 대비 명시. server_handlers 는 binggupack/mcp/ 하위 → dirname 3 = ROOT."""
+    scripts = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "scripts")
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+
+
+def _u_recall(params=None):
+    """query 관련 기억 회상(read-only·use_count 미기록·랭킹순). ledger 없으면 빈 결과."""
+    params = params or {}
+    query = (params.get("query") or "").strip()
+    if not query:
+        return {"action": "recall", "mode": "read", "error": "query_required"}
+    ledger = _operating_ledger()
+    if not os.path.exists(ledger):
+        return {"action": "recall", "mode": "read", "empty": True, "count": 0,
+                "nodes": [], "edges": [], "summary": "장부 없음(회상할 기억 0)"}
+    _ensure_scripts_path()
+    import binggu_recall as RC
+    limit = params.get("limit")
+    res = RC.why_search(ledger, query, limit=limit if isinstance(limit, int) else None)
+    nodes = [{"i": i, "node_id": n.get("node_id"), "node_type": n["node_type"],
+              "subtype": n.get("semantic_subtype"), "rank": round(n["rank_score"], 3),
+              "rel": round(n["relevance"], 2), "claim": n["claim"]}
+             for i, n in enumerate(res["relevant_nodes"], 1)]
+    edges = [{"source": e["source"], "relation": e["relation"], "target": e["target"]}
+             for e in res.get("relevant_edges", [])]
+    return {"action": "recall", "mode": "read", "count": len(nodes),
+            "nodes": nodes, "edges": edges, "summary": res.get("summary", "")}
+
+
+def _u_preflight(params=None):
+    """작업 전 회상(기억할 것 + 위험패턴 + 선호). read-only. cwd 미지정 시 서버 cwd(위험패턴 힌트만)."""
+    params = params or {}
+    ledger = _operating_ledger()
+    if not os.path.exists(ledger):
+        return {"action": "preflight", "mode": "read", "empty": True,
+                "remember": [], "avoid_patterns": [], "preferences": [], "risk_level": "없음"}
+    _ensure_scripts_path()
+    import binggu_recall as RC
+    files = params.get("files")
+    if isinstance(files, str):
+        files = [f.strip() for f in files.split(",") if f.strip()]
+    res = RC.preflight_context(ledger, prompt=params.get("prompt"),
+                               cwd=params.get("cwd") or os.getcwd(),
+                               domain=params.get("domain"), files_changed=files or None)
+    return {"action": "preflight", "mode": "read",
+            "remember": [{"node_type": n["node_type"], "subtype": n.get("semantic_subtype"), "claim": n["claim"]}
+                         for n in res["remember"]],
+            "avoid_patterns": [{"risk": round(m["risk_score"], 2), "claim": m["claim"]}
+                               for m in res["avoid_patterns"]],
+            "preferences": [{"claim": p["claim"]} for p in res["preferences"]],
+            "risk_level": res["risk_level"],
+            "question": res.get("question") if res.get("needs_question") else None}
+
+
+def _u_trace_review(params=None):
+    """미판정 회상 목록(효용 판정 대기). read-only(스냅샷 write 안 함 — mark 는 미노출)."""
+    ledger = _operating_ledger()
+    home = _operating_home()
+    if not os.path.exists(ledger):
+        return {"action": "trace_review", "mode": "read", "empty": True, "count": 0, "pending": []}
+    _ensure_scripts_path()
+    import binggu_recall_trace as RT
+    pend = RT.list_pending(home=home, ledger_path=ledger)
+    return {"action": "trace_review", "mode": "read", "count": len(pend),
+            "pending": [{"idx": p["idx"], "claim": p.get("claim"), "category": p.get("category"),
+                         "rank": p.get("rank"), "node_id": p.get("node_id")} for p in pend]}
+
+
+def _u_trace_show(params=None):
+    """판단 노드 근거 사슬(다홉). read-only. node_id 는 list/recall 이 반환한 값."""
+    params = params or {}
+    node_id = (params.get("node_id") or "").strip()
+    if not node_id:
+        return {"action": "trace_show", "mode": "read", "error": "node_id_required"}
+    ledger = _operating_ledger()
+    if not os.path.exists(ledger):
+        return {"action": "trace_show", "mode": "read", "empty": True, "found": False}
+    _ensure_scripts_path()
+    import binggu_recall as RC
+    res = RC.judgment_trace(ledger, node_id)
+    if not res.get("found"):
+        return {"action": "trace_show", "mode": "read", "found": False}
+    r = res["root"]
+    return {"action": "trace_show", "mode": "read", "found": True,
+            "root": {"node_id": r["node_id"], "node_type": r["node_type"],
+                     "rank": round(r["rank_score"], 3), "claim": r["claim"]},
+            "chain": [{"from": c["from"], "relation": c["relation"], "to": c["to"],
+                       "direction": c["direction"],
+                       "peer": c.get("peer_claim") if c.get("peer_present") else None}
+                      for c in res["chain"]],
+            "summary": res.get("summary", ""), "confidence": round(res.get("confidence", 0), 2)}
+
+
+def _u_status(params=None):
+    """장부 요약(active/deprecated/검증예정/수용/audit chain). read-only."""
+    ledger = _operating_ledger()
+    if not os.path.exists(ledger):
+        return {"action": "status", "mode": "read", "empty": True, "ledger_exists": False}
+    _ensure_scripts_path()
+    from openbinggu_owner_accept_ux import open_accept, accepted_view
+    db = open_accept(ledger)
+    try:
+        n = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
+        d = db.con.execute("SELECT count(*) FROM nodes WHERE state='deprecated'").fetchone()[0]
+        p = db.con.execute("SELECT count(*) FROM judgment_reviews WHERE status='pending'").fetchone()[0]
+        acc = len(accepted_view(db))
+        chain = db.verify_chain()
+    finally:
+        db.close()
+    return {"action": "status", "mode": "read", "ledger_exists": True,
+            "active": n, "deprecated": d, "pending_reviews": p, "accepted": acc,
+            "audit_chain": "INTACT" if chain else "BROKEN"}
+
+
+def _u_list(params=None):
+    """후보 목록(status/kind 필터). read-only. markdown + count + accepted 수."""
+    params = params or {}
+    ledger = _operating_ledger()
+    if not os.path.exists(ledger):
+        return {"action": "list", "mode": "read", "empty": True, "count": 0, "markdown": "장부 없음"}
+    _ensure_scripts_path()
+    from openbinggu_owner_accept_ux import open_accept, accepted_view
+    from openbinggu_candidate_list_view import list_candidates
+    db = open_accept(ledger)
+    try:
+        v = list_candidates(db, params.get("status") or "all", params.get("kind"))
+        acc = len(accepted_view(db))
+    finally:
+        db.close()
+    return {"action": "list", "mode": "read", "count": len(v.get("rows", [])),
+            "accepted": acc, "markdown": v.get("markdown", "")}
+
+
+def _u_reminders(params=None):
+    """due 경과 판단 리마인더 목록. read-only."""
+    params = params or {}
+    ledger = _operating_ledger()
+    if not os.path.exists(ledger):
+        return {"action": "reminders", "mode": "read", "empty": True, "markdown": "장부 없음"}
+    _ensure_scripts_path()
+    import datetime as _dt
+    from openbinggu_owner_accept_ux import open_accept
+    from binggupack.storage import list_due_reminders
+    db = open_accept(ledger)
+    try:
+        today = params.get("today") or _dt.date.today().isoformat()
+        r = list_due_reminders(db, today)
+    finally:
+        db.close()
+    return {"action": "reminders", "mode": "read", "markdown": r.get("markdown", "")}
+
+
 # ---- 노출 도구 테이블(read/dry-run 만). 위험 도구는 의도적으로 부재 ----
 TOOLS = {
     "pack_build":           {"path_params": ["input_dir"], "underlying": _u_pack_build,          "mode": "dry-run"},
@@ -174,6 +343,31 @@ TOOLS = {
                                  "dry_run": {"type": "boolean"},
                                  "due_date": {"type": "string"}},
                               "required": ["text", "indices"]}},
+    # ---- Phase 2 배치 A: 조회(read) 도구. path 입력 없음·ledger 서버 결정·write 0 ----
+    "recall":       {"path_params": [], "underlying": _u_recall, "mode": "read",
+                     "input_schema": {"properties": {"query": {"type": "string"},
+                                                     "limit": {"type": "integer"}},
+                                      "required": ["query"]}},
+    "preflight":    {"path_params": [], "underlying": _u_preflight, "mode": "read",
+                     "input_schema": {"properties": {"prompt": {"type": "string"},
+                                                     "cwd": {"type": "string"},
+                                                     "domain": {"type": "string"},
+                                                     "files": {"type": "string"}},
+                                      "required": []}},
+    "trace_review": {"path_params": [], "underlying": _u_trace_review, "mode": "read",
+                     "input_schema": {"properties": {}, "required": []}},
+    "trace_show":   {"path_params": [], "underlying": _u_trace_show, "mode": "read",
+                     "input_schema": {"properties": {"node_id": {"type": "string"}},
+                                      "required": ["node_id"]}},
+    "status":       {"path_params": [], "underlying": _u_status, "mode": "read",
+                     "input_schema": {"properties": {}, "required": []}},
+    "list":         {"path_params": [], "underlying": _u_list, "mode": "read",
+                     "input_schema": {"properties": {"status": {"type": "string"},
+                                                     "kind": {"type": "string"}},
+                                      "required": []}},
+    "reminders":    {"path_params": [], "underlying": _u_reminders, "mode": "read",
+                     "input_schema": {"properties": {"today": {"type": "string"}},
+                                      "required": []}},
 }
 
 # 노출 금지(핸들러 부재로 자동 차단되지만, 명시 거부 목록으로 의도 박제)
@@ -221,6 +415,10 @@ _SAVE_CONVO = ("이 문서는 배포 절차를 정의한다. 이 입찰은 마�
 def _selftest():
     allow_root = os.path.normpath(os.path.join(os.environ.get("TEMP", "/tmp"),
                                                "openbinggu_path_safety_allow_root"))
+    # 조회(read) 도구는 _operating_ledger()=BINGGU_HOME/ledger.sqlite 를 읽는다. selftest 결정성 +
+    # 운영 ledger 미접촉을 위해 존재하지 않는 temp 홈으로 강제(→ read 도구는 graceful empty 반환).
+    os.environ["BINGGU_HOME"] = os.path.join(os.environ.get("TEMP", "/tmp"),
+                                             "binggu_selftest_home_readonly_none")
 
     print("=" * 72)
     print("OpenBinggu MCP server handlers 결선 후보 (synthetic / selftest)")
@@ -245,6 +443,14 @@ def _selftest():
         ("capture_preview_ok",   "capture_preview",      {"utterances": ["이거 저장해", "ㅋㅋ"]},        True,  "read no-path"),
         # save 도구 — dry-run 기본은 executed=True(도구 실행됨)이나 executed_write=False(ledger write 0).
         ("save_dryrun_default",  "save_candidate",       {"text": _SAVE_CONVO, "indices": [1]},        True,  "dry-run preview"),
+        # Phase 2 배치 A 조회(read) — ledger 없어도 graceful(executed=True). BINGGU_HOME=temp 라 운영 미접촉.
+        ("recall_read_ok",       "recall",               {"query": "배포 절차"},                        True,  "read no-path"),
+        ("preflight_read_ok",    "preflight",            {"prompt": "이 입찰 검토"},                     True,  "read no-path"),
+        ("trace_review_read_ok", "trace_review",         {},                                           True,  "read no-path"),
+        ("trace_show_read_ok",   "trace_show",           {"node_id": "node:CONV:none"},                True,  "read no-path"),
+        ("status_read_ok",       "status",               {},                                           True,  "read no-path"),
+        ("list_read_ok",         "list",                 {},                                           True,  "read no-path"),
+        ("reminders_read_ok",    "reminders",            {},                                           True,  "read no-path"),
     ]
 
     import json as _json
@@ -288,15 +494,18 @@ def _selftest():
     save_ok = save_ok and s2
     save_notes.append(("save_confirm_mismatch_reject", s2))
 
-    # S3) 자동호출(actor=auto 위조 시도) — 서버가 actor=reader 하드 오버라이드 → save_selected G4 항상 BLOCK.
-    #     confirm 정확일치+dry_run=False 라도 실저장 0.
+    # S3) 자동저장 방지 불변식(f9a9c61 정책): params actor 는 서버가 무시하고 confirm='SAVE n' 정확일치만
+    #     사람증거로 인정한다. confirm 부재(모델 자동호출 흉내)+dry_run=False → 핸들러 confirm 게이트가 REJECT →
+    #     save_selected 진입 0(write 0). actor=auto 위조는 무의미(params actor 미사용).
+    #     (구 케이스는 도달 불가한 G4_no_auto reason 을 기대해 상시 FAIL — f9a9c61 이 read-only 해제 시 코드만
+    #      바꾸고 이 selftest 를 안 고쳐 남은 사전존재 결함. confirm 정확일치는 human 승격, 불일치/부재는
+    #      confirm_phrase_mismatch 로 앞단 차단되어 G4_no_auto 는 도달 불가. 실제 방어 경로 reason 으로 정정.)
     r = handle_tool("save_candidate",
-                    {"text": _SAVE_CONVO, "indices": [1], "confirm": "SAVE 1",
-                     "dry_run": False, "actor": "auto"}, allow_root)
+                    {"text": _SAVE_CONVO, "indices": [1], "dry_run": False, "actor": "auto"}, allow_root)
     tr = r.get("tool_result") or {}
-    s3 = (tr.get("executed_write") is False and tr.get("reason") == "G4_no_auto")
+    s3 = (tr.get("executed_write") is False and tr.get("reason") == "confirm_phrase_mismatch")
     save_ok = save_ok and s3
-    save_notes.append(("save_auto_call_blocked_G4", s3))
+    save_notes.append(("save_auto_call_write0_no_confirm", s3))
 
     # S4) 운영 store(OPERATING_PATHS) mtime 불변 — 실 ledger write 0 입증.
     op_after = {p: (os.path.getmtime(p) if os.path.exists(p) else None) for p in OPERATING_PATHS}
