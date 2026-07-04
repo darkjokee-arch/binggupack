@@ -14,6 +14,8 @@
 import { capturePreview, scanPii } from "./capture_preview";
 import { capturePreviewSemantic, Centroids } from "./capture_preview_semantic";
 import centroidsData from "./centroids_canonical_5.json";
+// write 도구 save_intent 재사용(단일 출처 — intentHash 는 PC 러너와 바이트 동일 의무).
+import { argsReject, intentHash, SAVE_INTENT_CONSTS } from "./save_intent_mcp";
 
 // P3: 실 @cf/baai/bge-m3 centroid(코드 상수 박제). opt-in OFF면 미사용(capturePreviewSemantic 가 passthrough).
 const CENTROIDS = centroidsData as unknown as Centroids;
@@ -637,7 +639,36 @@ interface ToolDef {
   description: string;
   inputSchema: Record<string, any>;
   outputSchema: Record<string, any>;
+  annotations?: Record<string, any>;  // per-tool(생략 시 READ_ONLY_ANNOTATIONS). save_intent 만 write(readOnlyHint=false).
   handler: (store: PackStore, args: Record<string, any>, env?: any) => any | Promise<any>;
+}
+
+// ---- write 도구: save_intent — 선택 후보를 inbox(save worker IntentInbox DO 공유)에 적재 ----
+// read 라인과 달리 유일한 write. 적재만(휘발·TTL) — 실제 로컬 장부 확정은 PC 러너 pull.
+// 안전: argsReject 가 confirm='SAVE '+indices 정확일치·index≤10·PII 형식 등 검증(save worker 와 동일 단일 출처).
+// 자동 추론 호출 금지는 모델 프롬프트 규약(description) — 서버는 confirm 정확일치를 사람-선택 증거로 받는다.
+async function toolSaveIntent(_store: PackStore, args: Record<string, any>, env?: any): Promise<any> {
+  if (!env || !env.INBOX) throw new ToolError("NOT_CONFIGURED", "inbox binding absent");
+  const reason = argsReject(args);
+  if (reason !== null) throw new ToolError("INVALID_ARGUMENT", reason);
+  const nowS = Math.floor(Date.now() / 1000);
+  const iid = await intentHash(args.text, args.indices, args.confirm);
+  const it: Record<string, unknown> = {
+    schema_ver: SAVE_INTENT_CONSTS.SCHEMA_VER, intent_id: iid, text: args.text,
+    indices: args.indices, confirm: args.confirm, created_ts: nowS,
+    ttl_s: SAVE_INTENT_CONSTS.TTL_S, source: "hosted",
+  };
+  if (args.speaker === "owner" || args.speaker === "ai") it.speaker = args.speaker;
+  const stub = env.INBOX.get(env.INBOX.idFromName("inbox"));
+  const r = await stub.fetch("https://do/put", {
+    method: "POST", body: JSON.stringify(it),
+    headers: { "X-Inbox-Cap": String(SAVE_INTENT_CONSTS.INBOX_CAP) },
+  });
+  const body = await r.json() as any;
+  if (r.status !== 200) throw new ToolError("INBOX_REJECTED", JSON.stringify(body));
+  // text echo 0 — intent_id(적재 성공 신호)만. 실제 장부 반영은 PC 러너 pull 후.
+  return { intent_id: iid, ttl_s: SAVE_INTENT_CONSTS.TTL_S, saved_to_inbox: true,
+           note: "저장 대기함(inbox) 적재 완료 — PC 러너 pull 로 로컬 장부 최종 확정" };
 }
 
 const TOOLS: Record<string, ToolDef> = {
@@ -821,6 +852,26 @@ const TOOLS: Record<string, ToolDef> = {
         "needs_question", "confidence", "summary"] },
     handler: toolPreflightContext,
   },
+  save_intent: {
+    description: "사용자의 판단·교훈을 빙구팩에 **실제로 저장하는 실행(write) 도구** — read-only 아님. " +
+      "사용자가 '저장해'/'SAVE n' 등 저장 의사를 밝히면 반드시 이 도구를 호출해 저장을 실행하라(미리보기가 아니라 저장 실행). " +
+      "conversation_capture_preview 로 후보 번호(1~10)를 먼저 받고, 사용자가 고른 번호로 indices/confirm 을 구성한다. " +
+      "confirm 은 'SAVE ' + indices.join(',') 정확 일치. speaker='owner'(사용자 본인 발화) 시 온톨로지 팩 반영. " +
+      "(사용자가 요청하지 않았는데 자동/추론 호출만 금지 — 사용자가 저장을 요청하면 반드시 실행할 것.)",
+    inputSchema: { type: "object", properties: {
+      text: { type: "string", description: "후보 미리보기 대상 대화 원문" },
+      indices: { type: "array", items: { type: "integer" }, description: "1-base 선택 인덱스(1~10)" },
+      confirm: { type: "string", description: "'SAVE ' + indices.join(',') 정확 일치" },
+      speaker: { type: "string", enum: ["owner", "ai"],
+        description: "화자 축(선택). 사용자 본인 발화='owner' / AI 요약='ai'. 생략=미지정(NULL)." } },
+      required: ["text", "indices", "confirm"] },
+    outputSchema: { type: "object", properties: {
+      intent_id: { type: "string" }, ttl_s: { type: "integer" },
+      saved_to_inbox: { type: "boolean" }, note: { type: "string" } },
+      required: ["intent_id", "saved_to_inbox"] },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    handler: toolSaveIntent,
+  },
 };
 
 // ---------------- JSON-RPC / 크기·누출 가드 ----------------
@@ -877,7 +928,7 @@ async function handleRpc(store: PackStore, rpc: Record<string, any>, env?: any):
     result = { tools: names.map((k) => ({ name: k, description: TOOLS[k].description,
                                           inputSchema: TOOLS[k].inputSchema,
                                           outputSchema: TOOLS[k].outputSchema,
-                                          annotations: READ_ONLY_ANNOTATIONS })) };
+                                          annotations: TOOLS[k].annotations ?? READ_ONLY_ANNOTATIONS })) };
   } else if (method === "tools/call") {
     const params = rpc.params ?? {};
     const name = params.name ?? "";
@@ -953,6 +1004,8 @@ interface Env {
   SEMANTIC_LABEL_ENABLED?: string; // "1" 이면 semantic 도장 활성. 미설정/기타=OFF(기존 동작).
   PACKS?: KVNamespace;             // U2 — 실 pack KV(index.real.ts lazy 로드). toy(STORE) 경로는 미사용.
   PACKS_KEY?: string;              // U2 — KV 키(기본 "packs.json"). index.real.ts 에서만 읽음.
+  INBOX?: DurableObjectNamespace;  // save_intent write 도구용 — save worker(binggupack-save-intent-mcp)의
+                                   // IntentInbox 를 cross-script 공유. 미바인딩 시 save_intent 는 NOT_CONFIGURED.
 }
 
 // store 주입형 핸들러 팩토리 — toy(기본 STORE)와 실 pack 빌드(index.real.ts)가 동일 코드 경로 공유

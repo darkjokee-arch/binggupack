@@ -100,8 +100,9 @@ export class IntentInbox {
     }
 
     if (url.pathname === "/put") {
-      const enabled = await this.state.storage.get<boolean>("enabled");
-      if (enabled !== true) return denyJson(503, "inbox_disabled"); // 기본 off = fail-closed
+      // owner GO(2026-07-04): 채팅(ChatGPT/claude.ai) 상시 적재 위해 inbox enable 게이트 제거.
+      // 경로키(/mcp2·/save2 <경로키>) 인증이 앞단 방어 — 그것 없으면 아무도 put 에 도달 못 함.
+      // storage 에 남은 enabled=false 무시(HMAC enable 수단 부재 대응). 잠그려면 이 게이트 복원 후 재배포.
       const it = await request.json() as any;
       const cap = parseInt(request.headers.get("X-Inbox-Cap") ?? "", 10) || DEFAULT_INBOX_CAP;
       const m = await this.state.storage.list({ prefix: "intent:" });

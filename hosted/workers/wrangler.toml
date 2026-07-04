@@ -12,3 +12,10 @@ binding = "AI"
 # P3 활성(2026-06-15 owner "라이브배포 시작"): semantic 도장 ON. 실패 시 RULES→no_suggestion fallback.
 [vars]
 SEMANTIC_LABEL_ENABLED = "1"
+
+# save_intent(write) 도구용 — save worker(binggupack-save-intent-mcp)의 IntentInbox 를 cross-script 공유.
+# 소유·migration 은 save worker 가 보유(여기선 참조만) → 적재는 기존 inbox→PC pull 파이프라인 그대로 재사용.
+[[durable_objects.bindings]]
+name = "INBOX"
+class_name = "IntentInbox"
+script_name = "binggupack-save-intent-mcp"
