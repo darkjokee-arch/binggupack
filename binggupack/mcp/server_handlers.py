@@ -316,6 +316,155 @@ def _u_reminders(params=None):
     return {"action": "reminders", "mode": "read", "markdown": r.get("markdown", "")}
 
 
+# ==== Phase 2 배치 B: 쓰기(write-gated) 도구 — pair/deprecate/replace ====
+# save_candidate 와 동일 안전 패턴(자동저장 방지 불변):
+#   - MCP params 의 actor 는 무시. confirm 정확일치(사용자가 목록/preview 를 보고 재현한 증거)만 human 승격.
+#   - dry_run 기본 True(비가역 write default-deny) → expected confirm 안내 + preview, write 0.
+#   - dry_run=False + confirm 정확일치 → 게이트(save_paired/deprecate_from_list/replace_from_list)가 재검증 후 write.
+#   - 운영 ledger 는 서버 결정(BINGGU_HOME/~/.binggupack). MCP 경로 입력 무시(주입 차단).
+#   - 게이트 자체가 confirm≠expected → confirm_phrase_mismatch, actor≠human → G4_no_auto 로 이중 차단.
+#   - _resolve_human_ctx(CLI 의 TTY/trust 우회)는 MCP 에서 미사용 — confirm 정확일치만 사람증거로 인정.
+def _u_pair(params=None):
+    """owner 발화(+ai 요약) 화자축 페어 저장. dry_run 기본·PAIR confirm 정확일치·자동저장 차단.
+    relation: accepts/refutes/revises · by: owner(사용자가 AI 발화에 반응)/ai. ai_text 생략=owner 단독."""
+    params = params or {}
+    owner_text = params.get("owner_text", "")
+    ai_text = params.get("ai_text") or None
+    owner_pick = params.get("owner_pick", 1)
+    ai_pick = params.get("ai_pick", 1)
+    by = params.get("by", "ai")
+    relation = params.get("relation", "accepts")
+    confirm = params.get("confirm", "")
+    dry_run = params.get("dry_run", True)
+    if not (owner_text or "").strip():
+        return {"action": "pair", "mode": "write-gated", "verdict": "REJECT",
+                "executed_write": False, "reason": "owner_text_required"}
+    rel = "%s_%s" % (by, relation)
+    expected = ("PAIR %s owner:%d ai:%d" % (rel, owner_pick, ai_pick)) if ai_text \
+        else ("PAIR owner:%d" % owner_pick)
+    _ensure_scripts_path()
+    from binggupack.capture import preview as cvp
+
+    def _pv(t):
+        try:
+            return [{"index": j + 1, "label_kind": c["label_kind"], "sentence": c["sentence"]}
+                    for j, c in enumerate(cvp.capture_preview(t)["candidates"])]
+        except Exception:
+            return []
+
+    if dry_run:
+        # dry-run: write 0. owner/ai 후보 preview + 기대 confirm 안내(사용자가 pick 을 골라야 하므로).
+        return {"action": "pair", "mode": "dry-run", "verdict": "PREVIEW",
+                "executed_write": False, "would_write_ledger": False,
+                "relation": rel, "confirm_expected": expected,
+                "owner_preview": _pv(owner_text),
+                "ai_preview": _pv(ai_text) if ai_text else []}
+    # dry_run=False: confirm 정확일치만 human. 불일치/부재 → reader → save_paired G4 BLOCK(자동저장 방지).
+    actor = "human" if (confirm and confirm == expected) else "reader"
+    ledger = _operating_ledger()
+    if not os.path.exists(ledger):
+        return {"action": "pair", "mode": "write-gated", "verdict": "REJECT",
+                "executed_write": False, "reason": "ledger_not_found"}
+    from openbinggu_owner_accept_ux import open_accept
+    from binggupack.storage import save_paired
+    snap_dir = os.path.join(_operating_home(), "snapshots")
+    os.makedirs(snap_dir, exist_ok=True)
+    db = open_accept(ledger)
+    try:
+        r = save_paired(db, owner_text, ai_text, {"actor": actor, "confirm": confirm},
+                        snap_dir, relation_kind=rel, owner_pick=owner_pick, ai_pick=ai_pick,
+                        due_date=params.get("due_date"))
+    finally:
+        db.close()
+    return {"action": "pair", "mode": "write-gated",
+            "verdict": "ALLOW" if r.get("applied") else "BLOCK",
+            "executed_write": bool(r.get("applied")),
+            "saved": r.get("saved"), "reason": r.get("reason"),
+            "relation": r.get("relation"), "paired": r.get("paired"),
+            "pack_id": r.get("pack_id"), "ledger": "operating"}
+
+
+def _u_deprecate(params=None):
+    """목록 인덱스 1건 기각. dry_run 기본·'DEPRECATE <index> <id8>' confirm 정확일치·자동차단.
+    index/id8 은 list 도구가 반환한 순번+node hash8(사용자가 본 목록 재현 증거)."""
+    params = params or {}
+    index = params.get("index")
+    id8 = params.get("id8", "")
+    reason = params.get("reason", "")
+    confirm = params.get("confirm", "")
+    dry_run = params.get("dry_run", True)
+    if not isinstance(index, int) or not id8:
+        return {"action": "deprecate", "mode": "write-gated", "verdict": "REJECT",
+                "executed_write": False, "reason": "index_and_id8_required"}
+    expected = "DEPRECATE %s %s" % (index, id8)
+    ledger = _operating_ledger()
+    if not os.path.exists(ledger):
+        return {"action": "deprecate", "mode": "write-gated", "verdict": "REJECT",
+                "executed_write": False, "reason": "ledger_not_found"}
+    if dry_run:
+        return {"action": "deprecate", "mode": "dry-run", "verdict": "PREVIEW",
+                "executed_write": False, "would_write_ledger": False,
+                "confirm_expected": expected,
+                "note": "list 도구로 index/id8 확인 후 dry_run=false + confirm 으로 실행(사유 reason 필수)"}
+    actor = "human" if (confirm and confirm == expected) else "reader"
+    _ensure_scripts_path()
+    from openbinggu_owner_accept_ux import open_accept
+    from openbinggu_candidate_deprecate_ux import deprecate_from_list
+    snap_dir = os.path.join(_operating_home(), "snapshots")
+    os.makedirs(snap_dir, exist_ok=True)
+    db = open_accept(ledger)
+    try:
+        r = deprecate_from_list(db, index, id8, reason, {"actor": actor, "confirm": confirm}, snap_dir)
+    finally:
+        db.close()
+    return {"action": "deprecate", "mode": "write-gated",
+            "verdict": "ALLOW" if r.get("applied") else "BLOCK",
+            "executed_write": bool(r.get("applied")),
+            "reason": r.get("reason"), "node_id": r.get("node_id"), "ledger": "operating"}
+
+
+def _u_replace(params=None):
+    """목록 인덱스 1건 교체(기각+신규 candidate). dry_run 기본·
+    'REPLACE <index> <id8> WITH <new_sentence>' confirm 정확일치·자동차단."""
+    params = params or {}
+    index = params.get("index")
+    id8 = params.get("id8", "")
+    new_sentence = params.get("new_sentence", "")
+    reason = params.get("reason", "")
+    confirm = params.get("confirm", "")
+    dry_run = params.get("dry_run", True)
+    if not isinstance(index, int) or not id8 or not (new_sentence or "").strip():
+        return {"action": "replace", "mode": "write-gated", "verdict": "REJECT",
+                "executed_write": False, "reason": "index_id8_new_sentence_required"}
+    expected = "REPLACE %s %s WITH %s" % (index, id8, new_sentence)
+    ledger = _operating_ledger()
+    if not os.path.exists(ledger):
+        return {"action": "replace", "mode": "write-gated", "verdict": "REJECT",
+                "executed_write": False, "reason": "ledger_not_found"}
+    if dry_run:
+        return {"action": "replace", "mode": "dry-run", "verdict": "PREVIEW",
+                "executed_write": False, "would_write_ledger": False,
+                "confirm_expected": expected,
+                "note": "list 도구로 index/id8 확인 후 dry_run=false + confirm 으로 실행(사유 reason 필수)"}
+    actor = "human" if (confirm and confirm == expected) else "reader"
+    _ensure_scripts_path()
+    from openbinggu_owner_accept_ux import open_accept
+    from openbinggu_candidate_replace_ux import replace_from_list
+    snap_dir = os.path.join(_operating_home(), "snapshots")
+    os.makedirs(snap_dir, exist_ok=True)
+    db = open_accept(ledger)
+    try:
+        r = replace_from_list(db, index, id8, new_sentence, reason,
+                              {"actor": actor, "confirm": confirm}, snap_dir)
+    finally:
+        db.close()
+    return {"action": "replace", "mode": "write-gated",
+            "verdict": "ALLOW" if r.get("applied") else "BLOCK",
+            "executed_write": bool(r.get("applied")),
+            "reason": r.get("reason"), "old_node_id": r.get("old_node_id"),
+            "new_node_id": r.get("new_node_id"), "ledger": "operating"}
+
+
 # ---- 노출 도구 테이블(read/dry-run 만). 위험 도구는 의도적으로 부재 ----
 TOOLS = {
     "pack_build":           {"path_params": ["input_dir"], "underlying": _u_pack_build,          "mode": "dry-run"},
@@ -368,6 +517,27 @@ TOOLS = {
     "reminders":    {"path_params": [], "underlying": _u_reminders, "mode": "read",
                      "input_schema": {"properties": {"today": {"type": "string"}},
                                       "required": []}},
+    # ---- Phase 2 배치 B: 쓰기(write-gated) 도구. dry-run 기본·confirm 정확일치·actor 하드 reader·자동차단 ----
+    "pair":         {"path_params": [], "underlying": _u_pair, "mode": "write-gated",
+                     "input_schema": {"properties": {
+                         "owner_text": {"type": "string"}, "ai_text": {"type": "string"},
+                         "owner_pick": {"type": "integer"}, "ai_pick": {"type": "integer"},
+                         "by": {"type": "string"}, "relation": {"type": "string"},
+                         "confirm": {"type": "string"}, "dry_run": {"type": "boolean"},
+                         "due_date": {"type": "string"}},
+                      "required": ["owner_text"]}},
+    "deprecate":    {"path_params": [], "underlying": _u_deprecate, "mode": "write-gated",
+                     "input_schema": {"properties": {
+                         "index": {"type": "integer"}, "id8": {"type": "string"},
+                         "reason": {"type": "string"}, "confirm": {"type": "string"},
+                         "dry_run": {"type": "boolean"}},
+                      "required": ["index", "id8"]}},
+    "replace":      {"path_params": [], "underlying": _u_replace, "mode": "write-gated",
+                     "input_schema": {"properties": {
+                         "index": {"type": "integer"}, "id8": {"type": "string"},
+                         "new_sentence": {"type": "string"}, "reason": {"type": "string"},
+                         "confirm": {"type": "string"}, "dry_run": {"type": "boolean"}},
+                      "required": ["index", "id8", "new_sentence"]}},
 }
 
 # 노출 금지(핸들러 부재로 자동 차단되지만, 명시 거부 목록으로 의도 박제)
@@ -451,6 +621,11 @@ def _selftest():
         ("status_read_ok",       "status",               {},                                           True,  "read no-path"),
         ("list_read_ok",         "list",                 {},                                           True,  "read no-path"),
         ("reminders_read_ok",    "reminders",            {},                                           True,  "read no-path"),
+        # Phase 2 배치 B 쓰기(write-gated) — dry-run 기본은 executed=True(도구 실행)이나 executed_write=False(write 0).
+        ("pair_dryrun_default",  "pair",                 {"owner_text": _SAVE_CONVO},                  True,  "dry-run write0"),
+        ("deprecate_dryrun",     "deprecate",            {"index": 1, "id8": "abcd1234"},              True,  "dry-run write0"),
+        ("replace_dryrun",       "replace",              {"index": 1, "id8": "abcd1234",
+                                                          "new_sentence": "수정된 문장"},              True,  "dry-run write0"),
     ]
 
     import json as _json
@@ -464,6 +639,11 @@ def _selftest():
         blob = _json.dumps(r, ensure_ascii=False)
         for k, v in params.items():
             if tool == "save_candidate" and k == "text":
+                continue
+            # 배치 B dry-run preview/confirm_expected 는 사용자 선택용 입력(텍스트·id8·confirm) 노출이 의도 동작
+            # (save 와 동형). id8=사용자가 list 에서 본 node hash8 — 경로/secret 아님, confirm 생성용.
+            if tool in ("pair", "deprecate", "replace") and k in ("owner_text", "ai_text",
+                                                                  "new_sentence", "confirm", "id8"):
                 continue
             if isinstance(v, str) and v.strip() and v.strip() in blob:
                 raw_leak = True
@@ -506,6 +686,30 @@ def _selftest():
     s3 = (tr.get("executed_write") is False and tr.get("reason") == "confirm_phrase_mismatch")
     save_ok = save_ok and s3
     save_notes.append(("save_auto_call_write0_no_confirm", s3))
+
+    # S5) pair confirm 부재(자동호출 흉내) + dry_run=False → write 0. (BINGGU_HOME=temp 라 ledger_not_found
+    #     또는 reader→save_paired G4 — 어느 쪽이든 운영/temp 자동 write 0.)
+    r = handle_tool("pair", {"owner_text": _SAVE_CONVO, "dry_run": False, "actor": "auto"}, allow_root)
+    tr = r.get("tool_result") or {}
+    s5 = (tr.get("executed_write") is False)
+    save_ok = save_ok and s5
+    save_notes.append(("pair_no_confirm_write0", s5))
+
+    # S6) deprecate confirm 불일치 + dry_run=False → write 0.
+    r = handle_tool("deprecate", {"index": 1, "id8": "abcd1234", "reason": "x",
+                                  "confirm": "DEPRECATE 9 zzzzzzzz", "dry_run": False}, allow_root)
+    tr = r.get("tool_result") or {}
+    s6 = (tr.get("executed_write") is False)
+    save_ok = save_ok and s6
+    save_notes.append(("deprecate_mismatch_write0", s6))
+
+    # S7) replace confirm 불일치 + dry_run=False → write 0.
+    r = handle_tool("replace", {"index": 1, "id8": "abcd1234", "new_sentence": "y", "reason": "x",
+                                "confirm": "REPLACE 9 zzzzzzzz WITH y", "dry_run": False}, allow_root)
+    tr = r.get("tool_result") or {}
+    s7 = (tr.get("executed_write") is False)
+    save_ok = save_ok and s7
+    save_notes.append(("replace_mismatch_write0", s7))
 
     # S4) 운영 store(OPERATING_PATHS) mtime 불변 — 실 ledger write 0 입증.
     op_after = {p: (os.path.getmtime(p) if os.path.exists(p) else None) for p in OPERATING_PATHS}

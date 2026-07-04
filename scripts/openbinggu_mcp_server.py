@@ -41,6 +41,9 @@ _TOOL_DESC = {
     "status": "장부 요약 — active/deprecated/검증예정/수용/audit chain(read)",
     "list": "저장 후보 목록(status/kind 필터·read)",
     "reminders": "due 경과 판단 리마인더(read)",
+    "pair": "owner 발화(+ai 요약) 화자축 페어 저장(dry-run 기본·PAIR confirm 정확일치·자동차단)",
+    "deprecate": "목록 인덱스 1건 기각(dry-run 기본·DEPRECATE <n> <id8> confirm·자동차단)",
+    "replace": "목록 인덱스 1건 교체(dry-run 기본·REPLACE <n> <id8> WITH <new> confirm·자동차단)",
 }
 
 
@@ -270,6 +273,15 @@ def _selftest():
     res = r.get("result", {})
     checks.append(("recall_read_call_ok",
                    res.get("executed") is True and res.get("verdict") == "ALLOW"))
+
+    # 9f) pair write-gated tools/call — dry-run 기본은 write 0(executed_write=False·PREVIEW).
+    r = call({"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+              "params": {"name": "pair", "arguments": {"owner_text": "이 방향으로 가자"}}})
+    res = r.get("result", {})
+    tr = res.get("tool_result") or {}
+    checks.append(("pair_call_dryrun_write0",
+                   res.get("executed") is True and tr.get("executed_write") is False
+                   and tr.get("verdict") == "PREVIEW"))
 
     # 10) malformed: missing method
     r = call({"jsonrpc": "2.0", "id": 10})
