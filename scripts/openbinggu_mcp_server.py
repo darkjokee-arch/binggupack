@@ -187,6 +187,63 @@ def serve_stdio(allow_root):
                 continue
 
 
+def serve_http(allow_root, port, path_token):
+    """로컬 HTTP JSON-RPC 서버 (Cloudflare Tunnel 뒤에서 웹/앱 커넥터에 로컬 MCP 그대로 노출).
+
+    - 127.0.0.1 바인드: 인바운드 포트를 직접 열지 않는다(외부 노출은 터널이 담당).
+    - 경로키 인증: POST /mcp/<path_token> 만 처리(그 외 403). path_token 은 env 로 주입(코드 평문 0).
+    - handle_jsonrpc 재사용: stdio 와 동일 로직(initialize/tools/list/tools/call) — 22도구 그대로.
+    - SSE/JSON 협상: Accept: text/event-stream 이면 SSE 로 감싼다(claude.ai 등 호환).
+    - notification(id 없음) 202. request 만 응답.
+    """
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        def _send(self, code, body, sse=False):
+            data = body.encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "text/event-stream" if sse else "application/json")
+            if sse:
+                self.send_header("Cache-Control", "no-cache")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            if data:
+                self.wfile.write(data)
+
+        def do_GET(self):
+            self._send(404, json.dumps({"error": "POST only"}))
+
+        def do_POST(self):
+            if self.path != "/mcp/" + path_token:
+                self._send(403, json.dumps({"error": "forbidden"}))
+                return
+            try:
+                ln = int(self.headers.get("Content-Length", "0") or "0")
+                raw = self.rfile.read(ln).decode("utf-8")
+                req = json.loads(raw)
+            except Exception:
+                self._send(400, json.dumps(_err(None, -32700, "parse error")))
+                return
+            try:
+                resp = handle_jsonrpc(req, allow_root)
+            except Exception as e:
+                rid = req.get("id") if isinstance(req, dict) else None
+                resp = _err(rid, -32603, "internal error: " + type(e).__name__)
+            if not (isinstance(req, dict) and req.get("id") is not None):
+                self._send(202, "")   # notification
+                return
+            payload = json.dumps(resp, ensure_ascii=False)
+            if "text/event-stream" in (self.headers.get("Accept") or ""):
+                self._send(200, "event: message\ndata: " + payload + "\n\n", sse=True)
+            else:
+                self._send(200, payload)
+
+        def log_message(self, *a):
+            pass  # 접근 로그 억제(경로키 노출 방지)
+
+    ThreadingHTTPServer(("127.0.0.1", int(port)), Handler).serve_forever()
+
+
 # ---------------- selftest ----------------
 
 def _selftest():
@@ -378,8 +435,15 @@ def main():
     elif args[0] == "--serve" and len(args) >= 2:
         # 실 stdio 서버: 등록/공개는 별도 GO. 의도치 않은 가동 방지로 명시 인자 요구.
         serve_stdio(os.path.abspath(args[1]))
+    elif args[0] == "--http" and len(args) >= 3:
+        # 로컬 HTTP 서버(터널 뒤 웹/앱 커넥터용). 경로키는 env BINGGU_MCP_PATH_TOKEN 주입(코드 평문 0).
+        tok = os.environ.get("BINGGU_MCP_PATH_TOKEN", "").strip()
+        if not tok:
+            print("BINGGU_MCP_PATH_TOKEN env 필요(경로키)")
+            sys.exit(2)
+        serve_http(os.path.abspath(args[2]), args[1], tok)
     else:
-        print("usage: openbinggu_mcp_server.py [--selftest | --serve <ROOT>]")
+        print("usage: openbinggu_mcp_server.py [--selftest | --serve <ROOT> | --http <PORT> <ROOT>]")
         sys.exit(2)
 
 
