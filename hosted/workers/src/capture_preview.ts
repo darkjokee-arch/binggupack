@@ -100,6 +100,12 @@ export function scanPii(s: string): string[] {
   return found;
 }
 
+// C1 백스톱: hosted save_intent 가 put 직전 text 전체에 secret 재검사 (save_intent_mcp.ts).
+// SECRET_RES 무수정 재사용 — 문장 단위 제외(capturePreview)와 별개로 원문 전체 표면 방어.
+export function hasSecret(s: string): boolean {
+  return SECRET_RES.some((re) => re.test(s));
+}
+
 function meaningful(s: string): boolean {
   const stripped = s.replace(REDACT_RE, "").trim();
   if (stripped.length < 6) return false;

@@ -53,9 +53,14 @@ def main():
     out = _run(["hosted", "inbox"]).stdout or ""
     print(out)
     committed = 0
-    # "[N] ... 후보 M" 파싱 — M>0 만 commit
-    for m in re.finditer(r"\[(\d+)\].*?후보 (\d+)", out):
-        n, cand = m.group(1), int(m.group(2))
+    # "[N] ... 후보 M[ ⚠PII/secret]" 파싱 — M>0 만 commit.
+    # 같은 라인 꼬리(후보 뒤)에 render_summary_md 의 PII/secret flag 가 있으면 auto-commit SKIP
+    # (사람 직접 검토로 위임 — 원문 PII 자동 반영 방지). save_selected 재스캔 뒤 이중 백스톱.
+    for m in re.finditer(r"\[(\d+)\].*?후보 (\d+)([^\n]*)", out):
+        n, cand, tail = m.group(1), int(m.group(2)), m.group(3)
+        if "PII/secret" in tail:
+            print("skip [%s]: PII/secret flagged — 자동 commit 제외(사람 검토)" % n)
+            continue
         if cand > 0:
             r = _run(["hosted", "pull", "--select", n, "--confirm", "LIVE SAVE " + n])
             print(r.stdout)

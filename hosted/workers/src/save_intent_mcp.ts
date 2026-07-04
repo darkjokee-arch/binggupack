@@ -6,7 +6,7 @@
 // 최종 저장 권한 = 로컬 러너 게이트(여기는 휘발 적재만). read 라인(62팩) 무접촉·별도 worker.
 // live 노출 = A-2 owner GO 전 금지. 변수명 token/secret '=' 조합 회피 (6/10 박제).
 import { IntentInbox } from "./save_intent_v2";
-import { capturePreview } from "./capture_preview";
+import { capturePreview, scanPii, hasSecret } from "./capture_preview";
 import { hex, sigV2Only, verifySig } from "./save_common";
 
 export { IntentInbox };
@@ -186,8 +186,15 @@ async function handleMcp(rpc: any, env: SaveMcpEnv, stub: DurableObjectStub, sse
       // confirm/indices 없으면 순수 preview(저장 0). 자동저장 방지는 confirm 게이트로 불변(사용자 SAVE n 명시 증거).
       if (typeof args.confirm === "string" && Array.isArray(args.indices) && args.indices.length) {
         const rej = argsReject({ text: args.text, indices: args.indices, confirm: args.confirm, speaker: args.speaker });
+        // C1 백스톱: put 직전 text 전체 PII/secret 재검사. 매치 시 inbox 적재 스킵(원문 클라우드/디스크 잔존 방지).
+        // 로그는 kind만 — 원문/매치값 0. intentHash 입력·confirm 게이트 무변경.
+        const piiKinds = scanPii(args.text);
+        const secretHit = hasSecret(args.text);
         if (rej !== null) {
           out.save_result = { saved: false, error: rej };
+        } else if (piiKinds.length || secretHit) {
+          console.log(`[MCP] preview_save backstop block: pii_kinds=${JSON.stringify(piiKinds)} secret=${secretHit}`);
+          out.save_result = { saved: false, error: "pii_in_text" };
         } else {
           const nowS = Math.floor(Date.now() / 1000);
           const iid = await intentHash(args.text, args.indices, args.confirm);
@@ -219,6 +226,14 @@ async function handleMcp(rpc: any, env: SaveMcpEnv, stub: DurableObjectStub, sse
     const reason = argsReject(args);
     if (reason !== null) {
       return rpcResult(id, { content: [{ type: "text", text: JSON.stringify({ error: reason }) }],
+                             isError: true }, sse);
+    }
+    // C1 백스톱: put 직전 text 전체 PII/secret 재검사(원문 클라우드/디스크 잔존 방지). 로그는 kind만.
+    const savePiiKinds = scanPii(args.text);
+    const saveSecretHit = hasSecret(args.text);
+    if (savePiiKinds.length || saveSecretHit) {
+      console.log(`[MCP] save_intent backstop block: pii_kinds=${JSON.stringify(savePiiKinds)} secret=${saveSecretHit}`);
+      return rpcResult(id, { content: [{ type: "text", text: JSON.stringify({ error: "pii_in_text" }) }],
                              isError: true }, sse);
     }
     const nowS = Math.floor(Date.now() / 1000);
