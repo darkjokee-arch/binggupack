@@ -11,6 +11,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import binggu_publish_p2_pipeline as P2
 import binggu_cloud_pack_export as EXP
+import binggu_platform as _plat
 
 results = []
 
@@ -140,7 +141,8 @@ def main():
                  lambda: P2.check_permanent_guards(out5, build5))
 
     # ── 운영 ledger 경로 거부 ──
-    op = os.path.join(os.path.expanduser("~"), ".binggupack", "ledger.sqlite")
+    # BINGGU_HOME 우선 실 장부 경로 — 가드(default_ledger())와 동일 기준.
+    op = _plat.default_ledger()
     expect_block_qerr("24.운영 ledger 경로 거부",
                       lambda: P2.run_pipeline(_fresh_out(tmp, "opx"), op, queue_id="qx"))
 

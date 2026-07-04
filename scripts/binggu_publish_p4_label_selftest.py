@@ -9,10 +9,11 @@ import sys
 import tempfile
 
 # selftest 결정성 — semantic(canonical/Ollama·임베딩) 유사도는 머신/부하마다 달라
-# build_cloud_pack 의 known_match 검증이 비결정적이 된다(case 14 실 ledger 빌드).
+# build_cloud_pack 의 graph/canonical 경로가 비결정적이 된다(case 14 실 ledger 빌드).
 # 운영 build_real_pack 경로는 불변(semantic ON 그대로) — selftest 진입부에서만 강제 OFF.
 # 자매 선례: binggu_rationale_suggest._selftest / watcher_pack_builder_m0.run_selftest 동일 패턴.
-# (PYTHONHASHSEED 고정은 __main__ 의 self re-exec 가드 참조 — 둘 다 테스트 전용·운영 불변)
+# (known_match 결정성은 hash 시드가 아니라 _retrieval_eval 의 sorted(ct)[:3] + self pre-seed 로 확보 —
+#  실제 case 14 flaky 원인은 hash 랜덤화가 아닌 tie-break 아티팩트였고 export 쪽에서 해소됨.)
 os.environ["BINGGU_SEMANTIC_OFF"] = "1"
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -133,11 +134,12 @@ def main():
 
 
 if __name__ == "__main__":
-    # selftest 결정성 — PYTHONHASHSEED 고정(테스트 전용). build_cloud_pack 의 _retrieval_eval 가
-    # set 순회(list(set(...))[:3])로 synthetic query 핵심어를 뽑아 hash 랜덤화에 따라
-    # known_match_failures 가 프로세스마다 0/1 로 흔들린다(같은 실 ledger 42행인데 case 14 비결정 BLOCK).
-    # 인터프리터 시작 후엔 seed 변경 불가 → 미고정 시 자기 자신을 seed=0 으로 1회 re-exec.
-    # 운영 build 경로/검증 로직은 불변(여기서만 seed 고정).
+    # selftest 결정성 — PYTHONHASHSEED 고정(테스트 전용, belt-and-suspenders).
+    # ※ 과거엔 _retrieval_eval 이 set 순회(list(set(...))[:3])라 hash 랜덤화로 known_match_failures 가
+    #    0/1 흔들린다고 봤으나, 실제 case 14 flaky 원인은 결정적 tie-break 아티팩트였다:
+    #    q_terms 는 sorted(ct)[:3](이미 hash 무관)인데 export 의 검색 루프가 self overlap 동률(1.0)을
+    #    먼저 나온 chunk 로 고정 → 뒤 chunk self-query 가 자기를 못 집어 허위 known_fail=1.
+    #    → export._retrieval_eval 에서 self chunk pre-seed 로 해소. seed 고정은 잔여 결정성 보강용으로 유지.
     if os.environ.get("PYTHONHASHSEED") != "0":
         os.environ["PYTHONHASHSEED"] = "0"
         import subprocess

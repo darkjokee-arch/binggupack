@@ -131,7 +131,8 @@ def main():
     check("20f.BLOCK → failed 귀결", Q._status(conn, "q6") == "failed")
 
     # 21. 운영 ledger 경로 거부 (P1 fail-closed)
-    op = os.path.join(os.path.expanduser("~"), ".binggupack", "ledger.sqlite")
+    # BINGGU_HOME 우선 실 장부 경로 — 가드(_OPERATIONAL_LEDGER=default_ledger())와 동일 기준.
+    op = Q._plat.default_ledger()
     expect_raise("21.운영 ledger 경로 거부", lambda: Q.open_queue(op))
 
     conn.close()

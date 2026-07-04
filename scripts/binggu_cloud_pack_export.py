@@ -280,8 +280,13 @@ def _retrieval_eval(chunks):
         q_terms = set(sorted(ct)[:3])   # synthetic query = chunk 핵심어 3개 (sorted=결정적·hash시드 무관; ct는 문자열 set)
         queries.append({"query_id": "Q-" + c["chunk_id"], "terms": sorted(q_terms),
                         "expected_chunk": c["chunk_id"], "synthetic": True})
-        # 검색: q_terms 와 overlap 최대 chunk
-        best, best_ov = None, 0.0
+        # 검색: q_terms 와 overlap 최대 chunk.
+        # self chunk 를 self overlap 으로 pre-seed → tie(동일 term 집합) 시 self 우선.
+        # q_terms ⊆ ct 이므로 self overlap 은 항상 1.0(q_terms 비면 0.0). 이후 strict > 라
+        # 다른 chunk(최대 1.0)도 self 를 못 이김 → 자기 쿼리는 자기 자신을 매치(known_match 방향만 낮춤).
+        # (미pre-seed 시 동률을 먼저 나온 chunk 로 고정 → 뒤 chunk self-query 가 허위 known_fail 됨)
+        self_ov = (len(q_terms & ct) / len(q_terms)) if q_terms else 0.0
+        best, best_ov = c["chunk_id"], self_ov
         for cid, t in chunk_terms:
             ov = (len(q_terms & t) / len(q_terms)) if q_terms else 0.0
             if ov > best_ov:
