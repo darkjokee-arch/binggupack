@@ -1,8 +1,7 @@
 # Install BingguPack v1.17.0
 
-> 최신 소스(git clone): `v1.16.0` (외부 리뷰 5건 정리 — PII scan 버그·ruff/mypy 툴체인 점진 도입·브랜드 통일).
-> PyPI 현재 배포: `1.15.0` — `pip install binggupack`는 **PyPI의 1.15.0**을 설치합니다. v1.16.0 기능은 아래 `git clone`으로 사용하세요.
-> 현재 `main`에는 v1.16.0 태그 이후 미배포 변경이 포함됩니다: **MCP 24도구 · HTTP 모드(웹/앱 커넥터) · ChatGPT 저장 채널 · 클라우드 read 도구** — [CHANGELOG](CHANGELOG.md) v1.17.0(pending) 참조.
+> 최신 릴리스: `v1.17.0` — **MCP 24도구 · HTTP 모드(웹/앱 커넥터) · ChatGPT 저장 채널 · 원클릭 온보딩(`binggu onboard`) · backup/export/restore** ([CHANGELOG](CHANGELOG.md) 참조).
+> PyPI 반영이 늦으면 아래 `git clone`으로 최신을 사용하세요.
 
 > `scripts/`·`docs/`의 `openbinggu_`/`OPENBINGGU_` 접두사는 레거시 내부 코드네임입니다(BingguPack과 동일 프로젝트).
 
@@ -25,7 +24,7 @@
 
 로컬 CLI만 쓰려면 이 경로가 가장 짧습니다.
 
-> PyPI 현재 배포는 **`1.15.0`**입니다. `pip install binggupack`는 1.15.0을 설치합니다. **v1.16.0**(현재 git 소스 최신)의 기능이 필요하면 아래 [Clone / source install](#clone--source-install)을 사용하세요.
+> `pip install binggupack`는 PyPI 최신 배포판을 설치합니다. PyPI 반영이 늦거나 최신 기능이 필요하면 아래 [Clone / source install](#clone--source-install)을 사용하세요.
 
 ```bash
 python -m pip install binggupack

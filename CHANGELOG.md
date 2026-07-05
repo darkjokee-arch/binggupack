@@ -1,8 +1,8 @@
 # Changelog — BingguPack
 
-## v1.17.0 (미배포 · pending) — MCP 24도구 · 웹/앱 커넥터 · ChatGPT 저장 채널 · 원클릭 온보딩 (2026-07-05)
+## v1.17.0 — MCP 24도구 · 웹/앱 커넥터 · ChatGPT 저장 채널 · 원클릭 온보딩 (2026-07-05)
 
-v1.16.0 태그 이후 `main`에 쌓인 커밋 묶음(버전 파일은 1.17.0 반영 — PyPI publish 는 owner 수동 트리거). 로컬 MCP를 8→**24도구**로 전면 확장하고, 웹/앱 커넥터(HTTP 모드)와 ChatGPT 채팅 저장 채널을 열고, 신규 사용자 원클릭 온보딩을 붙였다. 저장은 여전히 사람 confirm(도구별 문구 정확 일치)만.
+로컬 MCP를 8→**24도구**로 전면 확장하고, 웹/앱 커넥터(HTTP 모드)와 ChatGPT 채팅 저장 채널을 열고, 신규 사용자 원클릭 온보딩과 backup/export/restore 데이터 주권을 붙였다. 저장은 여전히 사람 confirm(도구별 문구 정확 일치)만.
 
 ### Added
 - **원클릭 온보딩 `binggu onboard`**: setup-cloud(읽기 worker) + 저장 채널(save_mcp — 키 48hex 자동생성·repo 밖 보관·secret stdin 주입·커넥터 URL 기본 마스킹 `--show-url` 옵트인) + auto-pull 스케줄러 + 웹 MCP 안내를 한 진입점으로(멱등·dry-run 기본·login/deploy 는 본인 손). `scripts/binggu_setup_save.py` selftest 36케이스.

@@ -19,6 +19,8 @@
 - 🕸️ 기억들을 서로 연결해 **지도처럼** 묶어요
 - 📦 그 지도가 **오픈크랩(익스퍼트플랜)에 자동으로 팩(전문가 지식 묶음)으로** 만들어져요
 - 🔌 Claude Code에 자동으로 붙고, 폰·웹·ChatGPT 채팅에서 승인한 메모도 가져와요
+- 🚀 **원클릭 온보딩** — `binggu onboard` 하나로 내 클라우드 저장 채널·자동 pull까지 셋업돼요
+- 💾 **내 데이터는 내 것** — 장부를 통째로 백업/내보내기하고, 언제든 되돌릴 수 있어요
 
 **왜 믿을 만한가 — 빙구팩만의 강점**
 
@@ -31,9 +33,9 @@
 > 전부 **자동 저장 없이, 내가 승인한 것만, 로컬 우선**입니다.
 > 명령어·용어까지 자세히는 아래 [기능 전체 지도](#기능-전체-지도)를 보세요.
 
-> 현재 `main`: 분류 기준 통합, `remember`/`pair` 명시 입력 경로, 회상 효용 trace, `storage`/`mcp` facade, 코어 로직 `binggupack/` 패키지 이관(strangler·[ARCHITECTURE](docs/BINGGUPACK_ARCHITECTURE.md)), ruff/mypy 툴체인·브랜드 통일에 더해 — v1.16.0 태그 이후 **MCP 24도구 확장 · HTTP 모드(웹/앱 커넥터) · ChatGPT 저장 채널 · 클라우드 read 도구**까지 반영(미배포 · [CHANGELOG](CHANGELOG.md) v1.17.0 pending).
-> 최신 소스(git clone): **v1.16.0** · [Release](https://github.com/darkjokee-arch/binggupack/releases/tag/v1.16.0)
-> PyPI 현재 배포: **1.15.0** · [PyPI](https://pypi.org/project/binggupack/) — `pip install binggupack`로 받는 버전입니다. v1.16.0 기능은 아래 `git clone`으로 사용하세요.
+> 현재 릴리스 **v1.17.0** ([CHANGELOG](CHANGELOG.md)): **MCP 24도구 전면 노출 · HTTP 모드(웹/앱 커넥터) · ChatGPT 저장 채널 · 원클릭 온보딩(`binggu onboard`) · backup/export/restore 데이터 주권 · CI ruff 정적 게이트**. 코어 로직 `binggupack/` 패키지 정본화(strangler·[ARCHITECTURE](docs/BINGGUPACK_ARCHITECTURE.md)) 진행. 저장은 여전히 사람 confirm(문구 정확 일치)만.
+> 최신 소스(git clone): **v1.17.0** · [Release](https://github.com/darkjokee-arch/binggupack/releases/tag/v1.17.0)
+> PyPI: [pypi.org/project/binggupack](https://pypi.org/project/binggupack/) — `pip install binggupack`. PyPI 반영이 늦으면 아래 `git clone`으로 최신을 사용하세요.
 > 로컬 우선 · 자동 저장 없음 · 내가 고른 것만 저장 · MIT License
 
 [처음 시작하기](docs/START_HERE.md) · [10분 튜토리얼](docs/BINGGUPACK_TUTORIAL.md) · [설치](INSTALL.md) · [Claude Code MCP](INSTALL.md#install-claude-code-mcp-sandbox-entry) · [캡처 hook](docs/BINGGUPACK_CAPTURE_HOOK_SETUP.md) · [문서 색인](docs/INDEX.md)
@@ -180,7 +182,7 @@ CLI 전체: init/start · status/doctor · preview/remember · reflect · save �
 
 clone해서 바로 쓸 수 있습니다. 아래에서 `binggu`라고 부르는 명령은 clone한 폴더에서는 `python binggu.py`로 실행하면 됩니다.
 
-일반 사용자는 PyPI 설치가 가장 짧습니다. (PyPI 현재 배포 = `1.15.0`. v1.16.0 기능은 아래 `git clone`으로 사용하세요.)
+일반 사용자는 PyPI 설치가 가장 짧습니다. (PyPI 반영이 늦으면 아래 `git clone`으로 최신 v1.17.0을 사용하세요.)
 
 ```bash
 pip install binggupack
