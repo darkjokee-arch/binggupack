@@ -234,7 +234,7 @@ def _parse_jsonl(s):
 def validate_opencrab_pack(files):
     """OpenCrab Desktop 기대 구조 검증 — 6개 결함을 각각 검출. {ok, issues}."""
     issues = []
-    docs = _parse_jsonl(files.get("cloud/documents.jsonl", ""))
+    _parse_jsonl(files.get("cloud/documents.jsonl", ""))
     chunks = _parse_jsonl(files.get("cloud/chunks.jsonl", ""))
     nodes = _parse_jsonl(files.get("graph/nodes.jsonl", ""))
     edges = _parse_jsonl(files.get("graph/edges.jsonl", ""))

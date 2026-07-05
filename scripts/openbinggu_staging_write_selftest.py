@@ -245,7 +245,7 @@ def staging_apply(db, pack, ctx, snap_dir, ts=None):
 def tombstone(db, node_id, ctx, snap_dir, ts=None):
     before = db.store_checksum()
     with db.write_lock():
-        snap = db.snapshot(snap_dir, "snap_t_" + _hash(before))
+        db.snapshot(snap_dir, "snap_t_" + _hash(before))
         db.con.execute("BEGIN")
         db.con.execute("UPDATE nodes SET state='tombstoned' WHERE node_id=?", (node_id,))
         db.con.execute("COMMIT")

@@ -229,7 +229,7 @@ def _selftest():
               "T1 init 전 → enabled False · hook 미등록")
 
         # T2 init → 플래그·scope(현재 cwd)·hook 등록
-        r = init_profile(home, cwd, hook_command=cmd, settings_path=settings)
+        init_profile(home, cwd, hook_command=cmd, settings_path=settings)
         st1 = status(home, cwd, settings)
         check(st1["enabled"] and st1["in_current_scope"] and st1["hook_registered"]
               and not st1["global"], "T2 init → enabled · 현재 scope ON · hook 등록 · global False")
@@ -272,7 +272,7 @@ def _selftest():
         buf = PersistentCaptureBuffer(home=home)
         buf.feed("이거 저장해", cwd)  # global ON 이라 수집됨
         had_buffer = buf.size >= 1
-        res = uninstall(home, settings_path=settings)
+        uninstall(home, settings_path=settings)
         st2 = status(home, cwd, settings)
         data3 = json.loads(settings.read_text(encoding="utf-8"))
         existing_kept = any("existing-hook.js" in h.get("command", "")

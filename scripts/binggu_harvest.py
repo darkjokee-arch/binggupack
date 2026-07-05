@@ -802,7 +802,7 @@ def _selftest():
 
     # T3 mock fetch 텍스트 → candidate=true·promotion_allowed=false 후보만 생성(영구 0)
     fetch_calls.clear()
-    mt_before = os.path.getmtime(lp)
+    os.path.getmtime(lp)
     before_active = sqlite3.connect(lp).execute(
         "SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
     r = run(runner=mock_fetch(SAMPLE))

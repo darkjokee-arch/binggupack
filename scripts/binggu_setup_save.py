@@ -153,7 +153,7 @@ def deploy_save_step(runner, apply=False, deploy=False):
 # ── [s4] secret put (stdin 주입) ────────────────────────────────────
 def _real_secret_runner(args, cwd=None, input_text=None):
     """wrangler secret put — 값은 stdin 으로만(argv/히스토리 노출 0). 호출 때만 subprocess."""
-    import subprocess  # noqa: 지역 import — 모듈 로드 시 외부명령 의존 0
+    import subprocess  # 지역 import — 모듈 로드 시 외부명령 의존 0
     npx = P.resolve_npx()
     proc = subprocess.run([npx, "wrangler"] + list(args), cwd=cwd,
                           capture_output=True, text=True, input=input_text)

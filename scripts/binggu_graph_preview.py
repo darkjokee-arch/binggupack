@@ -216,7 +216,7 @@ def _selftest():
        "중복 edge dedup(valid 1 + warn)")
 
     # 8) cycle 감지(warn) — 매트릭스 우회 합성 edge로 직접 주입
-    g8 = build_graph_preview(
+    build_graph_preview(
         [N("x", "판단", "t1", ["E1"]), N("y", "판단", "t2", ["E2"])],
         edge_candidates=[{"source_id": "x", "target_id": "y", "relation": SUPPORTS, "evidence_refs": ["E1"]},
                          {"source_id": "y", "target_id": "x", "relation": SUPPORTS, "evidence_refs": ["E2"]}])

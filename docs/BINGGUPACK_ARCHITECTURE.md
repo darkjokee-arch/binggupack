@@ -32,7 +32,7 @@ BingguPack은 **로컬 우선 개인 기억 엔진**입니다. 원본 기억은 
 | `mcp/` | MCP 서버 핸들러(server_handlers)·경로 게이트(path_gate_adapter) |
 | `workspace/` | 작업공간 정리(organize)·플랫폼(platform) |
 
-## strangler 이관 패턴 (진행 중)
+## strangler 이관 패턴 (동결 확정 — 2026-07-05)
 
 레거시 코드는 `scripts/openbinggu_*.py`·`scripts/watcher_*.py`·`scripts/binggu_*.py`에 있었습니다.
 이를 **한 번에 갈아엎지 않고**, 순수 로직만 `binggupack/` 정본으로 옮기고 원본은 얇은 위임(shim)만
@@ -46,6 +46,12 @@ BingguPack은 **로컬 우선 개인 기억 엔진**입니다. 원본 기억은 
 
 이관된 각 정본은 `--selftest` GATE(GO/NO-GO)와 `shim === 정본` 동일 객체(identity) 검증,
 그리고 전체 회귀 게이트를 통과한 뒤에만 반영됩니다.
+
+**동결 결정(2026-07-05)**: 배치 1~6에 걸쳐 순수 leaf 36+ 개 이관을 완료했고, 남은 ~90개는
+`build_pack`·`pack_review_e2e`·`consumer_smoke`·watcher 오케스트레이션 등 **파일 I/O 본체**라
+순수 코어가 빈약합니다(위 "억지로 옮기지 않는 것이 정답" 원칙 해당). 추가 이관은 회귀 위험 대비
+이득이 없어 **여기서 동결**합니다 — 신규 기능은 처음부터 `binggupack/` 정본으로 작성하고,
+scripts/ 는 shim + 오케스트레이션 잔류층으로 유지합니다(ruff F 게이트는 scripts/ 포함 0 유지).
 
 ## 검증 게이트
 

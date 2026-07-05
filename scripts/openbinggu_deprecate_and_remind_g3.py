@@ -440,7 +440,7 @@ def run():
         and all(it["node_id"] != "n2" for it in sig_n2["items"]))
 
     # --- 열린 분류 (keep / challenge / discard) — 에코챔버 차단 ---
-    before_cls = db.store_checksum()
+    db.store_checksum()
     rk = classify_harvest_item(db, "h1", "keep", "내 가치관과 일치", {"actor": "human"}, ts="2026-06-01T00:00:00")
     rc_ = classify_harvest_item(db, "h2", "challenge", "다르지만 근거 있음 — 도전 보관", {"actor": "human"}, ts="2026-06-01T00:00:00")
     rd = classify_harvest_item(db, "h3", "discard", "무근거", {"actor": "human"}, ts="2026-06-01T00:00:00")

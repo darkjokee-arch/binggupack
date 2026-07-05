@@ -457,7 +457,7 @@ def _selftest():
 
     # T10 사람기록 있어도 checksum 변화 없으면(=published 동일) NOOP — 이중게이트 AND
     calls.clear()
-    r1 = run(runner=mock_ok)   # 위 T9 가 published 갱신했을 수도 → 한 번 더
+    run(runner=mock_ok)   # 위 T9 가 published 갱신했을 수도 → 한 번 더
     calls.clear()
     r = run(runner=mock_ok)
     chk("T10 변화 없으면 사람기록 있어도 NOOP(AND 조건)", r["status"] == "NOOP")

@@ -158,7 +158,7 @@ def run_selftest():
     for name, nodes, ev_index, fresh, expect in _fixtures():
         r1 = _emit(nodes, ev_index, fresh, name)
         b1 = (TMP_OUT / name / "incoming_edges.jsonl").read_bytes()
-        r2 = _emit(nodes, ev_index, fresh, name)
+        _emit(nodes, ev_index, fresh, name)
         b2 = (TMP_OUT / name / "incoming_edges.jsonl").read_bytes()
         r1["idempotent"] = (b1 == b2)
         r1["expect"] = expect

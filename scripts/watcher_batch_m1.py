@@ -45,11 +45,11 @@ sys.path.insert(0, str(BASE))
 from binggupack.pack.batch_m1 import (  # noqa: E402  (모듈속성 re-export)
     batch_redact,
     scan_residual_pii,
-    PII_SHAPES,
-    BIZNO_SHAPE,
-    WHITELIST_CONTEXT,
-    DENYLIST_CONTEXT,
-    _SCAN_SHAPES,
+    PII_SHAPES,  # noqa: F401 — shim 재수출(하위호환)
+    BIZNO_SHAPE,  # noqa: F401 — shim 재수출(하위호환)
+    WHITELIST_CONTEXT,  # noqa: F401 — shim 재수출(하위호환)
+    DENYLIST_CONTEXT,  # noqa: F401 — shim 재수출(하위호환)
+    _SCAN_SHAPES,  # noqa: F401 — shim 재수출(하위호환)
 )
 
 SCOPE = "project:openbinggu"

@@ -732,7 +732,7 @@ def run():
         all(r["route"] == "approval_queue" and r["applied"] is False for r in (r_hook, r_dep, r_del)))
 
     # --- 12. safe apply: 안전(warn/rank) → 영수증 + 롤백점 자동 ---
-    before_safe = db.store_checksum()
+    db.store_checksum()
     r_warn = route_change(db, "warn", "랭킹 경고 표시", H, snap_dir, ts="2026-06-17T03:00:00Z")
     rec(12, "안전(warn) → 영수증(receipt_seq) + 자동 스냅샷 롤백점",
         r_warn["route"] == "auto_receipt" and r_warn["applied"] is True

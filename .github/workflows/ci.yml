@@ -50,7 +50,7 @@ jobs:
       - name: Ruff static gate (binggupack/ F-rules 0 — 7/3 달성 상태 고정)
         run: |
           pip install "ruff==0.15.20"
-          python -m ruff check binggupack/ --select F
+          python -m ruff check binggupack/ scripts/ --select F
 
       - name: Cross-platform policy selftest (40/40, GATE=GO)
         run: python scripts/binggu_platform_selftest.py

@@ -21,6 +21,7 @@ CLI:
 """
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -101,7 +102,7 @@ def run_selftest():
         diff_text = fp.read_text(encoding="utf-8")
         r1 = process_one(diff_text, fp.stem)
         b1 = (TMP_OUT / fp.stem / "incoming_nodes.jsonl").read_bytes()
-        r2 = process_one(diff_text, fp.stem)
+        process_one(diff_text, fp.stem)
         b2 = (TMP_OUT / fp.stem / "incoming_nodes.jsonl").read_bytes()
         r1["idempotent"] = (b1 == b2)
         cases.append(r1)

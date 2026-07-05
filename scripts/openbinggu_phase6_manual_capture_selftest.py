@@ -197,7 +197,7 @@ def _selftest():
     op_after = {p: (os.path.getmtime(p) if os.path.exists(p) else None) for p in OPERATING_PATHS}
     store_unchanged = (op_before == op_after)
     # 실 홈 binggupack write 0 (temp만 사용)
-    real_home_clean = not os.path.exists(os.path.join(real_home, "binggupack_cap_probe"))
+    not os.path.exists(os.path.join(real_home, "binggupack_cap_probe"))
 
     npass = sum(1 for _, _, v in results if v == "PASS")
     for cid, name, v in sorted(results, key=lambda x: int(x[0][1:])):

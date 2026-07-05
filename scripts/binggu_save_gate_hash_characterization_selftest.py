@@ -54,7 +54,7 @@ def run():
                      ("주민 901010-1234567", ["901010-1234567"]),
                      ("api sk-abcd1234efgh5678", ["sk-abcd1234efgh5678"])]:
         h = sent_hash(s)
-        n = _norm(s)
+        _norm(s)
         for leak in leaks:
             if leak in h:  # hash 에 원문 미노출
                 pii_ok = False; pii_detail = "PII leaked in hash: %r" % leak; break

@@ -62,7 +62,7 @@ def review_preview(token, queue_item, decision, resolver, evidence_store,
         return {"verdict": "BLOCK", "reason_code": arc, "stage": "scope", "confirmed_created": 0}
     reviewer = {"user_root": access["user_root"], "actor": access["actor_kind"],
                 "owner_approved": access["approval"]}
-    r = resolve = resolver.resolve(queue_item, decision, reviewer, evidence_store)
+    r = resolver.resolve(queue_item, decision, reviewer, evidence_store)
     r["stage"] = "resolve"
     return r
 

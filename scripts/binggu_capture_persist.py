@@ -472,7 +472,7 @@ def _selftest():
         ledger_mtime_c = ledger.stat().st_mtime_ns
         try:
             scope2.sem_preview_flag.write_text("1", encoding="utf-8")
-            pv_c1 = buf3.render_preview()   # semantic=None → get_cached_shadow → 생성 1
+            buf3.render_preview()   # semantic=None → get_cached_shadow → 생성 1
             pv_c2 = buf3.render_preview()   # 캐시 hit → 생성 0
             scope2.sem_preview_flag.unlink()
         finally:
