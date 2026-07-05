@@ -139,7 +139,7 @@ def gen_gif():
     print("demo.gif OK (%d frames)" % len(frames))
 
 
-# ── social_preview.png — 글로우 + 별자리 ────────────────────────────
+# ── social_preview.png — 빙구(얼음 구슬) 컨셉 · 글로우 ──────────────
 def gen_social():
     W2, H2 = 1280, 640
     im = Image.new("RGB", (W2, H2), BG)
@@ -147,58 +147,72 @@ def gen_social():
     for i in range(H2):  # 베이스 그라데이션
         t = i / H2
         d.line([(0, i), (W2, i)], fill=(11 + int(10 * t), 18 + int(13 * t), 32 + int(14 * t)))
-    # 글로우 레이어(인디고 좌상 · 민트 우하)
+    # 글로우(아이스 좌상 · 민트 우하)
     glow = Image.new("RGBA", (W2, H2), (0, 0, 0, 0))
     gd = ImageDraw.Draw(glow)
-    gd.ellipse([-260, -300, 560, 340], fill=(56, 72, 150, 90))
+    gd.ellipse([-260, -300, 560, 340], fill=(46, 88, 158, 90))
     gd.ellipse([820, 330, 1560, 900], fill=(16, 90, 70, 80))
-    gd.ellipse([60, 120, 500, 520], fill=(52, 211, 153, 26))
+    gd.ellipse([60, 120, 500, 520], fill=(56, 189, 248, 22))
     im = Image.alpha_composite(im.convert("RGBA"), glow.filter(ImageFilter.GaussianBlur(90))).convert("RGB")
     d = ImageDraw.Draw(im)
-    # 별자리(우측)
-    pts = [(1020, 96), (1106, 148), (1064, 236), (1190, 196), (1146, 300), (988, 300)]
-    edges = [(0, 1), (1, 2), (1, 3), (2, 4), (3, 4), (2, 5)]
-    for a, b in edges:
-        d.line([pts[a], pts[b]], fill=(59, 74, 107), width=2)
-    star_c = [(139, 156, 248), (94, 234, 212), (148, 163, 184), (148, 163, 184), (252, 211, 77), (148, 163, 184)]
-    for (x, y), c in zip(pts, star_c):
-        d.ellipse([x - 5, y - 5, x + 5, y + 5], fill=c)
-    for x, y, r in [(940, 70, 2), (1240, 110, 3), (1210, 330, 2), (900, 210, 2), (1250, 240, 2)]:
-        d.ellipse([x - r, y - r, x + r, y + r], fill=(120, 134, 160))
-    # 로고 카드(그림자)
+
+    ICE = (125, 211, 252)
+
+    def snowflake(cx, cy, arm, tipr, lw, alpha_line, core_r, tip_colors):
+        """눈결정 그래프 — 6가지 + 끝점 노드 + 민트 코어."""
+        import math
+        tips = []
+        for k in range(6):
+            ang = math.radians(k * 60 - 90)
+            tx, ty = cx + arm * math.cos(ang), cy + arm * math.sin(ang)
+            d.line([(cx, cy), (tx, ty)], fill=alpha_line, width=lw)
+            tips.append((tx, ty))
+        for (tx, ty), c in zip(tips, tip_colors):
+            d.ellipse([tx - tipr, ty - tipr, tx + tipr, ty + tipr], fill=c)
+        d.ellipse([cx - core_r, cy - core_r, cx + core_r, cy + core_r], fill=(52, 211, 153))
+        d.ellipse([cx - core_r // 2, cy - core_r // 2, cx + core_r // 2, cy + core_r // 2], fill=(236, 253, 245))
+
+    TIPS = [ICE, (129, 140, 248), (94, 234, 212), ICE, (129, 140, 248), (251, 191, 36)]
+
+    # 우측: 고스트 빙구
+    ocx, ocy, orr = 1108, 178, 118
+    ov = Image.new("RGBA", (W2, H2), (0, 0, 0, 0))
+    ImageDraw.Draw(ov).ellipse([ocx - orr, ocy - orr, ocx + orr, ocy + orr], fill=(39, 75, 126, 90))
+    im = Image.alpha_composite(im.convert("RGBA"), ov.filter(ImageFilter.GaussianBlur(4))).convert("RGB")
+    d = ImageDraw.Draw(im)
+    d.ellipse([ocx - orr, ocy - orr, ocx + orr, ocy + orr], outline=(93, 158, 210), width=3)
+    d.arc([ocx - orr + 18, ocy - orr + 12, ocx + orr - 30, ocy + orr - 60], 205, 285, fill=(224, 242, 254), width=6)
+    snowflake(ocx, ocy, 80, 7, 4, (94, 168, 220), 13, TIPS)
+    # 서리 반짝임
+    for x, y, l in [(960, 80, 9), (1246, 262, 7), (988, 268, 6), (1240, 96, 7)]:
+        d.line([(x, y - l), (x, y + l)], fill=(156, 200, 238), width=3)
+        d.line([(x - l, y), (x + l, y)], fill=(156, 200, 238), width=3)
+
+    # 로고 카드
     lx, ly, ls = 96, 176, 288
     shadow = Image.new("RGBA", (W2, H2), (0, 0, 0, 0))
     ImageDraw.Draw(shadow).rounded_rectangle([lx + 6, ly + 14, lx + ls + 6, ly + ls + 14], 56, fill=(0, 0, 0, 160))
     im = Image.alpha_composite(im.convert("RGBA"), shadow.filter(ImageFilter.GaussianBlur(14))).convert("RGB")
     d = ImageDraw.Draw(im)
     d.rounded_rectangle([lx, ly, lx + ls, ly + ls], 56, fill=(11, 18, 32), outline=(51, 65, 94), width=4)
-    for i, w in enumerate((66, 52, 66)):
-        yy = ly + 58 + i * 38
-        d.rounded_rectangle([lx + 44, yy, lx + 44 + w, yy + 9], 5, fill=(76, 90, 120))
-    d.rounded_rectangle([lx + 44, ly + 182, lx + 122, ly + 191], 5, fill=MINT)
-    pts2 = {"a": (lx + 186, ly + 62), "b": (lx + 230, ly + 114), "c": (lx + 178, ly + 162), "e": (lx + 236, ly + 202)}
-    # 노드 글로우
-    ng = Image.new("RGBA", (W2, H2), (0, 0, 0, 0))
-    ngd = ImageDraw.Draw(ng)
-    for p, c in (("a", (96, 165, 250)), ("b", (52, 211, 153)), ("c", (251, 191, 36)), ("e", (96, 165, 250))):
-        x, y = pts2[p]
-        ngd.ellipse([x - 26, y - 26, x + 26, y + 26], fill=c + (110,))
-    im = Image.alpha_composite(im.convert("RGBA"), ng.filter(ImageFilter.GaussianBlur(12))).convert("RGB")
-    d = ImageDraw.Draw(im)
-    for p, q in (("a", "b"), ("b", "c"), ("b", "e"), ("c", "e")):
-        d.line([pts2[p], pts2[q]], fill=(129, 140, 248), width=5)
-    for p, c, r in (("a", (96, 165, 250), 14), ("b", (52, 211, 153), 19), ("c", (251, 191, 36), 13), ("e", (96, 165, 250), 14)):
-        x, y = pts2[p]
-        d.ellipse([x - r, y - r, x + r, y + r], fill=c)
-    d.ellipse([pts2["b"][0] - 8, pts2["b"][1] - 8, pts2["b"][0] + 8, pts2["b"][1] + 8], fill=(236, 253, 245))
+    for i, w in enumerate((60, 48, 60)):
+        yy = ly + 62 + i * 38
+        d.rounded_rectangle([lx + 40, yy, lx + 40 + w, yy + 9], 5, fill=(76, 90, 120))
+    d.rounded_rectangle([lx + 40, ly + 186, lx + 112, ly + 195], 5, fill=MINT)
+    # 카드 속 미니 빙구
+    mcx, mcy, mrr = lx + 196, ly + 120, 66
+    d.ellipse([mcx - mrr, mcy - mrr, mcx + mrr, mcy + mrr], fill=(22, 41, 77), outline=(93, 158, 210), width=2)
+    d.arc([mcx - mrr + 10, mcy - mrr + 7, mcx + mrr - 18, mcy + mrr - 34], 205, 285, fill=(224, 242, 254), width=4)
+    snowflake(mcx, mcy, 46, 5, 3, (125, 190, 235), 9, TIPS)
     # 승인 도장
-    d.ellipse([lx + 40, ly + 218, lx + 96, ly + 274], fill=(5, 46, 34), outline=(52, 211, 153), width=4)
-    d.line([(lx + 54, ly + 246), (lx + 64, ly + 258), (lx + 84, ly + 232)], fill=(94, 234, 212), width=6, joint="curve")
+    d.ellipse([lx + 38, ly + 216, lx + 94, ly + 272], fill=(5, 46, 34), outline=(52, 211, 153), width=4)
+    d.line([(lx + 52, ly + 244), (lx + 62, ly + 256), (lx + 82, ly + 230)], fill=(94, 234, 212), width=6, joint="curve")
+
     # 타이포
-    d.text((448, 210), "빙구팩", font=font(92, True), fill=(241, 245, 249))
-    d.text((746, 240), "BingguPack", font=font(60, True), fill=(52, 211, 153))
-    d.text((452, 352), "AI와 일하며 쌓이는 내 판단·실수·취향을", font=font(34), fill=(203, 213, 225))
-    d.text((452, 402), "내 PC 안의 기억 장부로", font=font(34), fill=(203, 213, 225))
+    d.text((448, 202), "빙구팩", font=font(92, True), fill=(241, 245, 249))
+    d.text((746, 232), "BingguPack", font=font(60, True), fill=(52, 211, 153))
+    d.text((452, 344), "기억을 얼려, 신선하게 —", font=font(36, True), fill=(125, 211, 252))
+    d.text((452, 400), "내 판단·실수·취향을 내 PC 안의 기억 장부로", font=font(32), fill=(203, 213, 225))
     pills = [("자동 저장 없음", (14, 59, 44), (42, 163, 122), MINT),
              ("내가 승인한 것만", (24, 43, 82), (75, 101, 181), (165, 196, 252)),
              ("로컬 우선", (59, 43, 16), (176, 138, 46), (252, 211, 77))]

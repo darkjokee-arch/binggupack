@@ -1,27 +1,38 @@
 <svg width="1280" height="320" viewBox="0 0 1280 320" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Malgun Gothic, Apple SD Gothic Neo, sans-serif">
+  <!-- 빙구팩 = 빙(氷)+구(球) 얼음 구슬 · 아이스팩 — 기억을 얼려 신선하게 보존 -->
   <defs>
     <radialGradient id="bnA" cx="0.12" cy="0.1" r="0.9">
-      <stop offset="0" stop-color="#27346B" stop-opacity="0.9"/>
-      <stop offset="1" stop-color="#27346B" stop-opacity="0"/>
+      <stop offset="0" stop-color="#1E3A6E" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#1E3A6E" stop-opacity="0"/>
     </radialGradient>
     <radialGradient id="bnB" cx="0.95" cy="1.0" r="0.9">
-      <stop offset="0" stop-color="#0E4E3C" stop-opacity="0.85"/>
+      <stop offset="0" stop-color="#0E4E3C" stop-opacity="0.8"/>
       <stop offset="1" stop-color="#0E4E3C" stop-opacity="0"/>
     </radialGradient>
     <linearGradient id="bnBase" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#0C1426"/>
       <stop offset="1" stop-color="#0A1120"/>
     </linearGradient>
+    <radialGradient id="bnOrb" cx="0.38" cy="0.3" r="0.85">
+      <stop offset="0" stop-color="#274B7E" stop-opacity="0.95"/>
+      <stop offset="0.55" stop-color="#16294D" stop-opacity="0.85"/>
+      <stop offset="0.92" stop-color="#0E1B34" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#3E6EA8" stop-opacity="0.55"/>
+    </radialGradient>
+    <radialGradient id="bnOrbGhost" cx="0.4" cy="0.32" r="0.8">
+      <stop offset="0" stop-color="#274B7E" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#0E1B34" stop-opacity="0.15"/>
+    </radialGradient>
+    <linearGradient id="bnIce" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7DD3FC"/>
+      <stop offset="1" stop-color="#38BDF8"/>
+    </linearGradient>
     <linearGradient id="bnMint" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#5EEAD4"/>
       <stop offset="1" stop-color="#10B981"/>
     </linearGradient>
-    <linearGradient id="bnEdge" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#818CF8"/>
-      <stop offset="1" stop-color="#34D399"/>
-    </linearGradient>
     <filter id="bnGlow" x="-80%" y="-80%" width="260%" height="260%">
-      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feGaussianBlur stdDeviation="5" result="b"/>
       <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
     <filter id="bnSoft" x="-50%" y="-50%" width="200%" height="200%">
@@ -29,71 +40,95 @@
     </filter>
   </defs>
 
-  <!-- 배경: 베이스 + 메시 그라데이션 -->
+  <!-- 배경 -->
   <rect width="1280" height="320" rx="22" fill="url(#bnBase)"/>
   <rect width="1280" height="320" rx="22" fill="url(#bnA)"/>
   <rect width="1280" height="320" rx="22" fill="url(#bnB)"/>
   <rect x="1.5" y="1.5" width="1277" height="317" rx="20.5" fill="none" stroke="#26324D" stroke-width="3"/>
 
-  <!-- 별자리 필드(우측 여백) -->
-  <g stroke="#3B4A6B" stroke-width="1.4" opacity="0.7">
-    <line x1="1040" y1="70" x2="1112" y2="112"/>
-    <line x1="1112" y1="112" x2="1078" y2="184"/>
-    <line x1="1112" y1="112" x2="1196" y2="150"/>
-    <line x1="1078" y1="184" x2="1160" y2="240"/>
-    <line x1="1196" y1="150" x2="1160" y2="240"/>
+  <!-- 우측: 고스트 빙구(반투명 얼음 구슬 + 눈결정) -->
+  <g opacity="0.8">
+    <circle cx="1120" cy="160" r="105" fill="url(#bnOrbGhost)"/>
+    <circle cx="1120" cy="160" r="105" fill="none" stroke="#7DD3FC" stroke-width="2" opacity="0.35"/>
+    <path d="M 1048 104 A 92 92 0 0 1 1112 68" stroke="#E0F2FE" stroke-width="7" fill="none"
+          stroke-linecap="round" opacity="0.22"/>
+    <g stroke="#5EA8DC" stroke-width="4" stroke-linecap="round" opacity="0.6">
+      <line x1="1120" y1="160" x2="1120" y2="90"/>
+      <line x1="1120" y1="160" x2="1181" y2="125"/>
+      <line x1="1120" y1="160" x2="1181" y2="195"/>
+      <line x1="1120" y1="160" x2="1120" y2="230"/>
+      <line x1="1120" y1="160" x2="1059" y2="195"/>
+      <line x1="1120" y1="160" x2="1059" y2="125"/>
+    </g>
+    <g fill="#7DD3FC" opacity="0.75">
+      <circle cx="1120" cy="90" r="7"/>
+      <circle cx="1181" cy="125" r="6"/>
+      <circle cx="1181" cy="195" r="7" fill="#5EEAD4"/>
+      <circle cx="1120" cy="230" r="6"/>
+      <circle cx="1059" cy="195" r="7" fill="#818CF8"/>
+      <circle cx="1059" cy="125" r="6" fill="#FBBF24"/>
+    </g>
+    <circle cx="1120" cy="160" r="12" fill="url(#bnMint)" opacity="0.9"/>
   </g>
-  <g fill="#94A3B8">
-    <circle cx="1040" cy="70" r="4" opacity="0.7"/>
-    <circle cx="1112" cy="112" r="5.5" opacity="0.85" fill="#8B9CF8"/>
-    <circle cx="1078" cy="184" r="4" opacity="0.6"/>
-    <circle cx="1196" cy="150" r="4.5" opacity="0.7" fill="#5EEAD4"/>
-    <circle cx="1160" cy="240" r="4" opacity="0.6"/>
-    <circle cx="980" cy="196" r="2.5" opacity="0.4"/>
-    <circle cx="1230" cy="80" r="2.5" opacity="0.4"/>
-    <circle cx="948" cy="60" r="2" opacity="0.35"/>
-    <circle cx="1244" cy="262" r="2.5" opacity="0.4"/>
+  <!-- 서리 반짝임 -->
+  <g stroke="#9CC8EE" stroke-width="2.5" stroke-linecap="round" opacity="0.5">
+    <path d="M 968 74 v 14 M 961 81 h 14"/>
+    <path d="M 1244 250 v 12 M 1238 256 h 12"/>
+    <path d="M 992 246 v 10 M 987 251 h 10"/>
   </g>
 
-  <!-- 좌: 로고 마크 -->
+  <!-- 좌: 로고 마크(장부 + 미니 빙구) -->
   <g transform="translate(84,58)" filter="url(#bnSoft)">
     <rect width="204" height="204" rx="44" fill="#0B1220"/>
     <rect x="1.5" y="1.5" width="201" height="201" rx="42.5" fill="none" stroke="#33415E" stroke-width="3"/>
     <g stroke-linecap="round">
-      <line x1="34" y1="58" x2="82" y2="58" stroke="#4C5A78" stroke-width="7"/>
-      <line x1="34" y1="86" x2="72" y2="86" stroke="#4C5A78" stroke-width="7"/>
-      <line x1="34" y1="114" x2="82" y2="114" stroke="#4C5A78" stroke-width="7"/>
-      <line x1="34" y1="146" x2="86" y2="146" stroke="url(#bnMint)" stroke-width="7.5" filter="url(#bnGlow)"/>
+      <line x1="30" y1="56" x2="72" y2="56" stroke="#4C5A78" stroke-width="7"/>
+      <line x1="30" y1="82" x2="64" y2="82" stroke="#4C5A78" stroke-width="7"/>
+      <line x1="30" y1="108" x2="72" y2="108" stroke="#4C5A78" stroke-width="7"/>
+      <line x1="30" y1="138" x2="76" y2="138" stroke="url(#bnMint)" stroke-width="7.5" filter="url(#bnGlow)"/>
     </g>
-    <g stroke="url(#bnEdge)" stroke-width="3.5" opacity="0.95">
-      <line x1="130" y1="56" x2="160" y2="90"/>
-      <line x1="160" y1="90" x2="126" y2="120"/>
-      <line x1="160" y1="90" x2="164" y2="142"/>
-      <line x1="126" y1="120" x2="164" y2="142"/>
+    <!-- 미니 빙구 -->
+    <circle cx="140" cy="96" r="52" fill="url(#bnOrb)"/>
+    <circle cx="140" cy="96" r="52" fill="none" stroke="#7DD3FC" stroke-width="1.8" opacity="0.55"/>
+    <path d="M 105 68 A 46 46 0 0 1 136 50" stroke="#E0F2FE" stroke-width="4" fill="none"
+          stroke-linecap="round" opacity="0.35"/>
+    <g stroke="url(#bnIce)" stroke-width="3.4" stroke-linecap="round">
+      <line x1="140" y1="96" x2="140" y2="62"/>
+      <line x1="140" y1="96" x2="170" y2="79"/>
+      <line x1="140" y1="96" x2="170" y2="113"/>
+      <line x1="140" y1="96" x2="140" y2="130"/>
+      <line x1="140" y1="96" x2="110" y2="113"/>
+      <line x1="140" y1="96" x2="110" y2="79"/>
     </g>
-    <circle cx="130" cy="56" r="10" fill="#60A5FA" filter="url(#bnGlow)"/>
-    <circle cx="160" cy="90" r="13.5" fill="url(#bnMint)" filter="url(#bnGlow)"/>
-    <circle cx="126" cy="120" r="8.5" fill="#FBBF24" filter="url(#bnGlow)"/>
-    <circle cx="164" cy="142" r="10" fill="#60A5FA" filter="url(#bnGlow)"/>
-    <circle cx="160" cy="90" r="5.5" fill="#ECFDF5"/>
+    <g fill="#7DD3FC">
+      <circle cx="140" cy="62" r="5"/>
+      <circle cx="170" cy="79" r="4.5" fill="#818CF8"/>
+      <circle cx="170" cy="113" r="5" fill="#5EEAD4"/>
+      <circle cx="140" cy="130" r="4.5"/>
+      <circle cx="110" cy="113" r="5" fill="#818CF8"/>
+      <circle cx="110" cy="79" r="4.5" fill="#FBBF24"/>
+    </g>
+    <circle cx="140" cy="96" r="9" fill="url(#bnMint)" filter="url(#bnGlow)"/>
+    <circle cx="140" cy="96" r="4" fill="#ECFDF5"/>
+    <!-- 승인 도장 -->
     <g>
-      <circle cx="62" cy="176" r="15" fill="#052E22" stroke="url(#bnMint)" stroke-width="2.5"/>
-      <path d="M 55 176 L 60 181.5 L 70 170" stroke="#5EEAD4" stroke-width="3.5" fill="none"
+      <circle cx="52" cy="172" r="15" fill="#052E22" stroke="url(#bnMint)" stroke-width="2.5"/>
+      <path d="M 45 172 L 50 177.5 L 60 166" stroke="#5EEAD4" stroke-width="3.5" fill="none"
             stroke-linecap="round" stroke-linejoin="round"/>
     </g>
   </g>
 
-  <!-- 우: 워드마크 + 태그라인 + 원칙 필 -->
-  <text x="344" y="136" fill="#F1F5F9" font-size="66" font-weight="800" letter-spacing="-1">빙구팩
-    <tspan fill="url(#bnMint)" font-size="58"> BingguPack</tspan></text>
-  <text x="348" y="186" fill="#B7C3D8" font-size="25">AI와 일하며 쌓이는 내 판단·실수·취향을 — 내 PC 안의 기억 장부로</text>
+  <!-- 우: 워드마크 + 태그라인 -->
+  <text x="330" y="126" fill="#F1F5F9" font-size="64" font-weight="800" letter-spacing="-1">빙구팩
+    <tspan fill="url(#bnMint)" font-size="56"> BingguPack</tspan></text>
+  <text x="334" y="176" fill="#B7C3D8" font-size="25">기억을 얼려, 신선하게 — 내 판단·실수·취향을 내 PC 안의 기억 장부로</text>
 
   <g font-size="19" font-weight="700">
-    <rect x="348" y="216" width="158" height="42" rx="21" fill="#0E3B2C" stroke="#2AA37A" stroke-width="1.5"/>
-    <text x="427" y="243" text-anchor="middle" fill="#5EEAD4">자동 저장 없음</text>
-    <rect x="522" y="216" width="188" height="42" rx="21" fill="#182B52" stroke="#4B65B5" stroke-width="1.5"/>
-    <text x="616" y="243" text-anchor="middle" fill="#A5C4FC">내가 승인한 것만</text>
-    <rect x="726" y="216" width="142" height="42" rx="21" fill="#3B2B10" stroke="#B08A2E" stroke-width="1.5"/>
-    <text x="797" y="243" text-anchor="middle" fill="#FCD34D">로컬 우선</text>
+    <rect x="334" y="210" width="158" height="42" rx="21" fill="#0E3B2C" stroke="#2AA37A" stroke-width="1.5"/>
+    <text x="413" y="237" text-anchor="middle" fill="#5EEAD4">자동 저장 없음</text>
+    <rect x="508" y="210" width="188" height="42" rx="21" fill="#182B52" stroke="#4B65B5" stroke-width="1.5"/>
+    <text x="602" y="237" text-anchor="middle" fill="#A5C4FC">내가 승인한 것만</text>
+    <rect x="712" y="210" width="142" height="42" rx="21" fill="#3B2B10" stroke="#B08A2E" stroke-width="1.5"/>
+    <text x="783" y="237" text-anchor="middle" fill="#FCD34D">로컬 우선</text>
   </g>
 </svg>

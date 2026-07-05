@@ -1,24 +1,32 @@
 <svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <!-- 빙구팩 = 빙(氷)+구(球) 얼음 구슬 · 아이스팩(신선 보존) — 기억을 얼려 보존하는 구체 속
+       눈결정 지식그래프(가지=근거 엣지 · 끝점=기억 노드) + 장부 라인 + 승인 도장. -->
   <defs>
-    <radialGradient id="lgBg" cx="0.35" cy="0.28" r="1.1">
-      <stop offset="0" stop-color="#1D2E52"/>
-      <stop offset="0.55" stop-color="#111B33"/>
+    <radialGradient id="lgBg" cx="0.35" cy="0.25" r="1.15">
+      <stop offset="0" stop-color="#16294D"/>
+      <stop offset="0.55" stop-color="#0F1A33"/>
       <stop offset="1" stop-color="#0A1120"/>
     </radialGradient>
-    <linearGradient id="lgTopLight" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.07"/>
-      <stop offset="0.4" stop-color="#FFFFFF" stop-opacity="0"/>
+    <radialGradient id="lgOrb" cx="0.38" cy="0.3" r="0.85">
+      <stop offset="0" stop-color="#274B7E" stop-opacity="0.95"/>
+      <stop offset="0.55" stop-color="#16294D" stop-opacity="0.85"/>
+      <stop offset="0.92" stop-color="#0E1B34" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#3E6EA8" stop-opacity="0.55"/>
+    </radialGradient>
+    <linearGradient id="lgIce" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7DD3FC"/>
+      <stop offset="1" stop-color="#38BDF8"/>
     </linearGradient>
     <linearGradient id="lgMint" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#5EEAD4"/>
       <stop offset="1" stop-color="#10B981"/>
     </linearGradient>
-    <linearGradient id="lgEdge" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#818CF8"/>
-      <stop offset="1" stop-color="#34D399"/>
+    <linearGradient id="lgTopLight" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.07"/>
+      <stop offset="0.4" stop-color="#FFFFFF" stop-opacity="0"/>
     </linearGradient>
     <filter id="lgGlow" x="-80%" y="-80%" width="260%" height="260%">
-      <feGaussianBlur stdDeviation="10" result="b"/>
+      <feGaussianBlur stdDeviation="9" result="b"/>
       <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
     <filter id="lgSoft" x="-50%" y="-50%" width="200%" height="200%">
@@ -33,51 +41,68 @@
     <rect x="27.5" y="27.5" width="457" height="457" rx="102.5" fill="none" stroke="#33415E" stroke-width="3"/>
   </g>
 
-  <!-- 은은한 별 필드(기억의 배경) -->
-  <g fill="#94A3B8">
-    <circle cx="120" cy="90" r="3" opacity="0.35"/>
-    <circle cx="392" cy="76" r="2.5" opacity="0.3"/>
-    <circle cx="430" cy="150" r="2" opacity="0.25"/>
-    <circle cx="84" cy="410" r="2.5" opacity="0.28"/>
-    <circle cx="240" cy="66" r="2" opacity="0.25"/>
-    <circle cx="448" cy="300" r="2" opacity="0.22"/>
+  <!-- 서리 반짝임 -->
+  <g stroke="#9CC8EE" stroke-width="3" stroke-linecap="round" opacity="0.55">
+    <path d="M 116 96 v 18 M 107 105 h 18"/>
+    <path d="M 428 132 v 14 M 421 139 h 14"/>
+    <path d="M 96 396 v 14 M 89 403 h 14"/>
   </g>
+  <circle cx="404" cy="86" r="3" fill="#9CC8EE" opacity="0.5"/>
+  <circle cx="452" cy="300" r="2.5" fill="#9CC8EE" opacity="0.4"/>
 
-  <!-- 장부(왼쪽): 기록 라인 + 승인 라인 -->
+  <!-- 장부(왼쪽): 기록 + 승인 라인 -->
   <g stroke-linecap="round">
-    <line x1="98" y1="158" x2="206" y2="158" stroke="#4C5A78" stroke-width="13"/>
-    <line x1="98" y1="212" x2="186" y2="212" stroke="#4C5A78" stroke-width="13"/>
-    <line x1="98" y1="266" x2="206" y2="266" stroke="#4C5A78" stroke-width="13"/>
-    <line x1="98" y1="320" x2="176" y2="320" stroke="#4C5A78" stroke-width="13"/>
-    <line x1="98" y1="380" x2="212" y2="380" stroke="url(#lgMint)" stroke-width="14" filter="url(#lgGlow)"/>
+    <line x1="80" y1="164" x2="168" y2="164" stroke="#4C5A78" stroke-width="13"/>
+    <line x1="80" y1="216" x2="150" y2="216" stroke="#4C5A78" stroke-width="13"/>
+    <line x1="80" y1="268" x2="168" y2="268" stroke="#4C5A78" stroke-width="13"/>
+    <line x1="80" y1="326" x2="174" y2="326" stroke="url(#lgMint)" stroke-width="14" filter="url(#lgGlow)"/>
   </g>
 
-  <!-- 승인분 → 그래프로 흐르는 점선 -->
-  <path d="M 224 376 C 272 372 278 320 306 306" stroke="#34D399" stroke-width="9"
-        fill="none" stroke-linecap="round" stroke-dasharray="0.5 19" opacity="0.95"/>
+  <!-- 승인분 → 구체로 흡수되는 점선 -->
+  <path d="M 186 322 C 226 316 228 296 246 284" stroke="#34D399" stroke-width="8"
+        fill="none" stroke-linecap="round" stroke-dasharray="0.5 17" opacity="0.95"/>
 
-  <!-- 기억의 별자리(오른쪽): 그라데이션 엣지 + 글로우 노드 -->
-  <g stroke="url(#lgEdge)" stroke-width="7" opacity="0.95">
-    <line x1="330" y1="150" x2="404" y2="232"/>
-    <line x1="404" y1="232" x2="318" y2="302"/>
-    <line x1="404" y1="232" x2="416" y2="354"/>
-    <line x1="318" y1="302" x2="416" y2="354"/>
-    <line x1="330" y1="150" x2="416" y2="120" opacity="0.45"/>
+  <!-- 빙구(얼음 구슬) -->
+  <circle cx="330" cy="252" r="138" fill="url(#lgOrb)" filter="url(#lgSoft)"/>
+  <circle cx="330" cy="252" r="138" fill="none" stroke="#7DD3FC" stroke-width="3" opacity="0.55"/>
+  <!-- 스펙큘러 하이라이트 -->
+  <path d="M 236 176 A 122 122 0 0 1 320 130" stroke="#E0F2FE" stroke-width="10"
+        fill="none" stroke-linecap="round" opacity="0.35"/>
+  <circle cx="262" cy="160" r="7" fill="#E0F2FE" opacity="0.5"/>
+
+  <!-- 눈결정 지식그래프 (6가지 · 가지끝 = 기억 노드) -->
+  <g stroke="url(#lgIce)" stroke-width="7" stroke-linecap="round" opacity="0.95">
+    <line x1="330" y1="252" x2="330" y2="158"/>
+    <line x1="330" y1="252" x2="411" y2="205"/>
+    <line x1="330" y1="252" x2="411" y2="299"/>
+    <line x1="330" y1="252" x2="330" y2="346"/>
+    <line x1="330" y1="252" x2="249" y2="299"/>
+    <line x1="330" y1="252" x2="249" y2="205"/>
   </g>
-  <circle cx="416" cy="120" r="10" fill="#818CF8" opacity="0.8" filter="url(#lgGlow)"/>
-  <circle cx="330" cy="150" r="24" fill="#60A5FA" filter="url(#lgGlow)"/>
-  <circle cx="330" cy="150" r="11" fill="#DBEAFE"/>
-  <circle cx="404" cy="232" r="33" fill="url(#lgMint)" filter="url(#lgGlow)"/>
-  <circle cx="404" cy="232" r="14" fill="#ECFDF5"/>
-  <circle cx="318" cy="302" r="21" fill="#FBBF24" filter="url(#lgGlow)"/>
-  <circle cx="318" cy="302" r="9" fill="#FEF3C7"/>
-  <circle cx="416" cy="354" r="23" fill="#60A5FA" filter="url(#lgGlow)"/>
-  <circle cx="416" cy="354" r="10" fill="#DBEAFE"/>
+  <!-- 결정 가지(branch tick) -->
+  <g stroke="#7DD3FC" stroke-width="4.5" stroke-linecap="round" opacity="0.8">
+    <path d="M 330 196 l -14 -12 M 330 196 l 14 -12"/>
+    <path d="M 379 224 l -2 -18 M 379 224 l 16 8"/>
+    <path d="M 379 280 l 16 -8 M 379 280 l -2 18"/>
+    <path d="M 330 308 l 14 12 M 330 308 l -14 12"/>
+    <path d="M 281 280 l 2 18 M 281 280 l -16 -8"/>
+    <path d="M 281 224 l -16 8 M 281 224 l 2 -18"/>
+  </g>
+  <!-- 기억 노드(가지 끝) -->
+  <circle cx="330" cy="158" r="14" fill="#7DD3FC" filter="url(#lgGlow)"/>
+  <circle cx="411" cy="205" r="12" fill="#818CF8" filter="url(#lgGlow)"/>
+  <circle cx="411" cy="299" r="14" fill="#5EEAD4" filter="url(#lgGlow)"/>
+  <circle cx="330" cy="346" r="12" fill="#7DD3FC" filter="url(#lgGlow)"/>
+  <circle cx="249" cy="299" r="14" fill="#818CF8" filter="url(#lgGlow)"/>
+  <circle cx="249" cy="205" r="12" fill="#FBBF24" filter="url(#lgGlow)"/>
+  <!-- 중심 코어(승인된 기억) -->
+  <circle cx="330" cy="252" r="24" fill="url(#lgMint)" filter="url(#lgGlow)"/>
+  <circle cx="330" cy="252" r="10" fill="#ECFDF5"/>
 
-  <!-- 승인 도장: "내가 승인한 것만" 정체성 -->
+  <!-- 승인 도장 -->
   <g>
-    <circle cx="238" cy="430" r="34" fill="#052E22" stroke="url(#lgMint)" stroke-width="5"/>
-    <path d="M 222 430 L 233 442 L 256 416" stroke="#5EEAD4" stroke-width="8" fill="none"
+    <circle cx="128" cy="416" r="34" fill="#052E22" stroke="url(#lgMint)" stroke-width="5"/>
+    <path d="M 112 416 L 123 428 L 146 402" stroke="#5EEAD4" stroke-width="8" fill="none"
           stroke-linecap="round" stroke-linejoin="round"/>
   </g>
 </svg>
