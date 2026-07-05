@@ -109,6 +109,72 @@ def backup_ledger(ledger_path, out_path=None, home=None, ts=None):
             "nodes": len(data["nodes"]), "edges": len(data["edges"])}
 
 
+def restore_ledger(backup_path, ledger_path, home=None, ts=None, confirm=None):
+    """백업 스냅샷으로 운영 ledger 를 교체(파괴적 · confirm 정확 일치 게이트).
+
+    confirm 미지정/불일치 → 검증 결과만 반환(write 0). 정확 일치("RESTORE <백업파일명>") 시:
+      ① 백업 유효성(sqlite + nodes 테이블) ② 현 ledger 를 _backup/pre_restore_<ts>.sqlite
+      자동 스냅샷(복구의 복구) ③ os.replace 원자 교체 + 낡은 -wal/-shm 제거
+      (직전 스냅샷이 WAL 반영분 포함이므로 안전).
+    반환 status: NO_BACKUP / INVALID_BACKUP / DRY_RUN / CONFIRM_MISMATCH /
+                 PRE_SNAPSHOT_FAIL / BUSY / OK.
+    """
+    import shutil
+    if not backup_path or not os.path.exists(backup_path):
+        return {"status": "NO_BACKUP", "backup": backup_path}
+    try:
+        con = _connect_ro(backup_path)
+        try:
+            tables = {r[0] for r in con.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        finally:
+            con.close()
+    except sqlite3.DatabaseError:
+        return {"status": "INVALID_BACKUP", "backup": backup_path}
+    if "nodes" not in tables:
+        return {"status": "INVALID_BACKUP", "backup": backup_path, "reason": "no_nodes_table"}
+    bdata = read_all(backup_path)
+    cur = read_all(ledger_path) if os.path.exists(ledger_path) else {"nodes": [], "edges": []}
+    expected = "RESTORE " + os.path.basename(backup_path)
+    info = {"backup": backup_path, "backup_nodes": len(bdata["nodes"]),
+            "backup_edges": len(bdata["edges"]), "current_nodes": len(cur["nodes"]),
+            "current_edges": len(cur["edges"]), "expected_confirm": expected}
+    if confirm != expected:
+        info["status"] = "CONFIRM_MISMATCH" if confirm else "DRY_RUN"
+        return info
+    pre = None
+    if os.path.exists(ledger_path):
+        base = home or os.path.dirname(ledger_path)
+        pre_path = os.path.join(base, "_backup", "pre_restore_%s.sqlite" % _stamp(ts))
+        b = backup_ledger(ledger_path, out_path=pre_path, home=base, ts=ts)
+        if b["status"] != "OK":
+            info["status"] = "PRE_SNAPSHOT_FAIL"
+            return info
+        pre = b["out_path"]
+    d = os.path.dirname(ledger_path) or "."
+    os.makedirs(d, exist_ok=True)
+    tmp_path = os.path.join(d, ".restore_tmp_%s" % _stamp(ts))
+    shutil.copy2(backup_path, tmp_path)
+    try:
+        os.replace(tmp_path, ledger_path)
+    except OSError as e:  # 다른 프로세스(MCP/auto-pull)가 잡고 있으면 교체 실패 — 원본 무손상
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        info.update({"status": "BUSY", "error": str(e)})
+        return info
+    for suf in ("-wal", "-shm"):
+        try:
+            os.remove(ledger_path + suf)
+        except OSError:
+            pass
+    after = read_all(ledger_path)
+    info.update({"status": "OK", "pre_snapshot": pre,
+                 "nodes": len(after["nodes"]), "edges": len(after["edges"])})
+    return info
+
+
 _TYPE_ORDER = ["judgment", "판단", "concept", "개념", "state", "상태",
                "evidence", "증거", "document", "문서"]
 
@@ -238,6 +304,36 @@ def _selftest():
         ck(read_all(os.path.join(tmp, "none.sqlite"))["nodes"] == [], "부재 ledger → 빈 세트(graceful)")
         ck(backup_ledger(os.path.join(tmp, "none.sqlite"))["status"] == "NO_LEDGER",
            "부재 ledger backup → NO_LEDGER(에러 0)")
+
+        # 6. restore dry-run — 안내만 · write 0
+        conn = sqlite3.connect(led)
+        conn.execute("INSERT INTO nodes VALUES('n3','state','복원 시험','active',NULL,'ai','t2',0,1)")
+        conn.commit()
+        conn.close()
+        r = restore_ledger(b["out_path"], led)
+        ck(r["status"] == "DRY_RUN" and r["backup_nodes"] == 2 and r["current_nodes"] == 3
+           and len(read_all(led)["nodes"]) == 3, "restore dry-run — 검증만 · 교체 0")
+
+        # 7. confirm 불일치 → 거부 + write 0
+        r = restore_ledger(b["out_path"], led, confirm="RESTORE wrong.sqlite")
+        ck(r["status"] == "CONFIRM_MISMATCH" and len(read_all(led)["nodes"]) == 3,
+           "restore confirm 불일치 → 거부 + 교체 0")
+
+        # 8. 정확 confirm → 교체 + 직전 상태 pre_restore 스냅샷(복구의 복구)
+        r = restore_ledger(b["out_path"], led,
+                           confirm="RESTORE " + os.path.basename(b["out_path"]))
+        ck(r["status"] == "OK" and len(read_all(led)["nodes"]) == 2
+           and r["pre_snapshot"] and os.path.exists(r["pre_snapshot"])
+           and len(read_all(r["pre_snapshot"])["nodes"]) == 3,
+           "restore 정확 confirm — 교체 성공 + pre_restore 스냅샷 3노드 보존")
+
+        # 9. 비 sqlite 백업 → INVALID + 원본 무접촉
+        bad = os.path.join(tmp, "bad.sqlite")
+        with open(bad, "w", encoding="utf-8") as f:
+            f.write("not a database")
+        r = restore_ledger(bad, led, confirm="RESTORE bad.sqlite")
+        ck(r["status"] == "INVALID_BACKUP" and len(read_all(led)["nodes"]) == 2,
+           "restore 비정상 백업 → INVALID + 원본 무손상")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

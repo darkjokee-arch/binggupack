@@ -1100,6 +1100,41 @@ def cmd_onboard(a):
     return 0 if res2["halted_at"] is None else 2
 
 
+def cmd_restore(a):
+    """restore — 백업 스냅샷으로 장부 교체(파괴적 · confirm 정확 일치 필수).
+    confirm 없이 실행하면 검증 결과 + 기대 confirm 문구만 안내(write 0).
+    교체 직전 현 장부를 _backup/pre_restore_<ts>.sqlite 로 자동 스냅샷(복구의 복구)."""
+    from binggupack.workspace import archive as AR
+    ledger, _ = _ledger_paths(a.ledger)
+    res = AR.restore_ledger(a.backup, ledger, home=os.path.dirname(ledger),
+                            confirm=getattr(a, "confirm", None))
+    st = res["status"]
+    if st == "NO_BACKUP":
+        print("백업 파일이 없습니다: %s" % res.get("backup"))
+        return 1
+    if st == "INVALID_BACKUP":
+        print("백업 파일이 유효한 장부가 아닙니다: %s (%s)" % (res.get("backup"), res.get("reason", "not_sqlite")))
+        return 1
+    if st in ("DRY_RUN", "CONFIRM_MISMATCH"):
+        if st == "CONFIRM_MISMATCH":
+            print("confirm 불일치 — 교체하지 않았습니다(write 0).")
+        print("백업: 노드 %d · 엣지 %d  ↔  현재: 노드 %d · 엣지 %d"
+              % (res["backup_nodes"], res["backup_edges"], res["current_nodes"], res["current_edges"]))
+        print('교체하려면:  python binggu.py restore "%s" --confirm "%s"'
+              % (res["backup"], res["expected_confirm"]))
+        return 0 if st == "DRY_RUN" else 1
+    if st == "BUSY":
+        print("장부를 다른 프로세스가 사용 중이라 교체 실패(원본 무손상): %s" % res.get("error"))
+        print("Claude 앱/Code·auto-pull 을 잠시 멈춘 뒤 재시도하세요.")
+        return 1
+    if st == "PRE_SNAPSHOT_FAIL":
+        print("교체 직전 자동 스냅샷 실패 — 안전을 위해 교체하지 않았습니다.")
+        return 1
+    print("복원 완료: 노드 %d · 엣지 %d ← %s" % (res["nodes"], res["edges"], res["backup"]))
+    print("직전 상태 스냅샷(되돌리기용): %s" % res.get("pre_snapshot"))
+    return 0
+
+
 def cmd_backup(a):
     """backup — 장부를 일관 스냅샷으로 복사(운영 write 0). 기본 <home>/_backup/ledger_<ts>.sqlite."""
     from binggupack.workspace import archive as AR
@@ -1245,6 +1280,9 @@ def main():
     exp = sub.add_parser("export")   # 장부 내보내기(md/json · 데이터 주권)
     exp.add_argument("--format", dest="fmt", choices=["md", "json"], default="md")
     exp.add_argument("--out", default=None)
+    rsp = sub.add_parser("restore")  # 백업 → 장부 교체(파괴적 · confirm 정확 일치 게이트)
+    rsp.add_argument("backup")                           # 백업 sqlite 경로
+    rsp.add_argument("--confirm", default=None)          # "RESTORE <백업파일명>" 정확 일치
     a = p.parse_args()
     fn = {"init": cmd_init, "start": cmd_init, "status": cmd_status, "doctor": cmd_status,
           "preview": cmd_preview, "remember": lambda a: cmd_preview(a, explicit=True),  # remember=명시 입력
@@ -1256,7 +1294,8 @@ def main():
           "hosted": cmd_hosted, "harvest": cmd_harvest, "setup-cloud": cmd_setup_cloud,
           "onboard": cmd_onboard,
           "confirm-edges": cmd_confirm_edges, "pair": cmd_pair, "trust": cmd_trust,
-          "route": cmd_route, "backup": cmd_backup, "export": cmd_export}[a.cmd]
+          "route": cmd_route, "backup": cmd_backup, "export": cmd_export,
+          "restore": cmd_restore}[a.cmd]
     sys.exit(fn(a))
 
 

@@ -243,6 +243,17 @@ def autopull_scheduler_step(os_name, runner=None, task_exists=None, apply=False)
                 % SCHED_TASK_NAME)
 
 
+# ── [s8] 웹 MCP(선택) 안내 — 정보만(변경 0) ─────────────────────────
+def web_mcp_guide_step():
+    """로컬 24도구를 웹/앱 커넥터로 여는 선택 단계 안내. 공개 터널 노출은 본인 직접
+    실행이 정책(자동 등록 0 — classifier/보안 경계와 동일)."""
+    return step("s8", INFO, "(선택) 웹 MCP — 로컬 24도구를 claude/ChatGPT 커넥터로",
+                "cloudflared 설치(https://developers.cloudflare.com/cloudflared/) 후 본인 셸에서:\n"
+                "  powershell -ExecutionPolicy Bypass -File \"%s\"\n"
+                "  주소는 <home>/mcp_web_url.txt (quick tunnel — 재부팅 시 갱신)"
+                % os.path.join(SCRIPTS_DIR, "register_webmcp.ps1"))
+
+
 # ── 오케스트레이터 ─────────────────────────────────────────────────
 def run_save_setup(apply=False, deploy=False, show_url=False, os_name=None, wp_dir=None,
                    login_runner=None, deploy_runner=None, secret_runner=None,
@@ -292,6 +303,9 @@ def run_save_setup(apply=False, deploy=False, show_url=False, os_name=None, wp_d
     # [s7] auto-pull 스케줄러
     steps.append(autopull_scheduler_step(os_name, runner=sched_runner,
                                          task_exists=task_exists, apply=apply))
+
+    # [s8] 웹 MCP 안내(선택 · 정보만)
+    steps.append(web_mcp_guide_step())
 
     return {"apply": apply, "deploy": deploy, "steps": steps, "halted_at": None}
 
@@ -463,6 +477,12 @@ def _selftest():
 
     # 34. 실 toml 존재(repo 정합 — 읽기만)
     chk("34.실 wrangler.save_mcp.prod.toml 존재", os.path.exists(WRANGLER_SAVE))
+
+    # 35. [s8] 웹 MCP 안내 — 항상 INFO(변경 0) + 등록 스크립트 경로 포함
+    s35 = web_mcp_guide_step()
+    chk("35.웹 MCP 안내 = INFO + register_webmcp 경로",
+        s35["status"] == INFO and "register_webmcp.ps1" in (s35["hint"] or ""))
+    chk("36.run_save_setup 에 s8 포함", any(s["stage"] == "s8" for s in res3["steps"]))
 
     print("\n" + "=" * 62)
     print("binggu_setup_save — selftest (mock + temp · 실 CF/스케줄러 미접촉)")

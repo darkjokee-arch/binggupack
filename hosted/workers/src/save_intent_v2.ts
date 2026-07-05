@@ -8,6 +8,7 @@
 // 변수명에 token·secret 류 + '=' 조합 금지 — 공개 트리 스캐너 자기검출 회피 (6/10 박제)
 
 import { SIG_WINDOW_S, sigV2Only, verifySig } from "./save_common";
+import { scanPii, hasSecret } from "./capture_preview";
 
 const SCHEMA_VER = 1;
 const TEXT_CAP = 36000;
@@ -187,6 +188,9 @@ export function makeSaveV2Handler() {
       }
       const reason = shapeReject(body);
       if (reason !== null) return denyJson(400, reason);
+      // PII/secret 백스톱 — 서명 채널(intent)에도 원문 PII 적재 0 (save_mcp put 경로 패리티)
+      const txt = String(body.text ?? "");
+      if (scanPii(txt).length > 0 || hasSecret(txt)) return denyJson(400, "pii_in_text");
       const it = {
         schema_ver: SCHEMA_VER, intent_id: body.intent_id, text: body.text,
         indices: body.indices, confirm: body.confirm,

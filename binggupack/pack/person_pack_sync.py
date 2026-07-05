@@ -28,11 +28,29 @@ from binggupack import paths as binggu_paths
 from binggupack.safety.t3_filter import filter_uploadable
 
 # owner 온톨로지 팩(2026-07-02 최초 업로드) — 갱신 대상.
-# 사용자별 일반화: 다른 사용자는 BINGGU_PACK_ID/BINGGU_PACK_TITLE 환경변수로 자기 팩을 지정.
-# 미설정 시 owner 기본값 유지(기존 동작 회귀 0).
-PACK_ID = os.environ.get("BINGGU_PACK_ID") or "4da76877-e286-449f-8116-569be4056838"
+# 사용자별 일반화(우선순위): env BINGGU_PACK_ID/BINGGU_PACK_TITLE > <home>/person_pack.json
+# ({"pack_id":..., "title":...}) > owner 기본값(기존 동작 회귀 0). 온보딩이 config 파일을 안내.
 STATE_FILE = "person_pack_last.json"
-PACK_TITLE = os.environ.get("BINGGU_PACK_TITLE") or "사장님 의사결정 원칙 온톨로지"
+PACK_CONFIG_FILE = "person_pack.json"
+
+
+def _pack_config():
+    """env > config 파일 > owner 기본값. import 시점 1회 해석(env 해석과 동일 시맨틱)."""
+    pid = os.environ.get("BINGGU_PACK_ID")
+    title = os.environ.get("BINGGU_PACK_TITLE")
+    if not (pid and title):
+        try:
+            with open(binggu_paths.state_path(PACK_CONFIG_FILE), encoding="utf-8") as f:
+                c = json.load(f)
+            pid = pid or (c.get("pack_id") or None)
+            title = title or (c.get("title") or None)
+        except Exception:  # 부재/손상 → 다음 폴백(기본값)
+            pass
+    return (pid or "4da76877-e286-449f-8116-569be4056838",
+            title or "사장님 의사결정 원칙 온톨로지")
+
+
+PACK_ID, PACK_TITLE = _pack_config()
 
 
 def _home():
