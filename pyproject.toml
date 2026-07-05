@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "binggupack"
-version = "1.16.0"   # v1.16.0 — 외부 리뷰 5건 정리(PII scan 버그·툴체인 점진 도입·브랜드 통일). version SSOT = binggupack/__about__.py.
+version = "1.17.0"   # v1.17.0 — MCP 24도구·웹/앱 커넥터·ChatGPT 저장 채널·원클릭 온보딩·restore. version SSOT = binggupack/__about__.py.
 description = "BingguPack — local-first, evidence-backed memory/context pack framework with an installable Claude Code MCP server (stdio JSON-RPC). Python stdlib only."
 readme = "README.md"
 requires-python = ">=3.10"

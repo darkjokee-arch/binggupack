@@ -1,4 +1,4 @@
-# Install BingguPack v1.16.0
+# Install BingguPack v1.17.0
 
 > 최신 소스(git clone): `v1.16.0` (외부 리뷰 5건 정리 — PII scan 버그·ruff/mypy 툴체인 점진 도입·브랜드 통일).
 > PyPI 현재 배포: `1.15.0` — `pip install binggupack`는 **PyPI의 1.15.0**을 설치합니다. v1.16.0 기능은 아래 `git clone`으로 사용하세요.

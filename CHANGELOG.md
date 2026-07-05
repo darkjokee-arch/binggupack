@@ -1,10 +1,14 @@
 # Changelog — BingguPack
 
-## v1.17.0 (미배포 · pending) — MCP 24도구 · 웹/앱 커넥터 · ChatGPT 저장 채널 (2026-07-05)
+## v1.17.0 (미배포 · pending) — MCP 24도구 · 웹/앱 커넥터 · ChatGPT 저장 채널 · 원클릭 온보딩 (2026-07-05)
 
-v1.16.0 태그 이후 `main`에 쌓인 56커밋 묶음(태그/배포 전 — pyproject 버전은 아직 1.16.0). 로컬 MCP를 8→**24도구**로 전면 확장하고, 웹/앱 커넥터(HTTP 모드)와 ChatGPT 채팅 저장 채널을 열었다. 저장은 여전히 사람 confirm(도구별 문구 정확 일치)만.
+v1.16.0 태그 이후 `main`에 쌓인 커밋 묶음(버전 파일은 1.17.0 반영 — PyPI publish 는 owner 수동 트리거). 로컬 MCP를 8→**24도구**로 전면 확장하고, 웹/앱 커넥터(HTTP 모드)와 ChatGPT 채팅 저장 채널을 열고, 신규 사용자 원클릭 온보딩을 붙였다. 저장은 여전히 사람 confirm(도구별 문구 정확 일치)만.
 
 ### Added
+- **원클릭 온보딩 `binggu onboard`**: setup-cloud(읽기 worker) + 저장 채널(save_mcp — 키 48hex 자동생성·repo 밖 보관·secret stdin 주입·커넥터 URL 기본 마스킹 `--show-url` 옵트인) + auto-pull 스케줄러 + 웹 MCP 안내를 한 진입점으로(멱등·dry-run 기본·login/deploy 는 본인 손). `scripts/binggu_setup_save.py` selftest 36케이스.
+- **`binggu restore`**: 백업 스냅샷으로 장부 교체 — `RESTORE <백업파일명>` confirm 정확 일치 게이트 + 교체 직전 `pre_restore_<ts>.sqlite` 자동 스냅샷(복구의 복구) + 원자 교체. backup/export 와 함께 데이터 주권 3종 완성.
+- **웹 MCP 상시가동 스크립트 일반화 편입**: `scripts/start_binggu_web.py`(HTTP+quick tunnel·경로토큰 자동생성·로그에 토큰 0) + `scripts/register_webmcp.ps1`(경로 자동탐지) — 공개 터널 노출 결정은 사람 직접 실행.
+- **CI ruff 정적 게이트**: `binggupack/` F-rules 0 을 3-OS CI 에서 강제(7/3 달성 상태 고정).
 - **MCP 24도구 전면 노출** (기존 8 → 24): 조회 7종(`recall`/`preflight`/`trace_review`/`trace_show`/`status`/`list`/`reminders`) + 쓰기 3종(`pair`/`deprecate`/`replace` — dry-run 기본·confirm 정확 일치 시에만 실행) + 작업 4종(`reflect`/`harvest_list`/`harvest_add`/`harvest_remove`) + 클라우드 read 2종(아래). `harvest_run`(실 네트워크 수확) 등 위험 도구 15종은 MCP 노출 금지 유지.
 - **클라우드 read 도구**: `cloud_recall`/`cloud_packs` — OpenCrab 클라우드 지식·팩 조회(read 전용·PII 마스킹·미설정 시 graceful 통과).
 - **로컬 MCP HTTP 모드**: `openbinggu_mcp_server.py --http <PORT> <ROOT>` — Cloudflare Tunnel 뒤에서 Claude 웹/앱 커넥터에 로컬 24도구를 그대로 노출. 경로 토큰은 `BINGGU_MCP_PATH_TOKEN` env 주입(코드 평문 0).
@@ -27,7 +31,8 @@ v1.16.0 태그 이후 `main`에 쌓인 56커밋 묶음(태그/배포 전 — pyp
 
 ### Security
 - 적대적 검증(Fable5) findings 6건 수정: T3 필터 다국어 우회(영어·한자·NFKC 정규화) 차단, cloud wire 전 필드 검사+content 추출 실패 fail-closed, actor 게이트 실소비, 한국 주소/이름 마스킹 보강, 델타 업로드 `uploaded_hashes` 보존.
-- hosted `save_intent` **PII 백스톱 reject** + 무인 pull PII skip — 채팅 저장 채널에 PII 이중 방어.
+- hosted `save_intent` **PII 백스톱 reject** + 무인 pull PII skip — 채팅 저장 채널에 PII 이중 방어. legacy `save_intent_v2` 서명 채널(intent)에도 동일 백스톱 패리티 적용.
+- `person_pack_sync` 팩 지정 일반화: env > `<home>/person_pack.json` > 기본값 — 사용자별 온톨로지 팩 지정 경로 확장.
 - T3 하드제외 필터 + ingest 파이프 게이트 — 온톨로지 팩 업로드에서 PII·개인사 반출 절대금지.
 - tree-scan 위생: selftest fixture PII 리터럴을 런타임 조립로 바꿔 정적 스캔 CLEAN.
 
