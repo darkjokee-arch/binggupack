@@ -1095,7 +1095,8 @@ def cmd_onboard(a):
     if res1["halted_at"] is not None:
         return 2
     res2 = SS.run_save_setup(apply=apply_, deploy=deploy,
-                             show_url=bool(getattr(a, "show_url", False)))
+                             show_url=bool(getattr(a, "show_url", False)),
+                             webmcp=bool(getattr(a, "webmcp", False)))
     print(SS.render_report(res2))
     return 0 if res2["halted_at"] is None else 2
 
@@ -1275,6 +1276,7 @@ def main():
     obp.add_argument("--apply", action="store_true")
     obp.add_argument("--deploy", action="store_true")
     obp.add_argument("--show-url", dest="show_url", action="store_true")  # 커넥터 전체 URL(본인 화면)
+    obp.add_argument("--webmcp", action="store_true")   # 웹 MCP 자동가동 등록 옵트인(공개 터널=본인 결정)
     bkp = sub.add_parser("backup")   # 장부 백업(일관 스냅샷 복사 · 운영 write 0)
     bkp.add_argument("--out", default=None)
     exp = sub.add_parser("export")   # 장부 내보내기(md/json · 데이터 주권)

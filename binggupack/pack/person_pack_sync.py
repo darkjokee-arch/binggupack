@@ -53,6 +53,53 @@ def _pack_config():
 PACK_ID, PACK_TITLE = _pack_config()
 
 
+def pack_create_required():
+    """신규 사용자 흐름 — env 미설정 + config 파일이 auto_create=true & pack_id 빈값이면
+    '팩 생성 필요'(owner 기본값으로 업로드하는 오타겟 차단). 파일은 매 호출 fresh 읽기
+    (import 캐시와 무관 — 온보딩 직후/기록 직후 상태를 즉시 반영).
+    반환: False | {"title": <생성할 팩 제목>}"""
+    if os.environ.get("BINGGU_PACK_ID"):
+        return False
+    try:
+        with open(binggu_paths.state_path(PACK_CONFIG_FILE), encoding="utf-8") as f:
+            c = json.load(f)
+    except Exception:
+        return False
+    if bool(c.get("auto_create")) and not (c.get("pack_id") or "").strip():
+        return {"title": c.get("title") or "개인 의사결정 온톨로지"}
+    return False
+
+
+def record_pack_id(pack_id, title=None, baseline=True, ledger=None):
+    """Agent 가 opencrab_ingest_text 로 팩 생성 후 UUID 기록(온보딩 auto_create 완결).
+    baseline=True — 생성 시 전체 텍스트를 이미 업로드했으므로 현재 전체 문장을
+    uploaded 로 흡수(이후 sync_delta 는 신규만). 별도 프로세스 호출 전제(import 상수는
+    다음 프로세스부터 새 pack_id 반영)."""
+    pid = (pack_id or "").strip()
+    if not pid:
+        return {"status": "INVALID", "reason": "empty_pack_id"}
+    path = binggu_paths.state_path(PACK_CONFIG_FILE)
+    try:
+        with open(path, encoding="utf-8") as f:
+            c = json.load(f)
+    except Exception:
+        c = {}
+    c["pack_id"] = pid
+    if title:
+        c["title"] = title
+    c["auto_create"] = False
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(c, f, ensure_ascii=False, indent=2)
+    absorbed = 0
+    if baseline:
+        sentences, _b = _owner_sentences(ledger=ledger)
+        cur = [_sent_hash(s) for s in sentences]
+        save_state(_hash(_render_pack(sentences)), len(sentences),
+                   uploaded_hashes=cur, pack_id=pid)
+        absorbed = len(cur)
+    return {"status": "OK", "pack_id": pid, "config": path, "absorbed": absorbed}
+
+
 def _home():
     return binggu_paths.home()
 
@@ -109,11 +156,12 @@ def load_state():
     return {}
 
 
-def save_state(content_hash, count, uploaded_hashes=None):
+def save_state(content_hash, count, uploaded_hashes=None, pack_id=None):
     """상태 저장. uploaded_hashes=None 이면 기존 값을 보존한다(어느 경로에서도 silent
     wipe 금지 — 불변식). full/delta 모드 혼용 시 baseline·confirm 이 델타 추적 상태를
-    지워 재-baseline(신규 문장 무업로드 흡수=데이터 손실)을 유발하던 결함 차단."""
-    st = {"pack_id": PACK_ID, "content_hash": content_hash, "count": count}
+    지워 재-baseline(신규 문장 무업로드 흡수=데이터 손실)을 유발하던 결함 차단.
+    pack_id — record_pack_id(신규 생성 직후)가 모듈 상수(구 값) 대신 새 UUID 를 기록."""
+    st = {"pack_id": pack_id or PACK_ID, "content_hash": content_hash, "count": count}
     if uploaded_hashes is None:
         prev = load_state().get("uploaded_hashes")
         if prev is not None:
@@ -142,6 +190,16 @@ def _sent_hash(s):
 def sync(baseline=False, write_text=None, ledger=None):
     """변경 감지. baseline=True → 현재 상태를 기준으로 기록(업로드 안 함).
     반환 {status, pack_id, count, blocked, hash, ...}."""
+    req = pack_create_required()
+    if req:
+        text, count, blocked = build_pack_text(ledger=ledger)
+        if write_text:
+            with open(write_text, "w", encoding="utf-8") as f:
+                f.write(text)
+        return {"status": "PACK_CREATE_REQUIRED", "pack_id": None, "title": req["title"],
+                "count": count, "blocked": blocked, "text": text,
+                "hint": "MCP Agent: opencrab_ingest_text(title, text)로 팩 생성 → "
+                        "person_pack_sync.record_pack_id('<uuid>') 호출(이후 델타만 업로드)"}
     text, count, blocked = build_pack_text(ledger=ledger)
     h = _hash(text)
     if write_text:
@@ -183,6 +241,16 @@ def sync_delta(write_text=None, ledger=None):
       DELTA_UPDATE       — 신규 문장 있음. delta_sentences/delta_hashes/delta_text 제공.
       NO_CHANGE          — 신규 없음.
     write_text: DELTA_UPDATE 시 델타 텍스트(신규만)를 파일로 출력(Agent 업로드용)."""
+    req = pack_create_required()
+    if req:
+        text, count, blocked = build_pack_text(ledger=ledger)
+        if write_text:
+            with open(write_text, "w", encoding="utf-8") as f:
+                f.write(text)
+        return {"status": "PACK_CREATE_REQUIRED", "pack_id": None, "title": req["title"],
+                "count": count, "blocked": blocked, "text": text, "delta_count": 0,
+                "hint": "MCP Agent: opencrab_ingest_text(title, text)로 팩 생성 → "
+                        "person_pack_sync.record_pack_id('<uuid>') 호출(이후 델타만 업로드)"}
     sentences, blocked = _owner_sentences(ledger=ledger)
     cur = [(_sent_hash(s), s) for s in sentences]
     full_hash = _hash(_render_pack(sentences))
@@ -356,6 +424,35 @@ def _selftest():
               and rmig2["delta_sentences"] == ["새 원칙: 방법은 무조건 있다"],
               "Tf5b 레거시 상태에서도 신규 문장은 정상 검출")
 
+        # ---- 신규 사용자 auto_create (온보딩 config → 생성 필요 신호 → record_pack_id) ----
+        cfgp = os.path.join(home, "person_pack.json")
+        with open(cfgp, "w", encoding="utf-8") as f:
+            json.dump({"pack_id": "", "title": "테스트 개인 온톨로지", "auto_create": True}, f)
+        rq = pack_create_required()
+        check(bool(rq) and rq["title"] == "테스트 개인 온톨로지",
+              "Tn1 auto_create+빈 pack_id → 팩 생성 필요 감지")
+        rn = sync_delta()
+        check(rn["status"] == "PACK_CREATE_REQUIRED" and rn["pack_id"] is None
+              and "결론부터" in rn["text"] and rn["delta_count"] == 0,
+              "Tn2 sync_delta → PACK_CREATE_REQUIRED(전체 텍스트 동봉·owner UUID 오타겟 차단)")
+        rn2 = sync()
+        check(rn2["status"] == "PACK_CREATE_REQUIRED", "Tn3 sync 도 동일 신호")
+        rr = record_pack_id("11111111-2222-3333-4444-555555555555", baseline=True)
+        check(rr["status"] == "OK" and rr["absorbed"] == 6,
+              "Tn4 record_pack_id → config 기록 + 현재 6문장 전량 흡수(생성 시 full ingest 가정)")
+        cfg = json.load(open(cfgp, encoding="utf-8"))
+        check(cfg["pack_id"].startswith("11111111") and cfg["auto_create"] is False,
+              "Tn5 config pack_id 기록·auto_create 해제")
+        rn3 = sync_delta()
+        check(rn3["status"] == "NO_CHANGE" and rn3["delta_count"] == 0,
+              "Tn6 기록 직후 델타 NO_CHANGE(흡수 반영)")
+        check((load_state().get("pack_id") or "").startswith("11111111"),
+              "Tn7 상태 pack_id = 신규 UUID(모듈 상수 아님)")
+        check(record_pack_id("")["status"] == "INVALID", "Tn8 빈 pack_id 거부")
+        os.remove(cfgp)
+        check(pack_create_required() is False,
+              "Tn9 config 부재 → 생성 신호 없음(owner 기본값 경로 회귀 0)")
+
         con.close()
         print(f"\nGATE={'GO' if ok else 'NO-GO'}")
         return 0 if ok else 1
@@ -375,10 +472,16 @@ def main(argv=None):
                     help="델타(신규 문장만) 감지 모드 — append 중복 방지")
     ap.add_argument("--confirm-delta-hashes", default=None,
                     help="델타 업로드 성공한 문장 hash(콤마구분) — uploaded set 에 병합")
+    ap.add_argument("--record-pack-id", dest="record_pack_id", default=None,
+                    help="Agent 팩 생성 후 UUID 기록(auto_create 완결·현재 전량 흡수 baseline)")
+    ap.add_argument("--title", default=None, help="--record-pack-id 와 함께 팩 제목 갱신(선택)")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args(argv)
     if a.selftest:
         return _selftest()
+    if a.record_pack_id:
+        print(json.dumps(record_pack_id(a.record_pack_id, title=a.title), ensure_ascii=False))
+        return 0
     if (a.confirm_delta_hashes is not None and a.confirm_hash is not None
             and a.confirm_count is not None):
         hashes = [x for x in a.confirm_delta_hashes.split(",") if x]

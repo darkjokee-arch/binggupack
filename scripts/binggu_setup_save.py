@@ -36,8 +36,10 @@ CLI:
   python binggu_setup_save.py --selftest
 """
 import argparse
+import json
 import os
 import re
+import shutil
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -51,6 +53,9 @@ WRANGLER_SAVE = os.path.join(WORKERS_DIR, "wrangler.save_mcp.prod.toml")
 REGISTER_PS1 = os.path.join(SCRIPTS_DIR, "register_autopull.ps1")
 AUTOPULL_PY = os.path.join(SCRIPTS_DIR, "auto_pull_hosted.py")
 SCHED_TASK_NAME = "BingguPack_AutoPull"
+REGISTER_WEBMCP_PS1 = os.path.join(SCRIPTS_DIR, "register_webmcp.ps1")
+START_WEB_PY = os.path.join(SCRIPTS_DIR, "start_binggu_web.py")
+WEBMCP_TASK_NAME = "BingguPack_WebMCP"
 VARS_NAME = ".dev.vars.save_mcp"
 KEY_FIELDS = ("SAVE_PATH_TOKEN", "SAVE_SIGN_SECRET")
 
@@ -207,10 +212,10 @@ def connector_step(wp_dir, show_url=False):
 
 
 # ── [s7] auto-pull 스케줄러 (멱등·OS 분기) ──────────────────────────
-def _real_task_exists():
+def _real_task_exists(name=SCHED_TASK_NAME):
     """Windows 스케줄 태스크 존재 여부 — schtasks /Query rc==0."""
     import subprocess
-    r = subprocess.run(["schtasks", "/Query", "/TN", SCHED_TASK_NAME],
+    r = subprocess.run(["schtasks", "/Query", "/TN", name],
                        capture_output=True, text=True)
     return r.returncode == 0
 
@@ -243,21 +248,74 @@ def autopull_scheduler_step(os_name, runner=None, task_exists=None, apply=False)
                 % SCHED_TASK_NAME)
 
 
-# ── [s8] 웹 MCP(선택) 안내 — 정보만(변경 0) ─────────────────────────
-def web_mcp_guide_step():
-    """로컬 24도구를 웹/앱 커넥터로 여는 선택 단계 안내. 공개 터널 노출은 본인 직접
-    실행이 정책(자동 등록 0 — classifier/보안 경계와 동일)."""
-    return step("s8", INFO, "(선택) 웹 MCP — 로컬 24도구를 claude/ChatGPT 커넥터로",
-                "cloudflared 설치(https://developers.cloudflare.com/cloudflared/) 후 본인 셸에서:\n"
-                "  powershell -ExecutionPolicy Bypass -File \"%s\"\n"
-                "  주소는 <home>/mcp_web_url.txt (quick tunnel — 재부팅 시 갱신)"
-                % os.path.join(SCRIPTS_DIR, "register_webmcp.ps1"))
+# ── [s8] 웹 MCP(선택) — 기본 안내(변경 0) · --webmcp 명시 옵트인 시 등록 실행 ──
+def web_mcp_step(os_name=None, webmcp=False, apply=False, runner=None,
+                 task_exists=None, cloudflared=None):
+    """로컬 24도구를 웹/앱 커넥터로 여는 선택 단계. 공개 터널 노출은 사람 결정 정책 —
+    자동 등록 0 유지, 단 본인이 --webmcp 를 명시 타이핑한 옵트인은 사람 결정으로 간주해
+    (--apply 와 함께) register_webmcp.ps1 실행까지 대행한다. 미지정=기존 안내(INFO)."""
+    if not webmcp:
+        return step("s8", INFO, "(선택) 웹 MCP — 로컬 24도구를 claude/ChatGPT 커넥터로",
+                    "--webmcp --apply 로 로그온 자동가동 등록(공개 터널=본인 결정 옵트인) 또는 본인 셸에서:\n"
+                    "  powershell -ExecutionPolicy Bypass -File \"%s\"\n"
+                    "  주소는 <home>/mcp_web_url.txt (quick tunnel — 재부팅 시 갱신)"
+                    % REGISTER_WEBMCP_PS1)
+    os_name = os_name or P.detect_os()
+    if os_name != "windows":
+        return step("s8", INFO, "웹 MCP 자동 등록은 Windows 만 — %s 는 수동 실행" % os_name,
+                    "본인 셸에서: python \"%s\" (HTTP+cloudflared quick tunnel)" % START_WEB_PY)
+    exists = task_exists if task_exists is not None else _real_task_exists(WEBMCP_TASK_NAME)
+    if exists:
+        return step("s8", SKIP, "웹 MCP 스케줄러 '%s' 이미 등록됨" % WEBMCP_TASK_NAME)
+    cf = cloudflared if cloudflared is not None else (shutil.which("cloudflared") is not None)
+    if not cf:
+        return step("s8", STOP, "cloudflared 미설치 — 웹 MCP 터널 불가",
+                    "설치: https://developers.cloudflare.com/cloudflared/ 후 --webmcp --apply 재실행")
+    if not apply:
+        return step("s8", INFO, "웹 MCP 미등록 — --webmcp --apply 시 register_webmcp.ps1 실행")
+    r = (runner or _real_ps1_runner)(REGISTER_WEBMCP_PS1)
+    if isinstance(r, dict) and r.get("rc") not in (0, None):
+        return step("s8", STOP, "웹 MCP 등록 실패",
+                    "직접 실행: powershell -ExecutionPolicy Bypass -File \"%s\"" % REGISTER_WEBMCP_PS1)
+    return step("s8", OK, "웹 MCP 스케줄러 '%s' 등록 완료(로그온 자동가동 · 주소 <home>/mcp_web_url.txt)"
+                % WEBMCP_TASK_NAME)
+
+
+# ── [s9] 개인 팩 config — 신규 사용자 auto_create 마커(owner 회귀 0) ──
+def person_pack_config_step(apply=False, home=None, username=None):
+    """PACK_ID 사용자별 자동생성 진입점. env/기존 config 있으면 SKIP(owner·기존 사용자 회귀 0).
+    --apply 시 <home>/person_pack.json 에 auto_create 마커 생성 → 첫 sync 가
+    PACK_CREATE_REQUIRED 반환 → MCP Agent 가 opencrab_ingest_text 로 본인 클라우드에
+    팩 생성 → person_pack_sync --record-pack-id <uuid> 로 완결(이후 델타만 업로드).
+    빙구팩 자체는 클라우드 자격증명 0 원칙 유지(생성은 사용자 MCP 채널 몫)."""
+    if os.environ.get("BINGGU_PACK_ID"):
+        return step("s9", SKIP, "개인 팩 env(BINGGU_PACK_ID) 사용 중 — config 불필요")
+    h = home or os.environ.get("BINGGU_HOME") or os.path.join(os.path.expanduser("~"), ".binggupack")
+    cfg = os.path.join(h, "person_pack.json")
+    if os.path.exists(cfg):
+        return step("s9", SKIP, "개인 팩 config 이미 존재: person_pack.json")
+    if os.path.exists(os.path.join(h, "person_pack_last.json")):
+        # 이미 sync 운영 이력 = 기존 사용자(owner 포함) — auto_create 마커를 만들면
+        # 다음 sync 가 PACK_CREATE_REQUIRED 로 바뀌어 기존 팩 업로드가 멎는다. 보호 SKIP.
+        return step("s9", SKIP, "기존 sync 이력(person_pack_last.json) — 기존 팩 설정 유지")
+    if not apply:
+        return step("s9", INFO, "개인 팩 config 미생성 — --apply 시 auto_create 마커 생성",
+                    "생성 후 첫 sync = PACK_CREATE_REQUIRED → Agent 팩 생성 → --record-pack-id 로 완결")
+    os.makedirs(h, exist_ok=True)
+    user = username or os.environ.get("USERNAME") or os.environ.get("USER") or "사용자"
+    with open(cfg, "w", encoding="utf-8") as f:
+        json.dump({"pack_id": "", "title": "%s 개인 온톨로지" % user, "auto_create": True},
+                  f, ensure_ascii=False, indent=2)
+    return step("s9", OK, "개인 팩 config 생성(auto_create) — 첫 sync 시 팩 생성 흐름으로 연결",
+                "기존 사용자가 실수로 생성했다면 삭제로 복귀: %s" % cfg)
 
 
 # ── 오케스트레이터 ─────────────────────────────────────────────────
 def run_save_setup(apply=False, deploy=False, show_url=False, os_name=None, wp_dir=None,
                    login_runner=None, deploy_runner=None, secret_runner=None,
-                   sched_runner=None, task_exists=None, keygen=None, toml_path=None):
+                   sched_runner=None, task_exists=None, keygen=None, toml_path=None,
+                   webmcp=False, webmcp_runner=None, webmcp_task_exists=None,
+                   cloudflared=None, pp_home=None):
     """저장 채널 셋업 1회. 기본 dry-run(변경 0). 모든 runner 는 selftest 주입용."""
     os_name = os_name or P.detect_os()
     wp_dir = wp_dir or default_wp_dir()
@@ -304,8 +362,13 @@ def run_save_setup(apply=False, deploy=False, show_url=False, os_name=None, wp_d
     steps.append(autopull_scheduler_step(os_name, runner=sched_runner,
                                          task_exists=task_exists, apply=apply))
 
-    # [s8] 웹 MCP 안내(선택 · 정보만)
-    steps.append(web_mcp_guide_step())
+    # [s8] 웹 MCP — 기본 안내 · --webmcp 옵트인 시 등록
+    steps.append(web_mcp_step(os_name=os_name, webmcp=webmcp, apply=apply,
+                              runner=webmcp_runner, task_exists=webmcp_task_exists,
+                              cloudflared=cloudflared))
+
+    # [s9] 개인 팩 config(auto_create) — PACK_ID 사용자별 생성 진입점
+    steps.append(person_pack_config_step(apply=apply, home=pp_home))
 
     return {"apply": apply, "deploy": deploy, "steps": steps, "halted_at": None}
 
@@ -460,7 +523,8 @@ def _selftest():
                           wp_dir=tempfile.mkdtemp(prefix="setup_save_f_"),
                           login_runner=mock_login_ok, deploy_runner=mock_deploy,
                           secret_runner=mock_secret, sched_runner=mock_ps1,
-                          task_exists=True, keygen=fake_gen)
+                          task_exists=True, keygen=fake_gen,
+                          pp_home=tempfile.mkdtemp(prefix="setup_save_pp_"))
     rep = render_report(res3)
     chk("31.full apply report 에 시크릿 전문 0(마스킹만)", FAKE not in rep and res3["halted_at"] is None)
 
@@ -478,11 +542,63 @@ def _selftest():
     # 34. 실 toml 존재(repo 정합 — 읽기만)
     chk("34.실 wrangler.save_mcp.prod.toml 존재", os.path.exists(WRANGLER_SAVE))
 
-    # 35. [s8] 웹 MCP 안내 — 항상 INFO(변경 0) + 등록 스크립트 경로 포함
-    s35 = web_mcp_guide_step()
-    chk("35.웹 MCP 안내 = INFO + register_webmcp 경로",
+    # 35. [s8] 웹 MCP 기본 = INFO(변경 0) + 등록 스크립트 경로 포함
+    s35 = web_mcp_step(webmcp=False)
+    chk("35.웹 MCP 기본 = INFO + register_webmcp 경로",
         s35["status"] == INFO and "register_webmcp.ps1" in (s35["hint"] or ""))
     chk("36.run_save_setup 에 s8 포함", any(s["stage"] == "s8" for s in res3["steps"]))
+
+    # 37~41. [s8] --webmcp 옵트인 분기(전부 mock — 실 스케줄러/ps1 0)
+    chk("37.webmcp 기등록 → SKIP",
+        web_mcp_step(os_name="windows", webmcp=True, task_exists=True)["status"] == SKIP)
+    chk("38.webmcp cloudflared 없음 → STOP",
+        web_mcp_step(os_name="windows", webmcp=True, task_exists=False,
+                     cloudflared=False)["status"] == STOP)
+    chk("39.webmcp dry-run → INFO(등록 대기)",
+        web_mcp_step(os_name="windows", webmcp=True, apply=False, task_exists=False,
+                     cloudflared=True)["status"] == INFO)
+    chk("40.webmcp apply+rc0 → OK(등록 완료)",
+        web_mcp_step(os_name="windows", webmcp=True, apply=True, task_exists=False,
+                     cloudflared=True, runner=lambda p_: {"rc": 0})["status"] == OK)
+    chk("41.webmcp apply+rc1 → STOP(실패 안내)",
+        web_mcp_step(os_name="windows", webmcp=True, apply=True, task_exists=False,
+                     cloudflared=True, runner=lambda p_: {"rc": 1})["status"] == STOP)
+    chk("42.webmcp 비Windows → INFO(수동 안내)",
+        web_mcp_step(os_name="mac", webmcp=True, apply=True)["status"] == INFO)
+
+    # 43~47. [s9] 개인 팩 config(auto_create) — temp home 격리
+    import tempfile as _tf
+    _pph = _tf.mkdtemp(prefix="pp_home_")
+    try:
+        chk("43.s9 dry-run → INFO(생성 대기)",
+            person_pack_config_step(apply=False, home=_pph)["status"] == INFO)
+        s44 = person_pack_config_step(apply=True, home=_pph, username="테스터")
+        cfgp = os.path.join(_pph, "person_pack.json")
+        cfgj = json.load(open(cfgp, encoding="utf-8"))
+        chk("44.s9 apply → OK + auto_create config 생성",
+            s44["status"] == OK and cfgj["auto_create"] is True and cfgj["pack_id"] == ""
+            and "테스터" in cfgj["title"])
+        chk("45.s9 재실행 → SKIP(멱등)",
+            person_pack_config_step(apply=True, home=_pph)["status"] == SKIP)
+        os.environ["BINGGU_PACK_ID"] = "x" * 36
+        chk("46.s9 env 사용 중 → SKIP(owner/기존 사용자 회귀 0)",
+            person_pack_config_step(apply=True, home=_pph)["status"] == SKIP)
+        os.environ.pop("BINGGU_PACK_ID", None)
+        chk("47.run_save_setup 에 s9 포함", any(s["stage"] == "s9" for s in res3["steps"]))
+        _pph2 = _tf.mkdtemp(prefix="pp_home2_")
+        try:
+            with open(os.path.join(_pph2, "person_pack_last.json"), "w", encoding="utf-8") as f:
+                f.write('{"pack_id":"기존"}')
+            chk("48.s9 기존 sync 이력 → SKIP(운영 중 사용자 보호·apply 여도 마커 미생성)",
+                person_pack_config_step(apply=True, home=_pph2)["status"] == SKIP
+                and not os.path.exists(os.path.join(_pph2, "person_pack.json")))
+        finally:
+            _sh2 = __import__("shutil")
+            _sh2.rmtree(_pph2, ignore_errors=True)
+    finally:
+        os.environ.pop("BINGGU_PACK_ID", None)
+        import shutil as _sh
+        _sh.rmtree(_pph, ignore_errors=True)
 
     print("\n" + "=" * 62)
     print("binggu_setup_save — selftest (mock + temp · 실 CF/스케줄러 미접촉)")
@@ -498,11 +614,13 @@ def main(argv=None):
     p.add_argument("--apply", action="store_true", help="실제 변경(키 생성/스케줄러)")
     p.add_argument("--deploy", action="store_true", help="(--apply 와) deploy+secret put — 비가역")
     p.add_argument("--show-url", action="store_true", help="커넥터 전체 URL 표시(본인 화면에서만)")
+    p.add_argument("--webmcp", action="store_true",
+                   help="웹 MCP 로그온 자동가동 등록 옵트인(공개 터널=본인 결정 · --apply 와 함께)")
     p.add_argument("--selftest", action="store_true")
     a = p.parse_args(argv)
     if a.selftest:
         return 0 if _selftest() else 1
-    res = run_save_setup(apply=a.apply, deploy=a.deploy, show_url=a.show_url)
+    res = run_save_setup(apply=a.apply, deploy=a.deploy, show_url=a.show_url, webmcp=a.webmcp)
     print(render_report(res))
     return 0 if res["halted_at"] is None else 2
 
