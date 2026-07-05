@@ -131,7 +131,20 @@ BINGGU_MCP_PATH_TOKEN=<경로토큰> python scripts/openbinggu_mcp_server.py --h
 
 ChatGPT 채팅에서 `SAVE n`으로 승인한 것만 hosted inbox에 잠깐 적재되고, 내 PC가 서명키로 pull해 로컬 장부에 반영합니다(자동 저장 0 유지 · PII 백스톱 reject).
 
-- 무인 반영: `scripts/auto_pull_hosted.py`(후보 있으면 자동 반영) + `scripts/register_autopull.ps1`(Windows 스케줄러 등록).
+### 원클릭 온보딩 — `binggu onboard`
+
+본인 Cloudflare 계정에 읽기 worker + 저장 채널(save_mcp) + auto-pull 스케줄러를 한 번에 셋업합니다(멱등 · dry-run 기본):
+
+```bash
+python binggu.py onboard                  # 1) 점검만 — 무엇이 될지 확인(변경 0)
+npx wrangler login                        # 2) 본인 CF 로그인(브라우저 OAuth — 대행 없음)
+python binggu.py onboard --apply --deploy # 3) 키 자동생성 + worker 배포 + 스케줄러 등록
+python binggu.py onboard --show-url       # 4) ChatGPT 커넥터에 붙여넣을 전체 URL 확인
+```
+
+- 경로키/서명키는 `secrets.token_hex`로 자동 생성돼 `<repo>/../workers_port/.dev.vars.save_mcp`(repo 밖)에 저장되고, worker에는 stdin으로만 주입됩니다(argv/히스토리/출력 노출 0 — 화면 표시는 항상 앞8자 마스킹).
+- 커넥터 등록: ChatGPT 설정 → 커넥터 → MCP 서버 URL에 `--show-url`로 확인한 주소(`…/mcp2/<경로키>`)를 붙여넣기. 이 URL은 비밀입니다.
+- 무인 반영: `scripts/auto_pull_hosted.py`(후보 있으면 자동 반영) + `scripts/register_autopull.ps1`(Windows 스케줄러 등록 — 경로 자동탐지 · mac/linux는 cron 라인 안내).
 - hosted 경로 설계·경계: [docs/BINGGUPACK_SAVE_INTENT_V2A_MCP_CONNECTOR_DESIGN.md](docs/BINGGUPACK_SAVE_INTENT_V2A_MCP_CONNECTOR_DESIGN.md) · [docs/BINGGUPACK_HOSTED_BOUNDARY.md](docs/BINGGUPACK_HOSTED_BOUNDARY.md).
 
 ## Troubleshooting

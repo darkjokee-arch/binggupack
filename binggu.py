@@ -1080,6 +1080,26 @@ def cmd_setup_cloud(a):
     return 0 if res["halted_at"] is None else 2
 
 
+def cmd_onboard(a):
+    """onboard — 신규 사용자 원클릭 셋업: 읽기(setup-cloud) + 저장채널(save_mcp) + auto-pull.
+    얇은 래퍼 — 실 오케스트레이션은 binggu_setup_cloud/binggu_setup_save(순수함수+selftest).
+      python binggu.py onboard                  # 점검만(dry-run · 변경 0)
+      python binggu.py onboard --apply          # 키 생성/kv/toml/스케줄러(배포 제외)
+      python binggu.py onboard --apply --deploy # 위 + worker 2종 deploy(비가역)
+    login(브라우저 OAuth)·deploy 결정·ChatGPT 커넥터 등록은 본인 손 — 대행 0."""
+    import binggu_setup_cloud as SC
+    import binggu_setup_save as SS
+    apply_, deploy = bool(getattr(a, "apply", False)), bool(getattr(a, "deploy", False))
+    res1 = SC.run_setup(apply=apply_, deploy=deploy)
+    print(SC.render_report(res1))
+    if res1["halted_at"] is not None:
+        return 2
+    res2 = SS.run_save_setup(apply=apply_, deploy=deploy,
+                             show_url=bool(getattr(a, "show_url", False)))
+    print(SS.render_report(res2))
+    return 0 if res2["halted_at"] is None else 2
+
+
 def cmd_backup(a):
     """backup — 장부를 일관 스냅샷으로 복사(운영 write 0). 기본 <home>/_backup/ledger_<ts>.sqlite."""
     from binggupack.workspace import archive as AR
@@ -1216,6 +1236,10 @@ def main():
     scp = sub.add_parser("setup-cloud")     # cloud 셋업 1개 진입점(멱등·실패정지·dry-run 기본)
     scp.add_argument("--apply", action="store_true")     # 실제 변경(미지정=점검만)
     scp.add_argument("--deploy", action="store_true")    # (--apply 와) wrangler deploy 까지 — 비가역
+    obp = sub.add_parser("onboard")  # 신규 사용자 원클릭: setup-cloud + 저장채널 + auto-pull
+    obp.add_argument("--apply", action="store_true")
+    obp.add_argument("--deploy", action="store_true")
+    obp.add_argument("--show-url", dest="show_url", action="store_true")  # 커넥터 전체 URL(본인 화면)
     bkp = sub.add_parser("backup")   # 장부 백업(일관 스냅샷 복사 · 운영 write 0)
     bkp.add_argument("--out", default=None)
     exp = sub.add_parser("export")   # 장부 내보내기(md/json · 데이터 주권)
@@ -1230,6 +1254,7 @@ def main():
           "resolve": cmd_resolve, "reminders": cmd_reminders, "capture": cmd_capture,
           "recall": cmd_recall, "why": cmd_recall, "ask": cmd_recall, "trace": cmd_trace, "preflight": cmd_preflight,
           "hosted": cmd_hosted, "harvest": cmd_harvest, "setup-cloud": cmd_setup_cloud,
+          "onboard": cmd_onboard,
           "confirm-edges": cmd_confirm_edges, "pair": cmd_pair, "trust": cmd_trust,
           "route": cmd_route, "backup": cmd_backup, "export": cmd_export}[a.cmd]
     sys.exit(fn(a))

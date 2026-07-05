@@ -12,10 +12,12 @@ inbox 회수(drain)는 HMAC 서명(.dev.vars.save_mcp)으로만 가능 — 인�
 import subprocess
 import re
 import os
+import sys
 import datetime
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PY = os.environ.get("BINGGU_PYTHON", r"C:/Users/PC/AppData/Local/Programs/Python/Python314/python")
+# 사용자 무관 기본값: env 우선 → 이 프로세스의 파이썬(sys.executable — pythonw 여도 파이프 정상)
+PY = os.environ.get("BINGGU_PYTHON") or sys.executable or "python"
 HOME_DIR = os.environ.get("BINGGU_HOME") or os.path.join(os.path.expanduser("~"), ".binggupack")
 
 # Windows: 이 프로세스가 띄우는 모든 자식 콘솔 창 억제.

@@ -1,0 +1,491 @@
+# -*- coding: utf-8 -*-
+"""binggu_setup_save.py — 저장 채널(save_mcp worker) 온보딩 오케스트레이터.
+
+setup-cloud(읽기 worker)와 짝. 이 모듈은 "ChatGPT/claude 채팅 저장 → 클라우드 inbox
+→ PC pull → 로컬 장부" 채널을 신규 사용자 본인 CF 계정에 셋업한다.
+`binggu onboard` 가 setup-cloud → setup-save 를 순차 호출(원클릭 진입점).
+
+단계(전부 멱등 · 기본 dry-run):
+  [s0] preflight: wrangler.save_mcp.prod.toml 존재 + wrangler(글로벌/로컬).
+  [s1] wrangler login 점검(대행 금지 — setup_cloud [1] 재사용).
+  [s2] 키 생성 (멱등): <repo>/../workers_port/.dev.vars.save_mcp 에
+       SAVE_PATH_TOKEN·SAVE_SIGN_SECRET 생성(secrets.token_hex(24)=48hex).
+       이미 있으면 SKIP(값 불변 — 재발급은 파일 삭제 후 재실행).
+       파일은 repo 밖(workers_port) — git 커밋 유출 원천 차단.
+  [s3] deploy — 별도 GO(비가역, --deploy 명시): wrangler deploy --config save_mcp.prod.
+       시크릿 미주입 worker 는 503 전면 거부(save_intent_mcp.ts pathKey 가드) — 노출 창 0.
+  [s4] secret put (--deploy 와 묶음 — worker 존재 보장 시점): 값은 stdin 주입
+       (셸 히스토리/프로세스 목록/argv 노출 0).
+  [s5] WORKER_URL 기입 (멱등): deploy 출력의 workers.dev URL 을 .dev.vars.save_mcp upsert.
+  [s6] 커넥터 안내: 기본 마스킹(…/mcp2/앞8자…) — 전체 URL 은 --show-url 옵트인.
+  [s7] auto-pull 스케줄러 (멱등·OS 분기): Windows=register_autopull.ps1(경로 자동탐지),
+       mac/linux=cron 라인 안내만(자동 등록 X).
+
+안전 불변식:
+  - 시크릿 평문 출력 0: report 는 앞8자+길이 마스킹만. --show-url 은 본인 옵트인.
+  - 시크릿 파일 repo 밖 + secret put 은 stdin — 커밋/히스토리 유출 0.
+  - login·deploy 는 본인 행위(대행 0) — setup_cloud 와 동일 정책.
+  - 자동수집/자동저장 게이트 무변: 이 모듈은 전송로만 셋업. 저장은 여전히
+    hosted 쪽 confirm('SAVE n') 사람-증거 + auto-pull 의 후보>0/PII flag skip 게이트.
+  - selftest 전부 mock + temp — 실 CF/스케줄러/실 키파일 미접촉.
+
+CLI:
+  python binggu_setup_save.py                    # dry-run 점검(변경 0)
+  python binggu_setup_save.py --apply            # 키 생성 + 스케줄러(배포 제외)
+  python binggu_setup_save.py --apply --deploy   # 위 + deploy + secret put(비가역)
+  python binggu_setup_save.py --selftest
+"""
+import argparse
+import os
+import re
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import binggu_platform as P  # noqa: E402
+import binggu_setup_cloud as SC  # noqa: E402 — step/상수/runner/login 재사용(정책 단일화)
+
+SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(SCRIPTS_DIR)
+WORKERS_DIR = os.path.join(REPO, "hosted", "workers")
+WRANGLER_SAVE = os.path.join(WORKERS_DIR, "wrangler.save_mcp.prod.toml")
+REGISTER_PS1 = os.path.join(SCRIPTS_DIR, "register_autopull.ps1")
+AUTOPULL_PY = os.path.join(SCRIPTS_DIR, "auto_pull_hosted.py")
+SCHED_TASK_NAME = "BingguPack_AutoPull"
+VARS_NAME = ".dev.vars.save_mcp"
+KEY_FIELDS = ("SAVE_PATH_TOKEN", "SAVE_SIGN_SECRET")
+
+step, OK, SKIP, STOP, INFO = SC.step, SC.OK, SC.SKIP, SC.STOP, SC.INFO
+
+
+def default_wp_dir():
+    """pull 러너(_load_save_env)와 동일 규약 — env 우선, 기본 <repo>/../workers_port."""
+    return os.environ.get("BINGGU_WORKERS_PORT") or \
+        os.path.abspath(os.path.join(REPO, "..", "workers_port"))
+
+
+def mask(v):
+    """시크릿 표시용 — 앞8자+길이만(평문 0). 8자 이하면 길이만."""
+    v = v or ""
+    if len(v) <= 8:
+        return "…(%d자)" % len(v)
+    return v[:8] + "…(%d자)" % len(v)
+
+
+def read_dev_vars(path):
+    """KEY=VALUE 파일 파싱 — openbinggu_save_intent_live_runner._load_save_env 와 동일 규칙."""
+    d = {}
+    if not os.path.exists(path):
+        return d
+    with open(path, encoding="utf-8") as fp:
+        for line in fp:
+            if "=" in line:
+                k, v = line.split("=", 1)
+                d[k.strip()] = v.strip()
+    return d
+
+
+def write_dev_vars(path, d):
+    """KEY=VALUE 재작성(순서 고정 — diff 안정). 디렉토리 없으면 생성."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    order = ["WORKER_URL"] + list(KEY_FIELDS)
+    keys = [k for k in order if k in d] + [k for k in d if k not in order]
+    with open(path, "w", encoding="utf-8") as fp:
+        for k in keys:
+            fp.write("%s=%s\n" % (k, d[k]))
+
+
+# ── [s2] 키 생성 (멱등) ─────────────────────────────────────────────
+def ensure_save_keys(wp_dir, apply=False, gen=None):
+    """SAVE_PATH_TOKEN/SAVE_SIGN_SECRET 없으면 생성(48hex). 있으면 SKIP(값 불변).
+
+    반환 (step, keys_dict_or_None). keys 는 호출자(secret put)용 — report 로는 안 나감.
+    """
+    if gen is None:
+        import secrets as _sec
+        gen = lambda: _sec.token_hex(24)  # noqa: E731 — 48 hex (owner 키와 동일 길이)
+    path = os.path.join(wp_dir, VARS_NAME)
+    d = read_dev_vars(path)
+    if all(d.get(k) for k in KEY_FIELDS):
+        return step("s2", SKIP, "키 이미 있음: %s (%s)" % (
+            path, " ".join("%s=%s" % (k, mask(d[k])) for k in KEY_FIELDS))), d
+    if not apply:
+        return step("s2", INFO, "키 미생성 — --apply 시 %s 에 48hex 2종 생성" % path), None
+    for k in KEY_FIELDS:
+        if not d.get(k):
+            d[k] = gen()
+    write_dev_vars(path, d)
+    return step("s2", OK, "키 생성 완료: %s (%s) — 이 파일은 repo 밖·비밀" % (
+        path, " ".join("%s=%s" % (k, mask(d[k])) for k in KEY_FIELDS))), d
+
+
+# ── [s3] deploy (별도 GO) ───────────────────────────────────────────
+_URL_RE = re.compile(r"https://[A-Za-z0-9.\-]+\.workers\.dev")
+
+
+def parse_deploy_url(stdout):
+    """wrangler deploy stdout 에서 workers.dev URL 추출. 없으면 None."""
+    m = _URL_RE.search(stdout or "")
+    return m.group(0) if m else None
+
+
+def deploy_save_step(runner, apply=False, deploy=False):
+    """save_mcp worker 배포 — --deploy 명시 시에만(비가역). 반환 (step, url_or_None)."""
+    if not deploy:
+        return step("s3", SKIP, "save worker 배포 생략(비가역) — 배포하려면 --deploy 추가\n"
+                    "  미배포/시크릿 미주입 worker 는 503 전면 거부라 노출 창 0"), None
+    if not apply:
+        return step("s3", INFO, "deploy 는 --apply --deploy 동시 명시 필요"), None
+    r = runner(["deploy", "--config", os.path.basename(WRANGLER_SAVE)], WORKERS_DIR)
+    if r.get("rc") != 0:
+        return step("s3", STOP, "save worker deploy 실패",
+                    "원문: %s" % (r.get("stderr") or r.get("stdout") or "(no output)")), None
+    url = parse_deploy_url(r.get("stdout", "") + "\n" + r.get("stderr", ""))
+    if not url:
+        return step("s3", OK, "deploy 완료 — URL 파싱 실패(출력에서 workers.dev 주소 직접 확인)"), None
+    return step("s3", OK, "save worker deploy 완료: %s" % url), url
+
+
+# ── [s4] secret put (stdin 주입) ────────────────────────────────────
+def _real_secret_runner(args, cwd=None, input_text=None):
+    """wrangler secret put — 값은 stdin 으로만(argv/히스토리 노출 0). 호출 때만 subprocess."""
+    import subprocess  # noqa: 지역 import — 모듈 로드 시 외부명령 의존 0
+    npx = P.resolve_npx()
+    proc = subprocess.run([npx, "wrangler"] + list(args), cwd=cwd,
+                          capture_output=True, text=True, input=input_text)
+    return {"rc": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr}
+
+
+def secrets_put_step(keys, secret_runner=None, apply=False, deploy=False):
+    """SAVE_PATH_TOKEN/SAVE_SIGN_SECRET 를 worker secret 으로 주입.
+
+    --deploy 와 묶음(그 시점 worker 존재 보장). 같은 값 재주입은 무해(멱등).
+    """
+    if not (apply and deploy):
+        return step("s4", INFO, "secret put 은 --apply --deploy 와 묶음(worker 존재 보장 시점)")
+    if not keys or not all(keys.get(k) for k in KEY_FIELDS):
+        return step("s4", STOP, "주입할 키 없음 — [s2] 키 생성이 선행돼야 함")
+    runner = secret_runner or _real_secret_runner
+    for k in KEY_FIELDS:
+        r = runner(["secret", "put", k, "--config", os.path.basename(WRANGLER_SAVE)],
+                   WORKERS_DIR, keys[k])
+        if r.get("rc") != 0:
+            return step("s4", STOP, "secret put 실패: %s" % k,
+                        "원문: %s" % (r.get("stderr") or r.get("stdout") or "(no output)"))
+    return step("s4", OK, "worker secret 주입 완료(%s) — 값은 stdin 경유(노출 0)"
+                % ", ".join(KEY_FIELDS))
+
+
+# ── [s5] WORKER_URL 기입 (멱등) ─────────────────────────────────────
+def upsert_worker_url(wp_dir, url, apply=False):
+    """deploy URL 을 .dev.vars.save_mcp 의 WORKER_URL 로 upsert. 동일 값이면 no-op."""
+    if not url:
+        return step("s5", SKIP, "기입할 URL 없음(deploy 생략/파싱 실패)")
+    path = os.path.join(wp_dir, VARS_NAME)
+    d = read_dev_vars(path)
+    if d.get("WORKER_URL") == url:
+        return step("s5", SKIP, "WORKER_URL 이미 동일 — 무변경")
+    if not apply:
+        return step("s5", INFO, "WORKER_URL 기입 예정(--apply): %s" % url)
+    d["WORKER_URL"] = url
+    write_dev_vars(path, d)
+    return step("s5", OK, "WORKER_URL 기입 완료: %s" % url)
+
+
+# ── [s6] 커넥터 안내 (기본 마스킹) ──────────────────────────────────
+def connector_step(wp_dir, show_url=False):
+    """ChatGPT 커넥터 URL 안내. 기본 마스킹 — 전체 URL 은 --show-url 옵트인."""
+    d = read_dev_vars(os.path.join(wp_dir, VARS_NAME))
+    base, tok = d.get("WORKER_URL"), d.get("SAVE_PATH_TOKEN")
+    if not (base and tok):
+        return step("s6", INFO, "커넥터 URL 형식: <WORKER_URL>/mcp2/<SAVE_PATH_TOKEN>\n"
+                    "  키 생성([s2])·deploy([s3]) 후 다시 실행하면 실제 주소 안내")
+    shown = base.rstrip("/") + "/mcp2/" + (tok if show_url else mask(tok))
+    hint = ("ChatGPT: 설정 → 커넥터 → 새 커넥터 → MCP 서버 URL 에 위 주소 붙여넣기.\n"
+            "이 URL 은 비밀입니다(경로키 포함) — 공유/스크린샷 금지."
+            + ("" if show_url else "\n전체 URL 보기: --show-url (본인 화면에서만)"))
+    return step("s6", OK if show_url else INFO, "커넥터 URL: %s" % shown, hint)
+
+
+# ── [s7] auto-pull 스케줄러 (멱등·OS 분기) ──────────────────────────
+def _real_task_exists():
+    """Windows 스케줄 태스크 존재 여부 — schtasks /Query rc==0."""
+    import subprocess
+    r = subprocess.run(["schtasks", "/Query", "/TN", SCHED_TASK_NAME],
+                       capture_output=True, text=True)
+    return r.returncode == 0
+
+
+def _real_ps1_runner(ps1):
+    import subprocess
+    r = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                        "-File", ps1], capture_output=True, text=True)
+    return {"rc": r.returncode, "stdout": r.stdout, "stderr": r.stderr}
+
+
+def autopull_scheduler_step(os_name, runner=None, task_exists=None, apply=False):
+    """5분 주기 auto-pull 등록. Windows=register_autopull.ps1(자동탐지판). 그외=cron 안내."""
+    if os_name != "windows":
+        py_abs = sys.executable or P.python_cmd(os_name)
+        hint = ("cron 라인 추가(중복 점검 후): crontab -l | grep auto_pull || "
+                "(crontab -l 2>/dev/null; echo '*/5 * * * * %s %s') | crontab -"
+                % (py_abs, AUTOPULL_PY))
+        return step("s7", INFO, "스케줄러 자동 등록은 Windows 만 — %s 는 아래 복붙" % os_name, hint)
+    exists = task_exists if task_exists is not None else _real_task_exists()
+    if exists:
+        return step("s7", SKIP, "스케줄러 '%s' 이미 등록됨" % SCHED_TASK_NAME)
+    if not apply:
+        return step("s7", INFO, "스케줄러 미등록 — --apply 시 register_autopull.ps1 실행")
+    r = (runner or _real_ps1_runner)(REGISTER_PS1)
+    if isinstance(r, dict) and r.get("rc") not in (0, None):
+        return step("s7", STOP, "스케줄러 등록 실패",
+                    "직접 실행: powershell -ExecutionPolicy Bypass -File \"%s\"" % REGISTER_PS1)
+    return step("s7", OK, "스케줄러 '%s' 등록 완료(5분 주기 · 후보>0/PII-flag skip 게이트 그대로)"
+                % SCHED_TASK_NAME)
+
+
+# ── 오케스트레이터 ─────────────────────────────────────────────────
+def run_save_setup(apply=False, deploy=False, show_url=False, os_name=None, wp_dir=None,
+                   login_runner=None, deploy_runner=None, secret_runner=None,
+                   sched_runner=None, task_exists=None, keygen=None, toml_path=None):
+    """저장 채널 셋업 1회. 기본 dry-run(변경 0). 모든 runner 는 selftest 주입용."""
+    os_name = os_name or P.detect_os()
+    wp_dir = wp_dir or default_wp_dir()
+    toml_path = toml_path or WRANGLER_SAVE
+    steps = []
+
+    # [s0] preflight — toml + wrangler 존재(read-only)
+    if not os.path.exists(toml_path):
+        steps.append(step("s0", STOP, "wrangler.save_mcp.prod.toml 없음: %s" % toml_path,
+                          "clone 이 온전한지 확인(hosted/workers)"))
+        return {"apply": apply, "deploy": deploy, "steps": steps, "halted_at": "s0"}
+    steps.append(step("s0", OK, "save_mcp toml 확인: %s" % os.path.basename(toml_path)))
+
+    # [s1] login (read-only whoami — setup_cloud 정책 재사용)
+    login_ok, s1 = SC.check_login(login_runner or SC._real_runner)
+    steps.append(s1)
+    if not login_ok:
+        return {"apply": apply, "deploy": deploy, "steps": steps, "halted_at": "s1"}
+
+    # [s2] 키 생성 (멱등 · repo 밖)
+    s2, keys = ensure_save_keys(wp_dir, apply=apply, gen=keygen)
+    steps.append(s2)
+
+    # [s3] deploy (별도 GO)
+    s3, url = deploy_save_step(deploy_runner or SC._real_runner, apply=apply, deploy=deploy)
+    steps.append(s3)
+    if s3["status"] == STOP:
+        return {"apply": apply, "deploy": deploy, "steps": steps, "halted_at": "s3"}
+
+    # [s4] secret put (--deploy 묶음)
+    s4 = secrets_put_step(keys, secret_runner=secret_runner, apply=apply, deploy=deploy)
+    steps.append(s4)
+    if s4["status"] == STOP:
+        return {"apply": apply, "deploy": deploy, "steps": steps, "halted_at": "s4"}
+
+    # [s5] WORKER_URL upsert
+    s5 = upsert_worker_url(wp_dir, url, apply=apply)
+    steps.append(s5)
+
+    # [s6] 커넥터 안내 (기본 마스킹)
+    steps.append(connector_step(wp_dir, show_url=show_url))
+
+    # [s7] auto-pull 스케줄러
+    steps.append(autopull_scheduler_step(os_name, runner=sched_runner,
+                                         task_exists=task_exists, apply=apply))
+
+    return {"apply": apply, "deploy": deploy, "steps": steps, "halted_at": None}
+
+
+def render_report(result):
+    mode = "APPLY" if result["apply"] else "DRY-RUN(점검만 · 변경 0)"
+    if result["deploy"]:
+        mode += " +DEPLOY"
+    L = ["=" * 64, "빙구팩 저장 채널(save_mcp) 셋업 — %s" % mode, "=" * 64]
+    for s in result["steps"]:
+        L.append("%s [%s] %s" % (SC._TAG.get(s["status"], "[?]"), s["stage"], s["msg"]))
+        if s.get("hint"):
+            for line in s["hint"].splitlines():
+                L.append("       %s" % line)
+    L.append("-" * 64)
+    if result["halted_at"] is not None:
+        L.append("⛔ [%s] 단계에서 멈춤 — 위 안내대로 본인이 처리 후 다시 실행하세요." % result["halted_at"])
+    elif not result["apply"]:
+        L.append("다음: 실제 적용은  python binggu.py onboard --apply")
+        L.append("      (worker 배포까지: --apply --deploy / login·deploy 는 본인 행위)")
+    else:
+        L.append("완료 — ChatGPT 에서 저장하면 5분 내 auto-pull 이 로컬 장부에 반영합니다.")
+    L.append("주체: wrangler login(브라우저 OAuth) · --deploy 결정은 본인 손. 시크릿 평문 출력 0.")
+    return "\n".join(L)
+
+
+# ── selftest (실 CF/스케줄러/실 키파일 미접촉 — mock + temp 만) ─────
+def _selftest():
+    import tempfile
+    ok = 0
+    tot = 0
+
+    def chk(name, cond):
+        nonlocal ok, tot
+        tot += 1
+        ok += 1 if cond else 0
+        print(("  PASS " if cond else "  FAIL ") + name)
+
+    FAKE = "aaaabbbbccccddddeeeeffff000011112222333344445555"  # 48자 모의 키(실키 아님)
+
+    # 1~3. mask — 평문 미노출
+    chk("1.mask 앞8+길이", mask(FAKE) == "aaaabbbb…(48자)")
+    chk("2.mask 짧은값 길이만", mask("abc") == "…(3자)")
+    chk("3.mask 에 전문 미포함", FAKE not in mask(FAKE))
+
+    wp = tempfile.mkdtemp(prefix="setup_save_st_")
+
+    # 4~5. dev_vars 왕복
+    write_dev_vars(os.path.join(wp, VARS_NAME),
+                   {"WORKER_URL": "https://x.workers.dev", "SAVE_PATH_TOKEN": FAKE})
+    d = read_dev_vars(os.path.join(wp, VARS_NAME))
+    chk("4.dev_vars 왕복", d["WORKER_URL"] == "https://x.workers.dev" and d["SAVE_PATH_TOKEN"] == FAKE)
+    chk("5.부재 파일 → 빈 dict", read_dev_vars(os.path.join(wp, "no_file")) == {})
+
+    # 6~9. ensure_save_keys — 생성/멱등/마스킹/dry-run
+    wp2 = tempfile.mkdtemp(prefix="setup_save_k_")
+    calls = [0]
+
+    def fake_gen():
+        calls[0] += 1
+        return FAKE
+    s, keys = ensure_save_keys(wp2, apply=True, gen=fake_gen)
+    chk("6.키 생성 OK(2종 48자)", s["status"] == OK and calls[0] == 2
+        and all(len(keys[k]) == 48 for k in KEY_FIELDS))
+    s2, keys2 = ensure_save_keys(wp2, apply=True, gen=fake_gen)
+    chk("7.재실행 SKIP + 값 불변(멱등)", s2["status"] == SKIP and calls[0] == 2
+        and keys2["SAVE_PATH_TOKEN"] == FAKE)
+    chk("8.step msg 마스킹(전문 0)", FAKE not in s["msg"] and FAKE not in s2["msg"])
+    s3, k3 = ensure_save_keys(tempfile.mkdtemp(prefix="setup_save_d_"), apply=False)
+    chk("9.dry-run → INFO + 파일 미생성", s3["status"] == INFO and k3 is None)
+
+    # 10~11. parse_deploy_url
+    OUT = "Uploaded x (1 sec)\n  https://binggupack-save-intent-mcp.example.workers.dev\nVersion: 1"
+    chk("10.deploy URL 파싱", parse_deploy_url(OUT)
+        == "https://binggupack-save-intent-mcp.example.workers.dev")
+    chk("11.URL 없음 → None", parse_deploy_url("no url here") is None)
+
+    # 12~14. deploy 게이트
+    dep_calls = []
+
+    def mock_deploy(args, cwd=None):
+        dep_calls.append(args)
+        return {"rc": 0, "stdout": OUT, "stderr": ""}
+    s, url = deploy_save_step(mock_deploy, apply=True, deploy=False)
+    chk("12.deploy 기본 SKIP + 미호출", s["status"] == SKIP and not dep_calls)
+    s, url = deploy_save_step(mock_deploy, apply=True, deploy=True)
+    chk("13.--deploy → OK + URL", s["status"] == OK and url and "workers.dev" in url)
+    def mock_deploy_fail(args, cwd=None):
+        return {"rc": 1, "stdout": "", "stderr": "boom"}
+    chk("14.deploy 실패 → STOP", deploy_save_step(mock_deploy_fail, apply=True, deploy=True)[0]["status"] == STOP)
+
+    # 15~18. secrets put — stdin 전달 + 게이트
+    put_calls = []
+
+    def mock_secret(args, cwd=None, input_text=None):
+        put_calls.append((args[2], input_text))
+        return {"rc": 0, "stdout": "ok", "stderr": ""}
+    keys_d = {k: FAKE for k in KEY_FIELDS}
+    s = secrets_put_step(keys_d, secret_runner=mock_secret, apply=True, deploy=True)
+    chk("15.secret put 2종 + stdin 값 전달", s["status"] == OK and len(put_calls) == 2
+        and all(v == FAKE for _n, v in put_calls))
+    chk("16.put 대상 이름 정확", [n for n, _v in put_calls] == list(KEY_FIELDS))
+    put_calls.clear()
+    s = secrets_put_step(keys_d, secret_runner=mock_secret, apply=True, deploy=False)
+    chk("17.--deploy 없음 → INFO + 미호출", s["status"] == INFO and not put_calls)
+    chk("18.키 없음 → STOP", secrets_put_step(None, secret_runner=mock_secret,
+                                              apply=True, deploy=True)["status"] == STOP)
+
+    # 19~21. upsert_worker_url 멱등
+    s = upsert_worker_url(wp2, "https://a.workers.dev", apply=True)
+    chk("19.URL 기입 OK", s["status"] == OK
+        and read_dev_vars(os.path.join(wp2, VARS_NAME))["WORKER_URL"] == "https://a.workers.dev")
+    chk("20.동일 값 재기입 → SKIP", upsert_worker_url(wp2, "https://a.workers.dev", apply=True)["status"] == SKIP)
+    chk("21.URL 없음 → SKIP", upsert_worker_url(wp2, None, apply=True)["status"] == SKIP)
+
+    # 22~24. connector — 기본 마스킹 / --show-url / 미완성 안내
+    s = connector_step(wp2, show_url=False)
+    chk("22.커넥터 기본 마스킹(전문 0)", FAKE not in s["msg"] and "/mcp2/" in s["msg"])
+    s = connector_step(wp2, show_url=True)
+    chk("23.--show-url → 전체 URL", "/mcp2/" + FAKE in s["msg"])
+    chk("24.키/URL 없으면 형식 안내", "형식" in connector_step(tempfile.mkdtemp(prefix="setup_save_e_"))["msg"])
+
+    # 25~28. 스케줄러 분기
+    chk("25.win 존재 → SKIP", autopull_scheduler_step("windows", task_exists=True, apply=True)["status"] == SKIP)
+    sched = []
+
+    def mock_ps1(p):
+        sched.append(p)
+        return {"rc": 0}
+    chk("26.win 미존재+apply → 등록", autopull_scheduler_step(
+        "windows", runner=mock_ps1, task_exists=False, apply=True)["status"] == OK and sched)
+    chk("27.win dry-run → INFO", autopull_scheduler_step(
+        "windows", task_exists=False, apply=False)["status"] == INFO)
+    chk("28.mac → cron 안내", "crontab" in (autopull_scheduler_step("macos", apply=True)["hint"] or ""))
+
+    # 29~31. 오케스트레이터 — dry-run 변경 0 / 미로그인 halt / report 시크릿 0
+    def mock_login_ok(args, cwd=None):
+        return {"rc": 0, "stdout": "logged in", "stderr": ""}
+
+    def mock_login_no(args, cwd=None):
+        return {"rc": 1, "stdout": "", "stderr": "not logged in"}
+    wp3 = tempfile.mkdtemp(prefix="setup_save_o_")
+    res = run_save_setup(apply=False, os_name="windows", wp_dir=wp3,
+                         login_runner=mock_login_ok, deploy_runner=mock_deploy,
+                         secret_runner=mock_secret, task_exists=False, keygen=fake_gen)
+    chk("29.dry-run 변경 0(키파일 미생성)", res["halted_at"] is None
+        and not os.path.exists(os.path.join(wp3, VARS_NAME)))
+    res2 = run_save_setup(apply=True, os_name="windows", wp_dir=wp3,
+                          login_runner=mock_login_no)
+    chk("30.미로그인 → halt s1", res2["halted_at"] == "s1")
+    res3 = run_save_setup(apply=True, deploy=True, os_name="windows",
+                          wp_dir=tempfile.mkdtemp(prefix="setup_save_f_"),
+                          login_runner=mock_login_ok, deploy_runner=mock_deploy,
+                          secret_runner=mock_secret, sched_runner=mock_ps1,
+                          task_exists=True, keygen=fake_gen)
+    rep = render_report(res3)
+    chk("31.full apply report 에 시크릿 전문 0(마스킹만)", FAKE not in rep and res3["halted_at"] is None)
+
+    # 32. default_wp_dir — repo 밖(부모 디렉토리) 규약
+    chk("32.기본 wp = repo 밖 workers_port",
+        os.environ.get("BINGGU_WORKERS_PORT") is not None
+        or os.path.basename(default_wp_dir()) == "workers_port"
+        and os.path.dirname(default_wp_dir()) == os.path.dirname(REPO))
+
+    # 33. capture flag write 0 (setup_cloud 케이스33 패턴 — 자기검출 회피 분리 조립)
+    src = open(os.path.abspath(__file__), encoding="utf-8").read()
+    bad = ["init_" + "profile(", "capture_" + "enabled =", "set_" + "capture"]
+    chk("33.capture flag write 코드 0", not any(t in src for t in bad))
+
+    # 34. 실 toml 존재(repo 정합 — 읽기만)
+    chk("34.실 wrangler.save_mcp.prod.toml 존재", os.path.exists(WRANGLER_SAVE))
+
+    print("\n" + "=" * 62)
+    print("binggu_setup_save — selftest (mock + temp · 실 CF/스케줄러 미접촉)")
+    print("=" * 62)
+    print("RESULT: %d/%d %s" % (ok, tot, "PASS" if ok == tot else "FAIL"))
+    print("GATE: %s" % ("GO" if ok == tot else "NO-GO"))
+    return ok == tot
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(prog="binggu_setup_save",
+                                description="저장 채널(save_mcp) 셋업 — 멱등·실패정지·dry-run 기본")
+    p.add_argument("--apply", action="store_true", help="실제 변경(키 생성/스케줄러)")
+    p.add_argument("--deploy", action="store_true", help="(--apply 와) deploy+secret put — 비가역")
+    p.add_argument("--show-url", action="store_true", help="커넥터 전체 URL 표시(본인 화면에서만)")
+    p.add_argument("--selftest", action="store_true")
+    a = p.parse_args(argv)
+    if a.selftest:
+        return 0 if _selftest() else 1
+    res = run_save_setup(apply=a.apply, deploy=a.deploy, show_url=a.show_url)
+    print(render_report(res))
+    return 0 if res["halted_at"] is None else 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
