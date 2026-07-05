@@ -1,6 +1,42 @@
-# BingguPack
+<div align="center">
 
-**AI와 일하면서 쌓이는 내 판단, 실수, 취향, 규칙을 내 PC 안의 기억 장부로 바꾸는 로컬 우선 AI 작업 메모리입니다.**
+# 🧠 BingguPack
+
+**AI와 일하면서 쌓이는 내 판단·실수·취향·규칙을
+내 PC 안의 기억 장부로 바꾸는 로컬 우선 AI 작업 메모리**
+
+[![PyPI](https://img.shields.io/pypi/v/binggupack?color=3775A9&logo=pypi&logoColor=white&label=PyPI)](https://pypi.org/project/binggupack/)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://pypi.org/project/binggupack/)
+[![CI](https://github.com/darkjokee-arch/binggupack/actions/workflows/ci.yml/badge.svg)](https://github.com/darkjokee-arch/binggupack/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/darkjokee-arch/binggupack?label=Release&color=success)](https://github.com/darkjokee-arch/binggupack/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
+**자동 저장 없음 · 내가 승인한 것만 · 로컬 우선**
+
+[⚡ 빠른 시작](#-빠른-시작) · [✨ 기능 한눈에](#빙구팩이-해주는-일-한눈에) · [📖 처음 시작하기](docs/START_HERE.md) · [🛠 설치 가이드](INSTALL.md) · [🗂 문서 색인](docs/INDEX.md)
+
+</div>
+
+---
+
+```mermaid
+flowchart LR
+    A["💬 AI와 평소처럼 대화"] --> B["👀 저장 후보만 미리보기"]
+    B -->|"내가 SAVE 승인"| C[("🧠 내 PC 기억 장부")]
+    B -.->|"승인 안 하면"| X["저장 0"]
+    C --> D["🔎 다음 작업 때 자동 회상"]
+    C --> E["🕸️ 지식 그래프"] --> F["📦 전문가 팩 자동 생성"]
+```
+
+## ⚡ 빠른 시작
+
+```bash
+pip install binggupack
+binggu start            # 내 PC에 기억 장부 만들기 — 끝
+binggu onboard          # (선택) ChatGPT 저장 채널·자동 동기화까지 원클릭
+```
+
+자세한 설치·연결(Claude Code MCP, 웹/앱 커넥터)은 [설치 가이드](INSTALL.md)를 보세요.
 
 ## 빙구팩이 해주는 일 (한눈에)
 
@@ -40,10 +76,7 @@
 > 전부 **자동 저장 없이, 내가 승인한 것만, 로컬 우선**입니다.
 > 명령어·용어까지 자세히는 아래 [기능 전체 지도](#기능-전체-지도)를 보세요.
 
-> 현재 릴리스 **v1.17.0** ([CHANGELOG](CHANGELOG.md)): **MCP 24도구 전면 노출 · HTTP 모드(웹/앱 커넥터) · ChatGPT 저장 채널 · 원클릭 온보딩(`binggu onboard`) · backup/export/restore 데이터 주권 · CI ruff 정적 게이트**. 코어 로직 `binggupack/` 패키지 정본화(strangler·[ARCHITECTURE](docs/BINGGUPACK_ARCHITECTURE.md)) 진행. 저장은 여전히 사람 confirm(문구 정확 일치)만.
-> 최신 소스(git clone): **v1.17.0** · [Release](https://github.com/darkjokee-arch/binggupack/releases/tag/v1.17.0)
-> PyPI: [pypi.org/project/binggupack](https://pypi.org/project/binggupack/) — `pip install binggupack`. PyPI 반영이 늦으면 아래 `git clone`으로 최신을 사용하세요.
-> 로컬 우선 · 자동 저장 없음 · 내가 고른 것만 저장 · MIT License
+> **v1.17.0 하이라이트** — MCP **24도구** · 웹/앱 커넥터(HTTP 모드) · ChatGPT 저장 채널 · 원클릭 온보딩 · backup/export/**restore** · CI 정적 게이트(ruff+tsc). 상세는 [CHANGELOG](CHANGELOG.md) · 구조는 [ARCHITECTURE](docs/BINGGUPACK_ARCHITECTURE.md).
 
 [처음 시작하기](docs/START_HERE.md) · [10분 튜토리얼](docs/BINGGUPACK_TUTORIAL.md) · [설치](INSTALL.md) · [Claude Code MCP](INSTALL.md#install-claude-code-mcp-sandbox-entry) · [캡처 hook](docs/BINGGUPACK_CAPTURE_HOOK_SETUP.md) · [문서 색인](docs/INDEX.md)
 
@@ -116,6 +149,14 @@ BingguPack은 모든 대화를 긁어모으는 도구가 아닙니다.
 - ⏰ **알림** — *"이건 나중에 다시 보자"* 하면 다시 볼 때 알려줘요
 
 ### 웹·앱·ChatGPT에서도 씁니다
+
+```mermaid
+flowchart TB
+    CC["🖥️ Claude Code / 데스크톱 앱"] -->|"MCP 24도구"| L[("🧠 내 PC 장부 ledger.sqlite")]
+    GPT["💬 ChatGPT 채팅"] -->|"SAVE 승인분만 → inbox → 서명키 pull"| L
+    WEB["🌐 웹/앱 커넥터"] -->|"경로 토큰 보호 터널"| L
+    L -->|"민감정보 T3 차단 · 바뀐 것만 델타"| OC["📦 오픈크랩 전문가 팩"]
+```
 
 - 🌐 **웹/앱 커넥터(HTTP 모드)** — 로컬 MCP 서버를 HTTP 모드(`--http`)로 열고 Cloudflare Tunnel 뒤에 두면, Claude 웹/앱 커넥터에서도 같은 **24도구**를 그대로 씁니다. 접근은 경로 토큰(`BINGGU_MCP_PATH_TOKEN`)으로 보호돼요.
 - 💬 **ChatGPT 저장 채널** — ChatGPT 채팅 중 `SAVE n`으로 승인한 것만 클라우드 inbox에 잠깐 담기고, 내 PC가 서명키로 가져와(pull) 로컬 장부에 반영해요. 여기서도 자동 저장은 없어요.
