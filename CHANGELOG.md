@@ -1,5 +1,11 @@
 # Changelog — BingguPack
 
+## Unreleased
+
+- **CI 타입검사 게이트**: hosted/workers TS 11파일 `tsc --noEmit`(strict) — tsconfig + typescript/@cloudflare/workers-types 도입, 로컬 0건 확인 후 게이트화.
+- **v2 save worker 폐기 확정**: `binggupack-save-intent-v2`(6/12 배포·7/3 save_mcp로 대체) — 시크릿만 남은 방치 표면 제거. CF 삭제는 owner 직접 실행(`wrangler delete --config wrangler.save_v2.prod.toml`). v1(binggupack-save-intent-local)은 CF에 이미 없음. 코드 파일은 이력·DO 클래스(라이브 import) 보존.
+- **README 기능 표 재구성**: 기능명 중심 카드 표(주요 기능 12종 + 안전장치 5종) — 비전문가가 한눈에.
+
 ## v1.17.0 — MCP 24도구 · 웹/앱 커넥터 · ChatGPT 저장 채널 · 원클릭 온보딩 (2026-07-05)
 
 로컬 MCP를 8→**24도구**로 전면 확장하고, 웹/앱 커넥터(HTTP 모드)와 ChatGPT 채팅 저장 채널을 열고, 신규 사용자 원클릭 온보딩과 backup/export/restore 데이터 주권을 붙였다. 저장은 여전히 사람 confirm(도구별 문구 정확 일치)만.

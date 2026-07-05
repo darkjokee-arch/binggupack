@@ -1,4 +1,7 @@
-# V2-2 — save-intent v2 운영 worker (라이브 D3' canary 전용 라인).
+# ⚠️ DECOMMISSIONED (2026-07-05 폐기 확정): save_mcp(binggupack-save-intent-mcp)가 7/3 대체.
+#   CF 삭제는 owner 직접: cd hosted/workers && npx wrangler delete --config wrangler.save_v2.prod.toml
+#   재배포 금지. 파일은 이력 보존용(IntentInbox DO 클래스 정본 save_intent_v2.ts는 라이브가 import).
+# (구) V2-2 — save-intent v2 운영 worker (라이브 D3' canary 전용 라인).
 # owner 승인 문구("V2-2 배포 고", 2026-06-12) 하에만 deploy.
 # 읽기 라인(binggupack-workers-port-local)·로컬 라인(binggupack-save-intent-v2-local)과 name 완전 분리.
 # 기본 상태 = inbox 잠김(fail-closed) — secret 미주입 시 503 not configured.

@@ -11,6 +11,23 @@ env:
   PYTHONUTF8: "1"  # windows 러너 cp1252 콘솔 한국어 출력 UnicodeEncodeError 방지 (posix는 무해)
 
 jobs:
+  typecheck-workers:
+    # hosted/workers TS 11파일 strict 타입검사 — 로컬 tsc 0건 확인 후 게이트화(2026-07-05)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - name: Install (hosted/workers devDeps)
+        working-directory: hosted/workers
+        run: npm install
+      - name: tsc --noEmit (strict)
+        working-directory: hosted/workers
+        run: npx tsc --noEmit
+
   selftest:
     # cross-platform 정책(scripts/binggu_platform.py) 실기기 검증 — 실제 ubuntu/macos/windows 러너에서 GATE=GO
     strategy:
