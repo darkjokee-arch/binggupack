@@ -1,44 +1,83 @@
 <svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#0F172A"/>
-      <stop offset="1" stop-color="#1E293B"/>
+    <radialGradient id="lgBg" cx="0.35" cy="0.28" r="1.1">
+      <stop offset="0" stop-color="#1D2E52"/>
+      <stop offset="0.55" stop-color="#111B33"/>
+      <stop offset="1" stop-color="#0A1120"/>
+    </radialGradient>
+    <linearGradient id="lgTopLight" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.07"/>
+      <stop offset="0.4" stop-color="#FFFFFF" stop-opacity="0"/>
     </linearGradient>
-    <linearGradient id="mint" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#34D399"/>
+    <linearGradient id="lgMint" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5EEAD4"/>
       <stop offset="1" stop-color="#10B981"/>
     </linearGradient>
+    <linearGradient id="lgEdge" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#818CF8"/>
+      <stop offset="1" stop-color="#34D399"/>
+    </linearGradient>
+    <filter id="lgGlow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="10" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="lgSoft" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000000" flood-opacity="0.45"/>
+    </filter>
   </defs>
 
-  <!-- 배경: 둥근 사각(기억 장부) -->
-  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#bg)"/>
-  <rect x="16" y="16" width="480" height="480" rx="96" fill="none" stroke="#334155" stroke-width="4"/>
-
-  <!-- 장부 페이지 라인(왼쪽) -->
-  <g stroke="#475569" stroke-width="10" stroke-linecap="round" opacity="0.85">
-    <line x1="96" y1="150" x2="200" y2="150"/>
-    <line x1="96" y1="205" x2="182" y2="205"/>
-    <line x1="96" y1="260" x2="200" y2="260"/>
-    <line x1="96" y1="315" x2="170" y2="315"/>
-  </g>
-  <!-- 승인된 항목(민트 체크 라인) -->
-  <g stroke="#34D399" stroke-width="10" stroke-linecap="round">
-    <line x1="96" y1="370" x2="212" y2="370"/>
+  <!-- 본체 -->
+  <g filter="url(#lgSoft)">
+    <rect x="26" y="26" width="460" height="460" rx="104" fill="url(#lgBg)"/>
+    <rect x="26" y="26" width="460" height="460" rx="104" fill="url(#lgTopLight)"/>
+    <rect x="27.5" y="27.5" width="457" height="457" rx="102.5" fill="none" stroke="#33415E" stroke-width="3"/>
   </g>
 
-  <!-- 지식 그래프(오른쪽): 노드 + 근거 엣지 -->
-  <g stroke="#60A5FA" stroke-width="7" opacity="0.9">
-    <line x1="330" y1="150" x2="404" y2="230"/>
-    <line x1="404" y1="230" x2="318" y2="300"/>
-    <line x1="404" y1="230" x2="416" y2="352"/>
-    <line x1="318" y1="300" x2="416" y2="352"/>
+  <!-- 은은한 별 필드(기억의 배경) -->
+  <g fill="#94A3B8">
+    <circle cx="120" cy="90" r="3" opacity="0.35"/>
+    <circle cx="392" cy="76" r="2.5" opacity="0.3"/>
+    <circle cx="430" cy="150" r="2" opacity="0.25"/>
+    <circle cx="84" cy="410" r="2.5" opacity="0.28"/>
+    <circle cx="240" cy="66" r="2" opacity="0.25"/>
+    <circle cx="448" cy="300" r="2" opacity="0.22"/>
   </g>
-  <circle cx="330" cy="150" r="26" fill="#60A5FA"/>
-  <circle cx="404" cy="230" r="34" fill="url(#mint)"/>
-  <circle cx="318" cy="300" r="24" fill="#FBBF24"/>
-  <circle cx="416" cy="352" r="26" fill="#60A5FA"/>
 
-  <!-- 장부 → 그래프 연결(승인분만 흐른다) -->
-  <path d="M 222 368 C 268 366 276 318 306 304" stroke="#34D399" stroke-width="9"
-        fill="none" stroke-linecap="round" stroke-dasharray="1 18"/>
+  <!-- 장부(왼쪽): 기록 라인 + 승인 라인 -->
+  <g stroke-linecap="round">
+    <line x1="98" y1="158" x2="206" y2="158" stroke="#4C5A78" stroke-width="13"/>
+    <line x1="98" y1="212" x2="186" y2="212" stroke="#4C5A78" stroke-width="13"/>
+    <line x1="98" y1="266" x2="206" y2="266" stroke="#4C5A78" stroke-width="13"/>
+    <line x1="98" y1="320" x2="176" y2="320" stroke="#4C5A78" stroke-width="13"/>
+    <line x1="98" y1="380" x2="212" y2="380" stroke="url(#lgMint)" stroke-width="14" filter="url(#lgGlow)"/>
+  </g>
+
+  <!-- 승인분 → 그래프로 흐르는 점선 -->
+  <path d="M 224 376 C 272 372 278 320 306 306" stroke="#34D399" stroke-width="9"
+        fill="none" stroke-linecap="round" stroke-dasharray="0.5 19" opacity="0.95"/>
+
+  <!-- 기억의 별자리(오른쪽): 그라데이션 엣지 + 글로우 노드 -->
+  <g stroke="url(#lgEdge)" stroke-width="7" opacity="0.95">
+    <line x1="330" y1="150" x2="404" y2="232"/>
+    <line x1="404" y1="232" x2="318" y2="302"/>
+    <line x1="404" y1="232" x2="416" y2="354"/>
+    <line x1="318" y1="302" x2="416" y2="354"/>
+    <line x1="330" y1="150" x2="416" y2="120" opacity="0.45"/>
+  </g>
+  <circle cx="416" cy="120" r="10" fill="#818CF8" opacity="0.8" filter="url(#lgGlow)"/>
+  <circle cx="330" cy="150" r="24" fill="#60A5FA" filter="url(#lgGlow)"/>
+  <circle cx="330" cy="150" r="11" fill="#DBEAFE"/>
+  <circle cx="404" cy="232" r="33" fill="url(#lgMint)" filter="url(#lgGlow)"/>
+  <circle cx="404" cy="232" r="14" fill="#ECFDF5"/>
+  <circle cx="318" cy="302" r="21" fill="#FBBF24" filter="url(#lgGlow)"/>
+  <circle cx="318" cy="302" r="9" fill="#FEF3C7"/>
+  <circle cx="416" cy="354" r="23" fill="#60A5FA" filter="url(#lgGlow)"/>
+  <circle cx="416" cy="354" r="10" fill="#DBEAFE"/>
+
+  <!-- 승인 도장: "내가 승인한 것만" 정체성 -->
+  <g>
+    <circle cx="238" cy="430" r="34" fill="#052E22" stroke="url(#lgMint)" stroke-width="5"/>
+    <path d="M 222 430 L 233 442 L 256 416" stroke="#5EEAD4" stroke-width="8" fill="none"
+          stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
 </svg>

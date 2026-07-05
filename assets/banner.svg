@@ -1,47 +1,99 @@
-<svg width="1280" height="300" viewBox="0 0 1280 300" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Malgun Gothic, Apple SD Gothic Neo, sans-serif">
+<svg width="1280" height="320" viewBox="0 0 1280 320" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Malgun Gothic, Apple SD Gothic Neo, sans-serif">
   <defs>
-    <linearGradient id="bbg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#0F172A"/>
-      <stop offset="1" stop-color="#1E293B"/>
+    <radialGradient id="bnA" cx="0.12" cy="0.1" r="0.9">
+      <stop offset="0" stop-color="#27346B" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#27346B" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="bnB" cx="0.95" cy="1.0" r="0.9">
+      <stop offset="0" stop-color="#0E4E3C" stop-opacity="0.85"/>
+      <stop offset="1" stop-color="#0E4E3C" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="bnBase" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0C1426"/>
+      <stop offset="1" stop-color="#0A1120"/>
     </linearGradient>
-    <linearGradient id="bmint" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#34D399"/>
+    <linearGradient id="bnMint" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5EEAD4"/>
       <stop offset="1" stop-color="#10B981"/>
     </linearGradient>
+    <linearGradient id="bnEdge" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#818CF8"/>
+      <stop offset="1" stop-color="#34D399"/>
+    </linearGradient>
+    <filter id="bnGlow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="bnSoft" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#000000" flood-opacity="0.45"/>
+    </filter>
   </defs>
 
-  <rect width="1280" height="300" rx="20" fill="url(#bbg)"/>
+  <!-- 배경: 베이스 + 메시 그라데이션 -->
+  <rect width="1280" height="320" rx="22" fill="url(#bnBase)"/>
+  <rect width="1280" height="320" rx="22" fill="url(#bnA)"/>
+  <rect width="1280" height="320" rx="22" fill="url(#bnB)"/>
+  <rect x="1.5" y="1.5" width="1277" height="317" rx="20.5" fill="none" stroke="#26324D" stroke-width="3"/>
 
-  <!-- 좌: 로고 미니어처 -->
-  <g transform="translate(88,62)">
-    <rect width="176" height="176" rx="36" fill="#0B1220" stroke="#334155" stroke-width="2.5"/>
-    <g stroke="#475569" stroke-width="5" stroke-linecap="round" opacity="0.85">
-      <line x1="30" y1="52" x2="70" y2="52"/>
-      <line x1="30" y1="76" x2="62" y2="76"/>
-      <line x1="30" y1="100" x2="70" y2="100"/>
-    </g>
-    <line x1="30" y1="128" x2="76" y2="128" stroke="#34D399" stroke-width="5" stroke-linecap="round"/>
-    <g stroke="#60A5FA" stroke-width="3.5" opacity="0.9">
-      <line x1="112" y1="52" x2="140" y2="82"/>
-      <line x1="140" y1="82" x2="110" y2="108"/>
-      <line x1="140" y1="82" x2="144" y2="126"/>
-      <line x1="110" y1="108" x2="144" y2="126"/>
-    </g>
-    <circle cx="112" cy="52" r="9" fill="#60A5FA"/>
-    <circle cx="140" cy="82" r="12" fill="url(#bmint)"/>
-    <circle cx="110" cy="108" r="8.5" fill="#FBBF24"/>
-    <circle cx="144" cy="126" r="9" fill="#60A5FA"/>
+  <!-- 별자리 필드(우측 여백) -->
+  <g stroke="#3B4A6B" stroke-width="1.4" opacity="0.7">
+    <line x1="1040" y1="70" x2="1112" y2="112"/>
+    <line x1="1112" y1="112" x2="1078" y2="184"/>
+    <line x1="1112" y1="112" x2="1196" y2="150"/>
+    <line x1="1078" y1="184" x2="1160" y2="240"/>
+    <line x1="1196" y1="150" x2="1160" y2="240"/>
+  </g>
+  <g fill="#94A3B8">
+    <circle cx="1040" cy="70" r="4" opacity="0.7"/>
+    <circle cx="1112" cy="112" r="5.5" opacity="0.85" fill="#8B9CF8"/>
+    <circle cx="1078" cy="184" r="4" opacity="0.6"/>
+    <circle cx="1196" cy="150" r="4.5" opacity="0.7" fill="#5EEAD4"/>
+    <circle cx="1160" cy="240" r="4" opacity="0.6"/>
+    <circle cx="980" cy="196" r="2.5" opacity="0.4"/>
+    <circle cx="1230" cy="80" r="2.5" opacity="0.4"/>
+    <circle cx="948" cy="60" r="2" opacity="0.35"/>
+    <circle cx="1244" cy="262" r="2.5" opacity="0.4"/>
   </g>
 
-  <!-- 우: 워드마크 + 태그라인 -->
-  <text x="320" y="128" fill="#F1F5F9" font-size="64" font-weight="800">빙구팩 <tspan fill="#34D399">BingguPack</tspan></text>
-  <text x="322" y="180" fill="#CBD5E1" font-size="26">AI와 일하며 쌓이는 내 판단·실수·취향을 — 내 PC 안의 기억 장부로</text>
-  <g font-size="19" font-weight="600">
-    <rect x="322" y="208" width="150" height="40" rx="20" fill="#064E3B"/>
-    <text x="397" y="234" text-anchor="middle" fill="#34D399">자동 저장 없음</text>
-    <rect x="486" y="208" width="186" height="40" rx="20" fill="#1E3A5F"/>
-    <text x="579" y="234" text-anchor="middle" fill="#93C5FD">내가 승인한 것만</text>
-    <rect x="686" y="208" width="140" height="40" rx="20" fill="#3F2D12"/>
-    <text x="756" y="234" text-anchor="middle" fill="#FCD34D">로컬 우선</text>
+  <!-- 좌: 로고 마크 -->
+  <g transform="translate(84,58)" filter="url(#bnSoft)">
+    <rect width="204" height="204" rx="44" fill="#0B1220"/>
+    <rect x="1.5" y="1.5" width="201" height="201" rx="42.5" fill="none" stroke="#33415E" stroke-width="3"/>
+    <g stroke-linecap="round">
+      <line x1="34" y1="58" x2="82" y2="58" stroke="#4C5A78" stroke-width="7"/>
+      <line x1="34" y1="86" x2="72" y2="86" stroke="#4C5A78" stroke-width="7"/>
+      <line x1="34" y1="114" x2="82" y2="114" stroke="#4C5A78" stroke-width="7"/>
+      <line x1="34" y1="146" x2="86" y2="146" stroke="url(#bnMint)" stroke-width="7.5" filter="url(#bnGlow)"/>
+    </g>
+    <g stroke="url(#bnEdge)" stroke-width="3.5" opacity="0.95">
+      <line x1="130" y1="56" x2="160" y2="90"/>
+      <line x1="160" y1="90" x2="126" y2="120"/>
+      <line x1="160" y1="90" x2="164" y2="142"/>
+      <line x1="126" y1="120" x2="164" y2="142"/>
+    </g>
+    <circle cx="130" cy="56" r="10" fill="#60A5FA" filter="url(#bnGlow)"/>
+    <circle cx="160" cy="90" r="13.5" fill="url(#bnMint)" filter="url(#bnGlow)"/>
+    <circle cx="126" cy="120" r="8.5" fill="#FBBF24" filter="url(#bnGlow)"/>
+    <circle cx="164" cy="142" r="10" fill="#60A5FA" filter="url(#bnGlow)"/>
+    <circle cx="160" cy="90" r="5.5" fill="#ECFDF5"/>
+    <g>
+      <circle cx="62" cy="176" r="15" fill="#052E22" stroke="url(#bnMint)" stroke-width="2.5"/>
+      <path d="M 55 176 L 60 181.5 L 70 170" stroke="#5EEAD4" stroke-width="3.5" fill="none"
+            stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </g>
+
+  <!-- 우: 워드마크 + 태그라인 + 원칙 필 -->
+  <text x="344" y="136" fill="#F1F5F9" font-size="66" font-weight="800" letter-spacing="-1">빙구팩
+    <tspan fill="url(#bnMint)" font-size="58"> BingguPack</tspan></text>
+  <text x="348" y="186" fill="#B7C3D8" font-size="25">AI와 일하며 쌓이는 내 판단·실수·취향을 — 내 PC 안의 기억 장부로</text>
+
+  <g font-size="19" font-weight="700">
+    <rect x="348" y="216" width="158" height="42" rx="21" fill="#0E3B2C" stroke="#2AA37A" stroke-width="1.5"/>
+    <text x="427" y="243" text-anchor="middle" fill="#5EEAD4">자동 저장 없음</text>
+    <rect x="522" y="216" width="188" height="42" rx="21" fill="#182B52" stroke="#4B65B5" stroke-width="1.5"/>
+    <text x="616" y="243" text-anchor="middle" fill="#A5C4FC">내가 승인한 것만</text>
+    <rect x="726" y="216" width="142" height="42" rx="21" fill="#3B2B10" stroke="#B08A2E" stroke-width="1.5"/>
+    <text x="797" y="243" text-anchor="middle" fill="#FCD34D">로컬 우선</text>
   </g>
 </svg>
