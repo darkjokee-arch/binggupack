@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/logo.svg" width="110" alt="빙구팩 로고">
+
 # 🧠 BingguPack
 
 **AI와 일하면서 쌓이는 내 판단·실수·취향·규칙을
@@ -19,14 +21,9 @@
 
 ---
 
-```mermaid
-flowchart LR
-    A["💬 AI와 평소처럼 대화"] --> B["👀 저장 후보만 미리보기"]
-    B -->|"내가 SAVE 승인"| C[("🧠 내 PC 기억 장부")]
-    B -.->|"승인 안 하면"| X["저장 0"]
-    C --> D["🔎 다음 작업 때 자동 회상"]
-    C --> E["🕸️ 지식 그래프"] --> F["📦 전문가 팩 자동 생성"]
-```
+<p align="center"><img src="assets/flow.svg" width="880" alt="대화 → 미리보기 → SAVE 승인 → 내 PC 기억 장부 → 자동 회상 · 지식 그래프 → 전문가 팩"></p>
+
+<p align="center"><img src="assets/demo.gif" width="760" alt="binggu preview → SAVE 승인 → recall 데모"></p>
 
 ## ⚡ 빠른 시작
 
@@ -150,13 +147,7 @@ BingguPack은 모든 대화를 긁어모으는 도구가 아닙니다.
 
 ### 웹·앱·ChatGPT에서도 씁니다
 
-```mermaid
-flowchart TB
-    CC["🖥️ Claude Code / 데스크톱 앱"] -->|"MCP 24도구"| L[("🧠 내 PC 장부 ledger.sqlite")]
-    GPT["💬 ChatGPT 채팅"] -->|"SAVE 승인분만 → inbox → 서명키 pull"| L
-    WEB["🌐 웹/앱 커넥터"] -->|"경로 토큰 보호 터널"| L
-    L -->|"민감정보 T3 차단 · 바뀐 것만 델타"| OC["📦 오픈크랩 전문가 팩"]
-```
+<p align="center"><img src="assets/channels.svg" width="880" alt="Claude Code·ChatGPT·웹 커넥터 → 내 PC 장부 → 오픈크랩 전문가 팩"></p>
 
 - 🌐 **웹/앱 커넥터(HTTP 모드)** — 로컬 MCP 서버를 HTTP 모드(`--http`)로 열고 Cloudflare Tunnel 뒤에 두면, Claude 웹/앱 커넥터에서도 같은 **24도구**를 그대로 씁니다. 접근은 경로 토큰(`BINGGU_MCP_PATH_TOKEN`)으로 보호돼요.
 - 💬 **ChatGPT 저장 채널** — ChatGPT 채팅 중 `SAVE n`으로 승인한 것만 클라우드 inbox에 잠깐 담기고, 내 PC가 서명키로 가져와(pull) 로컬 장부에 반영해요. 여기서도 자동 저장은 없어요.

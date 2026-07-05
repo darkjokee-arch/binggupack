@@ -1,0 +1,59 @@
+<svg width="960" height="300" viewBox="0 0 960 300" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Malgun Gothic, Apple SD Gothic Neo, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748B"/>
+    </marker>
+    <marker id="arrowMint" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#34D399"/>
+    </marker>
+  </defs>
+
+  <rect width="960" height="300" rx="16" fill="#0F172A"/>
+
+  <!-- 1. 대화 -->
+  <g>
+    <rect x="28" y="106" width="170" height="88" rx="14" fill="#1E293B" stroke="#334155" stroke-width="1.5"/>
+    <text x="113" y="144" text-anchor="middle" fill="#E2E8F0" font-size="17" font-weight="600">AI와 평소처럼</text>
+    <text x="113" y="170" text-anchor="middle" fill="#E2E8F0" font-size="17" font-weight="600">대화</text>
+  </g>
+  <line x1="198" y1="150" x2="248" y2="150" stroke="#64748B" stroke-width="2.5" marker-end="url(#arrow)"/>
+
+  <!-- 2. 미리보기 -->
+  <g>
+    <rect x="252" y="106" width="180" height="88" rx="14" fill="#1E293B" stroke="#334155" stroke-width="1.5"/>
+    <text x="342" y="144" text-anchor="middle" fill="#E2E8F0" font-size="17" font-weight="600">저장 후보만</text>
+    <text x="342" y="170" text-anchor="middle" fill="#E2E8F0" font-size="17" font-weight="600">미리보기</text>
+  </g>
+
+  <!-- 승인 안 하면 저장 0 -->
+  <line x1="342" y1="106" x2="342" y2="66" stroke="#64748B" stroke-width="2" stroke-dasharray="5 5" marker-end="url(#arrow)"/>
+  <rect x="272" y="26" width="140" height="40" rx="10" fill="#0F172A" stroke="#475569" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <text x="342" y="52" text-anchor="middle" fill="#94A3B8" font-size="15">승인 안 하면 저장 0</text>
+
+  <!-- SAVE 승인 -->
+  <line x1="432" y1="150" x2="500" y2="150" stroke="#34D399" stroke-width="3" marker-end="url(#arrowMint)"/>
+  <rect x="428" y="112" width="78" height="26" rx="13" fill="#064E3B"/>
+  <text x="467" y="130" text-anchor="middle" fill="#34D399" font-size="14" font-weight="700">SAVE 승인</text>
+
+  <!-- 3. 내 PC 기억 장부 -->
+  <g>
+    <rect x="504" y="96" width="190" height="108" rx="18" fill="#134E4A" stroke="#34D399" stroke-width="2.5"/>
+    <text x="599" y="140" text-anchor="middle" fill="#ECFDF5" font-size="18" font-weight="700">내 PC 기억 장부</text>
+    <text x="599" y="168" text-anchor="middle" fill="#6EE7B7" font-size="14">로컬 우선 · 승인분만</text>
+  </g>
+
+  <!-- 4. 갈래: 회상 / 그래프 → 팩 -->
+  <line x1="694" y1="126" x2="748" y2="82" stroke="#64748B" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <line x1="694" y1="174" x2="748" y2="218" stroke="#64748B" stroke-width="2.5" marker-end="url(#arrow)"/>
+
+  <g>
+    <rect x="752" y="46" width="180" height="70" rx="14" fill="#1E293B" stroke="#60A5FA" stroke-width="1.5"/>
+    <text x="842" y="76" text-anchor="middle" fill="#BFDBFE" font-size="16" font-weight="600">다음 작업 때</text>
+    <text x="842" y="99" text-anchor="middle" fill="#BFDBFE" font-size="16" font-weight="600">자동 회상</text>
+  </g>
+  <g>
+    <rect x="752" y="184" width="180" height="70" rx="14" fill="#1E293B" stroke="#FBBF24" stroke-width="1.5"/>
+    <text x="842" y="214" text-anchor="middle" fill="#FDE68A" font-size="16" font-weight="600">지식 그래프 →</text>
+    <text x="842" y="237" text-anchor="middle" fill="#FDE68A" font-size="16" font-weight="600">전문가 팩 자동 생성</text>
+  </g>
+</svg>

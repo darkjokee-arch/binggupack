@@ -1,0 +1,44 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0F172A"/>
+      <stop offset="1" stop-color="#1E293B"/>
+    </linearGradient>
+    <linearGradient id="mint" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#34D399"/>
+      <stop offset="1" stop-color="#10B981"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 배경: 둥근 사각(기억 장부) -->
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#bg)"/>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="none" stroke="#334155" stroke-width="4"/>
+
+  <!-- 장부 페이지 라인(왼쪽) -->
+  <g stroke="#475569" stroke-width="10" stroke-linecap="round" opacity="0.85">
+    <line x1="96" y1="150" x2="200" y2="150"/>
+    <line x1="96" y1="205" x2="182" y2="205"/>
+    <line x1="96" y1="260" x2="200" y2="260"/>
+    <line x1="96" y1="315" x2="170" y2="315"/>
+  </g>
+  <!-- 승인된 항목(민트 체크 라인) -->
+  <g stroke="#34D399" stroke-width="10" stroke-linecap="round">
+    <line x1="96" y1="370" x2="212" y2="370"/>
+  </g>
+
+  <!-- 지식 그래프(오른쪽): 노드 + 근거 엣지 -->
+  <g stroke="#60A5FA" stroke-width="7" opacity="0.9">
+    <line x1="330" y1="150" x2="404" y2="230"/>
+    <line x1="404" y1="230" x2="318" y2="300"/>
+    <line x1="404" y1="230" x2="416" y2="352"/>
+    <line x1="318" y1="300" x2="416" y2="352"/>
+  </g>
+  <circle cx="330" cy="150" r="26" fill="#60A5FA"/>
+  <circle cx="404" cy="230" r="34" fill="url(#mint)"/>
+  <circle cx="318" cy="300" r="24" fill="#FBBF24"/>
+  <circle cx="416" cy="352" r="26" fill="#60A5FA"/>
+
+  <!-- 장부 → 그래프 연결(승인분만 흐른다) -->
+  <path d="M 222 368 C 268 366 276 318 306 304" stroke="#34D399" stroke-width="9"
+        fill="none" stroke-linecap="round" stroke-dasharray="1 18"/>
+</svg>

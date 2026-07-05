@@ -1,0 +1,54 @@
+<svg width="960" height="360" viewBox="0 0 960 360" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Malgun Gothic, Apple SD Gothic Neo, sans-serif">
+  <defs>
+    <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748B"/>
+    </marker>
+    <marker id="a2m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#34D399"/>
+    </marker>
+  </defs>
+
+  <rect width="960" height="360" rx="16" fill="#0F172A"/>
+
+  <!-- 상단 3채널 -->
+  <g>
+    <rect x="40" y="34" width="260" height="78" rx="14" fill="#1E293B" stroke="#60A5FA" stroke-width="1.5"/>
+    <text x="170" y="66" text-anchor="middle" fill="#BFDBFE" font-size="17" font-weight="700">Claude Code · 데스크톱 앱</text>
+    <text x="170" y="92" text-anchor="middle" fill="#94A3B8" font-size="14">MCP 24도구</text>
+  </g>
+  <g>
+    <rect x="350" y="34" width="260" height="78" rx="14" fill="#1E293B" stroke="#A78BFA" stroke-width="1.5"/>
+    <text x="480" y="66" text-anchor="middle" fill="#DDD6FE" font-size="17" font-weight="700">ChatGPT 채팅</text>
+    <text x="480" y="92" text-anchor="middle" fill="#94A3B8" font-size="14">SAVE 승인분만 → inbox → 서명키 pull</text>
+  </g>
+  <g>
+    <rect x="660" y="34" width="260" height="78" rx="14" fill="#1E293B" stroke="#F472B6" stroke-width="1.5"/>
+    <text x="790" y="66" text-anchor="middle" fill="#FBCFE8" font-size="17" font-weight="700">웹 · 앱 커넥터</text>
+    <text x="790" y="92" text-anchor="middle" fill="#94A3B8" font-size="14">경로 토큰 보호 터널</text>
+  </g>
+
+  <line x1="170" y1="112" x2="410" y2="182" stroke="#64748B" stroke-width="2.5" marker-end="url(#a2)"/>
+  <line x1="480" y1="112" x2="480" y2="180" stroke="#64748B" stroke-width="2.5" marker-end="url(#a2)"/>
+  <line x1="790" y1="112" x2="550" y2="182" stroke="#64748B" stroke-width="2.5" marker-end="url(#a2)"/>
+
+  <!-- 중앙 장부 -->
+  <g>
+    <rect x="360" y="186" width="240" height="84" rx="18" fill="#134E4A" stroke="#34D399" stroke-width="2.5"/>
+    <text x="480" y="222" text-anchor="middle" fill="#ECFDF5" font-size="18" font-weight="700">내 PC 장부</text>
+    <text x="480" y="248" text-anchor="middle" fill="#6EE7B7" font-size="14">ledger.sqlite · 자동 저장 없음</text>
+  </g>
+
+  <!-- 클라우드 팩 -->
+  <line x1="600" y1="228" x2="700" y2="228" stroke="#34D399" stroke-width="3" marker-end="url(#a2m)"/>
+  <text x="650" y="214" text-anchor="middle" fill="#6EE7B7" font-size="13">민감정보 T3 차단</text>
+  <text x="650" y="252" text-anchor="middle" fill="#6EE7B7" font-size="13">바뀐 것만 델타</text>
+  <g>
+    <rect x="704" y="190" width="216" height="76" rx="14" fill="#1E293B" stroke="#FBBF24" stroke-width="1.5"/>
+    <text x="812" y="222" text-anchor="middle" fill="#FDE68A" font-size="17" font-weight="700">오픈크랩 전문가 팩</text>
+    <text x="812" y="248" text-anchor="middle" fill="#94A3B8" font-size="14">읽기 조회 cloud_recall</text>
+  </g>
+
+  <!-- 하단 원칙 -->
+  <rect x="290" y="300" width="380" height="38" rx="19" fill="#0F172A" stroke="#334155" stroke-width="1.5"/>
+  <text x="480" y="325" text-anchor="middle" fill="#94A3B8" font-size="15">어느 채널이든 — 내가 승인한 것만 · 로컬 우선</text>
+</svg>
