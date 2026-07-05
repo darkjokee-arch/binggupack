@@ -4,8 +4,8 @@
 
 # 🧠 BingguPack
 
-**AI와 일하면서 쌓이는 내 판단·실수·취향·규칙을
-내 PC 안의 기억 장부로 바꾸는 로컬 우선 AI 작업 메모리**
+**기억을 얼려, 신선하게 —
+AI와 일하면서 쌓이는 내 판단·실수·취향을 내 PC 안의 기억 장부로**
 
 [![PyPI](https://img.shields.io/pypi/v/binggupack?color=3775A9&logo=pypi&logoColor=white&label=PyPI)](https://pypi.org/project/binggupack/)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://pypi.org/project/binggupack/)
@@ -30,7 +30,7 @@
 ```bash
 pip install binggupack
 binggu start            # 내 PC에 기억 장부 만들기 — 끝
-binggu onboard          # (선택) ChatGPT 저장 채널·자동 동기화까지 원클릭
+binggu onboard          # (선택) ChatGPT 저장 채널·자동 동기화·개인 팩까지 원클릭 (--webmcp = 웹 커넥터 등록)
 ```
 
 자세한 설치·연결(Claude Code MCP, 웹/앱 커넥터)은 [설치 가이드](INSTALL.md)를 보세요.
@@ -75,7 +75,7 @@ binggu onboard          # (선택) ChatGPT 저장 채널·자동 동기화까지
 
 > **v1.17.0 하이라이트** — MCP **24도구** · 웹/앱 커넥터(HTTP 모드) · ChatGPT 저장 채널 · 원클릭 온보딩 · backup/export/**restore** · CI 정적 게이트(ruff+tsc). 상세는 [CHANGELOG](CHANGELOG.md) · 구조는 [ARCHITECTURE](docs/BINGGUPACK_ARCHITECTURE.md).
 
-[처음 시작하기](docs/START_HERE.md) · [10분 튜토리얼](docs/BINGGUPACK_TUTORIAL.md) · [설치](INSTALL.md) · [Claude Code MCP](INSTALL.md#install-claude-code-mcp-sandbox-entry) · [캡처 hook](docs/BINGGUPACK_CAPTURE_HOOK_SETUP.md) · [문서 색인](docs/INDEX.md)
+## 왜 만들었나
 
 AI와 오래 일하다 보면 이런 일이 반복됩니다.
 
@@ -89,13 +89,6 @@ BingguPack은 모든 대화를 긁어모으는 도구가 아닙니다.
 다음에도 써먹을 **판단·교훈·선호·규칙**만 후보로 보여주고, 내가 직접 고른 것만 로컬 장부(`ledger.sqlite`)에 남깁니다.
 
 ## 이렇게 씁니다 *(명령어 몰라도 됩니다)*
-
-```text
-평소처럼 AI와 작업하다 "이건 기억해두자" 싶은 게 생김
-  → 빙구팩이 저장 후보로 미리 보여줌
-  → 내가 고른 것만 내 PC에 저장
-  → 다음 작업 전에 관련 기억·지난 실수를 다시 보여줌
-```
 
 ### 평소 사용 — 3단계면 끝
 
@@ -136,14 +129,6 @@ BingguPack은 모든 대화를 긁어모으는 도구가 아닙니다.
    - **4단계**: 가장 촘촘하게 *(기본값 · 원투대 → 길이 · 강도 · 가격대)*
    - 원하면 5단계 이상도 되지만 그만큼 **분량이 많아져요** *(전체 수집량으로 폭주는 막아요)*.
 3. **자동 업로드** — 완성된 팩이 오픈크랩(익스퍼트플랜)에 자동으로 올라가요.
-
-### 그 밖에 — 말만 하면 돼요
-
-- 🔄 **다시 꺼내기** — 새 작업을 시작하면 관련 기억·지난 실수를 알아서 먼저 보여줘요
-- 🗣️ **내 말 / AI 말 구분** — 저장할 때 누가 한 말인지 자동으로 나눠줘요
-- 📊 **직감 점수** — *"내 직감 얼마나 맞았어?"* 하면 숫자로 알려줘요
-- 🧹 **기억 고치기** — *"이 기억 이제 틀렸어, 바꿔줘"* / *"이건 폐기해"* 하면 돼요
-- ⏰ **알림** — *"이건 나중에 다시 보자"* 하면 다시 볼 때 알려줘요
 
 ### 웹·앱·ChatGPT에서도 씁니다
 
@@ -191,7 +176,7 @@ BingguPack은 모든 대화를 긁어모으는 도구가 아닙니다.
 CLI 전체: init/start · status/doctor · preview/remember · reflect · save · list
           recall/ask/why · trace · preflight · deprecate/replace/accept/unaccept
           due/reminders/resolve · pair/trust/route · capture · hosted · harvest
-          confirm-edges · setup-cloud
+          confirm-edges · setup-cloud · onboard · backup/export/restore
 ```
 
 ## 핵심 원칙
@@ -202,9 +187,6 @@ CLI 전체: init/start · status/doctor · preview/remember · reflect · save �
 - **클라우드는 보조 경로입니다.** hosted inbox는 잠깐 받아두는 통로이고, 원본 기억을 맡기는 서비스가 아닙니다.
 - **기억도 고칠 수 있습니다.** 오래된 판단은 교체, 폐기, 재검토할 수 있습니다.
 
-### 처음이라면 여기부터
-
-**[docs/START_HERE.md](docs/START_HERE.md)** 에서 5분 흐름만 따라가면 됩니다.
 
 ## 빙구팩이 아닌 것
 
@@ -219,20 +201,7 @@ CLI 전체: init/start · status/doctor · preview/remember · reflect · save �
 
 ## 직접 명령어로 쓰기 *(개발자용)*
 
-clone해서 바로 쓸 수 있습니다. 아래에서 `binggu`라고 부르는 명령은 clone한 폴더에서는 `python binggu.py`로 실행하면 됩니다.
-
-일반 사용자는 PyPI 설치가 가장 짧습니다. (PyPI 반영이 늦으면 아래 `git clone`으로 최신 v1.17.0을 사용하세요.)
-
-```bash
-pip install binggupack
-binggu start
-binggu remember "배포 전에 live endpoint를 먼저 확인한다"
-binggu doctor
-```
-
-`python -m binggupack doctor`처럼 모듈 실행도 됩니다.
-
-소스에서 바로 실행하려면 clone해서 `python binggu.py`를 쓰면 됩니다.
+PyPI 설치(위 빠른 시작) 없이 clone해서 바로 쓸 수도 있습니다. 아래에서 `binggu`라고 부르는 명령은 clone한 폴더에서는 `python binggu.py`로, 설치했다면 `binggu` 또는 `python -m binggupack`으로 실행하면 됩니다.
 
 ```bash
 git clone https://github.com/darkjokee-arch/binggupack.git
@@ -247,8 +216,6 @@ python binggu.py remember "배포 전에 live endpoint를 먼저 확인한다"
 ```
 
 출력에 저장 명령이 같이 나옵니다. 그 명령을 보고 내가 고른 번호만 저장합니다.
-
-처음 보는 문서가 많다면 [START_HERE](docs/START_HERE.md) → [10분 튜토리얼](docs/BINGGUPACK_TUTORIAL.md) → [설치 가이드](INSTALL.md)까지만 보면 됩니다.
 
 ```bash
 python binggu.py save "배포 전에 live endpoint를 먼저 확인한다" \
@@ -293,6 +260,7 @@ python binggu.py doctor
 | 처음 따라하기 | [START_HERE](docs/START_HERE.md) |
 | 10분 튜토리얼 | [BINGGUPACK_TUTORIAL](docs/BINGGUPACK_TUTORIAL.md) |
 | 설치 | [INSTALL](INSTALL.md) |
+| 캡처 hook 셋업 | [BINGGUPACK_CAPTURE_HOOK_SETUP](docs/BINGGUPACK_CAPTURE_HOOK_SETUP.md) |
 | 내 말 / AI 말 따로 저장 | [BINGGUPACK_SPEAKER_AXIS_DESIGN](docs/BINGGUPACK_SPEAKER_AXIS_DESIGN.md) |
 | 사람 승인과 안전 경계 | [BINGGUPACK_GOVERNANCE_DESIGN](docs/BINGGUPACK_GOVERNANCE_DESIGN.md) |
 | hosted inbox 경계 | [BINGGUPACK_HOSTED_BOUNDARY](docs/BINGGUPACK_HOSTED_BOUNDARY.md) |
