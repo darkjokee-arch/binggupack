@@ -482,7 +482,10 @@ def _selftest():
     chk("C1 env URL+TOKEN+toggle → enabled/url/source=env",
         c1["enabled"] and c1["url"] == "https://x.example/mcp"
         and c1["token_present"] and c1["source"] == "env")
-    c2 = load_cloud_config(env={})
+    # 격리: 운영 home 에 실제 cloud_ingest.json 이 있어도(정상 사용자 상태) 이 케이스는
+    # "설정 전무" 를 검증해야 하므로 부재 경로를 명시 주입한다(전역 상태 비의존).
+    c2 = load_cloud_config(env={}, config_path=os.path.join(
+        tempfile.gettempdir(), "binggu_selftest_absent", "cloud_ingest.json"))
     chk("C2 설정 전무 → enabled False·reason=NO_CLOUD_CONFIG·url None",
         (not c2["enabled"]) and c2["reason"] == "NO_CLOUD_CONFIG" and c2["url"] is None)
     pub = json.dumps({k: v for k, v in c1.items() if k != "token"}, ensure_ascii=False)

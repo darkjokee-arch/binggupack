@@ -71,6 +71,18 @@ def main():
     print("=== auto_pull 완료: %d 건 로컬 반영 ===" % committed)
     _log("auto_pull done committed=%d" % committed)
 
+    # 2) owner 온톨로지 CrabAgent 스키마 동기화 — person_pack.json crab_auto_sync:true
+    #    옵트인 시에만 live(없으면 DISABLED_AUTO)·변화 없으면 NO_CHANGE 로 네트워크 0.
+    #    best-effort: 실패해도 auto_pull 본연(inbox 회수)에는 영향 없음.
+    try:
+        r = subprocess.run([PY, os.path.join(BASE, "binggu_person_crab_sync.py"), "--auto"],
+                           capture_output=True, text=True, encoding="utf-8", cwd=BASE,
+                           timeout=600)
+        tail = (r.stdout or "").strip().splitlines()
+        _log("person_crab_sync auto: %s" % (tail[-1][:200] if tail else "no-output rc=%s" % r.returncode))
+    except Exception as ex:  # noqa — 동기화 실패가 pull 을 깨지 않게
+        _log("person_crab_sync auto ERR: %s" % type(ex).__name__)
+
 
 if __name__ == "__main__":
     main()

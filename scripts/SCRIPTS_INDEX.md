@@ -29,6 +29,7 @@
 | binggu_cloud_pack_export.py | 현행 | OpenCrab Cloud Pack v1 ZIP export(dry-run·fixture·업로드 0) | --selftest |
 | binggu_collection_planner.py | 현행 | 주제→LLM 동적 분류설계(aspect)+무손실 룰 폴백(plan 생성까지만) | --selftest |
 | binggu_crab_pack_wire.py | 현행 | CrabAgent 스키마 팩 빌드(순수·leak fail-closed)+업로드 wire(dry_run 기본·timeout 재시도) | --selftest |
+| binggu_person_crab_sync.py | 현행 | owner 온톨로지 CrabAgent 스키마 동기화(제자리 교체·auto 옵트인·NO_CHANGE 스킵) | --selftest |
 | binggu_contrast_protocol.py | 현행 | 대비 규약 — 빙구팩 신호↔강제조항 대비표(read-only·결정 0) | --selftest |
 | binggu_created_at_backfill.py | 현행 | active 노드 created_at(P1 신선도) 소급 backfill(dry-run 기본·멱등) | --selftest |
 | binggu_discover.py | 현행 | 주제→소스 자동발견+랭킹(fetch/파싱 0·provider 추상화·vet 재사용) | --selftest |

@@ -203,7 +203,11 @@ def _selftest():
         and "top_k" not in p_bad["params"]["arguments"])
 
     # ── run_query graceful 게이트 (네트워크 0) ──
-    r_nc = run_query("opencrab_query", {"query": "x"}, transport=None, env={})
+    # 격리: 운영 home 에 실제 config 가 있어도(정상 사용자 상태) 부재 경로를 명시 주입.
+    import os
+    import tempfile
+    _absent = os.path.join(tempfile.gettempdir(), "binggu_selftest_absent", "cloud_ingest.json")
+    r_nc = run_query("opencrab_query", {"query": "x"}, transport=None, env={}, config_path=_absent)
     chk("G1 config 없음 → NO_CLOUD_CONFIG·ok False",
         r_nc["reason"] == "NO_CLOUD_CONFIG" and r_nc["ok"] is False)
     r_ntk = run_query("opencrab_query", {"query": "x"},

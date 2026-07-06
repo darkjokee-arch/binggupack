@@ -54,6 +54,7 @@ GATES = [
     ("cloud_ingest_wire", "binggu_cloud_ingest_wire.py",               ["--selftest"], "GATE=GO"),
     ("cloud_query_wire",  "binggu_cloud_query_wire.py",                ["--selftest"], "GATE=GO"),
     ("crab_pack_wire",    "binggu_crab_pack_wire.py",                  ["--selftest"], "GATE=GO"),
+    ("person_crab_sync",  "binggu_person_crab_sync.py",                ["--selftest"], "GATE=GO"),
     ("workspace organize","binggu_workspace_organize.py",              ["--selftest"], "GATE=GO"),
     ("local ingest",      "localbinggu_ingest_executor.py",            ["--selftest"], "GATE=GO"),
     ("harvest inbound",   "binggu_harvest.py",                         ["--selftest"], "GATE: GO"),
