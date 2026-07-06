@@ -29,6 +29,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SPECS = [
     ("t3_filter", "scripts/binggu_t3_filter.py", ["--selftest"], "GATE=GO"),
     ("cloud_ingest_wire", "scripts/binggu_cloud_ingest_wire.py", ["--selftest"], "GATE=GO"),
+    ("crab_pack_wire", "scripts/binggu_crab_pack_wire.py", ["--selftest"], "GATE=GO"),
     ("person_pack_sync", "scripts/binggu_person_pack_sync.py", ["--selftest"], "GATE=GO"),
     ("public_tree_scan", "scripts/openbinggu_public_tree_scan.py", ["--selftest"], "GATE: GO"),
     ("recall", "scripts/binggu_recall.py", ["--selftest"], "GATE=GO"),
