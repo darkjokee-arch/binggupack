@@ -1,6 +1,6 @@
 # Changelog — BingguPack
 
-## Unreleased
+## v1.18.0 — CrabAgent 스키마 팩 · 사용자 온톨로지 자동 동기화 (2026-07-06)
 
 - **CrabAgent 스키마 팩 wire `crab_pack_wire`**: 데이터 폴더 → 개념/주장/증거 계층 Cloud Pack v1 ZIP 빌드(stdlib·PII leak fail-closed·원본 문서 미포함) + crab-agent 업로드(기본 dry_run·`BINGGU_CRAB_UPLOAD=1`+confirm 게이트·statement timeout 세션 재발급 재시도·한글 pack_name ASCII 자동 변환). 서버 재추출(문서당 13노드 상한) 경로를 대체. selftest 15케이스. *(오픈크랩 Expert 요금제 필요)*
 - **사용자 온톨로지 자동 동기화 `person_crab_sync`**: owner 확정 판단(T3 통과분)을 스키마 팩으로 빌드해 같은 pack_name 제자리 교체 동기화. `person_pack.json "crab_auto_sync": true` 옵트인 시 auto-pull(5분)에 편승해 무인 갱신(변화 없으면 NO_CHANGE·네트워크 0). 보조 문서 계층(`<home>/person_pack_sources/` — 경로 마스킹·PII 잔존 문서 통째 제외) + 문서 예산 초과 시 무손실 묶음 병합 + `crab_chunk_cap` 설정. selftest 11케이스.

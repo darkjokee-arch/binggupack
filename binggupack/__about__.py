@@ -10,5 +10,10 @@ scan 이 빌드 산출물(dist/·build/·*.egg-info/)을 read_error 로 잡던 �
 v1.17.0 — MCP 24도구 전면 노출·웹/앱 커넥터(HTTP 모드)·ChatGPT 저장 채널(inbox→PC pull)·
 원클릭 온보딩(binggu onboard: setup-cloud+저장채널+auto-pull)·backup/export/restore
 데이터 주권·CI ruff 정적 게이트. 저장은 여전히 사람 confirm(도구별 문구 정확 일치)만.
+
+v1.18.0 — CrabAgent 스키마 팩 경로(crab_pack_wire: 개념/주장/증거 계층 빌드+업로드·
+leak fail-closed·기본 dry_run)·사용자 온톨로지 자동 동기화(person_crab_sync:
+crab_auto_sync 옵트인·5분 무인 갱신·보조 문서 세척 병합·묶음·chunk_cap)·
+CI 타입검사(tsc strict) 게이트. 오픈크랩 Expert 요금제 전제(crab-agent 업로드).
 """
-__version__ = "1.17.0"
+__version__ = "1.18.0"
