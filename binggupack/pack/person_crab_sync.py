@@ -35,6 +35,8 @@ DEFAULT_PACK_NAME = "Binggu Person Ontology"    # ASCII 강제(서버 한글 키
 PACK_TITLE = "사장님 의사결정 원칙 온톨로지 (CrabAgent)"
 PACK_PURPOSE = ("빙구팩 사용자 개인 온톨로지 — owner 화자로 확정 저장된 의사결정 원칙·판단을 "
                 "개념/주장/증거 계층으로 구조화 (T3 하드제외 통과분·스키마 경로).")
+EXTRA_SOURCES_DIR = "person_pack_sources"       # <home>/ 하위 — 사용자가 승인해 넣은 보조 문서
+_PATH_MASK_RX = re.compile(r"[A-Za-z]:\\Users\\[^\s\\/:*?\"<>|]+")  # 경로 자동 마스킹(leak 게이트 선제)
 
 
 def _home(home=None):
@@ -84,6 +86,51 @@ def export_docs(sentences, out_dir):
     return len(sentences)
 
 
+def _extra_dir(home=None):
+    return Path(_home(home)) / EXTRA_SOURCES_DIR
+
+
+def _iter_extra(home=None):
+    """보조 문서 순회 — (안전 파일명, 세척 본문). 세척: 사용자 경로 마스킹(<PATH>) 후에도
+    PII/secret 패턴이 남는 문서는 통째 제외(fail-closed). yield 순서 결정적."""
+    from binggupack.pack.crab_pack_wire import LEAK_PATTERNS
+    src = _extra_dir(home)
+    skipped = [0]
+    if not src.is_dir():
+        return iter(()), skipped
+
+    def gen():
+        for p in sorted(src.rglob("*"), key=lambda x: str(x).lower()):
+            if not p.is_file() or p.suffix.lower() not in (".md", ".txt") or p.stat().st_size > 2_000_000:
+                continue
+            text = _PATH_MASK_RX.sub("<PATH>", p.read_text(encoding="utf-8", errors="replace"))
+            if any(rx.search(text) for _, rx in LEAK_PATTERNS):
+                skipped[0] += 1
+                continue
+            safe = re.sub(r"\s+", "_", re.sub(r'[\\/:*?"<>|]', "_", p.stem))
+            if len(safe) > 60:
+                safe = safe[:60] + "_" + hashlib.sha256(p.stem.encode("utf-8")).hexdigest()[:8]
+            yield "x_%s.txt" % safe, text
+    return gen(), skipped
+
+
+def extra_signature(home=None):
+    """보조 문서 병합분의 결정적 서명 — 변경 감지(NO_CHANGE)용. 없으면 None."""
+    it, _ = _iter_extra(home)
+    sig = ["%s:%s" % (n, hashlib.sha256(t.encode("utf-8")).hexdigest()[:12]) for n, t in it]
+    return hashlib.sha256("\n".join(sig).encode("utf-8")).hexdigest()[:16] if sig else None
+
+
+def merge_extra_sources(data_dir, home=None):
+    """보조 문서를 세척 후 데이터 폴더에 병합. 반환 {"merged", "skipped_leak"}."""
+    it, skipped = _iter_extra(home)
+    merged = 0
+    for name, text in it:
+        (Path(data_dir) / name).write_text(text, encoding="utf-8")
+        merged += 1
+    return {"merged": merged, "skipped_leak": skipped[0]}
+
+
 def sync(*, dry_run=True, confirm=False, force=False, env=None, ledger=None, home=None,
          config_path=None, work_dir=None, transport=None, put_fn=None, post_fn=None,
          sleep_fn=None, max_tries=8):
@@ -103,7 +150,8 @@ def sync(*, dry_run=True, confirm=False, force=False, env=None, ledger=None, hom
     if not sentences:
         out.update({"status": "NO_SENTENCES"})
         return out
-    ch = _content_hash(sentences)
+    xsig = extra_signature(home)
+    ch = _content_hash(sentences + ([xsig] if xsig else []))
     out["content_hash"] = ch
     st = load_state(home)
     if not force and st.get("content_hash") == ch and st.get("package_id"):
@@ -115,6 +163,7 @@ def sync(*, dry_run=True, confirm=False, force=False, env=None, ledger=None, hom
     data_dir = work / "data"
     zip_path = work / "person_crab_pack.zip"
     export_docs(sentences, data_dir)
+    out["extra"] = merge_extra_sources(data_dir, home)
     b = build_crab_pack(data_dir, zip_path, PACK_TITLE, PACK_PURPOSE, min_queries=4)
     out["grade"] = b.get("grade")
     if not b.get("ok"):
@@ -252,6 +301,28 @@ def _selftest():
                        put_fn=lambda u, b, **k: 200, post_fn=lambda u, h, **k: fin,
                        sleep_fn=lambda s: None, env={"BINGGU_CLOUD_MCP_URL": "https://mcp.example/x"})
         chk("S7 auto 옵트인 → live 진행(NO_CHANGE=최신 상태)", a2["status"] in ("NO_CHANGE", "DONE"))
+
+        # ── 보조 소스 계층 (person_pack_sources) ──
+        xdir = Path(home) / EXTRA_SOURCES_DIR
+        xdir.mkdir()
+        (xdir / "사용자_판단_보조문서.md").write_text(
+            "# [출처: ai정리] 사용자 판단 보조\n"
+            "사장님은 결론부터 짧게 듣는 방식을 선호하며 대안 제시를 중시한다.\n"
+            "작업 위치는 %s 에 있었다.\n" % r"C:\Users\tester\work", encoding="utf-8")
+        (xdir / "누출문서.md").write_text(
+            "# 누출\n연락처는 %s 입니다.\n" % ("x" + "@" + "y" + ".com"), encoding="utf-8")
+        s8 = sync(ledger=led, home=home, work_dir=work, dry_run=False, confirm=True, env=live_env,
+                  transport=transport, put_fn=lambda u, b, **k: 200,
+                  post_fn=lambda u, h, **k: fin, sleep_fn=lambda s: None)
+        chk("S8 보조 문서 병합(경로 마스킹) + 누출 문서 자동 제외",
+            s8["status"] == "DONE" and s8["extra"]["merged"] == 1 and s8["extra"]["skipped_leak"] == 1)
+        merged = (Path(work) / "data" / "x_사용자_판단_보조문서.txt").read_text(encoding="utf-8")
+        chk("S9 병합본에 사용자 경로 원문 미포함(<PATH> 마스킹)",
+            "<PATH>" in merged and "tester" not in merged)
+        s10 = sync(ledger=led, home=home, work_dir=work, dry_run=False, confirm=True, env=live_env,
+                   transport=transport, put_fn=lambda u, b, **k: 200,
+                   post_fn=lambda u, h, **k: fin, sleep_fn=lambda s: None)
+        chk("S10 보조 문서 변화 없음 → NO_CHANGE(서명 해시 통합)", s10["status"] == "NO_CHANGE")
 
     ok = all(c for _, c in checks)
     print("\nGATE=%s (%d/%d)" % ("GO" if ok else "NO-GO", sum(1 for _, c in checks if c), len(checks)))
