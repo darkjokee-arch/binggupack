@@ -142,12 +142,12 @@ def derive_claims(docs, limit=12):
     return claims
 
 
-def derive_queries(docs, limit=10):
+def derive_queries(docs, limit=10, cap=2400):
     """빌더와 동일한 청킹·idf 채점을 사전 실행해 hit/relevant/coverage 를 실제로
     통과하는 질의만 채택 — retrieval 게이트 실패의 구조적 봉합."""
     lows = []
     for _, _, text in docs:
-        lows.extend(c.lower() for c in chunk_doc(text))
+        lows.extend(c.lower() for c in chunk_doc(text, cap))
     nch = len(lows)
     if not nch:
         return []
@@ -198,7 +198,7 @@ def _local_vector(text, dim=256):
 
 
 # ───────────────────────────── 빌드 (순수·네트워크 0) ─────────────────────────────
-def build_crab_pack(data_dir, out_zip, title, purpose, *, min_queries=6, now_fn=None):
+def build_crab_pack(data_dir, out_zip, title, purpose, *, min_queries=6, now_fn=None, chunk_cap=2400):
     """데이터 폴더 → Cloud Pack v1 ZIP. 반환(raise 0): typed dict.
 
     {ok, grade, release_ready, failed_gates, counts, zip, leak_count, retrieval,
@@ -215,7 +215,7 @@ def build_crab_pack(data_dir, out_zip, title, purpose, *, min_queries=6, now_fn=
             return out
         concepts = derive_concepts(docs_raw)
         claims = derive_claims(docs_raw)
-        queries = derive_queries(docs_raw)
+        queries = derive_queries(docs_raw, cap=chunk_cap)
         out.update({"concepts": len(concepts), "claims": len(claims), "queries": len(queries)})
         if not concepts or not claims or len(queries) < min_queries:
             out["reason"] = "DERIVE_INSUFFICIENT"
@@ -234,7 +234,7 @@ def build_crab_pack(data_dir, out_zip, title, purpose, *, min_queries=6, now_fn=
                           "type": "Document", "label": fname, "path": fname,
                           "sha256": documents[-1]["sha256"], "bytes": len(raw_b),
                           "properties": {"path": fname}, "evidence_refs": []})
-            for ci, body in enumerate(chunk_doc(text), 1):
+            for ci, body in enumerate(chunk_doc(text, chunk_cap), 1):
                 ch_id = "chunk:%02d:%02d" % (di, ci)
                 for code, rx in LEAK_PATTERNS:
                     n = len(rx.findall(body))

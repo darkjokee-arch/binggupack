@@ -121,19 +121,53 @@ def extra_signature(home=None):
     return hashlib.sha256("\n".join(sig).encode("utf-8")).hexdigest()[:16] if sig else None
 
 
-def merge_extra_sources(data_dir, home=None):
-    """보조 문서를 세척 후 데이터 폴더에 병합. 반환 {"merged", "skipped_leak"}."""
+def merge_extra_sources(data_dir, home=None, max_bundle_docs=None):
+    """보조 문서를 세척 후 데이터 폴더에 병합. 반환 {"merged", "skipped_leak", "bundled"}.
+
+    max_bundle_docs 지정 시 그 개수 이하의 '묶음 문서'로 병합(내용 무손실 —
+    서버 finalize delete 비용이 유입 문서 수에 비례하는 한도 대응·2026-07-06 실측
+    108문서 통과/357 실패). 묶음 안에서 원본은 "## [원본: 파일명]" 섹션으로 보존.
+    """
     it, skipped = _iter_extra(home)
-    merged = 0
-    for name, text in it:
-        (Path(data_dir) / name).write_text(text, encoding="utf-8")
-        merged += 1
-    return {"merged": merged, "skipped_leak": skipped[0]}
+    items = list(it)
+    out = {"merged": 0, "skipped_leak": skipped[0], "bundled": False}
+    if not items:
+        return out
+    if max_bundle_docs is None or len(items) <= max_bundle_docs:
+        for name, text in items:
+            (Path(data_dir) / name).write_text(text, encoding="utf-8")
+        out["merged"] = len(items)
+        return out
+    n_bundles = max(1, int(max_bundle_docs))
+    per = -(-len(items) // n_bundles)  # ceil — 정렬 순서 유지(파일명 prefix 그룹 보존)
+    for bi in range(0, len(items), per):
+        group = items[bi:bi + per]
+        body = ["# 사용자 온톨로지 자료 묶음 %02d" % (bi // per + 1), ""]
+        for name, text in group:
+            body.append("## [원본: %s]" % name)
+            body.append(text)
+            body.append("")
+        (Path(data_dir) / ("bundle_%02d.txt" % (bi // per + 1))).write_text(
+            "\n".join(body), encoding="utf-8")
+        out["merged"] += len(group)
+    out["bundled"] = True
+    return out
+
+
+def _chunk_cap(home=None):
+    """청크 크기 — person_pack.json "crab_chunk_cap" > 기본 2400.
+    finalize 한도가 총 청크 수(~350선 실측)에 걸릴 때 키워서 1팩 유지."""
+    try:
+        cfg = json.load(open(os.path.join(_home(home), PACK_CONFIG_FILE), encoding="utf-8"))
+        v = int(cfg.get("crab_chunk_cap") or 0)
+        return v if 500 <= v <= 8000 else 2400
+    except Exception:
+        return 2400
 
 
 def sync(*, dry_run=True, confirm=False, force=False, env=None, ledger=None, home=None,
          config_path=None, work_dir=None, transport=None, put_fn=None, post_fn=None,
-         sleep_fn=None, max_tries=8):
+         sleep_fn=None, max_tries=8, max_docs=90):
     """owner 문장 → 스키마 팩 빌드 → 업로드(제자리 교체). 반환(raise 0): typed dict.
 
     {status: NO_CHANGE|PLAN|DONE|BUILD_FAIL|UPLOAD_FAIL, count, blocked, content_hash,
@@ -163,8 +197,10 @@ def sync(*, dry_run=True, confirm=False, force=False, env=None, ledger=None, hom
     data_dir = work / "data"
     zip_path = work / "person_crab_pack.zip"
     export_docs(sentences, data_dir)
-    out["extra"] = merge_extra_sources(data_dir, home)
-    b = build_crab_pack(data_dir, zip_path, PACK_TITLE, PACK_PURPOSE, min_queries=4)
+    budget = max(10, int(max_docs) - len(sentences))  # 총 문서 수 ≤ max_docs (finalize 한도)
+    out["extra"] = merge_extra_sources(data_dir, home, max_bundle_docs=budget)
+    b = build_crab_pack(data_dir, zip_path, PACK_TITLE, PACK_PURPOSE, min_queries=4,
+                        chunk_cap=_chunk_cap(home))
     out["grade"] = b.get("grade")
     if not b.get("ok"):
         out.update({"status": "BUILD_FAIL", "reason": b.get("reason") or str(b.get("failed_gates"))})
@@ -323,6 +359,18 @@ def _selftest():
                    transport=transport, put_fn=lambda u, b, **k: 200,
                    post_fn=lambda u, h, **k: fin, sleep_fn=lambda s: None)
         chk("S10 보조 문서 변화 없음 → NO_CHANGE(서명 해시 통합)", s10["status"] == "NO_CHANGE")
+
+        for i in range(30):  # 예산 초과 유도 → 묶음 병합
+            (xdir / ("추가문서_%02d.md" % i)).write_text(
+                "# 추가 자료 %02d\n이 문서는 묶음 병합 검증용 보조 자료이며 추천 코스 설명이 이어진다.\n" % i,
+                encoding="utf-8")
+        s11 = sync(ledger=led, home=home, work_dir=work, dry_run=False, confirm=True, env=live_env,
+                   transport=transport, put_fn=lambda u, b, **k: 200,
+                   post_fn=lambda u, h, **k: fin, sleep_fn=lambda s: None, max_docs=20)
+        n_docs = len(list((Path(work) / "data").glob("*.txt")))
+        chk("S11 문서 예산 초과 → 묶음 병합(총 문서 ≤ max_docs·무손실 merged 31)",
+            s11["status"] == "DONE" and s11["extra"]["bundled"] and s11["extra"]["merged"] == 31
+            and n_docs <= 20)
 
     ok = all(c for _, c in checks)
     print("\nGATE=%s (%d/%d)" % ("GO" if ok else "NO-GO", sum(1 for _, c in checks if c), len(checks)))
