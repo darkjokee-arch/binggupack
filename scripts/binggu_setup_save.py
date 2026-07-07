@@ -358,7 +358,8 @@ def register_opencrab_mcp(url, apply=False, claude_json_path=None, now_fn=None):
     path = claude_json_path or default_claude_json()
     if not url:
         return step("s10", INFO, "OpenCrab Expert URL 미제공 — 팩 자동생성 채널 미연결",
-                    "Expert 가입 후:  python binggu.py onboard --opencrab-url <내 전용 URL>")
+                    "Expert 가입:  https://opencrab.sh  (Expert 티어 → 내 전용 MCP URL 발급)\n"
+                    "  발급 후:  python binggu.py onboard --opencrab-url <내 전용 URL>")
     if not _OPENCRAB_URL_RE.match(url):
         return step("s10", STOP, "OpenCrab URL 형식 오류 — https://…opencrab.…/api/mcp/<token> 만 허용",
                     "입력값(마스킹): %s" % mask_opencrab_url(url))
