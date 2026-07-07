@@ -321,12 +321,92 @@ def person_pack_config_step(apply=False, home=None, username=None):
                 "기존 사용자가 실수로 생성했다면 삭제로 복귀: %s" % cfg)
 
 
+# ── [s10] OpenCrab Expert MCP 연결 (팩 자동생성 채널) ─────────────────
+OPENCRAB_MCP_NAME = "opencrab-cloud"
+# Expert 가입 시 발행되는 전용 URL 만 허용: https://[sub.]opencrab.<tld>/api/mcp/<token>
+_OPENCRAB_URL_RE = re.compile(
+    r"^https://([A-Za-z0-9\-]+\.)*opencrab\.[A-Za-z]{2,}/api/mcp/[A-Za-z0-9_\-]+$")
+
+
+def default_claude_json():
+    """Claude MCP 설정 경로 — env CLAUDE_CONFIG_PATH 우선, 기본 ~/.claude.json."""
+    return os.environ.get("CLAUDE_CONFIG_PATH") or \
+        os.path.join(os.path.expanduser("~"), ".claude.json")
+
+
+def _utc_stamp():
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def mask_opencrab_url(u):
+    """URL 토큰 마스킹 — .../api/mcp/앞6자…(길이). 평문 토큰 노출 0."""
+    m = re.match(r"^(https://[^/]+/api/mcp/)([A-Za-z0-9_\-]+)$", u or "")
+    if not m:
+        return "(형식오류)"
+    tok = m.group(2)
+    return m.group(1) + tok[:6] + "…(%d자)" % len(tok)
+
+
+def register_opencrab_mcp(url, apply=False, claude_json_path=None, now_fn=None):
+    """OpenCrab Expert 전용 URL 을 Claude MCP 설정(mcpServers.opencrab-cloud)에 등록(멱등).
+
+    이 연결이 있어야 "X 팩 만들어줘" → crab_agent 로 스키마 팩 자동생성이 작동한다(Expert 전용).
+    url 없음=INFO(미연결)·형식 오류=STOP·동일 등록=SKIP·미등록/변경=등록(백업 후 원자 교체).
+    apply 아니면 PLAN(파일 변경 0)·토큰은 화면 마스킹(평문 0)·기존 mcpServers/타 키 보존.
+    """
+    path = claude_json_path or default_claude_json()
+    if not url:
+        return step("s10", INFO, "OpenCrab Expert URL 미제공 — 팩 자동생성 채널 미연결",
+                    "Expert 가입 후:  python binggu.py onboard --opencrab-url <내 전용 URL>")
+    if not _OPENCRAB_URL_RE.match(url):
+        return step("s10", STOP, "OpenCrab URL 형식 오류 — https://…opencrab.…/api/mcp/<token> 만 허용",
+                    "입력값(마스킹): %s" % mask_opencrab_url(url))
+    data = {}
+    if os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as ex:
+            return step("s10", STOP, "%s 파싱 실패(%s) — 손상 우려로 미변경" % (path, type(ex).__name__),
+                        "파일 확인/백업 후 재실행")
+    if not isinstance(data, dict):
+        return step("s10", STOP, "%s 최상위가 객체가 아님 — 미변경(안전)" % path)
+    servers = data.get("mcpServers")
+    if not isinstance(servers, dict):
+        servers = {}
+    cur = servers.get(OPENCRAB_MCP_NAME)
+    if isinstance(cur, dict) and cur.get("url") == url and cur.get("type") == "http":
+        return step("s10", SKIP, "OpenCrab MCP 이미 등록됨: %s (%s)"
+                    % (OPENCRAB_MCP_NAME, mask_opencrab_url(url)))
+    if not apply:
+        verb = "업데이트" if cur is not None else "등록"
+        return step("s10", INFO, "OpenCrab MCP %s 대기 — --apply 시 %s 에 기입" % (verb, path),
+                    "대상: mcpServers.%s = {type:http, url:%s}"
+                    % (OPENCRAB_MCP_NAME, mask_opencrab_url(url)))
+    bak = None
+    if os.path.exists(path):
+        bak = "%s.binggu-bak.%s" % (path, (now_fn or _utc_stamp)())
+        shutil.copy2(path, bak)
+    servers[OPENCRAB_MCP_NAME] = {"type": "http", "url": url}
+    data["mcpServers"] = servers
+    tmp = path + ".binggu-tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)  # 원자 교체(부분쓰기 노출 0)
+    hint = "Claude Code/데스크톱 재시작 시 반영 — 이후 'X 팩 만들어줘' 로 스키마 팩 생성"
+    if bak:
+        hint += "\n  백업: %s" % bak
+    return step("s10", OK, "OpenCrab MCP 등록 완료: %s (%s)"
+                % (OPENCRAB_MCP_NAME, mask_opencrab_url(url)), hint)
+
+
 # ── 오케스트레이터 ─────────────────────────────────────────────────
 def run_save_setup(apply=False, deploy=False, show_url=False, os_name=None, wp_dir=None,
                    login_runner=None, deploy_runner=None, secret_runner=None,
                    sched_runner=None, task_exists=None, keygen=None, toml_path=None,
                    webmcp=False, webmcp_runner=None, webmcp_task_exists=None,
-                   cloudflared=None, pp_home=None):
+                   cloudflared=None, pp_home=None, opencrab_url=None, claude_json_path=None):
     """저장 채널 셋업 1회. 기본 dry-run(변경 0). 모든 runner 는 selftest 주입용."""
     os_name = os_name or P.detect_os()
     wp_dir = wp_dir or default_wp_dir()
@@ -380,6 +460,12 @@ def run_save_setup(apply=False, deploy=False, show_url=False, os_name=None, wp_d
 
     # [s9] 개인 팩 config(auto_create) — PACK_ID 사용자별 생성 진입점
     steps.append(person_pack_config_step(apply=apply, home=pp_home))
+
+    # [s10] OpenCrab Expert MCP 연결(팩 자동생성 채널) — --opencrab-url 제공 시에만 등록
+    s10 = register_opencrab_mcp(opencrab_url, apply=apply, claude_json_path=claude_json_path)
+    steps.append(s10)
+    if s10["status"] == STOP:
+        return {"apply": apply, "deploy": deploy, "steps": steps, "halted_at": "s10"}
 
     return {"apply": apply, "deploy": deploy, "steps": steps, "halted_at": None}
 
@@ -606,6 +692,41 @@ def _selftest():
         finally:
             _sh2 = __import__("shutil")
             _sh2.rmtree(_pph2, ignore_errors=True)
+
+        # 49~55. [s10] OpenCrab MCP 등록 — temp claude.json fixture
+        _cjd = tempfile.mkdtemp(prefix="claude_json_")
+        _cj = os.path.join(_cjd, ".claude.json")
+        with open(_cj, "w", encoding="utf-8") as _f:
+            json.dump({"mcpServers": {"other": {"type": "stdio"}}, "keep": 1}, _f)
+        _URL = "https://opencrab.sh/api/mcp/ocm_" + "a" * 24
+        _URL2 = "https://opencrab.sh/api/mcp/ocm_" + "b" * 24
+        try:
+            chk("49.s10 url 없음 → INFO(미연결)",
+                register_opencrab_mcp(None, apply=True, claude_json_path=_cj)["status"] == INFO)
+            chk("50.s10 형식 오류 → STOP + 미변경",
+                register_opencrab_mcp("https://evil.example/x", apply=True, claude_json_path=_cj)["status"] == STOP
+                and "opencrab-cloud" not in json.load(open(_cj, encoding="utf-8"))["mcpServers"])
+            chk("51.s10 dry-run → INFO + 파일 변경 0",
+                register_opencrab_mcp(_URL, apply=False, claude_json_path=_cj)["status"] == INFO
+                and "opencrab-cloud" not in json.load(open(_cj, encoding="utf-8"))["mcpServers"])
+            r49 = register_opencrab_mcp(_URL, apply=True, claude_json_path=_cj)
+            _cjj = json.load(open(_cj, encoding="utf-8"))
+            chk("52.s10 apply → OK + 등록 + 기존 서버/키 보존",
+                r49["status"] == OK
+                and _cjj["mcpServers"]["opencrab-cloud"] == {"type": "http", "url": _URL}
+                and _cjj["mcpServers"].get("other") == {"type": "stdio"} and _cjj.get("keep") == 1)
+            chk("53.s10 멱등 재등록 → SKIP",
+                register_opencrab_mcp(_URL, apply=True, claude_json_path=_cj)["status"] == SKIP)
+            r50 = register_opencrab_mcp(_URL2, apply=True, claude_json_path=_cj)
+            chk("54.s10 URL 변경 → OK(업데이트) + 백업 생성",
+                r50["status"] == OK
+                and json.load(open(_cj, encoding="utf-8"))["mcpServers"]["opencrab-cloud"]["url"] == _URL2
+                and any(f.startswith(".claude.json.binggu-bak.") for f in os.listdir(_cjd)))
+            chk("55.s10 토큰 평문 0(마스킹)",
+                ("ocm_" + "a" * 24) not in register_opencrab_mcp(_URL, apply=False, claude_json_path=_cj)["msg"])
+        finally:
+            _sh3 = __import__("shutil")
+            _sh3.rmtree(_cjd, ignore_errors=True)
     finally:
         os.environ.pop("BINGGU_PACK_ID", None)
         import shutil as _sh
@@ -627,11 +748,14 @@ def main(argv=None):
     p.add_argument("--show-url", action="store_true", help="커넥터 전체 URL 표시(본인 화면에서만)")
     p.add_argument("--webmcp", action="store_true",
                    help="웹 MCP 로그온 자동가동 등록 옵트인(공개 터널=본인 결정 · --apply 와 함께)")
+    p.add_argument("--opencrab-url", default=None,
+                   help="OpenCrab Expert 전용 MCP URL 을 Claude 설정에 등록(팩 자동생성 채널)")
     p.add_argument("--selftest", action="store_true")
     a = p.parse_args(argv)
     if a.selftest:
         return 0 if _selftest() else 1
-    res = run_save_setup(apply=a.apply, deploy=a.deploy, show_url=a.show_url, webmcp=a.webmcp)
+    res = run_save_setup(apply=a.apply, deploy=a.deploy, show_url=a.show_url, webmcp=a.webmcp,
+                         opencrab_url=a.opencrab_url)
     print(render_report(res))
     return 0 if res["halted_at"] is None else 2
 

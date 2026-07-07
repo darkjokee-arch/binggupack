@@ -189,20 +189,35 @@ def _hit_support(hit_events, node_ids, domain=None):
 
 # ---------------- 제안 문구(결정적 템플릿) ----------------
 
+def _safe_excerpt(sentence, limit=60):
+    """capture_preview 재분할(종결형/구두점+공백 → _SENT_SPLIT) 내성 발췌.
+    첫 세그먼트만 취해 발췌 내부에 문장 경계를 남기지 않는다 → 제안 문구가 save 경로에서 재분할돼
+    원문이 잘리는(truncation) 것을 원천 차단(promotion_write_is_safe 통과율↑·자동등록 확대·방어막 유지).
+    _SENT_SPLIT 은 capture_preview 정본 재사용(로컬 복제 시 drift) · import 실패 시 공백정규화 폴백."""
+    s = " ".join((sentence or "").split())  # 공백 정규화(re 의존 없이 \s+ → 단일 공백)
+    try:
+        from openbinggu_conversation_capture_preview import _SENT_SPLIT
+        seg = _SENT_SPLIT.split(s)[0] if s else ""
+    except Exception:
+        seg = s
+    return seg[:limit].strip()
+
+
 def _principle_text(cluster, support):
-    """결정적 템플릿 문구(LLM 0). 대표 노드 = sentence 토큰 최다·동점 id 최소."""
+    """결정적 템플릿 문구(LLM 0). 대표 노드 = sentence 토큰 최다·동점 id 최소.
+    발췌는 _safe_excerpt 로 재분할 내성 확보 + 끝 마침표 제거(support 접합부 '. (' 분할 방지)."""
     members = cluster["members"]
     rep = sorted(members, key=lambda n: (-len(RECALL._tokens(n.get("sentence") or "")), n["id"]))[0]
     sub = cluster["subtype"]
     cnt = len(members)
-    excerpt = (rep.get("sentence") or "")[:60]
+    excerpt = _safe_excerpt(rep.get("sentence") or "")
     if sub == "버그패턴":
-        base = ('반복된 버그패턴 %d건 감지: "%s" 부류 — 이 상황에서 착수 전 점검을 기본 규칙 후보로.'
+        base = ('반복된 버그패턴 %d건 감지: "%s" 부류 — 이 상황에서 착수 전 점검을 기본 규칙 후보로'
                 % (cnt, excerpt))
     elif sub == "교훈":
-        base = '반복된 교훈 %d건: "%s" 부류 — 원칙 규칙 후보.' % (cnt, excerpt)
+        base = '반복된 교훈 %d건: "%s" 부류 — 원칙 규칙 후보' % (cnt, excerpt)
     else:  # 선호
-        base = '반복된 선호 %d건: "%s" 부류 — 기본값 규칙 후보.' % (cnt, excerpt)
+        base = '반복된 선호 %d건: "%s" 부류 — 기본값 규칙 후보' % (cnt, excerpt)
     if support and (support.get("hits") or support.get("misses")):
         base += (" (owner 직감 근거 %d적중/%d빗나감, distinct 결정 %d건 — candidate·미검증)"
                  % (support.get("hits", 0), support.get("misses", 0),
@@ -606,7 +621,9 @@ def _selftest():
         rec(16, "자동확정 0: actor=auto → G4_no_auto write 0·active 자동승격 0",
             (not r16["applied"]) and n16 == 0 and r16["reason"] == "G4_no_auto" and act16 == 0)
 
-        # ── T17 문장 분할 제안은 자동 등록 불가(write_safe False → 수동 안내로 축소·안전>기능) ──
+        # ── T17 재분할 내성 발췌 → 정상 제안은 write_safe True(자동 등록 확대·방어막은 T18 유지) ──
+        # 구 동작: 종결형/구두점 발췌가 save 경로 재분할로 잘려 write_safe False → 수동 안내.
+        # _safe_excerpt 로 첫 세그먼트만 발췌 + 끝 마침표 제거해 단일 후보로 살아남게 개선(잘림 원천 차단).
         led17 = build_ledger("t17.sqlite", [
             ("n:s1", "judgment", "결과는 짧게 결론부터 보고하는 것을 선호한다 요약", "선호"),
             ("n:s2", "judgment", "결과는 짧게 결론부터 보고 선호 요약 방식", "선호"),
@@ -614,8 +631,14 @@ def _selftest():
         ])
         pr17 = propose_abstractions(led17)
         spec17 = build_promotion_candidate_spec(led17, pr17[0]["proposal_id"]) if pr17 else None
-        rec(17, "문장 분할 제안 → write_safe False(자동 등록 차단·수동 저장 안내로 축소)",
-            spec17 is not None and spec17["write_safe"] is False)
+        rec(17, "재분할 내성 발췌 → 정상 제안 write_safe True(자동 등록 확대)",
+            spec17 is not None and spec17["write_safe"] is True)
+
+        # ── T18 방어막 유지: save 경로가 원문을 쪼갤 수밖에 없는 입력은 여전히 write_safe False(수동 안내) ──
+        # 정상 제안은 T17 에서 통과하되, 인위적 분할 텍스트는 계속 차단 — '안전 > 기능' 방어막 불변.
+        rec(18, "방어막 유지: 분할 유발 텍스트 → False·단일 문장 → True(방어막 정상 판정)",
+            promotion_write_is_safe("첫 문장이다. 둘째 문장이다.") is False
+            and promotion_write_is_safe("반복된 선호 3건: 짧게 보고 선호 부류 규칙 후보") is True)
 
     finally:
         # 운영 store mtime 재측정(read-only 불변 증명).
