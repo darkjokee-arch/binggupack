@@ -29,13 +29,32 @@ from binggupack.safety.t3_filter import filter_uploadable
 
 # owner 온톨로지 팩(2026-07-02 최초 업로드) — 갱신 대상.
 # 사용자별 일반화(우선순위): env BINGGU_PACK_ID/BINGGU_PACK_TITLE > <home>/person_pack.json
-# ({"pack_id":..., "title":...}) > owner 기본값(기존 동작 회귀 0). 온보딩이 config 파일을 안내.
+# ({"pack_id":..., "title":...}) > person_pack_last.json(운영 마커) 의 pack_id > sentinel(None).
+# 하드코딩 owner UUID 를 제거 — owner 는 운영 마커(person_pack_last.json)에서 기존 pack_id 를
+# 읽어 회귀 0, 신규 사용자(마커 부재)는 sentinel → pack_create_required/auto_create 경로로 위임.
 STATE_FILE = "person_pack_last.json"
 PACK_CONFIG_FILE = "person_pack.json"
+DEFAULT_OWNER_LABEL = "사용자"   # 중립 화자 호칭(person_crab_sync._crab_meta 패턴) — 신규 사용자 기본
+
+
+def _owner_label():
+    """제목/헤더 화자 호칭: env BINGGU_OWNER_LABEL > person_pack.json owner_label > 중립 '사용자'.
+    owner 는 person_pack.json owner_label='사장님' 이라 표시 유지, 신규 사용자는 중립값 노출."""
+    lbl = os.environ.get("BINGGU_OWNER_LABEL")
+    if not lbl:
+        try:
+            with open(binggu_paths.state_path(PACK_CONFIG_FILE), encoding="utf-8") as f:
+                lbl = (json.load(f).get("owner_label") or "").strip() or None
+        except Exception:  # 부재/손상 → 중립 기본값
+            lbl = None
+    return lbl or DEFAULT_OWNER_LABEL
 
 
 def _pack_config():
-    """env > config 파일 > owner 기본값. import 시점 1회 해석(env 해석과 동일 시맨틱)."""
+    """pack_id/title 해석: env > person_pack.json(config) > person_pack_last.json(운영 마커) >
+    sentinel(None). 하드코딩 owner UUID 제거 — owner 회귀 0 은 운영 마커의 pack_id 로,
+    신규 사용자(마커 부재)는 sentinel 로 pack_create_required/auto_create 경로에 위임한다.
+    title 기본값은 owner_label 기반 중립 문구('<호칭> 의사결정 원칙 온톨로지')."""
     pid = os.environ.get("BINGGU_PACK_ID")
     title = os.environ.get("BINGGU_PACK_TITLE")
     if not (pid and title):
@@ -44,10 +63,15 @@ def _pack_config():
                 c = json.load(f)
             pid = pid or (c.get("pack_id") or None)
             title = title or (c.get("title") or None)
-        except Exception:  # 부재/손상 → 다음 폴백(기본값)
+        except Exception:  # 부재/손상 → 다음 폴백
             pass
-    return (pid or "4da76877-e286-449f-8116-569be4056838",
-            title or "사장님 의사결정 원칙 온톨로지")
+    if not pid:  # config 에 없으면 운영 마커(person_pack_last.json)의 pack_id 로 폴백(owner 회귀 0)
+        try:
+            with open(binggu_paths.state_path(STATE_FILE), encoding="utf-8") as f:
+                pid = (json.load(f).get("pack_id") or "").strip() or None
+        except Exception:  # 부재/손상 → sentinel(None)
+            pass
+    return (pid, title or ("%s 의사결정 원칙 온톨로지" % _owner_label()))
 
 
 PACK_ID, PACK_TITLE = _pack_config()
@@ -112,8 +136,16 @@ def _state_path():
     return binggu_paths.state_path(STATE_FILE)
 
 
-_PACK_HEADER = ["# 사장님(owner) 의사결정 원칙·판단 온톨로지", "",
-                "사용자 개인 온톨로지 — owner 화자 확정 원칙/판단 (T3 하드제외 통과분).", ""]
+def _pack_header(label=None):
+    """팩 헤더 — 화자 호칭 파라미터화(owner_label). 둘째 줄의 '사용자 개인 온톨로지'는
+    일반 서술어(호칭 아님)라 그대로 둔다."""
+    lbl = label or _owner_label()
+    return ["# %s(owner) 의사결정 원칙·판단 온톨로지" % lbl, "",
+            "사용자 개인 온톨로지 — owner 화자 확정 원칙/판단 (T3 하드제외 통과분).", ""]
+
+
+# 하위호환 별칭(wrapper 명시 re-export 보존) — import 시점 라벨 스냅샷. 실제 렌더는 _pack_header() 동적.
+_PACK_HEADER = _pack_header()
 
 
 def _owner_sentences(ledger=None):
@@ -136,8 +168,8 @@ def _owner_sentences(ledger=None):
     return uniq, len(fr["blocked"])
 
 
-def _render_pack(sentences):
-    return "\n".join(_PACK_HEADER + ["- " + s for s in sentences])
+def _render_pack(sentences, label=None):
+    return "\n".join(_pack_header(label) + ["- " + s for s in sentences])
 
 
 def build_pack_text(ledger=None):
@@ -227,9 +259,10 @@ def confirm(content_hash, count):
 # → baseline 이후 신규 문장만 델타 텍스트로 던지면 신규 노드만 추가된다(중복 0).
 
 
-def _render_delta(sentences):
+def _render_delta(sentences, label=None):
     """델타 업로드 텍스트 — 신규 원칙 문장만(기존 노드 재파싱·중복 방지)."""
-    return "\n".join(["# (추가) 사장님 의사결정 원칙 — 신규 반영분", ""]
+    lbl = label or _owner_label()
+    return "\n".join(["# (추가) %s 의사결정 원칙 — 신규 반영분" % lbl, ""]
                      + ["- " + s for s in sentences])
 
 
@@ -294,8 +327,8 @@ def confirm_delta(new_hashes, content_hash, count):
 
 # ---------------- selftest ----------------
 def _selftest():
-    import tempfile
     import shutil
+    import tempfile
     ok = True
 
     def check(cond, msg):
@@ -452,6 +485,48 @@ def _selftest():
         os.remove(cfgp)
         check(pack_create_required() is False,
               "Tn9 config 부재 → 생성 신호 없음(owner 기본값 경로 회귀 0)")
+
+        # ---- _pack_config 폴백 사슬 + owner_label 중립화 (트랙 C) ----
+        # 격리: 팩/라벨 env 를 비우고 config·운영 마커 파일만으로 폴백을 검증.
+        for _ev in ("BINGGU_PACK_ID", "BINGGU_PACK_TITLE", "BINGGU_OWNER_LABEL"):
+            os.environ.pop(_ev, None)
+        statep = _state_path()  # person_pack_last.json (BINGGU_HOME 격리)
+        for _p in (cfgp, statep):
+            if os.path.exists(_p):
+                os.remove(_p)
+        # (c) config·운영 마커 모두 부재 → pack_id sentinel(None)·하드코딩 owner UUID 제거 확인
+        pid_c, title_c = _pack_config()
+        check(pid_c is None, "Tc1 config·마커 모두 부재 → pack_id sentinel(None)·하드코딩 UUID 미노출")
+        check(title_c == "사용자 의사결정 원칙 온톨로지",
+              "Tc2 title 기본값 = 중립 owner_label('사용자') 기반")
+        # (b) config 부재 + person_pack_last.json 에 pack_id → 그 값(=owner 회귀 시나리오)
+        with open(statep, "w", encoding="utf-8") as f:
+            json.dump({"pack_id": "4da76877-e286-449f-8116-569be4056838",
+                       "content_hash": "x", "count": 1}, f, ensure_ascii=False)
+        pid_b, _tb = _pack_config()
+        check(pid_b == "4da76877-e286-449f-8116-569be4056838",
+              "Tc3 config 부재+운영 마커 pack_id → 마커값 반환(owner 회귀 0)")
+        # (a) config 에 pack_id 있으면 그것(운영 마커보다 우선)
+        with open(cfgp, "w", encoding="utf-8") as f:
+            json.dump({"pack_id": "99999999-aaaa-bbbb-cccc-dddddddddddd", "title": "명시 팩 제목"},
+                      f, ensure_ascii=False)
+        pid_a, title_a = _pack_config()
+        check(pid_a == "99999999-aaaa-bbbb-cccc-dddddddddddd" and title_a == "명시 팩 제목",
+              "Tc4 config pack_id·title 최우선(운영 마커보다 우선)")
+        os.remove(cfgp)
+        os.remove(statep)
+        # (d) owner_label override — env·config·기본값 + 헤더/델타 반영
+        os.environ["BINGGU_OWNER_LABEL"] = "대표님"
+        check(_owner_label() == "대표님", "Tc5 env BINGGU_OWNER_LABEL 최우선")
+        check("# 대표님(owner)" in _render_pack(["문장"])
+              and "대표님 의사결정 원칙" in _render_delta(["신규"]),
+              "Tc6 owner_label 이 팩 헤더·델타 텍스트에 반영")
+        os.environ.pop("BINGGU_OWNER_LABEL", None)
+        with open(cfgp, "w", encoding="utf-8") as f:
+            json.dump({"owner_label": "사장님"}, f, ensure_ascii=False)
+        check(_owner_label() == "사장님" and "# 사장님(owner)" in _render_pack(["문장"]),
+              "Tc7 config owner_label(env 부재) → owner 개인 호칭('사장님') 표시 유지")
+        os.remove(cfgp)
 
         con.close()
         print(f"\nGATE={'GO' if ok else 'NO-GO'}")

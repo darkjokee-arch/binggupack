@@ -748,6 +748,85 @@ def _u_abstraction(params=None):
             "note": "규칙화는 사람 SAVE(candidate confirm)로만 — 자동확정 0·self-modifying 0. 제안 표시 전용."}
 
 
+# ==== 작업A(3차): hit/miss mark — 회상 조언 적중/빗나감 기록(write-gated·D-1/D-2/nonce 방어) ====
+# save_candidate 와 동일 write-gated 패턴(자동기록 방지 불변):
+#   - MCP params 의 actor 는 신뢰 0(무시). confirm 이 'MARK_HIT <index> <recall_query>'(miss=MARK_MISS)
+#     정확일치일 때만 actor=human 승격 — 사용자가 recall 로 본 순위(index)+query 를 재현한 사람-선택 증거.
+#   - dry_run 기본 True(비가역 write default-deny) → 기대 confirm 안내 + write 0.
+#   - dry_run=False + confirm 정확일치 → hit_recording.mark_outcome 가 재검증 후 기록. 불일치/부재 →
+#     reader → mark_outcome 의 actor=human 게이트가 G4_no_auto 로 이중 차단(핸들러 confirm + 게이트 actor).
+#   - node_id 는 입력받지 않는다(D-1): mark_outcome 가 (recall_query, index)로 why_search 를 재실행해
+#     서버가 노드를 스스로 확보 → 회상에 없는 임의 node_id 를 hit 로 위조할 표면이 없다. nonce 는 미지정
+#     허용(서버 why_search 재실행으로 스냅샷 확보). decision_id 는 (node_id,nonce) 안정 해시(D-2 이중계상 차단).
+#   - 운영 ledger 는 서버 결정(BINGGU_HOME/~/.binggupack). MCP 경로 입력 일절 무시(주입 차단).
+#   - 반환은 recorded/reason/outcome/decision_id/nonce/domain/events + node_claim(PII 마스킹) 만 —
+#     node_id 등 민감값 미노출(mark_outcome 반환에도 node_id 없음·node_claim 만 PII 마스킹).
+#   ★ _FORBIDDEN 미등재 근거: mark 는 write-gated(dry_run 기본·confirm 게이트·actor 하드 reader)라
+#     record_resolution(무차별 기록) 계열과 달리 기본-deny 표면만 노출한다. record_resolution 자체는
+#     여전히 _FORBIDDEN 유지 — mark 는 그 위조 표면 없는 안전 래퍼(D-1/D-2)로만 노출.
+def _mark_outcome_handler(params, outcome):
+    """hit/miss 공통 write-gated 핸들러. outcome in ('hit','miss'). 자동기록 방지 이중 게이트."""
+    params = params or {}
+    recall_query = (params.get("recall_query") or "").strip()
+    index = params.get("index")
+    confirm = params.get("confirm", "")
+    domain = params.get("domain")
+    dry_run = params.get("dry_run", True)
+    label = "MARK_HIT" if outcome == "hit" else "MARK_MISS"
+    act = "mark_" + outcome
+    if not recall_query:
+        return {"action": act, "mode": "write-gated", "verdict": "REJECT",
+                "executed_write": False, "reason": "recall_query_required"}
+    if not isinstance(index, int) or isinstance(index, bool) or index < 1:
+        return {"action": act, "mode": "write-gated", "verdict": "REJECT",
+                "executed_write": False, "reason": "index_out_of_range"}
+    expected = "%s %d %s" % (label, index, recall_query)
+    ledger = _operating_ledger()
+    if not os.path.exists(ledger):
+        return {"action": act, "mode": "write-gated", "verdict": "REJECT",
+                "executed_write": False, "reason": "ledger_not_found"}
+    if dry_run:
+        # dry-run: write 0. 기대 confirm 안내(사용자가 recall 로 index 확인 후 opt-out 해야 하므로).
+        return {"action": act, "mode": "dry-run", "verdict": "PREVIEW",
+                "executed_write": False, "would_write_ledger": False,
+                "confirm_expected": expected,
+                "note": "recall 로 순위(index) 확인 후 dry_run=false + confirm 으로 기록(node_id 입력 불필요·서버 재실행 확보)"}
+    # dry_run=False: confirm 정확일치만 human. 불일치/부재 → reader → mark_outcome G4_no_auto(자동기록 방지).
+    actor = "human" if (confirm and confirm == expected) else "reader"
+    _ensure_scripts_path()
+    from openbinggu_owner_accept_ux import open_accept
+    db = open_accept(ledger)
+    from binggupack.pack import hit_recording as HR
+    try:
+        # nonce 미지정 — 서버가 why_search 재실행으로 스냅샷 확보(D-1). ledger 는 서버결정(MCP 경로입력 무시).
+        r = HR.mark_outcome(db, ledger, recall_query, index, outcome, {"actor": actor},
+                            nonce=None, domain=domain, home=_operating_home())
+    finally:
+        db.close()
+    claim = r.get("node_claim")
+    return {"action": act, "mode": "write-gated",
+            "verdict": "ALLOW" if r.get("recorded") else "BLOCK",
+            "executed_write": bool(r.get("recorded")),
+            "recorded": bool(r.get("recorded")), "reason": r.get("reason"),
+            "outcome": r.get("outcome"), "decision_id": r.get("decision_id"),
+            "nonce": r.get("nonce"), "domain": r.get("domain"),
+            "events": r.get("events"),
+            "node_claim": _redact_pii(claim) if claim else None,  # PII 마스킹(node_id 미포함)
+            "ledger": "operating"}
+
+
+def _u_mark_hit(params=None):
+    """회상 조언이 맞았다(직감 적중) 기록 — write-gated·'MARK_HIT <index> <recall_query>' confirm 정확일치.
+    node_id 입력 0(D-1)·dry_run 기본·actor 하드 reader·nonce 서버 확보·D-2 이중계상 차단."""
+    return _mark_outcome_handler(params, "hit")
+
+
+def _u_mark_miss(params=None):
+    """회상 조언이 틀렸다(직감 빗나감) 기록 — write-gated·'MARK_MISS <index> <recall_query>' confirm 정확일치.
+    node_id 입력 0(D-1)·dry_run 기본·actor 하드 reader·nonce 서버 확보·D-2 이중계상 차단."""
+    return _mark_outcome_handler(params, "miss")
+
+
 # ---- 노출 도구 테이블(read/dry-run 만). 위험 도구는 의도적으로 부재 ----
 TOOLS = {
     "pack_build":           {"path_params": ["input_dir"], "underlying": _u_pack_build,          "mode": "dry-run"},
@@ -862,6 +941,20 @@ TOOLS = {
     "abstraction": {"path_params": [], "underlying": _u_abstraction, "mode": "read",
                     "input_schema": {"properties": {"domain": {"type": "string"}},
                                      "required": []}},
+    # ---- 작업A(3차): hit/miss mark(write-gated). node_id 입력 0(D-1)·confirm 정확일치·dry-run 기본·자동기록 0 ----
+    #   save_candidate 와 동일 취급(write-gated). ledger 서버결정·MCP 경로입력 무시·이중게이트(confirm+actor).
+    "mark_hit":  {"path_params": [], "underlying": _u_mark_hit, "mode": "write-gated",
+                  "input_schema": {"properties": {
+                      "recall_query": {"type": "string"}, "index": {"type": "integer"},
+                      "confirm": {"type": "string"}, "domain": {"type": "string"},
+                      "dry_run": {"type": "boolean"}},
+                   "required": ["recall_query", "index"]}},
+    "mark_miss": {"path_params": [], "underlying": _u_mark_miss, "mode": "write-gated",
+                  "input_schema": {"properties": {
+                      "recall_query": {"type": "string"}, "index": {"type": "integer"},
+                      "confirm": {"type": "string"}, "domain": {"type": "string"},
+                      "dry_run": {"type": "boolean"}},
+                   "required": ["recall_query", "index"]}},
 }
 
 # 노출 금지(핸들러 부재로 자동 차단되지만, 명시 거부 목록으로 의도 박제)
@@ -986,6 +1079,9 @@ def _selftest():
         # 작업4: abstraction read(temp 홈 graceful empty). 규칙화(promote)는 도구 부재로 자동 차단.
         ("abstraction_read_ok",  "abstraction", {},                    True,  "read no-path"),
         ("abstraction_domain_ok","abstraction", {"domain": "bid"},     True,  "read no-path"),
+        # 작업A(3차): hit/miss mark — dry-run 기본. BINGGU_HOME=temp(없음)라 ledger_not_found graceful(executed=True·write 0).
+        ("mark_hit_read_ok",     "mark_hit",    {"recall_query": "배포 절차", "index": 1}, True, "write-gated no-ledger"),
+        ("mark_miss_read_ok",    "mark_miss",   {"recall_query": "배포 절차", "index": 1}, True, "write-gated no-ledger"),
     ]
 
     import json as _json
@@ -1010,6 +1106,10 @@ def _selftest():
                 continue
             if tool in ("harvest_add", "harvest_remove") and k in ("kind", "url", "keyword",
                                                                    "source_id", "confirm"):
+                continue
+            # 작업A(3차) mark: recall_query/confirm 은 confirm_expected('MARK_HIT <index> <query>')에
+            # 반드시 담기는 사용자 입력(공개 query·경로/secret 아님) — save/deprecate 와 동형 노출 의도.
+            if tool in ("mark_hit", "mark_miss") and k in ("recall_query", "confirm"):
                 continue
             if isinstance(v, str) and v.strip() and v.strip() in blob:
                 raw_leak = True
@@ -1134,6 +1234,101 @@ def _selftest():
               for t in ("record_contrast", "record_resolution", "record_use", "verify_snapshot"))
     save_ok = save_ok and s14
     save_notes.append(("record_write_fns_forbidden", s14))
+
+    # ----- 작업A(3차): hit/miss mark gates (temp home·temp ledger·운영 write 0) -----
+    # 핸들러가 _operating_ledger()=BINGGU_HOME/ledger.sqlite 를 쓰므로, 실 write 경로 검증은 BINGGU_HOME 을
+    # 잠깐 temp 로 바꿔 격리한다(운영 ~/.binggupack 미접촉·mark 후 원복). OPERATING_PATHS 는 별도(불변 유지).
+    import shutil as _sh
+    import tempfile as _tf
+    _saved_home = os.environ.get("BINGGU_HOME")
+    mark_ok = True
+    mark_notes = []
+    _mtmp = _tf.mkdtemp(prefix="binggu_mark_mcp_")
+    try:
+        _mledger = os.path.join(_mtmp, "ledger.sqlite")
+        _ensure_scripts_path()
+        from openbinggu_owner_accept_ux import open_accept as _oa
+        _mdb = _oa(_mledger)  # 핸들러와 동일 open_accept 로 회상 가능한 판단 노드 3건 적재.
+        for _nid, _sent in (("mk1", "배포 전 로컬 selftest 와 live endpoint 를 확인한다"),
+                            ("mk2", "배포 전 로컬 selftest 확인하고 endpoint 응답을 본다"),
+                            ("mk3", "무관한 요리 레시피 메모")):
+            _mdb.con.execute(
+                "INSERT INTO nodes(node_id,node_type,sentence,semantic_subtype,speaker,state,created_at)"
+                " VALUES(?,?,?,?,?,?,?)",
+                (_nid, "judgment", _sent, "교훈", "owner", "active", "2026-06-20T00:00:00Z"))
+        _mdb.con.commit()
+        _mdb.close()
+        os.environ["BINGGU_HOME"] = _mtmp  # 핸들러 _operating_ledger()가 이 temp 를 운영 ledger 로 인식
+        _mq = "배포 전 endpoint 확인"
+
+        # M1) dry-run 기본 — write 0(executed_write False·would_write_ledger False), 기대 confirm 안내.
+        r = handle_tool("mark_hit", {"recall_query": _mq, "index": 1}, allow_root)
+        tr = r.get("tool_result") or {}
+        m1 = (r.get("executed") is True and tr.get("executed_write") is False
+              and tr.get("would_write_ledger") is False and tr.get("verdict") == "PREVIEW"
+              and tr.get("confirm_expected") == ("MARK_HIT 1 " + _mq))
+        mark_ok = mark_ok and m1
+        mark_notes.append(("mark_dryrun_write0", m1))
+
+        # M2) confirm 불일치 + dry_run=False → write 0(reader → mark_outcome G4_no_auto).
+        r = handle_tool("mark_hit", {"recall_query": _mq, "index": 1,
+                                     "confirm": "MARK_HIT 9 wrong", "dry_run": False}, allow_root)
+        tr = r.get("tool_result") or {}
+        m2 = (tr.get("executed_write") is False and tr.get("recorded") is False
+              and tr.get("reason") == "G4_no_auto")
+        mark_ok = mark_ok and m2
+        mark_notes.append(("mark_confirm_mismatch_write0", m2))
+
+        # M3) actor 위조 무의미 — params actor='human' 이라도 confirm 부재면 reader → write 0(G4_no_auto).
+        r = handle_tool("mark_hit", {"recall_query": _mq, "index": 1,
+                                     "dry_run": False, "actor": "human"}, allow_root)
+        tr = r.get("tool_result") or {}
+        m3 = (tr.get("executed_write") is False and tr.get("recorded") is False
+              and tr.get("reason") == "G4_no_auto")
+        mark_ok = mark_ok and m3
+        mark_notes.append(("mark_actor_forge_reader_write0", m3))
+
+        # M4) confirm 정확일치 + dry_run=False → 실 기록(temp ledger). recorded True·outcome hit·decision_id.
+        r = handle_tool("mark_hit", {"recall_query": _mq, "index": 1,
+                                     "confirm": "MARK_HIT 1 " + _mq, "dry_run": False}, allow_root)
+        tr = r.get("tool_result") or {}
+        m4 = (r.get("executed") is True and tr.get("executed_write") is True
+              and tr.get("recorded") is True and tr.get("outcome") == "hit"
+              and bool(tr.get("decision_id")))
+        mark_ok = mark_ok and m4
+        mark_notes.append(("mark_confirm_exact_write", m4))
+
+        # M5) node_id 미노출(D-1) — mark 응답에 node:/node_id 토큰 없음(위조 표면 0).
+        _mblob = _json.dumps(tr, ensure_ascii=False)
+        m5 = ("node:" not in _mblob and "node_id" not in _mblob)
+        mark_ok = mark_ok and m5
+        mark_notes.append(("mark_no_node_id_exposed", m5))
+
+        # M6) D-2 이중계상 차단 — 같은 회상·같은 index 재mark → dup_decision·write 0(안정 decision_id).
+        r = handle_tool("mark_hit", {"recall_query": _mq, "index": 1,
+                                     "confirm": "MARK_HIT 1 " + _mq, "dry_run": False}, allow_root)
+        tr = r.get("tool_result") or {}
+        m6 = (tr.get("executed_write") is False and tr.get("reason") == "dup_decision")
+        mark_ok = mark_ok and m6
+        mark_notes.append(("mark_dup_decision_write0", m6))
+
+        # M7) mark_miss 다른 index → 다른 node → 다른 decision_id → 정상 기록(outcome miss).
+        r = handle_tool("mark_miss", {"recall_query": _mq, "index": 2,
+                                      "confirm": "MARK_MISS 2 " + _mq, "dry_run": False}, allow_root)
+        tr = r.get("tool_result") or {}
+        m7 = (tr.get("executed_write") is True and tr.get("recorded") is True
+              and tr.get("outcome") == "miss")
+        mark_ok = mark_ok and m7
+        mark_notes.append(("mark_miss_write", m7))
+    finally:
+        if _saved_home is None:
+            os.environ.pop("BINGGU_HOME", None)
+        else:
+            os.environ["BINGGU_HOME"] = _saved_home
+        _sh.rmtree(_mtmp, ignore_errors=True)
+
+    save_ok = save_ok and mark_ok
+    save_notes.extend(mark_notes)
 
     # S4) 운영 store(OPERATING_PATHS) mtime 불변 — 실 ledger write 0 입증.
     op_after = {p: (os.path.getmtime(p) if os.path.exists(p) else None) for p in OPERATING_PATHS}

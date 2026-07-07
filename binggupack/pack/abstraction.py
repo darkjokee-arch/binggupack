@@ -5,6 +5,11 @@
   추상화 후보(candidate rule)를 텍스트 리스트로 '제안'한다. 규칙화(active 승격)는 절대 하지
   않는다 — 제안은 반환/표시뿐이고, 규칙 자산 write 는 사람 SAVE(기존 candidate confirm 경로)에서만.
 
+승격 연결(트랙 B, read-only 커넥터): build_promotion_candidate_spec 은 proposal_id 로
+  propose_abstractions 를 재실행(서버 재확보=D-1)해 매칭 proposal 을 찾고 candidate 등록 '스펙'만
+  만든다(본 모듈 write 0). 실제 candidate=1 등록은 CLI 가 기존 save 경로(save_selected)로 위임하고,
+  active 승격은 여전히 별도 promote 단계(evidence 1:1 검증)로 남는다 — 새 엣지/게이트 발명 0.
+
 헌법 4불변(이 모듈이 물리로 보장):
   1) 대화중 0개입 — 자동 실행/자동 확정 0. propose 는 read-only 조회 후 dict 리스트만 반환.
   2) 자동확정 저장 금지 — DB write 0. INSERT/UPDATE/audit_append 0. active 승격 0.
@@ -51,8 +56,8 @@ for _p in (ROOT, _SCRIPTS):
     if _p and _p not in sys.path:
         sys.path.insert(0, _p)
 
-from binggupack.pack import recall as RECALL      # _tokens·_relevance·_load_graph·JUDGMENT_KINDS  # noqa: E402
-from binggupack.pack import hit_stats as HIT      # assert_not_ranking_input·_domain_norm(신호만)   # noqa: E402
+from binggupack.pack import hit_stats as HIT  # assert_not_ranking_input·_domain_norm(신호만)   # noqa: E402
+from binggupack.pack import recall as RECALL  # _tokens·_relevance·_load_graph·JUDGMENT_KINDS  # noqa: E402
 
 # 추상화 임계 — CLAUDE.md '3회+ 반복' 스킬화 임계와 정합(근거 노드 최소 개수).
 MIN_SUPPORT = 3
@@ -264,6 +269,73 @@ def propose_abstractions(ledger_path, domain=None, min_support=MIN_SUPPORT, home
     return proposals
 
 
+# ---------------- 승격 스펙 빌더(candidate 등록 연결 · read-only · write 0) ----------------
+
+def promotion_write_is_safe(text, explicit=True):
+    """등록될 문장이 기존 save 경로(capture_preview 재분할)에서 '단일 후보 = 원문 그대로'로 살아남는지
+    확인한다(read-only · DB write 0). 제안 문구 안의 인용 발췌가 문장 종결형을 포함하면 segmenter 가
+    중간에서 잘라 부분 문장만 저장될 수 있다 → 그런 경우 False 를 돌려 CLI 가 자동 등록을 막고 수동
+    저장을 안내하게 한다(억지 write 회피 · 안전 > 기능). capture_preview 는 lazy import(무거운 의존 회피).
+    """
+    try:
+        from openbinggu_conversation_capture_preview import capture_preview
+        pv = capture_preview(text, explicit=explicit)
+    except Exception:
+        return False
+    cands = pv.get("candidates") or []
+    return len(cands) == 1 and cands[0].get("sentence") == text
+
+
+def build_promotion_candidate_spec(ledger_path, proposal_id, domain=None,
+                                   min_support=MIN_SUPPORT, home=None):
+    """proposal_id 로 propose_abstractions 를 '재실행'해(서버 재확보=D-1 위조차단 재사용) 매칭 proposal 을
+    찾고, candidate 노드 1건 '등록 스펙'(dict)을 만든다. **write 0(순수)** — 실제 candidate 등록은
+    CLI 가 기존 save 경로(save_selected)로 위임한다(본 모듈은 DB write 0 유지).
+
+    D-1(위조 차단): proposal_id 는 content hash 일 뿐이고, 등록될 내용(text/evidence_refs/subtype)은
+      ledger 에서 재확보한 proposal 로만 결정된다. 임의 proposal_id → 재확보 목록에 없으면 None
+      (사람이 존재하지 않는·위조 proposal 을 promote 하는 표면 차단).
+
+    스키마 주의(억지 write 회피): 반환 evidence_refs 는 근거 판단 node_id 리스트 — **감사 provenance
+      용이며 그래프 엣지로 만들지 않는다**. 기존 save_selected 는 등록 문장에 대한 conv-self 자기증빙
+      + 1:1 evidence_supports 엣지를 붙이므로(promote 의 1:1 sentence 검증과 정합), 원본 node_id 로
+      가는 별도 엣지를 만들면 그 1:1 검증이 깨진다 → 새 엣지 타입 발명 0(self-modifying 0).
+
+    반환 dict:
+      proposal_id        : 입력과 동일(매칭 확인)
+      text               : proposed_principle_text — 등록될 문장(save 경로가 PII/A0 재스캔·재판정)
+      evidence_refs      : 근거 node_id(정렬) — provenance(감사 노트)용·엣지 아님
+      semantic_subtype/domain/supporting_count : proposal 메타(표시/감사)
+      source_kind        : 'abstraction_promotion'
+      confirm_phrase     : 'PROMOTE '+proposal_id — 사람이 정확 타이핑해야 하는 CLI 게이트 문구
+      save_indices/save_confirm : [1] / 'SAVE 1' — 기존 save_selected 내부 confirm 재사용(단일 문장)
+    매칭 proposal 이 없으면 None.
+    """
+    proposals = propose_abstractions(ledger_path, domain=domain,
+                                     min_support=min_support, home=home)
+    match = None
+    for p in proposals:
+        if p["proposal_id"] == proposal_id:
+            match = p
+            break
+    if match is None:
+        return None
+    return {
+        "proposal_id": match["proposal_id"],
+        "text": match["proposed_principle_text"],
+        "evidence_refs": list(match["evidence_refs"]),
+        "semantic_subtype": match["semantic_subtype"],
+        "domain": match["domain"],
+        "supporting_count": match["supporting_count"],
+        "source_kind": "abstraction_promotion",
+        "confirm_phrase": "PROMOTE " + proposal_id,
+        "save_indices": [1],
+        "save_confirm": "SAVE 1",
+        # 문장 분할로 원문이 잘리는 제안은 자동 등록 불가(수동 저장 안내). CLI 가 이 값으로 분기.
+        "write_safe": promotion_write_is_safe(match["proposed_principle_text"]),
+    }
+
+
 # ---------------- 표시(결정적 마크다운) ----------------
 
 def render_proposals_md(proposals):
@@ -277,6 +349,9 @@ def render_proposals_md(proposals):
         lines.append("- 근거(evidence_refs): " + ", ".join(p["evidence_refs"]))
         lines.append("- supporting_count: %d" % p["supporting_count"])
         lines.append("- trust: candidate_unverified")
+        # 승격(candidate 등록) 안내 — 사람이 정확 문구를 직접 타이핑해야만 write(자동확정 0).
+        lines.append('- candidate 등록: binggu abstraction --promote %s --confirm "PROMOTE %s"'
+                     % (p["proposal_id"], p["proposal_id"]))
         lines.append("")
     lines.append("규칙화하려면 사람이 SAVE 로 명시 승인해야 합니다"
                  "(빙구팩 규칙 자산 write 0·self-modifying 0).")
@@ -286,15 +361,19 @@ def render_proposals_md(proposals):
 # ---------------- selftest (recall._selftest 패턴 · raw sqlite3 · mtime 가드) ----------------
 
 def _selftest():
+    import shutil
     import sqlite3 as _sq
     import tempfile
-    import shutil
     from datetime import datetime, timezone
 
     if _SCRIPTS not in sys.path:
         sys.path.insert(0, _SCRIPTS)
-    from openbinggu_staging_write_selftest import OPERATING_PATHS
     from binggu_schema import apply_schema  # 정본 스키마(temp fixture 도 정본 상위집합)
+
+    # 승격 연결(트랙 B) 통합 검증용 — 실제 candidate 등록은 기존 save 경로(temp ledger)로만.
+    from openbinggu_conversation_candidate_save import save_selected
+    from openbinggu_deprecate_and_remind_g3 import open_g3
+    from openbinggu_staging_write_selftest import OPERATING_PATHS
 
     results = []
 
@@ -472,6 +551,71 @@ def _selftest():
         rec(11, "render_proposals_md 결정적(헤더·SAVE 안내)·빈 리스트 graceful",
             "추상화 제안" in md and "규칙화하려면 사람이 SAVE" in md
             and "제안 없음" in md_empty)
+
+        # ===== 승격 연결(트랙 B): proposal → candidate 등록 =====
+        snap = os.path.join(tmp, "snap")
+        os.makedirs(snap, exist_ok=True)
+
+        # ── T12 승격 스펙 빌더: proposal_id 매칭 → candidate 등록 스펙(dict) ──
+        spec = build_promotion_candidate_spec(led1, pr1[0]["proposal_id"])
+        rec(12, "build_promotion_candidate_spec: 매칭 proposal → 스펙(text=원문·confirm_phrase·write_safe)",
+            spec is not None and spec["text"] == pr1[0]["proposed_principle_text"]
+            and spec["confirm_phrase"] == "PROMOTE " + pr1[0]["proposal_id"]
+            and spec["evidence_refs"] == ["n:a1", "n:a2", "n:a3"]
+            and spec["source_kind"] == "abstraction_promotion"
+            and spec["save_confirm"] == "SAVE 1" and spec["write_safe"] is True)
+
+        # ── T13 D-1 위조 차단: 재확보 목록에 없는 proposal_id → None(임의 promote 불가) ──
+        rec(13, "D-1 위조 차단: 미매칭 proposal_id → None(등록 내용은 재확보로만 결정)",
+            build_promotion_candidate_spec(led1, "abstraction:deadbeefdeadbeef") is None)
+
+        # ── T14 confirm 불일치 → write 0(등록 안 됨) ──
+        db_c = open_g3(os.path.join(tmp, "promo_confirm.sqlite"))
+        r14 = save_selected(db_c, spec["text"], spec["save_indices"],
+                            {"actor": "human", "confirm": "SAVE 9"}, snap, explicit=True)
+        n14 = db_c.con.execute("SELECT count(*) FROM nodes").fetchone()[0]
+        db_c.close()
+        rec(14, "confirm 불일치 → write 0(applied False·nodes 0·confirm_phrase_mismatch)",
+            (not r14["applied"]) and n14 == 0 and r14["reason"] == "confirm_phrase_mismatch")
+
+        # ── T15 confirm 일치(actor=human) → candidate 등록(candidate=1·evidence 1:1·원문 그대로)+멱등 ──
+        db_ok = open_g3(os.path.join(tmp, "promo_ok.sqlite"))
+        r15 = save_selected(db_ok, spec["text"], spec["save_indices"],
+                            {"actor": "human", "confirm": spec["save_confirm"]}, snap, explicit=True)
+        nid15 = (r15.get("node_ids") or [None])[0]
+        row15 = db_ok.con.execute("SELECT candidate,node_type,sentence FROM nodes").fetchone()
+        sup15 = db_ok.con.execute(
+            "SELECT count(*) FROM edges WHERE relation='evidence_supports' AND target=?",
+            (nid15,)).fetchone()[0]
+        # 멱등: 같은 문장 재등록 → skip(중복 등록 0)
+        r15b = save_selected(db_ok, spec["text"], spec["save_indices"],
+                             {"actor": "human", "confirm": spec["save_confirm"]}, snap, explicit=True)
+        db_ok.close()
+        rec(15, "confirm 일치 → candidate 등록(candidate=1·judgment·evidence 1:1·원문)+멱등 재등록 skip",
+            r15["applied"] and r15["saved"] == 1 and row15[0] == 1 and row15[1] == "judgment"
+            and row15[2] == spec["text"] and sup15 == 1
+            and (not r15b["applied"]) and r15b["skipped_existing"] == 1)
+
+        # ── T16 자동확정 0: actor!=human → G4 write 0(active 자동승격 0) ──
+        db_a = open_g3(os.path.join(tmp, "promo_auto.sqlite"))
+        r16 = save_selected(db_a, spec["text"], spec["save_indices"],
+                            {"actor": "auto", "confirm": spec["save_confirm"]}, snap, explicit=True)
+        n16 = db_a.con.execute("SELECT count(*) FROM nodes").fetchone()[0]
+        act16 = db_a.con.execute("SELECT count(*) FROM nodes WHERE candidate=0").fetchone()[0]
+        db_a.close()
+        rec(16, "자동확정 0: actor=auto → G4_no_auto write 0·active 자동승격 0",
+            (not r16["applied"]) and n16 == 0 and r16["reason"] == "G4_no_auto" and act16 == 0)
+
+        # ── T17 문장 분할 제안은 자동 등록 불가(write_safe False → 수동 안내로 축소·안전>기능) ──
+        led17 = build_ledger("t17.sqlite", [
+            ("n:s1", "judgment", "결과는 짧게 결론부터 보고하는 것을 선호한다 요약", "선호"),
+            ("n:s2", "judgment", "결과는 짧게 결론부터 보고 선호 요약 방식", "선호"),
+            ("n:s3", "judgment", "짧게 결론부터 보고하는 방식을 선호 요약", "선호"),
+        ])
+        pr17 = propose_abstractions(led17)
+        spec17 = build_promotion_candidate_spec(led17, pr17[0]["proposal_id"]) if pr17 else None
+        rec(17, "문장 분할 제안 → write_safe False(자동 등록 차단·수동 저장 안내로 축소)",
+            spec17 is not None and spec17["write_safe"] is False)
 
     finally:
         # 운영 store mtime 재측정(read-only 불변 증명).

@@ -905,17 +905,68 @@ def cmd_resolve(a):
 def cmd_abstraction(a):
     """반복 판단 + hit_events 에서 규칙 후보(추상화)를 '제안만' 조회 — read-only·자동확정 0.
 
-    규칙화(active 승격)는 절대 하지 않는다 — 제안 문구만 표시. 규칙으로 만들려면 사람이 SAVE 로
-    명시 승인(candidate confirm 경로). DB write 0 · self-modifying 0."""
+    조회(기본): 제안 문구만 표시(DB write 0 · self-modifying 0).
+    등록(--promote <proposal_id>): 그 제안을 candidate 로 등록(승격 '연결'). active 승격은 여전히
+      별도 promote 단계(evidence 1:1 검증)로 남는다. 정확 문구 "PROMOTE <proposal_id>" 일치만 write,
+      dry-run 기본(confirm 없으면 미리보기만), 문장 분할로 원문이 잘리면 자동 등록 차단(수동 저장 안내).
+      실제 등록은 기존 save 경로(save_selected)를 재사용(candidate=1·conv-self 자기증빙 1:1·감사/체크섬)."""
     from binggupack.pack import abstraction as ABS
     ledger, _ = _ledger_paths(a.ledger)
     if not os.path.exists(ledger):
         print("장부가 없습니다: %s · 먼저 python binggu.py init" % ledger)
         return 2
-    proposals = ABS.propose_abstractions(ledger, domain=getattr(a, "domain", None),
-                                         home=os.path.dirname(ledger))
-    print(ABS.render_proposals_md(proposals))
-    return 0
+    domain = getattr(a, "domain", None)
+    home = os.path.dirname(ledger)
+    promote_id = getattr(a, "promote", None)
+    if not promote_id:
+        proposals = ABS.propose_abstractions(ledger, domain=domain, home=home)
+        print(ABS.render_proposals_md(proposals))
+        return 0
+
+    # ── candidate 등록(승격 연결) — 서버 재확보(D-1) → 사람 confirm 정확일치만 write ──
+    spec = ABS.build_promotion_candidate_spec(ledger, promote_id, domain=domain, home=home)
+    if spec is None:
+        print("BLOCK: proposal_not_found — 재확보 목록에 없는 proposal_id 입니다.")
+        print("  먼저 `binggu abstraction` 으로 현재 제안을 확인하세요(stale/위조 차단).")
+        return 1
+    confirm = getattr(a, "confirm", None)
+    if not confirm:
+        # dry-run 기본: 무엇이 등록될지 미리보기만(write 0)
+        print("# 승격 미리보기(dry-run · 아직 등록 안 함 · write 0)")
+        print("proposal_id : %s" % spec["proposal_id"])
+        print("등록 문장    : %s" % spec["text"])
+        print("근거(provenance·그래프 엣지 아님): %s" % ", ".join(spec["evidence_refs"]))
+        print("자동 등록 안전(문장 분할 없음): %s" % spec["write_safe"])
+        print('등록하려면   : binggu abstraction --promote %s --confirm "%s"'
+              % (spec["proposal_id"], spec["confirm_phrase"]))
+        return 0
+    if confirm != spec["confirm_phrase"]:
+        print('BLOCK: confirm_mismatch — 정확히 "%s" 를 입력해야 등록됩니다(자동확정 0).'
+              % spec["confirm_phrase"])
+        return 1
+    if not spec["write_safe"]:
+        # 억지 write 회피(안전 > 기능): 문장 분할로 원문이 잘리면 자동 등록하지 않고 수동 저장을 안내.
+        print("BLOCK: unsafe_segmentation — 이 제안 문구는 문장 분할로 원문 그대로 저장되지 않습니다.")
+        print("수동 저장(안전 경로)으로 등록하세요:")
+        print('  binggu preview "%s"' % spec["text"])
+        print('  binggu save "%s" --preview-id <표시된 id> --pick <원문 후보 번호> '
+              '--confirm "SAVE <번호>" --explicit' % spec["text"])
+        return 1
+
+    # write: 기존 save 경로 재사용 — actor 판정은 _resolve_human_ctx(위조방지 게이트/TTY) 그대로.
+    db, snap_dir = _open(a.ledger)
+    ctx = _resolve_human_ctx(a.ledger, [spec["text"]], spec["save_confirm"])
+    r = save_selected(db, spec["text"], spec["save_indices"], ctx, snap_dir, explicit=True)
+    db.close()
+    if r.get("applied") and r.get("saved") == 1:
+        print("OK: candidate 등록 완료 · pack=%s · node=%s"
+              % (r.get("pack_id"), (r.get("node_ids") or ["?"])[0]))
+        print("  active 승격은 별도 단계(기존 promote·evidence 1:1 검증) — 자동확정 0.")
+        return 0
+    if (not r.get("applied")) and r.get("skipped_existing"):
+        print("이미 등록된 후보입니다(idempotent·중복 등록 0): skipped=%d" % r["skipped_existing"])
+        return 0
+    return _show(r)
 
 
 def cmd_mark(a):
@@ -1297,8 +1348,12 @@ def main():
         mkp.add_argument("--index", type=int, default=1)   # recall 표시 번호(1-based)
         mkp.add_argument("--nonce", default=None)           # recall 이 발급한 회상 봉인(stale 방어)
         mkp.add_argument("--domain", default=None)          # 분모 분리 키(선택)
-    # 추상화 규칙 후보 제안(작업4·C) — read-only·자동확정 0
+    # 추상화 규칙 후보 제안(작업4·C) — read-only·자동확정 0. --promote 로 candidate 등록(승격 연결)
     abp = sub.add_parser("abstraction"); abp.add_argument("--domain", default=None)
+    abp.add_argument("--promote", default=None,
+                     help="proposal_id 를 candidate 로 등록(승격 연결). dry-run 기본")
+    abp.add_argument("--confirm", default=None,
+                     help='정확 문구 "PROMOTE <proposal_id>" 일치 시에만 등록(자동확정 0)')
     pp = sub.add_parser("pair")              # owner 발화 + ai 요약 페어 저장(화자 축)
     pp.add_argument("owner_text"); pp.add_argument("ai_text", nargs="?", default=None)
     pp.add_argument("--relation", choices=["accepts", "refutes", "revises"], default="accepts")
