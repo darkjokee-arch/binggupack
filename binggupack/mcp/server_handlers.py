@@ -161,6 +161,26 @@ def _operating_ledger():
     return os.path.join(_operating_home(), "ledger.sqlite")
 
 
+# ---- 응답 노출 전처리(작업3): PII 마스킹 + node_id 토큰 제거(Fable5 D-1 위조 차단) ----
+import re as _re  # noqa: E402
+_NODE_ID_RX = _re.compile(r"node:[A-Za-z0-9:_.\-]+")
+
+
+def _redact_pii(s):
+    """PII+secret 마스킹(batch_redact). why/contrast read 응답 노출 전 기본 적용."""
+    try:
+        from binggupack.pack.batch_m1 import batch_redact
+        red, _hits, _review = batch_redact(s or "")
+        return red
+    except Exception:
+        return s or ""
+
+
+def _mask_node_ids(s):
+    """'node:...' 토큰 마스킹 — why/contrast 출력의 node_id 로 write confirm/id8(node hash8) 위조 차단."""
+    return _NODE_ID_RX.sub("[node]", s or "")
+
+
 def _ensure_scripts_path():
     """scripts 정본 모듈(binggu_recall 등) import 보장. storage facade 도 동일 부트스트랩을 하지만
     read 도구 단독 진입(핸들러 selftest) 대비 명시. server_handlers 는 binggupack/mcp/ 하위 → dirname 3 = ROOT."""
@@ -191,6 +211,39 @@ def _u_recall(params=None):
              for e in res.get("relevant_edges", [])]
     return {"action": "recall", "mode": "read", "count": len(nodes),
             "nodes": nodes, "edges": edges, "summary": res.get("summary", "")}
+
+
+def _u_why(params=None):
+    """판단·근거 회상(why_search 래핑·read-only·write 0). node_id/edge_id 미노출(D-1)·PII 마스킹.
+
+    recall 도구와 달리 node_id 를 노출하지 않고 표시용 1-based index(i) 만 반환 —
+    모델이 deprecate/replace confirm(id8=node hash8) 을 위조하지 못하게 한다. ledger 없으면 빈 결과.
+    """
+    params = params or {}
+    query = (params.get("query") or "").strip()
+    if not query:
+        return {"action": "why", "mode": "read", "error": "query_required"}
+    ledger = _operating_ledger()
+    if not os.path.exists(ledger):
+        return {"action": "why", "mode": "read", "empty": True, "count": 0,
+                "nodes": [], "edges": [], "summary": "장부 없음(회상할 기억 0)"}
+    from binggupack.pack import recall as RECALL
+    limit = params.get("limit")
+    lim = limit if isinstance(limit, int) and not isinstance(limit, bool) else None
+    res = RECALL.why_search(ledger, query, limit=lim, home=_operating_home())
+    id2i, nodes = {}, []
+    for i, n in enumerate(res["relevant_nodes"], 1):
+        id2i[n.get("node_id")] = i
+        nodes.append({"i": i, "node_type": n["node_type"],
+                      "subtype": n.get("semantic_subtype"),
+                      "rank": round(n["rank_score"], 3), "rel": round(n["relevance"], 2),
+                      "trust": n.get("trust", "candidate_unverified"),
+                      "claim": _redact_pii(n["claim"])})
+    edges = [{"relation": e["relation"], "source_i": id2i.get(e["source"]),
+              "target_i": id2i.get(e["target"])} for e in res.get("relevant_edges", [])]
+    return {"action": "why", "mode": "read", "count": len(nodes), "nodes": nodes,
+            "edges": edges, "summary": _redact_pii(res.get("summary", "")),
+            "confidence": res.get("confidence", 0.0)}
 
 
 def _u_preflight(params=None):
@@ -607,6 +660,62 @@ def _u_cloud_packs(params=None):
     return {"action": "cloud_packs", "mode": "read", **_cloud_result_view(r)}
 
 
+# ==== 작업3: 대비(contrast) read 조회 — detect/build/render 만(기록계열 write 함수 절대 호출 0) ====
+# 안전 원칙(구조적 write 차단):
+#   - contrast_protocol 에서 read 3함수(detect_conflicts/build_contrast_table/render_contrast_md)만 import.
+#   - 기록계열 write 함수(_CONTRAST_WRITE_FNS)는 import·호출 0 → staging_db 미생성 → audit_append/
+#     contrast_snapshot INSERT 경로 원천 부재. recorded=False 로 응답 명시, selftest S13 소스검사로 재확인.
+#   - node_id 는 [node] 치환·원문 quote 는 PII 마스킹(D-1/PII). 빙구팩은 대비표 제시만(결정 0·자동교체 0).
+_CONTRAST_READ_FNS = ("detect_conflicts", "build_contrast_table", "render_contrast_md")
+_CONTRAST_WRITE_FNS = ("record_contrast", "verify_snapshot")  # staging write — 노출/호출 절대 금지
+
+
+def _u_contrast(params=None):
+    """빙구팩 preflight 신호 vs 강제조항(mandates) 대비표 조회(read-only·write 0·기록계열 미호출).
+
+    mandates: [{clause_text, stance(require|forbid), source, domain, ...}]. 안전/무결성 domain 은
+    detect_conflicts 가 SKIP(헌법 양보 0). 반환 tables 는 node_id 를 노출하지 않고 conflict_id(sha)만 준다.
+    """
+    params = params or {}
+    mandates = params.get("mandates") or []
+    if not isinstance(mandates, list):
+        return {"action": "contrast", "mode": "read", "error": "mandates_must_be_list"}
+    ledger = _operating_ledger()
+    from binggupack.pack import recall as RECALL
+    # read 3함수만 import — 기록계열 write 함수는 import 0(구조적 write 차단).
+    from binggupack.safety.contrast_protocol import (
+        detect_conflicts, build_contrast_table, render_contrast_md)
+    if not os.path.exists(ledger):
+        preflight_out = {"avoid_patterns": [], "preferences": [], "risk_level": "낮음"}
+    else:
+        files = params.get("files")
+        if isinstance(files, str):
+            files = [f.strip() for f in files.split(",") if f.strip()]
+        preflight_out = RECALL.preflight_context(
+            ledger, prompt=params.get("prompt"), cwd=params.get("cwd") or os.getcwd(),
+            domain=params.get("domain"), files_changed=files or None, home=_operating_home())
+    conflicts = detect_conflicts(preflight_out, mandates, home=_operating_home(), env=os.environ)
+    tables = []
+    for c in conflicts:
+        t = build_contrast_table(c, home=_operating_home())
+        md = _mask_node_ids(_redact_pii(render_contrast_md(t)))  # node_id·PII 제거(D-1/PII)
+        tables.append({
+            "conflict_id": t["conflict_id"], "match_via": t.get("match_via"),
+            "relevance": t.get("relevance"),
+            "binggu": {"stance": t["binggu_side"]["stance"],
+                       "claim": _redact_pii(t["binggu_side"]["quote"]),
+                       "trust": t["binggu_side"]["trust"], "cons": t["binggu_side"]["cons"]},
+            "mandate": {"stance": t["mandate_side"]["stance"], "source": t["mandate_side"]["source"],
+                        "quote": _redact_pii(t["mandate_side"]["quote"]),
+                        "quote_status": t["mandate_side"]["quote_status"],
+                        "trust": t["mandate_side"]["trust"]},
+            "choices": t["choices"], "markdown": md})
+    return {"action": "contrast", "mode": "read", "count": len(tables),
+            "recorded": False,  # 기록계열 미호출 — audit/snapshot write 0
+            "conflicts": tables,
+            "note": "빙구팩은 대비표 제시만(결정 0·자동교체 0). 선택은 사장님."}
+
+
 # ---- 노출 도구 테이블(read/dry-run 만). 위험 도구는 의도적으로 부재 ----
 TOOLS = {
     "pack_build":           {"path_params": ["input_dir"], "underlying": _u_pack_build,          "mode": "dry-run"},
@@ -706,6 +815,17 @@ TOOLS = {
                      "input_schema": {"properties": {"query": {"type": "string"},
                                                      "category": {"type": "string"}},
                                       "required": []}},
+    # ---- 작업3: 판단 근거 회상(why) + 강제조항 대비(contrast) read. node_id 미노출·PII 마스킹·write 0 ----
+    "why":      {"path_params": [], "underlying": _u_why, "mode": "read",
+                 "input_schema": {"properties": {"query": {"type": "string"},
+                                                 "limit": {"type": "integer"}},
+                                  "required": ["query"]}},
+    "contrast": {"path_params": [], "underlying": _u_contrast, "mode": "read",
+                 "input_schema": {"properties": {
+                     "prompt": {"type": "string"}, "cwd": {"type": "string"},
+                     "domain": {"type": "string"}, "files": {"type": "string"},
+                     "mandates": {"type": "array", "items": {"type": "object"}}},
+                  "required": ["mandates"]}},
 }
 
 # 노출 금지(핸들러 부재로 자동 차단되지만, 명시 거부 목록으로 의도 박제)
@@ -717,6 +837,9 @@ _FORBIDDEN = {
     # 트랙 B egress-only: 클라우드 write 계열 도구는 노출 금지(read cloud_recall/cloud_packs 만 허용).
     # ★opencrab_pack_qa 는 write 가능(assess_and_update/reverse_ingest)이라 절대 노출 금지.
     "opencrab_pack_update", "opencrab_pack_qa", "opencrab_workflow_manage",
+    # 작업3: 판단/사용/대비 기록계열 write 함수는 TOOLS 미등록 유지 + 명시 금지(Fable5 C).
+    # contrast(read)는 노출하나 record_contrast(staging write)는 절대 미노출 — tool_not_exposed:forbidden.
+    "record_contrast", "record_resolution", "record_use", "verify_snapshot",
 }
 
 
@@ -816,6 +939,14 @@ def _selftest():
         ("cloud_pack_qa_forbidden",     "opencrab_pack_qa",         {},                               False, "tool_not_exposed:forbidden"),
         ("cloud_pack_update_forbidden", "opencrab_pack_update",     {},                               False, "tool_not_exposed:forbidden"),
         ("cloud_workflow_forbidden",    "opencrab_workflow_manage", {},                               False, "tool_not_exposed:forbidden"),
+        # 작업3: why/contrast read(temp 홈 graceful empty) + 기록계열 write 함수 forbidden.
+        ("why_read_ok",      "why",      {"query": "배포 절차"},                                       True,  "read no-path"),
+        ("contrast_read_ok", "contrast", {"prompt": "이 입찰 검토", "mandates": [
+            {"clause_text": "대량 삭제는 승인 필수", "stance": "require",
+             "source": "CLAUDE.md", "domain": "style"}]},                                             True,  "read no-path"),
+        ("record_contrast_forbidden",   "record_contrast",   {}, False, "tool_not_exposed:forbidden"),
+        ("record_resolution_forbidden", "record_resolution", {}, False, "tool_not_exposed:forbidden"),
+        ("record_use_forbidden",        "record_use",        {}, False, "tool_not_exposed:forbidden"),
     ]
 
     import json as _json
@@ -930,6 +1061,40 @@ def _selftest():
               for t in ("opencrab_pack_qa", "opencrab_pack_update", "opencrab_workflow_manage"))
     save_ok = save_ok and s10
     save_notes.append(("cloud_write_tools_forbidden", s10))
+
+    import json as _j11
+    # S11) why — read·write 0·node_id/edge_id 미노출(D-1). temp 홈이라 graceful empty.
+    r = handle_tool("why", {"query": "배포 절차"}, allow_root)
+    tr = r.get("tool_result") or {}
+    blob11 = _j11.dumps(tr, ensure_ascii=False)
+    s11 = (r.get("executed") is True and "node_id" not in blob11 and "node:" not in blob11)
+    save_ok = save_ok and s11
+    save_notes.append(("why_read_no_node_id_write0", s11))
+
+    # S12) contrast — read·기록계열 미호출(recorded=False)·node_id 미노출.
+    r = handle_tool("contrast", {"prompt": "이 입찰 검토", "mandates": [
+        {"clause_text": "대량 삭제는 승인 필수", "stance": "require",
+         "source": "CLAUDE.md", "domain": "style"}]}, allow_root)
+    tr = r.get("tool_result") or {}
+    s12 = (r.get("executed") is True and tr.get("recorded") is False
+           and "node:" not in _j11.dumps(tr, ensure_ascii=False))
+    save_ok = save_ok and s12
+    save_notes.append(("contrast_read_recorded_false", s12))
+
+    # S13) 구조적 차단: contrast 핸들러 소스에 기록계열 write 함수 호출 0(call-form 검사).
+    import inspect as _insp
+    _csrc = _insp.getsource(_u_contrast)
+    s13 = all((w + "(") not in _csrc for w in _CONTRAST_WRITE_FNS)
+    save_ok = save_ok and s13
+    save_notes.append(("contrast_no_write_fn_call", s13))
+
+    # S14) 기록계열 write 함수 4개 — TOOLS 미등록 + _FORBIDDEN → tool_not_exposed:forbidden.
+    s14 = all(handle_tool(t, {}, allow_root).get("executed") is False
+              and handle_tool(t, {}, allow_root).get("reason_code", "").endswith("forbidden")
+              and t not in TOOLS
+              for t in ("record_contrast", "record_resolution", "record_use", "verify_snapshot"))
+    save_ok = save_ok and s14
+    save_notes.append(("record_write_fns_forbidden", s14))
 
     # S4) 운영 store(OPERATING_PATHS) mtime 불변 — 실 ledger write 0 입증.
     op_after = {p: (os.path.getmtime(p) if os.path.exists(p) else None) for p in OPERATING_PATHS}

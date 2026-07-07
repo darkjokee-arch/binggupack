@@ -2,9 +2,14 @@
 """BingguPack preflight 자동주입 hook (opt-in) — UserPromptSubmit.
 
 작업 시작 전(=사람이 프롬프트를 보내는 순간) 관련 판단·과거 위험패턴을 회상해
-**대화 상단에 정보로 자동 주입**한다(설계 §7-4 L5 Preflight / 헌법 §4·§6 안전벨트).
+**대화 상단에 자동 주입**한다(설계 §7-4 L5 Preflight / 헌법 §4·§6 안전벨트).
 
-이 hook 이 하는 일은 "정보 표시"뿐 — 강제·차단·저장은 0이다.
+회수 결과는 answer_rules(build_answer_rules → render_answer_rules_md)로 변환해
+"이렇게 하세요" 행동지시(조언) 형식으로 주입한다 — '저장→회수→조언' 루프의 조언 단계.
+(구 render_block 나열 형식은 대체됐고, 함수만 단위 재사용 위해 잔류. 접근 가능한 구조화
+mandates(옵션 <home>/preflight_mandates.json)가 있으면 detect_conflicts 로 충돌 조언까지.)
+
+이 hook 이 하는 일은 "정보(조언) 표시"뿐 — 강제·차단·저장은 0이다.
   - read-only 회상(binggu_recall.preflight_context) 만 호출 → ledger / 운영 store write 0.
   - stdout 으로 출력하면 Claude Code 가 그 텍스트를 컨텍스트로 주입한다(=상단 자동주입).
   - 차단 0: 항상 exit 0. 사람이 읽고 판단·진행한다(무승인 자동적용 0).
@@ -14,6 +19,10 @@
   - read-only: preflight_context 는 ledger 를 mode=ro 로만 연다(write 0). 운영 store 불변.
   - 빈 그래프 graceful: 신규 사용자(장부 없음/노드 0) → 출력 0 · 에러 0.
   - 무관 작업: 관련 기억 0 → 출력 0(소음 0). 관련 있을 때만 상단 블록 주입.
+  - scope 게이트: 기본 content_only(관련성 게이트된 content block 만 노출) · 전역 trust·owner 원칙은
+    positively in-scope(BINGGU_SCOPE env=all/domain 또는 preflight_scope.json allowlist 매칭 → full)일
+    때만 노출(무관 세션 전역 누출 차단 · Fable5 E). kill switch=preflight_disabled 파일 또는 BINGGU_SCOPE=off
+    → 3블록 전부 즉시 OFF. 게이트는 '억제'지 '차단' 아님(MCP 명시 preflight 도구는 게이트 미적용).
   - PII / 시크릿: 노드 문장은 이미 capture_classifier 마스킹을 거쳐 저장된 것만 회상.
   - AI 위조 불가: UserPromptSubmit 은 사람 발화 이벤트 — 회상은 사람 입력(prompt/cwd)에서만 시작.
   - 차단 0 + 모든 예외 흡수(항상 exit 0) → 어떤 경우에도 세션 방해 0.
@@ -36,6 +45,12 @@ def _scripts_dir():
     if env:
         return Path(env)
     return Path(__file__).resolve().parent.parent / "scripts"
+
+
+def _repo_root():
+    """binggupack 패키지(answer_rules/contrast_protocol)를 import 하기 위한 <repo> 경로.
+    이 파일은 <repo>/hooks 에 있으므로 부모의 부모 = <repo>."""
+    return Path(__file__).resolve().parent.parent
 
 
 def _home():
@@ -89,6 +104,76 @@ def render_block(res, max_remember=5, max_avoid=5, claim_cap=100):
     out.append("\n(위 내용은 과거 기억의 *추천·참고*입니다 — 자동 적용 0. "
                "영구 저장은 사람이 직접 `SAVE n` 을 타이핑할 때만.)")
     return "\n".join(out)
+
+
+def render_advice_block(res, ledger_path, conflicts=None, scope=None):
+    """preflight_context 결과(res) → answer_rules '이렇게 하세요' 조언 블록(content-tier 주 출력).
+
+    '저장→회수→조언' 루프의 조언 단계. render_block(remember/avoid/preferences 나열)를 대체하는
+    주 content 블록 — answer_rules 는 같은 회상 신호(avoid/prefer/remember/ask)를 행동지시로
+    재구성한 superset 이므로 render_block 과 병기하면 중복 노출이 된다 → render_advice_block 을
+    content-tier 주 블록으로 쓰고 render_block 은 (단위 재사용 위해) 함수만 잔류시킨다.
+
+    사람 노출 표면은 answer_rules.render_answer_rules_md() 단독(D-1 · raw node_id 미노출 ·
+    evidence_ref sha8 만). 관련 규칙이 하나도 없으면 None(관련성 게이트 유지 · 소음 0 — 무관
+    작업/빈 그래프에서 render_block 과 동일하게 침묵). read-only(ledger mode=ro) · write 0.
+    모든 예외 흡수 → None(hook 무방해)."""
+    try:
+        rr = str(_repo_root())
+        if rr not in sys.path:
+            sys.path.insert(0, rr)
+        from binggupack.pack.answer_rules import (
+            build_answer_rules, render_answer_rules_md)
+        rules = build_answer_rules(res or {}, conflicts=conflicts, scope=scope,
+                                   ledger_path=ledger_path)
+        md = render_answer_rules_md(rules)
+    except Exception:
+        return None
+    if not md:
+        return None
+    # 안전벨트 푸터(헌법 명시 · render_block 과 동일 보증 문구 보존): 강제 아님·자동 적용 0·저장 0.
+    return (md + "\n\n(위 규칙은 과거 기억의 *추천·참고* — 강제 아님 · 자동 적용 0. "
+            "영구 저장은 사람이 직접 `SAVE n` 을 타이핑할 때만 · 저장 0 · 빙구팩 결정 0.)")
+
+
+def _load_mandates():
+    """옵션 구조화 mandates 소스 — <home>/preflight_mandates.json (있으면 read-only 로드).
+
+    조사 결과(요구④): preflight hook 이 상시 접근 가능한 mandates 저장소는 없다 — 유일 소비처인
+    MCP contrast 도구(server_handlers._u_contrast)는 호출측이 mandates 를 param 으로 넘겨받으며,
+    파일/config/store 로 상주하는 mandates 는 없다. 헌법상 mandates 하드코딩 금지 →
+    기본은 파일 부재 → [] → conflicts=None(avoid/prefer/ask/remember 규칙만 · 정당).
+    사용자가 구조화 mandates(JSON list of {clause_text, stance(require|forbid), domain, ...})를
+    이 파일에 두면 그때만 대비(conflict) 조언을 켠다(데이터 주도 · 하드코딩 0).
+    파일 부재/파싱 실패/list 아님/예외 → [](graceful · 소음 0 · write 0)."""
+    try:
+        p = _home() / "preflight_mandates.json"
+        if not p.exists():
+            return []
+        spec = json.loads(p.read_text(encoding="utf-8"))
+        return spec if isinstance(spec, list) else []
+    except Exception:
+        return []
+
+
+def _detect_conflicts_if_any(res):
+    """구조화 mandates 파일이 있을 때만 detect_conflicts 연결 → 충돌 조언 입력(read-only).
+
+    없으면 None(요구④ 정당). contrast_protocol/detect_conflicts import 는 mandates 가 실제로
+    있을 때만 지연 수행(owner 상시 경로 부담 0). detect_conflicts 는 안전/무결성 mandate 를
+    이미 SKIP(헌법 양보 0). 모든 예외 흡수 → None."""
+    mandates = _load_mandates()
+    if not mandates:
+        return None
+    try:
+        rr = str(_repo_root())
+        if rr not in sys.path:
+            sys.path.insert(0, rr)
+        from binggupack.safety.contrast_protocol import detect_conflicts
+        conflicts = detect_conflicts(res, mandates, home=str(_home()), env=os.environ)
+        return conflicts or None
+    except Exception:
+        return None
 
 
 def _render_trust(ledger_path):
@@ -150,11 +235,9 @@ def _render_person_principles(ledger_path, prompt, cwd, RC, max_n=4):
             con.close()
     except Exception:
         return None
-    try:
-        dom = RC._domain_from_cwd(cwd, None)
-    except Exception:
-        dom = None
-    work_text = " ".join(p for p in [prompt, dom] if p)
+    # Fable5 E: owner 원칙 매칭은 prompt 만 사용 — cwd 도메인 가산 제거(무관 세션 broad owner 원칙 오매칭 차단).
+    #   (cwd 파라미터는 시그니처 유지 — 호출부 무변경. 세션 도메인 억제는 _resolve_scope 게이트가 담당.)
+    work_text = prompt or ""
     try:
         qtok = RC._tokens(work_text)
         scored = []
@@ -175,10 +258,45 @@ def _render_person_principles(ledger_path, prompt, cwd, RC, max_n=4):
     return "\n".join(lines)
 
 
+def _resolve_scope(home, dom=None):
+    """세션 scope 판정 → (level, domain, reason). level ∈ {'off','content_only','full'}.
+
+    신뢰 우선순위(cwd 비의존·위조저항 명시 선언 우선):
+      1) BINGGU_SCOPE env — off/all/특정 도메인(권위·세션 kill switch 포함).
+      2) preflight_scope.json allowlist — 닫힌 도메인 목록(dom 매칭 시 full · 밖이면 off).
+      3) 기본 — content_only(owner 확정): 관련성 게이트된 content block 만 하위호환 노출,
+         전역 trust/person 은 억제(Fable5 E 전역 누출 차단).
+    off = 3블록 전부 억제(세션 kill switch) · full = 3블록 모두 노출(positively in-scope).
+    read-only(env 조회 + json 읽기만 · write 0)."""
+    raw = (os.environ.get("BINGGU_SCOPE") or "").strip().lower()
+    if raw:
+        if raw in ("off", "0", "none", "false", "no"):
+            return ("off", None, "env_off")
+        if raw in ("all", "on", "1", "true", "yes", "*"):
+            return ("full", None, "env_all")
+        return ("full", raw, "env_domain")  # 특정 도메인 명시 선언 = positively in-scope
+    allow = home / "preflight_scope.json"
+    if allow.exists():
+        try:
+            spec = json.loads(allow.read_text(encoding="utf-8"))
+            domains = [str(x).strip().lower() for x in (spec.get("domains") or [])]
+        except Exception:
+            domains = []
+        if domains:
+            if dom and dom in domains:
+                return ("full", dom, "allow_match")
+            return ("off", dom, "allow_miss")  # 닫힌 목록 밖 = 억제
+    return ("content_only", None, "default")
+
+
 def _run(data):
     # 1) 기본 OFF 빠른 차단 (import 전 — 플래그 없으면 타 세션에 부담 0)
     try:
         if (data.get("hook_event_name") or "") != "UserPromptSubmit":
+            return None
+        # kill switch(즉시 OFF · 최우선): preflight_disabled 파일이 있으면 enabled 여도 무조건 억제.
+        # (BINGGU_SCOPE=off 세션 kill switch 는 _resolve_scope 에서 level='off' 로 처리)
+        if (_home() / "preflight_disabled").exists():
             return None
         if not (_home() / "preflight_enabled").exists():
             return None
@@ -203,12 +321,26 @@ def _run(data):
     try:
         prompt = data.get("prompt", "") or ""
         cwd = data.get("cwd") or os.getcwd()
+        # scope 게이트(단일 지점 · 별경로 누출 0): 세션 in-scope 판정 → off/content_only/full.
+        try:
+            dom = RC._domain_from_cwd(cwd, None)  # allowlist 도메인 매칭 힌트(권위 부여 안 함)
+        except Exception:
+            dom = None
+        level, _scope_dom, _reason = _resolve_scope(_home(), dom)
+        if level == "off":
+            return None  # 무관/비활성 세션 → block+person+trust 전부 억제
         res = RC.preflight_context(str(ledger), prompt=prompt, cwd=cwd)
         _maybe_record_trace(prompt, res)  # Phase 2: opt-in 일 때만 회상 메타 기록(원문 0·실패 흡수)
-        block = render_block(res)
-        # 회수 1단(상시): 사람축 원칙(owner) + 양방향 신뢰도(hit_stats) — read-only·관련 없으면 소음 0
-        person = _render_person_principles(str(ledger), prompt, cwd, RC)
-        trust = _render_trust(str(ledger))
+        # 회수→조언(loop 완성): 회상 결과(res)를 answer_rules '이렇게 하세요' 조언으로 변환해
+        #   content-tier 주 블록으로 출력(render_block 재구성 superset · 중복 노출 0 · content_only 노출).
+        #   detect_conflicts 는 접근 가능한 구조화 mandates 가 있을 때만(옵션 파일) 연결 — 없으면
+        #   conflicts=None(avoid/prefer/ask/remember 규칙만 · 요구④ 정당 · 하드코딩 0).
+        conflicts = _detect_conflicts_if_any(res)
+        block = render_advice_block(res, str(ledger), conflicts=conflicts)
+        # 회수 1단: 사람축 원칙(owner) + 양방향 신뢰도(hit_stats)는 전역(domain-agnostic) 블록 —
+        #   positively in-scope(full)일 때만 노출(Fable5 E 전역 누출 차단). read-only·관련 없으면 소음 0.
+        person = _render_person_principles(str(ledger), prompt, cwd, RC) if level == "full" else None
+        trust = _render_trust(str(ledger)) if level == "full" else None
         parts = [b for b in (block, person, trust) if b]
         return "\n\n".join(parts) if parts else None
     except Exception:
@@ -272,12 +404,14 @@ def _selftest():
         ledger = home / "ledger.sqlite"
         base_env = {**os.environ, "BINGGU_HOME": str(home),
                     "BINGGU_SCRIPTS": scripts, "PYTHONUTF8": "1"}
+        base_env.pop("BINGGU_SCOPE", None)  # 상속 env 격리 → 기본(default=content_only) 테스트 결정성
 
-        def call(payload, raw=None):
+        def call(payload, raw=None, extra_env=None):
+            env = {**base_env, **extra_env} if extra_env else base_env
             return subprocess.run(
                 [sys.executable, self_path],
                 input=(raw if raw is not None else json.dumps(payload)),
-                capture_output=True, text=True, env=base_env)
+                capture_output=True, text=True, env=env)
 
         repo_cwd = "C:/Users/PC/binggupack"
 
@@ -318,13 +452,12 @@ def _selftest():
         # 활성화
         (home / "preflight_enabled").write_text("1", encoding="utf-8")
 
-        # T2 위험작업 → 상단 블록 주입(버그패턴 + 반문)
+        # T2 위험작업 → answer_rules 조언 블록 주입(avoid=하지 마라 · 회수→조언 loop 실작동)
         r = call({"hook_event_name": "UserPromptSubmit",
                   "prompt": "검증 없이 바로 배포하려고 한다 endpoint", "cwd": repo_cwd})
         out = r.stdout
-        check(r.returncode == 0 and "빙구팩 preflight" in out
-              and "하면 안 되는 과거 패턴" in out and "위험도" in out,
-              "T2 위험작업 → 상단 블록 + 버그패턴 주입")
+        check(r.returncode == 0 and "빙구팩 실행 규칙" in out and "하지 마라" in out,
+              "T2 위험작업 → answer_rules 조언 블록(하지 마라=avoid 규칙) 주입")
         check("강제 아님" in out and "저장 0" in out and "자동 적용 0" in out,
               "T2b 안전벨트 문구(강제 아님·저장 0·자동 적용 0) 명시")
 
@@ -416,14 +549,17 @@ def _selftest():
                  "2026-06-20T00:00:00Z", None, None, "dec-%d" % i))
         con.commit()
         con.close()
+        # trust 는 전역 블록 — 신규 scope 게이트상 full 에서만 노출 → BINGGU_SCOPE=all 로 강제(보정).
         r = call({"hook_event_name": "UserPromptSubmit",
-                  "prompt": "검증 없이 바로 배포 endpoint", "cwd": repo_cwd})
+                  "prompt": "검증 없이 바로 배포 endpoint", "cwd": repo_cwd},
+                 extra_env={"BINGGU_SCOPE": "all"})
         check("양방향 신뢰도" in r.stdout and "내 직감(owner) 적중률" in r.stdout,
-              "T14 hit_events 표본 충분(N>=5) → 양방향 신뢰도 trust 블록 주입(회수 1단)")
-        # T15 trust 조회도 read-only(sqlite mode=ro) — ledger mtime/size 불변
+              "T14 hit_events 표본 충분(N>=5) + full → 양방향 신뢰도 trust 블록 주입(회수 1단)")
+        # T15 trust 조회도 read-only(sqlite mode=ro) — ledger mtime/size 불변(full 로 실제 경로 구동)
         mt0 = (ledger.stat().st_mtime_ns, ledger.stat().st_size)
         call({"hook_event_name": "UserPromptSubmit",
-              "prompt": "검증 없이 배포 endpoint", "cwd": repo_cwd})
+              "prompt": "검증 없이 배포 endpoint", "cwd": repo_cwd},
+             extra_env={"BINGGU_SCOPE": "all"})
         mt1 = (ledger.stat().st_mtime_ns, ledger.stat().st_size)
         check(mt0 == mt1, "T15 trust(both_sides) 조회 후 ledger 불변(read-only · write 0)")
 
@@ -436,15 +572,125 @@ def _selftest():
              0, "active", "h", "2026-06-01T00:00:00Z", "선호", 0, "owner"))
         con.commit()
         con.close()
+        # person 은 전역 블록 — full 에서만 노출 → BINGGU_SCOPE=all 로 강제(보정). 관련성 게이트는 유지.
         r = call({"hook_event_name": "UserPromptSubmit",
-                  "prompt": "검증 없이 배포 백업 먼저", "cwd": repo_cwd})
+                  "prompt": "검증 없이 배포 백업 먼저", "cwd": repo_cwd},
+                 extra_env={"BINGGU_SCOPE": "all"})
         check("사용자 원칙" in r.stdout and "owner 화자" in r.stdout,
-              "T16 사람축(speaker=owner) 원칙 → 상시 회수 블록 주입(회수 1단)")
-        # T16b 무관 작업엔 사람축 블록 없음(소음 0) — owner 원칙과 무관한 prompt
+              "T16 사람축(speaker=owner) 원칙 + full → 상시 회수 블록 주입(회수 1단)")
+        # T16b 무관 작업엔 사람축 블록 없음(소음 0) — full 이어도 관련도 0 이면 미노출(관련성 게이트)
         r2 = call({"hook_event_name": "UserPromptSubmit",
-                   "prompt": "오늘 점심 메뉴 추천", "cwd": "C:/tmp"})
+                   "prompt": "오늘 점심 메뉴 추천", "cwd": "C:/tmp"},
+                  extra_env={"BINGGU_SCOPE": "all"})
         check("사용자 원칙" not in r2.stdout,
-              "T16b 무관 작업 → 사람축 블록 미노출(관련도 0·소음 0)")
+              "T16b 무관 작업(full) → 사람축 블록 미노출(관련도 0·소음 0)")
+
+        # ── T17~T23 scope 게이트(Fable5 E 전역 누출 차단 · owner 확정 기본=content_only) ──
+        # (rich ledger: 위험/교훈/선호 노드 + hit_events 5 + owner 원칙 노드 p1 세팅 상태 재사용)
+        MATCH = "검증 없이 바로 배포 endpoint"  # seeded 위험/owner 노드와 매칭
+
+        # T17 BINGGU_SCOPE=off → enabled + rich ledger + 매칭 이어도 3블록 전부 억제(stdout 침묵)
+        r = call({"hook_event_name": "UserPromptSubmit", "prompt": MATCH, "cwd": repo_cwd},
+                 extra_env={"BINGGU_SCOPE": "off"})
+        check(r.returncode == 0 and r.stdout.strip() == "",
+              "T17 BINGGU_SCOPE=off → block+person+trust 전부 억제(세션 kill switch · 침묵)")
+
+        # T18 BINGGU_SCOPE=all → level=full → block+person+trust 3블록 모두 노출
+        r = call({"hook_event_name": "UserPromptSubmit", "prompt": MATCH, "cwd": repo_cwd},
+                 extra_env={"BINGGU_SCOPE": "all"})
+        check("빙구팩 실행 규칙" in r.stdout and "사용자 원칙" in r.stdout
+              and "양방향 신뢰도" in r.stdout,
+              "T18 BINGGU_SCOPE=all → 조언블록+person+trust 3블록 모두 노출(full)")
+
+        # T19 기본(env·allowlist 없음 · content_only) → block 노출·전역 trust/person 억제(Fable5 E)
+        r = call({"hook_event_name": "UserPromptSubmit", "prompt": MATCH, "cwd": repo_cwd})
+        check("빙구팩 실행 규칙" in r.stdout
+              and "양방향 신뢰도" not in r.stdout and "사용자 원칙" not in r.stdout,
+              "T19 기본(content_only) → 조언블록 노출·trust/person 억제(전역 누출 차단)")
+
+        # T20(요구⑤) bid-engine 무관 세션 owner 일반질문 → stdout 완전 침묵(오매칭 0)
+        #   prompt 가 seeded 노드와 토큰 0중복 + cwd basename 'bid-engine' qtok 가산 안 됨(de-broadening)
+        r = call({"hook_event_name": "UserPromptSubmit",
+                  "prompt": "나라장터 투찰 낙찰가 계산해줘", "cwd": "C:/Users/PC/bid-engine"})
+        check(r.returncode == 0 and r.stdout.strip() == "",
+              "T20(요구⑤) bid-engine 무관 세션 일반질문 → stdout 침묵(content block 매칭 0)")
+
+        # T21 allowlist 닫힌 목록: domains=['binggupack'] → binggupack cwd 만 full, 밖은 off
+        (home / "preflight_scope.json").write_text(
+            json.dumps({"domains": ["binggupack"]}), encoding="utf-8")
+        r = call({"hook_event_name": "UserPromptSubmit", "prompt": MATCH, "cwd": repo_cwd})
+        check("빙구팩 실행 규칙" in r.stdout and "양방향 신뢰도" in r.stdout
+              and "사용자 원칙" in r.stdout,
+              "T21a allowlist 매칭(cwd basename=binggupack) → level=full(3블록)")
+        r = call({"hook_event_name": "UserPromptSubmit", "prompt": MATCH,
+                  "cwd": "C:/Users/PC/bid-engine"})
+        check(r.stdout.strip() == "",
+              "T21b allowlist 미매칭(cwd basename=bid-engine) → level=off(침묵)")
+        (home / "preflight_scope.json").unlink()
+
+        # T22 kill switch(preflight_disabled 파일) → BINGGU_SCOPE=all + 매칭 이어도 침묵(최우선)
+        (home / "preflight_disabled").write_text("1", encoding="utf-8")
+        r = call({"hook_event_name": "UserPromptSubmit", "prompt": MATCH, "cwd": repo_cwd},
+                 extra_env={"BINGGU_SCOPE": "all"})
+        check(r.stdout.strip() == "",
+              "T22 kill switch(preflight_disabled) → env=all+매칭 이어도 침묵(즉시 OFF 최우선)")
+        (home / "preflight_disabled").unlink()
+        r = call({"hook_event_name": "UserPromptSubmit", "prompt": MATCH, "cwd": repo_cwd},
+                 extra_env={"BINGGU_SCOPE": "all"})
+        check("빙구팩 실행 규칙" in r.stdout,
+              "T22b kill switch 파일 제거 후 회상 재개(원복 확인)")
+
+        # T23 read-only 불변: 신규 scope 게이트 경로(full/off) 전후 ledger mtime/size 불변(write 0)
+        mz0 = (ledger.stat().st_mtime_ns, ledger.stat().st_size)
+        call({"hook_event_name": "UserPromptSubmit", "prompt": MATCH, "cwd": repo_cwd},
+             extra_env={"BINGGU_SCOPE": "all"})
+        call({"hook_event_name": "UserPromptSubmit", "prompt": "나라장터 투찰",
+              "cwd": "C:/Users/PC/bid-engine"}, extra_env={"BINGGU_SCOPE": "off"})
+        mz1 = (ledger.stat().st_mtime_ns, ledger.stat().st_size)
+        check(mz0 == mz1,
+              "T23 scope 게이트 경로(full/off) 전후 ledger 불변(scope 파일·env read 만 · write 0)")
+
+        # ── T24 회수→조언(loop 완성): answer_rules 조언 블록이 content_only 에서 노출 ──
+        #   avoid(하지 마라)·prefer(이렇게 하라)·remember(기억하라) 행동지시 + evidence_ref(sha8).
+        r = call({"hook_event_name": "UserPromptSubmit",
+                  "prompt": "검증 없이 바로 배포 백업 먼저 endpoint", "cwd": repo_cwd})
+        out = r.stdout
+        check("빙구팩 실행 규칙" in out and "하지 마라" in out and "이렇게 하라" in out
+              and "기억하라" in out and "ev:" in out,
+              "T24 조언 블록: avoid/prefer/remember 행동지시 + ev:sha8 노출(content_only)")
+        check("node:CONV:aa01" not in out and "node:CONV:ee05" not in out,
+              "T24b 조언 블록에 raw node_id 0(evidence_ref sha8 만 · D-1)")
+
+        # ── T25 conflicts: 옵션 mandates 파일 있을 때만 detect_conflicts 연결(요구④ '있으면' 경로) ──
+        #   preference(ee05·require) vs 비안전 forbid mandate(style) → '충돌:' 조언 규칙 생성.
+        mand_path = home / "preflight_mandates.json"
+        conflict_clause = "배포 작업은 백업 먼저 하지 말고 항상 바로 배포하라"  # ee05 토큰 5/8 ≥ 0.5
+        mand_prompt = "배포 작업 백업 먼저 할까"
+        mand_before = (ledger.stat().st_mtime_ns, ledger.stat().st_size)
+        mand_path.write_text(json.dumps([
+            {"clause_text": conflict_clause, "stance": "forbid",
+             "source": "CLAUDE.md", "ref": "CLAUDE.md §X", "domain": "style"}]),
+            encoding="utf-8")
+        r = call({"hook_event_name": "UserPromptSubmit", "prompt": mand_prompt, "cwd": repo_cwd})
+        check("충돌:" in r.stdout,
+              "T25 옵션 mandates 파일 → detect_conflicts 연결 → '충돌:' 조언 노출(있으면 경로)")
+        # T25b mandates 파일 제거 → 충돌 조언 0(기본 conflicts=None · 요구④ 정당 · 소음 0)
+        mand_path.unlink()
+        r = call({"hook_event_name": "UserPromptSubmit", "prompt": mand_prompt, "cwd": repo_cwd})
+        check("충돌:" not in r.stdout,
+              "T25b mandates 파일 부재 → 충돌 조언 0(기본 conflicts=None)")
+        # T25c 안전 mandate(domain=safety) → detect_conflicts SKIP(헌법 양보 0 · 대비표 안 만듦)
+        mand_path.write_text(json.dumps([
+            {"clause_text": conflict_clause, "stance": "forbid",
+             "source": "CLAUDE.md", "ref": "CLAUDE.md §3", "domain": "safety"}]),
+            encoding="utf-8")
+        r = call({"hook_event_name": "UserPromptSubmit", "prompt": mand_prompt, "cwd": repo_cwd})
+        check("충돌:" not in r.stdout,
+              "T25c 안전 mandate(domain=safety) → detect_conflicts SKIP(충돌 조언 0·헌법 양보 0)")
+        mand_path.unlink()
+        # T25d mandates 로드·detect_conflicts 는 read-only — ledger mtime/size 불변(write 0)
+        check((ledger.stat().st_mtime_ns, ledger.stat().st_size) == mand_before,
+              "T25d conflicts 경로(파일 read + detect_conflicts) 전후 ledger 불변(write 0)")
 
         print(f"\nGATE={'GO' if ok else 'NO-GO'}")
         return 0 if ok else 1

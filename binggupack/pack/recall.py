@@ -482,8 +482,11 @@ def preflight_context(ledger_path, prompt=None, cwd=None, domain=None,
     if scorer is None:
         scorer = _semantic_scorer(home=home)  # opt-in 통과 시 의미 회상·반문 보강
     g = _load_graph(ledger_path)
-    # 작업 텍스트 = prompt + cwd 도메인 힌트 + 변경 파일명(거친 1차 신호 — 키워드 prefilter).
-    dom = _domain_from_cwd(cwd, domain)
+    # 작업 텍스트 = prompt + 명시 domain + 변경 파일명(거친 1차 신호 — 키워드 prefilter).
+    # Fable5 E(surgical): 명시 `domain` 인자만 매칭 토큰에 유지하고, cwd basename 파생분은 제외한다.
+    #   (cwd basename 을 qtok 에 가산하면 무관 세션 폴더명이 오매칭을 broaden → 세션 게이트가 도메인 억제 담당.
+    #    CLI --domain · MCP domain param 은 그대로 유효 — _domain_from_cwd 의 cwd fallback 만 배제.)
+    dom = str(domain).lower() if domain else None
     parts = [p for p in [prompt, dom] if p]
     if files_changed:
         parts.extend(os.path.basename(str(f)) for f in files_changed)
