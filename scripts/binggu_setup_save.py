@@ -52,10 +52,21 @@ WORKERS_DIR = os.path.join(REPO, "hosted", "workers")
 WRANGLER_SAVE = os.path.join(WORKERS_DIR, "wrangler.save_mcp.prod.toml")
 REGISTER_PS1 = os.path.join(SCRIPTS_DIR, "register_autopull.ps1")
 AUTOPULL_PY = os.path.join(SCRIPTS_DIR, "auto_pull_hosted.py")
-SCHED_TASK_NAME = "BingguPack_AutoPull"
+
+
+def _sched_name(base):
+    """스케줄 작업명에 env BINGGU_TASK_SUFFIX 를 반영(같은 PC 다중 사용자 충돌 회피).
+    미설정(기본) → 현행 이름 그대로(owner·기존 사용자 회귀 0). register_*.ps1 도 같은
+    env 를 독립 해석하므로 subprocess env 상속으로 등록/조회 이름이 자동 일치한다."""
+    sfx = "".join(c for c in (os.environ.get("BINGGU_TASK_SUFFIX") or "")
+                  if c == "_" or (c.isascii() and c.isalnum()))  # ASCII 한정 = ps1 -replace 와 동일
+    return "%s_%s" % (base, sfx) if sfx else base
+
+
+SCHED_TASK_NAME = _sched_name("BingguPack_AutoPull")
 REGISTER_WEBMCP_PS1 = os.path.join(SCRIPTS_DIR, "register_webmcp.ps1")
 START_WEB_PY = os.path.join(SCRIPTS_DIR, "start_binggu_web.py")
-WEBMCP_TASK_NAME = "BingguPack_WebMCP"
+WEBMCP_TASK_NAME = _sched_name("BingguPack_WebMCP")
 VARS_NAME = ".dev.vars.save_mcp"
 KEY_FIELDS = ("SAVE_PATH_TOKEN", "SAVE_SIGN_SECRET")
 

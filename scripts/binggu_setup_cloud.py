@@ -53,7 +53,18 @@ REGISTER_PS1 = os.path.join(REPO, "register_autopush.ps1")
 PACKS_BINDING = "PACKS"
 PACKS_KEY = "packs.json"
 PACKS_DATA = os.path.join(WORKERS_DIR, "data", "packs.json")
-SCHED_TASK_NAME = "BingguPack_AutoPush"
+
+
+def _sched_name(base):
+    """스케줄 작업명에 env BINGGU_TASK_SUFFIX 를 반영(같은 PC 다중 사용자 충돌 회피).
+    미설정(기본) → 현행 이름 그대로(owner·기존 사용자 회귀 0). register_autopush.ps1 도
+    같은 env 를 독립 해석하므로 subprocess env 상속으로 등록/조회 이름이 자동 일치한다."""
+    sfx = "".join(c for c in (os.environ.get("BINGGU_TASK_SUFFIX") or "")
+                  if c == "_" or (c.isascii() and c.isalnum()))  # ASCII 한정 = ps1 -replace 와 동일
+    return "%s_%s" % (base, sfx) if sfx else base
+
+
+SCHED_TASK_NAME = _sched_name("BingguPack_AutoPush")
 # placeholder 표식 — 이 값이거나 빈 id 면 namespace 미생성으로 본다.
 PLACEHOLDER = "<OWNER_FILLS_KV_ID>"
 

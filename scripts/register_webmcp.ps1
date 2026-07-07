@@ -3,8 +3,14 @@
 # 실행: powershell -ExecutionPolicy Bypass -File <이 파일>
 # 경로 자동탐지: repo=$PSScriptRoot 부모, python=pythonw 우선(무인 실행 창 0).
 param(
-  [string]$Python = ""
+  [string]$Python = "",
+  [string]$TaskName = ""
 )
+# 작업명 = 기본 + (env BINGGU_TASK_SUFFIX). 같은 PC 다중 사용자 충돌 회피(미설정=회귀 0).
+if (-not $TaskName) {
+  $sfx = ($env:BINGGU_TASK_SUFFIX -replace '[^A-Za-z0-9_]', '')
+  $TaskName = if ($sfx) { "BingguPack_WebMCP_$sfx" } else { "BingguPack_WebMCP" }
+}
 if (-not $Python) {
   $cand = @()
   $c = Get-Command pythonw -ErrorAction SilentlyContinue
@@ -16,12 +22,12 @@ if (-not $Python) {
 if (-not $Python) { Write-Error "python(w)을 찾지 못했습니다 — -Python <경로> 로 지정하세요"; exit 1 }
 $script = Join-Path $PSScriptRoot "start_binggu_web.py"
 if (-not (Test-Path $script)) { Write-Error "start_binggu_web.py 없음: $script"; exit 1 }
-Register-ScheduledTask -TaskName "BingguPack_WebMCP" `
+Register-ScheduledTask -TaskName $TaskName `
   -Action (New-ScheduledTaskAction -Execute $Python -Argument "`"$script`"") `
   -Trigger (New-ScheduledTaskTrigger -AtLogOn) `
   -Principal (New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive) `
   -Description "빙구팩 로컬 MCP를 웹/앱 커넥터에 노출(HTTP+cloudflared quick tunnel). 로그온시 자동 가동." `
   -Force | Out-Null
-Write-Host "=== BingguPack_WebMCP 등록 완료 — 재부팅/로그온 시 웹 MCP 자동 가동 ($Python) ==="
+Write-Host "=== $TaskName 등록 완료 — 재부팅/로그온 시 웹 MCP 자동 가동 ($Python) ==="
 Write-Host "주소 확인: <home>/mcp_web_url.txt (quick tunnel — 재부팅 시 갱신)"
-Write-Host "해제하려면: Unregister-ScheduledTask -TaskName BingguPack_WebMCP -Confirm:`$false"
+Write-Host "해제하려면: Unregister-ScheduledTask -TaskName $TaskName -Confirm:`$false"

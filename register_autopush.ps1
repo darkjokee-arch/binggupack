@@ -11,6 +11,9 @@ if (-not $Py) { Write-Host "[STOP] python launcher (py/python/python3) not found
 $PyExe      = $Py.Source
 $RepoRoot   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ScriptPath = Join-Path $RepoRoot "scripts\binggu_publish_autopush.py"
+# 작업명 = 기본 + (env BINGGU_TASK_SUFFIX). 같은 PC 다중 사용자 충돌 회피(미설정=회귀 0).
+$sfx = ($env:BINGGU_TASK_SUFFIX -replace '[^A-Za-z0-9_]', '')
+$TaskName = if ($sfx) { "BingguPack_AutoPush_$sfx" } else { "BingguPack_AutoPush" }
 
 $act = New-ScheduledTaskAction -Execute $PyExe -Argument ('"{0}"' -f $ScriptPath) -WorkingDirectory $RepoRoot
 $trg = New-ScheduledTaskTrigger -Once -At ((Get-Date).AddMinutes(2)) -RepetitionInterval (New-TimeSpan -Minutes 10) -RepetitionDuration ([TimeSpan]::FromDays(3650))
@@ -23,6 +26,6 @@ $set = New-ScheduledTaskSettingsSet -StartWhenAvailable -Hidden `
     -ExecutionTimeLimit (New-TimeSpan -Minutes 15) `
     -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
     -MultipleInstances IgnoreNew
-Register-ScheduledTask -TaskName "BingguPack_AutoPush" -Action $act -Trigger $trg -Settings $set -Description "BingguPack SAVE->KV auto upload (double-gate)" -Force | Out-Null
+Register-ScheduledTask -TaskName $TaskName -Action $act -Trigger $trg -Settings $set -Description "BingguPack SAVE->KV auto upload (double-gate)" -Force | Out-Null
 Write-Host "=== 등록 결과 ==="
-Get-ScheduledTask -TaskName "BingguPack_AutoPush" | Select-Object TaskName, State | Format-List
+Get-ScheduledTask -TaskName $TaskName | Select-Object TaskName, State | Format-List

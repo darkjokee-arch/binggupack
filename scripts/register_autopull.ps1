@@ -4,8 +4,15 @@
 # 경로 자동탐지(사용자 무관): repo=$PSScriptRoot 부모, python=pythonw 우선(무인 실행 창 0).
 param(
   [string]$Python = "",
-  [string]$Repo = ""
+  [string]$Repo = "",
+  [string]$TaskName = ""
 )
+# 작업명 = 기본 "BingguPack_AutoPull" + (env BINGGU_TASK_SUFFIX 있으면 _<suffix>).
+# 같은 PC 다중 사용자 충돌 회피용 — 미설정 시 현행 이름 그대로(회귀 0).
+if (-not $TaskName) {
+  $sfx = ($env:BINGGU_TASK_SUFFIX -replace '[^A-Za-z0-9_]', '')
+  $TaskName = if ($sfx) { "BingguPack_AutoPull_$sfx" } else { "BingguPack_AutoPull" }
+}
 if (-not $Repo) { $Repo = Split-Path -Parent $PSScriptRoot }
 if (-not $Python) {
   $cand = @()
@@ -20,6 +27,6 @@ $script = Join-Path $PSScriptRoot "auto_pull_hosted.py"
 if (-not (Test-Path $script)) { Write-Error "auto_pull_hosted.py 없음: $script"; exit 1 }
 $a = New-ScheduledTaskAction -Execute $Python -Argument "`"$script`"" -WorkingDirectory $Repo
 $t = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 5)
-Register-ScheduledTask -TaskName "BingguPack_AutoPull" -Action $a -Trigger $t -Force -Description "BingguPack ChatGPT/claude 채팅 저장분 자동 로컬 pull (5분 주기)"
-Write-Host "=== 자동 pull 스케줄러 등록 완료 (BingguPack_AutoPull, 5분 주기, $Python) ==="
-Write-Host "해제하려면: Unregister-ScheduledTask -TaskName BingguPack_AutoPull -Confirm:`$false"
+Register-ScheduledTask -TaskName $TaskName -Action $a -Trigger $t -Force -Description "BingguPack ChatGPT/claude 채팅 저장분 자동 로컬 pull (5분 주기)"
+Write-Host "=== 자동 pull 스케줄러 등록 완료 ($TaskName, 5분 주기, $Python) ==="
+Write-Host "해제하려면: Unregister-ScheduledTask -TaskName $TaskName -Confirm:`$false"

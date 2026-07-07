@@ -32,15 +32,50 @@ from binggupack import paths as binggu_paths
 STATE_FILE = "person_crab_last.json"
 PACK_CONFIG_FILE = "person_pack.json"           # 기존 온보딩 config 재사용(crab_auto_sync 키 추가)
 DEFAULT_PACK_NAME = "Binggu Person Ontology"    # ASCII 강제(서버 한글 키 버그) — 표시명은 별도
-PACK_TITLE = "사장님 의사결정 원칙 온톨로지 (CrabAgent)"
-PACK_PURPOSE = ("빙구팩 사용자 개인 온톨로지 — owner 화자로 확정 저장된 의사결정 원칙·판단을 "
-                "개념/주장/증거 계층으로 구조화 (T3 하드제외 통과분·스키마 경로).")
+# 표시 문구 기본값(중립) — 사용자별 override 는 _crab_meta(env > person_pack.json > 기본).
+# 신규 사용자에게 owner 개인 호칭("사장님")이 노출되지 않도록 중립값을 기본으로 둔다.
+DEFAULT_PACK_TITLE = "개인 의사결정 원칙 온톨로지 (CrabAgent)"
+DEFAULT_PACK_PURPOSE = ("빙구팩 사용자 개인 온톨로지 — 사용자 화자로 확정 저장된 의사결정 원칙·판단을 "
+                        "개념/주장/증거 계층으로 구조화 (T3 하드제외 통과분·스키마 경로).")
+DEFAULT_OWNER_LABEL = "사용자"                    # export_docs 문서 본문의 화자 호칭(개인화 override 가능)
+# 하위호환 별칭(기존 import 참조 보존) — 실제 사용은 _crab_meta().
+PACK_TITLE = DEFAULT_PACK_TITLE
+PACK_PURPOSE = DEFAULT_PACK_PURPOSE
 EXTRA_SOURCES_DIR = "person_pack_sources"       # <home>/ 하위 — 사용자가 승인해 넣은 보조 문서
 _PATH_MASK_RX = re.compile(r"[A-Za-z]:\\Users\\[^\s\\/:*?\"<>|]+")  # 경로 자동 마스킹(leak 게이트 선제)
 
 
 def _home(home=None):
     return str(home) if home else binggu_paths.home()
+
+
+def _crab_meta(home=None, env=None):
+    """팩 표시 문구를 사용자별로 해석: env > <home>/person_pack.json > 중립 기본값.
+
+    person_pack_sync._pack_config 와 동일 시맨틱(개인 도구 → 배포 제품 일반화).
+      title       : BINGGU_CRAB_PACK_TITLE   > crab_pack_title
+      purpose     : BINGGU_CRAB_PACK_PURPOSE > crab_pack_purpose
+      owner_label : BINGGU_OWNER_LABEL       > owner_label   (문서 본문 화자 호칭)
+      pack_name   : BINGGU_CRAB_PACK_NAME    > crab_pack_name (ASCII 유지)
+    owner 는 person_pack.json 에 현행 값을 명시해 회귀 0 을 유지할 수 있다.
+    표시 문구는 프로세스 환경(os.environ)/config 로 결정 — 업로드 게이트 env 와 분리."""
+    e = os.environ if env is None else env
+    cfg = {}
+    try:
+        with open(os.path.join(_home(home), PACK_CONFIG_FILE), encoding="utf-8") as f:
+            cfg = json.load(f)
+    except Exception:  # 부재/손상 → 기본값 폴백
+        cfg = {}
+
+    def pick(env_key, cfg_key, default):
+        return e.get(env_key) or cfg.get(cfg_key) or default
+
+    return {
+        "title": pick("BINGGU_CRAB_PACK_TITLE", "crab_pack_title", DEFAULT_PACK_TITLE),
+        "purpose": pick("BINGGU_CRAB_PACK_PURPOSE", "crab_pack_purpose", DEFAULT_PACK_PURPOSE),
+        "owner_label": pick("BINGGU_OWNER_LABEL", "owner_label", DEFAULT_OWNER_LABEL),
+        "pack_name": pick("BINGGU_CRAB_PACK_NAME", "crab_pack_name", DEFAULT_PACK_NAME),
+    }
 
 
 def _state_path(home=None):
@@ -67,8 +102,11 @@ def _content_hash(sentences):
     return hashlib.sha256("\n".join(sentences).encode("utf-8")).hexdigest()[:16]
 
 
-def export_docs(sentences, out_dir):
-    """문장당 1문서 수출 — 파일명(=주제)이 문장 자체라 개념/질의 파생이 자기참조로 성립."""
+def export_docs(sentences, out_dir, owner_label=DEFAULT_OWNER_LABEL):
+    """문장당 1문서 수출 — 파일명(=주제)이 문장 자체라 개념/질의 파생이 자기참조로 성립.
+
+    owner_label — 문서 본문의 화자 호칭. 신규 사용자엔 '사용자'(중립), owner 는
+    person_pack.json 의 owner_label 로 개인 호칭 유지 가능."""
     out = Path(out_dir)
     if out.exists():
         shutil.rmtree(out)
@@ -78,9 +116,9 @@ def export_docs(sentences, out_dir):
         if len(safe) > 60:
             safe = safe[:60] + "_" + hashlib.sha256(s.encode("utf-8")).hexdigest()[:8]
         body = "\n".join([
-            "# 사장님 판단 원칙",
-            "사장님 판단: %s" % s,
-            "위 문장은 사장님(owner) 화자로 확정 저장된 의사결정 원칙·판단이다.",
+            "# %s 판단 원칙" % owner_label,
+            "%s 판단: %s" % (owner_label, s),
+            "위 문장은 %s(owner) 화자로 확정 저장된 의사결정 원칙·판단이다." % owner_label,
         ])
         (out / ("%s_%d.txt" % (safe, i))).write_text(body, encoding="utf-8")
     return len(sentences)
@@ -185,7 +223,11 @@ def sync(*, dry_run=True, confirm=False, force=False, env=None, ledger=None, hom
         out.update({"status": "NO_SENTENCES"})
         return out
     xsig = extra_signature(home)
-    ch = _content_hash(sentences + ([xsig] if xsig else []))
+    meta = _crab_meta(home, env)
+    # content_hash 에 표시 메타 서명 포함 — 제목/설명/화자 호칭을 바꾸면 재빌드·재업로드가
+    # 트리거되도록(표시명만 바꿔도 서버 팩에 반영). 문장 불변 + 메타 불변이면 NO_CHANGE.
+    meta_sig = "meta:%s|%s|%s|%s" % (meta["title"], meta["purpose"], meta["owner_label"], meta["pack_name"])
+    ch = _content_hash(sentences + ([xsig] if xsig else []) + [meta_sig])
     out["content_hash"] = ch
     st = load_state(home)
     if not force and st.get("content_hash") == ch and st.get("package_id"):
@@ -196,10 +238,10 @@ def sync(*, dry_run=True, confirm=False, force=False, env=None, ledger=None, hom
     work = Path(work_dir) if work_dir else Path(tempfile.mkdtemp(prefix="person_crab_"))
     data_dir = work / "data"
     zip_path = work / "person_crab_pack.zip"
-    export_docs(sentences, data_dir)
+    export_docs(sentences, data_dir, owner_label=meta["owner_label"])
     budget = max(10, int(max_docs) - len(sentences))  # 총 문서 수 ≤ max_docs (finalize 한도)
     out["extra"] = merge_extra_sources(data_dir, home, max_bundle_docs=budget)
-    b = build_crab_pack(data_dir, zip_path, PACK_TITLE, PACK_PURPOSE, min_queries=4,
+    b = build_crab_pack(data_dir, zip_path, meta["title"], meta["purpose"], min_queries=4,
                         chunk_cap=_chunk_cap(home))
     out["grade"] = b.get("grade")
     if not b.get("ok"):
@@ -209,8 +251,8 @@ def sync(*, dry_run=True, confirm=False, force=False, env=None, ledger=None, hom
         out.update({"status": "PLAN", "reason": "dry_run — live 는 --live --confirm"})
         return out
 
-    pack_name = st.get("pack_name") or DEFAULT_PACK_NAME
-    u = upload_crab_pack(zip_path, pack_name, PACK_PURPOSE, pack_category="personal-ontology",
+    pack_name = st.get("pack_name") or meta["pack_name"]
+    u = upload_crab_pack(zip_path, pack_name, meta["purpose"], pack_category="personal-ontology",
                          env=env, config_path=config_path, home=home, transport=transport,
                          put_fn=put_fn, post_fn=post_fn, sleep_fn=sleep_fn,
                          dry_run=False, confirm=confirm, max_tries=max_tries)
@@ -371,6 +413,39 @@ def _selftest():
         chk("S11 문서 예산 초과 → 묶음 병합(총 문서 ≤ max_docs·무손실 merged 31)",
             s11["status"] == "DONE" and s11["extra"]["bundled"] and s11["extra"]["merged"] == 31
             and n_docs <= 20)
+
+        # ── 표시 문구 일반화(개인 도구 → 배포 제품·신규 사용자 owner 호칭 미노출) ──
+        m_def = _crab_meta(home=home, env={})
+        chk("S12 기본 메타 = 중립값('사장님' 미노출)",
+            m_def["title"] == DEFAULT_PACK_TITLE and m_def["owner_label"] == "사용자"
+            and "사장님" not in m_def["title"] and "사장님" not in m_def["purpose"])
+        m_env = _crab_meta(home=home, env={"BINGGU_CRAB_PACK_TITLE": "T1", "BINGGU_OWNER_LABEL": "사장님"})
+        chk("S13 env override 최우선(title·owner_label)",
+            m_env["title"] == "T1" and m_env["owner_label"] == "사장님")
+        with open(os.path.join(home, PACK_CONFIG_FILE), "w", encoding="utf-8") as f:
+            json.dump({"crab_pack_title": "C-TITLE", "owner_label": "대표님"}, f, ensure_ascii=False)
+        m_cfg = _crab_meta(home=home, env={})
+        chk("S14 config override(env 부재 시 person_pack.json)",
+            m_cfg["title"] == "C-TITLE" and m_cfg["owner_label"] == "대표님")
+        ed1 = os.path.join(tmp, "ed1"); export_docs(_FIX_SENTENCES[:2], ed1)
+        b_def = (Path(ed1) / sorted(os.listdir(ed1))[0]).read_text(encoding="utf-8")
+        chk("S15 export 기본 본문 = 중립 '사용자'('사장님' 미포함)",
+            "사용자 판단" in b_def and "사장님" not in b_def)
+        ed2 = os.path.join(tmp, "ed2"); export_docs(_FIX_SENTENCES[:2], ed2, owner_label="사장님")
+        b_ov = (Path(ed2) / sorted(os.listdir(ed2))[0]).read_text(encoding="utf-8")
+        chk("S16 export owner_label override → 개인 호칭 반영", "사장님 판단" in b_ov)
+
+        # S14 에서 config owner_label='대표님' 로 바뀐 상태 → 문장 불변이라도 메타 변경 →
+        # content_hash 변경 → 재업로드(표시명 변경이 서버 팩에 반영되는 제품 정합성).
+        s17 = sync(ledger=led, home=home, work_dir=work, dry_run=False, confirm=True, env=live_env,
+                   transport=transport, put_fn=lambda u, b, **k: 200,
+                   post_fn=lambda u, h, **k: fin, sleep_fn=lambda s: None)
+        chk("S17 표시 메타 변경(문장 불변) → content_hash 변경으로 재업로드",
+            s17["status"] == "DONE")
+        s18 = sync(ledger=led, home=home, work_dir=work, dry_run=False, confirm=True, env=live_env,
+                   transport=transport, put_fn=lambda u, b, **k: 200,
+                   post_fn=lambda u, h, **k: fin, sleep_fn=lambda s: None)
+        chk("S18 메타·문장 모두 불변 → NO_CHANGE(메타 서명 안정)", s18["status"] == "NO_CHANGE")
 
     ok = all(c for _, c in checks)
     print("\nGATE=%s (%d/%d)" % ("GO" if ok else "NO-GO", sum(1 for _, c in checks if c), len(checks)))
