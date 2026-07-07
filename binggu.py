@@ -344,13 +344,20 @@ def cmd_recall(a):
         for e in res["relevant_edges"]:
             print("  %s -%s-> %s" % (e["source"], e["relation"], e["target"]))
     print("\n%s" % res["summary"])
+    # 회상 조언 적중 기록 안내(작업A) — nonce 로 위조(D-1)·이중계상(D-2) 방어. 사람 확정만 기록.
+    from binggupack.pack import hit_recording as _HR
+    _nonce = _HR.recall_nonce(a.query, [n["node_id"] for n in res["relevant_nodes"]])
+    print("  → 맞았으면:  python binggu.py mark-hit \"%s\" --index N --nonce %s" % (a.query, _nonce))
+    print("     틀렸으면 mark-miss (N=위 번호). 자동 기록 0 · 사람 확정만.")
     # P1-② use_count++ — --record 명시 시에만(사람의 '유용했다' 신호). 기본 회상은 read-only.
+    # 작업B: use_key(회상 스냅샷) 로 채택 멱등 — 같은 회상 반복 --record 는 정렬에 재기여 0.
     if getattr(a, "record", False):
         db, _ = _open(ledger)
+        use_key = RANK.adoption_key(a.query, getattr(a, "domain", None))
         for n in res["relevant_nodes"]:
-            RANK.record_use(db, n["node_id"])
+            RANK.record_use(db, n["node_id"], use_key=use_key)
         db.close()
-        print("\n(use_count 기록됨 · 유용성 신호 · 도장/문장 불변)")
+        print("\n(use_count 기록됨 · 유용성 신호 · 채택멱등[같은 회상 재기여 0] · 도장/문장 불변)")
     return 0
 
 
@@ -541,15 +548,17 @@ def cmd_preflight(a):
     if getattr(a, "record", False):
         import binggu_p1_ranking as RANK
         db, _ = _open(ledger)
+        # 작업B: preflight 회상도 채택 멱등(같은 prompt+domain 반복 --record 재기여 0).
+        use_key = RANK.adoption_key(getattr(a, "prompt", None) or "preflight", getattr(a, "domain", None))
         seen = set()
         for group in (res["remember"], res["avoid_patterns"], res["preferences"]):
             for n in group:
                 nid = n.get("node_id")
                 if nid and nid not in seen:
                     seen.add(nid)
-                    RANK.record_use(db, nid)
+                    RANK.record_use(db, nid, use_key=use_key)
         db.close()
-        print("\n(use_count 기록됨 %d건 · 유용성 신호 · 도장/문장 불변)" % len(seen))
+        print("\n(use_count 기록됨 %d건 · 유용성 신호 · 채택멱등 · 도장/문장 불변)" % len(seen))
     return 0
 
 
@@ -893,6 +902,58 @@ def cmd_resolve(a):
     return _show(r)
 
 
+def cmd_abstraction(a):
+    """반복 판단 + hit_events 에서 규칙 후보(추상화)를 '제안만' 조회 — read-only·자동확정 0.
+
+    규칙화(active 승격)는 절대 하지 않는다 — 제안 문구만 표시. 규칙으로 만들려면 사람이 SAVE 로
+    명시 승인(candidate confirm 경로). DB write 0 · self-modifying 0."""
+    from binggupack.pack import abstraction as ABS
+    ledger, _ = _ledger_paths(a.ledger)
+    if not os.path.exists(ledger):
+        print("장부가 없습니다: %s · 먼저 python binggu.py init" % ledger)
+        return 2
+    proposals = ABS.propose_abstractions(ledger, domain=getattr(a, "domain", None),
+                                         home=os.path.dirname(ledger))
+    print(ABS.render_proposals_md(proposals))
+    return 0
+
+
+def cmd_mark(a):
+    """회상(recall/why) 조언의 적중/빗나감 기록 — mark-hit / mark-miss.
+
+    node_id 를 직접 받지 않고 (query, index)로 받아 why_search 를 재실행해 서버가 노드를 확보한다
+    (D-1 위조 차단). nonce 로 회상 스냅샷을 고정하고(stale 차단), decision_id 를 (node_id,nonce)
+    안정 해시로 만들어 반복 mark 를 dup_decision 으로 막는다(D-2 이중계상 차단). 사람 확정만(actor=human)."""
+    from binggupack.pack import hit_recording as HR
+    ledger, _ = _ledger_paths(a.ledger)
+    if not os.path.exists(ledger):
+        print("장부가 없습니다(회상 기억 없음): %s · 먼저 python binggu.py init" % ledger)
+        return 2
+    outcome = "hit" if a.cmd == "mark-hit" else "miss"
+    db, _ = _open(ledger)
+    r = HR.mark_outcome(db, ledger, a.query, a.index, outcome, {"actor": "human"},
+                        nonce=a.nonce, domain=a.domain, home=os.path.dirname(ledger))
+    db.close()
+    if r.get("recorded"):
+        print("OK: %s 기록 — [%d] \"%s\"" % (outcome, a.index, r.get("node_claim") or ""))
+        print("    decision=%s · domain=%s · 사람 확정(자동 0)"
+              % (r.get("decision_id"), r.get("domain")))
+        return 0
+    reason = r.get("reason")
+    print("BLOCK: %s" % reason)
+    if reason == "stale_recall":
+        print("  회상 결과가 바뀌었습니다. python binggu.py recall \"%s\" 로 nonce 를 다시 받으세요"
+              " (기대 nonce=%s)." % (a.query, r.get("expected_nonce")))
+    elif reason in ("index_out_of_range",):
+        print("  index 가 회상 건수를 벗어났습니다(회상 %s건). recall 로 번호를 확인하세요."
+              % r.get("recall_count", "?"))
+    elif reason == "no_recall":
+        print("  이 query 로 회상되는 판단이 없습니다. recall 로 먼저 확인하세요.")
+    elif reason == "dup_decision":
+        print("  이미 같은 회상에서 기록됨(이중계상 방지). 중복 아님.")
+    return 1
+
+
 def cmd_reminders(a):
     db, _ = _open(a.ledger)
     today = a.today or datetime.date.today().isoformat()
@@ -1230,6 +1291,14 @@ def main():
     sp = sub.add_parser("resolve"); sp.add_argument("n", type=int); sp.add_argument("id8")
     sp.add_argument("--outcome", required=True, choices=OUTCOMES)
     sp.add_argument("--reason", required=True)
+    # 회상 조언 적중 기록(작업A) — mark-hit / mark-miss (query+index, node_id 미노출·nonce 방어)
+    for _mk in ("mark-hit", "mark-miss"):
+        mkp = sub.add_parser(_mk); mkp.add_argument("query")
+        mkp.add_argument("--index", type=int, default=1)   # recall 표시 번호(1-based)
+        mkp.add_argument("--nonce", default=None)           # recall 이 발급한 회상 봉인(stale 방어)
+        mkp.add_argument("--domain", default=None)          # 분모 분리 키(선택)
+    # 추상화 규칙 후보 제안(작업4·C) — read-only·자동확정 0
+    abp = sub.add_parser("abstraction"); abp.add_argument("--domain", default=None)
     pp = sub.add_parser("pair")              # owner 발화 + ai 요약 페어 저장(화자 축)
     pp.add_argument("owner_text"); pp.add_argument("ai_text", nargs="?", default=None)
     pp.add_argument("--relation", choices=["accepts", "refutes", "revises"], default="accepts")
@@ -1291,7 +1360,9 @@ def main():
           "reflect": cmd_reflect, "save": cmd_save,
           "list": cmd_list, "deprecate": cmd_deprecate, "replace": cmd_replace,
           "accept": cmd_accept, "unaccept": cmd_unaccept, "due": cmd_due,
-          "resolve": cmd_resolve, "reminders": cmd_reminders, "capture": cmd_capture,
+          "resolve": cmd_resolve, "mark-hit": cmd_mark, "mark-miss": cmd_mark,
+          "abstraction": cmd_abstraction,
+          "reminders": cmd_reminders, "capture": cmd_capture,
           "recall": cmd_recall, "why": cmd_recall, "ask": cmd_recall, "trace": cmd_trace, "preflight": cmd_preflight,
           "hosted": cmd_hosted, "harvest": cmd_harvest, "setup-cloud": cmd_setup_cloud,
           "onboard": cmd_onboard,

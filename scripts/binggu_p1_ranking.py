@@ -36,6 +36,7 @@ from binggupack.pack.p1_ranking import (  # noqa: E402,F401  (전체 명시 re-e
     compute_score,
     node_rank_score,
     record_use,
+    adoption_key,
     cfg,
 )
 
@@ -134,10 +135,32 @@ def _selftest():
         db = _DB(con)
         c1 = record_use(db, "n1")
         c2 = record_use(db, "n1")
-        chk("T13 record_use use_count++ (0→1→2)", c1 == 1 and c2 == 2)
+        chk("T13 record_use use_count++ (0→1→2·use_key 없음=하위호환)", c1 == 1 and c2 == 2)
         stored = con.execute("SELECT use_count, sentence, node_type FROM nodes WHERE node_id='n1'").fetchone()
         chk("T14 use_count 영속 + 문장/도장 불변", stored == (2, "문장", "judgment"))
         chk("T15 부재 노드 record_use → None(예외 0)", record_use(db, "nope") is None)
+
+        # ── 작업B 채택 멱등: 같은 use_key 반복 → use_count 불변(정렬 오염 차단) ──
+        con.execute("INSERT INTO nodes(node_id,node_type,sentence,candidate,state,use_count)"
+                    " VALUES('n2','judgment','문장2',0,'active',0)")
+        con.commit()
+        k = adoption_key("배포 절차 확인", domain="bid")
+        b1 = record_use(db, "n2", use_key=k)   # 신규 채택 → 0→1
+        b2 = record_use(db, "n2", use_key=k)   # 같은 회상 재채택 → 멱등(1 유지)
+        b3 = record_use(db, "n2", use_key=k)   # 재재채택 → 여전히 1
+        chk("T16 채택 멱등: 같은 use_key 반복 → use_count 불변(1·1·1)",
+            b1 == 1 and b2 == 1 and b3 == 1)
+        stored2 = con.execute("SELECT use_count FROM nodes WHERE node_id='n2'").fetchone()
+        ev_cnt = con.execute("SELECT count(*) FROM use_events WHERE node_id='n2'").fetchone()[0]
+        chk("T16b use_events UNIQUE dedup(행 1건·use_count 영속 1)",
+            stored2 == (1,) and ev_cnt == 1)
+        # 다른 use_key(다른 회상) → 재카운트 허용(장기 유용성 반영)
+        k2 = adoption_key("전혀 다른 회상 주제", domain="cook")
+        b4 = record_use(db, "n2", use_key=k2)
+        chk("T17 다른 use_key(다른 회상) → 재카운트 허용(1→2)", b4 == 2)
+        # adoption_key 결정성(같은 인자 같은 날 → 동일 키)
+        chk("T18 adoption_key 결정적(같은 query/domain → 동일)",
+            adoption_key("배포 절차 확인", domain="bid") == k)
         con.close()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

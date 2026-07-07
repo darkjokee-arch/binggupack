@@ -716,6 +716,38 @@ def _u_contrast(params=None):
             "note": "빙구팩은 대비표 제시만(결정 0·자동교체 0). 선택은 사장님."}
 
 
+# ==== 작업4: 추상화(abstraction) 규칙 후보 제안 read 조회 — propose_abstractions 래핑 ====
+# 안전 원칙: propose_abstractions 는 read-only(DB write 0·promote 0·self-modifying 0). 응답은
+#   node_id 를 노출하지 않는다(proposal_id=content hash·evidence 는 개수만·D-1). 원칙 문구 PII 마스킹.
+#   규칙화(active 승격)는 본 도구 밖 — 사람 SAVE(candidate confirm) 경로에서만.
+def _u_abstraction(params=None):
+    """반복 판단 + hit_events 에서 규칙 후보(추상화)를 '제안만' 조회(read-only·write 0·자동확정 0).
+
+    evidence_refs(node_id 리스트)는 노출하지 않고 supporting_count(개수)만 준다(D-1 정합).
+    proposal_id 는 content hash 이지 node_id 가 아니다. 규칙화는 사람 SAVE 로만(promote 0).
+    """
+    params = params or {}
+    ledger = _operating_ledger()
+    if not os.path.exists(ledger):
+        return {"action": "abstraction", "mode": "read", "empty": True,
+                "count": 0, "proposals": []}
+    from binggupack.pack import abstraction as ABS
+    proposals = ABS.propose_abstractions(ledger, domain=params.get("domain"),
+                                         home=_operating_home())
+    out = [{
+        "proposal_id": p["proposal_id"],                       # content hash(node_id 아님)
+        "principle": _redact_pii(p["proposed_principle_text"]),
+        "supporting_count": p["supporting_count"],             # 개수만(evidence_refs 미노출·D-1)
+        "semantic_subtype": p["semantic_subtype"],
+        "domain": p.get("domain"),
+        "evidence_summary": p["evidence_summary"],             # 순수 int dict(신호 아님·정렬 key 진입 0)
+        "trust": p["trust"],
+        "requires_human_save": p["requires_human_save"],
+    } for p in proposals]
+    return {"action": "abstraction", "mode": "read", "count": len(out), "proposals": out,
+            "note": "규칙화는 사람 SAVE(candidate confirm)로만 — 자동확정 0·self-modifying 0. 제안 표시 전용."}
+
+
 # ---- 노출 도구 테이블(read/dry-run 만). 위험 도구는 의도적으로 부재 ----
 TOOLS = {
     "pack_build":           {"path_params": ["input_dir"], "underlying": _u_pack_build,          "mode": "dry-run"},
@@ -826,6 +858,10 @@ TOOLS = {
                      "domain": {"type": "string"}, "files": {"type": "string"},
                      "mandates": {"type": "array", "items": {"type": "object"}}},
                   "required": ["mandates"]}},
+    # ---- 작업4: 추상화(규칙 후보 제안) read. node_id 미노출·proposal_id content hash·write 0·promote 0 ----
+    "abstraction": {"path_params": [], "underlying": _u_abstraction, "mode": "read",
+                    "input_schema": {"properties": {"domain": {"type": "string"}},
+                                     "required": []}},
 }
 
 # 노출 금지(핸들러 부재로 자동 차단되지만, 명시 거부 목록으로 의도 박제)
@@ -947,6 +983,9 @@ def _selftest():
         ("record_contrast_forbidden",   "record_contrast",   {}, False, "tool_not_exposed:forbidden"),
         ("record_resolution_forbidden", "record_resolution", {}, False, "tool_not_exposed:forbidden"),
         ("record_use_forbidden",        "record_use",        {}, False, "tool_not_exposed:forbidden"),
+        # 작업4: abstraction read(temp 홈 graceful empty). 규칙화(promote)는 도구 부재로 자동 차단.
+        ("abstraction_read_ok",  "abstraction", {},                    True,  "read no-path"),
+        ("abstraction_domain_ok","abstraction", {"domain": "bid"},     True,  "read no-path"),
     ]
 
     import json as _json

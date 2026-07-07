@@ -19,8 +19,10 @@
 """
 from __future__ import annotations
 
+import hashlib
 import math
 import os
+import sqlite3
 import sys
 from datetime import datetime, timezone
 
@@ -89,17 +91,44 @@ def node_rank_score(created_at, use_count, relevance=0.0, weights=None, home=Non
 
 
 # ── 유용성 카운터 (로컬 ledger use_count++) — PC CLI 회상 시점 호출 ──────────
-def record_use(db, node_id):
+def adoption_key(query, domain=None):
+    """채택 멱등 키 — 같은 회상(query+domain)은 하루 1회만 use_count 에 기여(정렬 오염 차단).
+
+    use_count 는 utility→compute_score→why_search 정렬에 '인과적으로' 진입한다(적중률 신호와 달리
+    합법 입력). 그래서 같은 회상을 짧은 시간 반복하면 정렬이 부풀려질 수 있다(Fable5 D — guard3 우회).
+    날짜 버킷으로 같은 날 반복은 멱등, 다음 날은 재채택 허용(장기 유용성 반영·단기 반복만 억제).
+    """
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    raw = "%s|%s|%s" % ((query or "").strip().lower(), (domain or ""), day)
+    return "use-" + hashlib.sha256(raw.encode("utf-8", "replace")).hexdigest()[:16]
+
+
+def record_use(db, node_id, use_key=None):
     """노드 회상 1회 기록 — use_count++. 로컬 ledger write(staging_apply 와 동일 DB).
 
     폰/웹 회상은 worker(read-only)라 집계 불가 → deferred. 이 함수는 PC CLI 회상 전용.
     node_type/sentence/도장 일체 미변경 — use_count 컬럼만 UPDATE. audit 는 호출자 선택.
-    반환 = 갱신 후 use_count(노드 부재 시 None).
+
+    use_key(작업B·채택 멱등): 지정하면 같은 (node_id, use_key) 는 use_events UNIQUE 로 dedup 돼
+      use_count 를 다시 올리지 않는다(현재값 반환). 미지정(None)은 기존 동작(무조건 ++·하위호환).
+      use_events 테이블이 없는 구 ledger 는 graceful fallback(무조건 ++) — apply_schema 후엔 생성됨.
+    반환 = 갱신 후 use_count(멱등 skip 시 현재값·노드 부재 시 None).
     """
     cur = db.con.execute("SELECT use_count FROM nodes WHERE node_id=?", (node_id,))
     row = cur.fetchone()
     if row is None:
         return None
+    if use_key is not None:
+        try:
+            ins = db.con.execute(
+                "INSERT OR IGNORE INTO use_events(node_id, use_key, ts) VALUES(?,?,?)",
+                (node_id, use_key, datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")))
+            if ins.rowcount == 0:
+                # 이미 채택됨 — use_count 불변(정렬 오염 차단). ++ 하지 않고 현재값 반환.
+                db.con.commit()
+                return int(row[0] or 0)
+        except sqlite3.OperationalError:
+            pass  # use_events 부재(구 ledger·미마이그) → fallback 무조건 ++
     new_count = int(row[0] or 0) + 1
     db.con.execute("UPDATE nodes SET use_count=? WHERE node_id=?", (new_count, node_id))
     db.con.commit()

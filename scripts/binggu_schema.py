@@ -92,6 +92,13 @@ _TABLE_COLUMNS = {
         "context_hash TEXT",
         "decision_id TEXT",
     ],
+    # 채택 멱등 로그(작업B) — 같은 (node_id, use_key) 재채택은 use_count 기여 0(정렬 오염 차단).
+    # use_key = 회상 스냅샷 키(query+domain+날짜버킷). UNIQUE 로 dedup, ts 는 선택(감사용).
+    "use_events": [
+        "node_id TEXT",
+        "use_key TEXT",
+        "ts TEXT",
+    ],
     "recall_traces": [
         "trace_id TEXT PRIMARY KEY",
         "kind TEXT",
@@ -155,6 +162,7 @@ _TABLE_COLUMNS = {
 _TABLE_CONSTRAINTS = {
     "recall_outcomes": ["UNIQUE(trace_id, node_id)"],
     "applied_registry": ["PRIMARY KEY(pack_id, content_hash)"],
+    "use_events": ["UNIQUE(node_id, use_key)"],  # 채택 멱등 dedup 키(작업B)
 }
 
 # ── 인덱스 정본 (실제 WHERE/JOIN 쿼리 패턴 기반) ──────────────────────────────

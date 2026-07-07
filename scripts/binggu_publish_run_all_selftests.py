@@ -47,6 +47,7 @@ GATES = [
     ("abstraction",       os.path.join("..", "binggupack", "pack", "abstraction.py"), ["--selftest"], "GATE=GO"),
     ("preflight hook",    os.path.join("..", "hooks", "binggu_preflight_hook.py"), ["--selftest"], "GATE=GO"),
     ("hit_stats comp4",   "binggu_hit_stats.py",                       ["--selftest"], "GATE: GO"),
+    ("hit_recording A",   os.path.join("..", "binggupack", "pack", "hit_recording.py"), ["--selftest"], "GATE=GO"),
     ("merkle anchor comp3","binggu_merkle_anchor.py",                  ["--selftest"], "GATE=GO"),
     ("hit_export comp5",  "binggu_hit_export_selftest.py",            [], "GATE=GO"),
     ("session_close",     "binggu_session_close.py",                   ["--selftest"], "GATE=GO"),
