@@ -709,11 +709,13 @@ def _u_cloud_packs(params=None):
 
 
 def _u_cloud_search(params=None):
-    """OpenCrab 팩 의미검색(질의확장 lexical·opencrab_search_documents 래핑·read egress-only).
+    """OpenCrab 팩 하이브리드 의미검색(서버 lexical+vector+graph fusion·opencrab_search_documents 래핑·read egress-only).
 
-    ★사용법(2026-07-08 4cli+Fable5 실측 확정): query 는 원 질문을 3~6개 자연 동의어로 확장해
-    넣는다. lexical 은 어휘 겹침이 recall 을 좌우하므로 raw 질문보다 확장 질의가 정답을 잡는다
-    (실측: raw "빠른 결정" 은 놓치나 "빠른 의사결정 신속 판단 직감 결단 즉시 실행" 은 정답 top-1).
+    ★서버 벡터 배선(2026-07-08): 서버 retrieval 이 저장 openai-1536 임베딩을 낮은 가중 fusion 으로
+    반영(vector_candidates 0→32 실측·evidence sources 에 "vector" 등장). 빙구팩은 코드 로직 변경 0 으로 수신.
+    ★사용법: query 는 원 질문을 3~6개 자연 동의어로 확장해 넣기를 권장한다. 현 fusion 은 벡터 가중이
+    낮아(≈0.3) lexical 이 최종 순위를 지배하므로 확장이 lexical recall 을 보강한다(실측: raw "빠른
+    결정" 은 놓치나 "빠른 의사결정 신속 판단 직감 결단 즉시 실행" 은 정답 top-1). 벡터 가중 상향은 서버측 튜닝 사안.
     min_score 미만 evidence 는 근거에서 배제(off-topic 오공급 방지). evidence chunk 원문은 PII
     마스킹 후 노출. package_id 로 특정 팩 한정. 미설정 시 graceful(네트워크 0).
     """

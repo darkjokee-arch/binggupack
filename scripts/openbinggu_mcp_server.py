@@ -50,7 +50,7 @@ _TOOL_DESC = {
     "harvest_remove": "외부 소스 제거(dry-run 기본·HARVEST_REMOVE <source_id> confirm)",
     "cloud_recall": "OpenCrab 클라우드 지식 조회(read·egress-only·PII 마스킹·미설정 graceful)",
     "cloud_packs": "OpenCrab 클라우드 팩 검색(read·egress-only·PII 마스킹·미설정 graceful)",
-    "cloud_search": "OpenCrab 팩 의미검색(질의확장 lexical: 원 질문을 3~6개 동의어로 확장해 넣기·score 하한 min_score로 off-topic 배제·chunk 원문 top-k·read·PII 마스킹·미설정 graceful)",
+    "cloud_search": "OpenCrab 팩 하이브리드 의미검색(서버 lexical+vector fusion·2026-07-08 서버 벡터 retrieval 배선 확인 vector_candidates>0). 질의확장(원 질문 3~6 동의어)은 벡터 가중 낮은 현 fusion에서 lexical 기여 보강용으로 여전히 권장·score 하한 min_score로 off-topic 배제·chunk 원문 top-k·read·PII 마스킹·미설정 graceful)",
 }
 
 

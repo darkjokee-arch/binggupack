@@ -212,11 +212,15 @@ def run_query(tool, args=None, *, transport=None, env=None, config_path=None, ho
 
 def run_search(query, *, top_k=5, min_score=0.0, package_id=None,
                transport=None, env=None, config_path=None, home=None):
-    """질의확장 lexical 팩검색: opencrab_search_documents 래핑 + score 하한 필터.
+    """하이브리드 의미검색: opencrab_search_documents 래핑 + score 하한 필터.
 
-    query 는 Claude 가 동의어 확장한 문자열(어휘 겹침이 lexical recall 을 좌우한다 — 2026-07-08
-    실측: raw "빠른 결정" 은 놓치나 "빠른 의사결정 신속 판단 직감" 확장은 정답 top-1). min_score
-    미만 evidence 는 근거에서 배제(off-topic 오공급 방지·Fable5 #3). read egress-only, evidence
+    ★서버 retrieval = lexical(BM25) + vector fusion + graph. 2026-07-08 서버가 벡터 다리를 배선
+    (vector_candidates 0→32 실측·evidence sources 에 "vector" 등장·저장 openai-1536 임베딩을 낮은
+    가중으로 fusion). 빙구팩은 코드 로직 변경 0 으로 hybrid evidence 를 그대로 수신한다.
+    query 는 여전히 Claude 가 동의어 확장한 문자열을 권장한다 — 현 fusion 은 벡터 가중이 낮아(≈0.3)
+    lexical 기여가 최종 순위를 지배하므로 확장이 lexical recall 을 보강한다(실측: raw "빠른 결정" 은
+    놓치나 "빠른 의사결정 신속 판단 직감" 확장은 정답 top-1). 벡터 가중 상향은 서버측 튜닝 사안.
+    min_score 미만 evidence 는 근거에서 배제(off-topic 오공급 방지·Fable5 #3). read egress-only, evidence
     텍스트는 PII 마스킹 후에만 노출. 게이트(url/token/transport)는 run_query 재사용. raise 0.
     반환: run_query typed dict + {evidence:[{text,score,chunk_id,pack_title}], count, filtered_out,
           min_score, residual, masked}.

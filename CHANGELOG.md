@@ -1,5 +1,10 @@
 # Changelog — BingguPack
 
+## Unreleased — cloud_search 하이브리드 의미검색 (서버 벡터 fusion 배선, 2026-07-08)
+
+- **`cloud_search` = 하이브리드 의미검색 현행화**: OpenCrab 서버가 저장된 openai-1536 임베딩을 검색 retrieval 에 낮은 가중 fusion 으로 배선(2026-07-08). `opencrab_query`·`opencrab_search_documents` 양 경로에서 `vector_candidates` 0→32·evidence `sources` 에 `"vector"` 등장 실측. 빙구팩 `cloud_search`(→`opencrab_search_documents`)는 **코드 로직 변경 0** 으로 hybrid evidence 를 그대로 수신 — 도구 설명·docstring 3곳을 "질의확장 lexical"에서 "하이브리드(lexical+vector fusion)"로 현행화. 질의확장(원 질문 3~6 동의어)은 현 fusion 의 벡터 가중이 낮아(≈0.3) lexical 기여가 순위를 지배하므로 lexical recall 보강용으로 여전히 권장. 벡터 가중 상향은 서버측 튜닝 사안.
+- 배경: 3각 검증(실측·문헌·레드팀)으로 "BM25 단독은 lexical gap 질의를 놓치고 dense fusion 이 사각지대를 메운다"를 통합팩 실측(BM25 recall@5 53.3% vs dense 80%·BM25 완전 miss 6건을 dense 가 top-1~3 회수)·문헌(RRF Cormack 2009·BEIR·Anthropic Contextual Retrieval)으로 입증 → 서버 벡터 fusion 배선 유도.
+
 ## v1.18.0 — CrabAgent 스키마 팩 · 사용자 온톨로지 자동 동기화 (2026-07-06)
 
 - **CrabAgent 스키마 팩 wire `crab_pack_wire`**: 데이터 폴더 → 개념/주장/증거 계층 Cloud Pack v1 ZIP 빌드(stdlib·PII leak fail-closed·원본 문서 미포함) + crab-agent 업로드(기본 dry_run·`BINGGU_CRAB_UPLOAD=1`+confirm 게이트·statement timeout 세션 재발급 재시도·한글 pack_name ASCII 자동 변환). 서버 재추출(문서당 13노드 상한) 경로를 대체. selftest 15케이스. *(오픈크랩 Expert 요금제 필요)*
