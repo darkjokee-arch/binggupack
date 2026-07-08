@@ -227,7 +227,10 @@ def run_search(query, *, top_k=5, min_score=0.0, package_id=None,
                 "reason": "query_required", "token_fingerprint": "none", "source": "none"}
     args = {"query": q, "limit": top_k}
     if isinstance(package_id, str) and package_id.strip():
-        args["package_id"] = package_id.strip()
+        # ★package_id(단수)는 서버가 다중 pack_key 통합 팩(pack_keys>1)을 scanned=0 처리 →
+        # package_ids(복수 배열)로 전송해야 통합 팩도 정상 스캔됨(2026-07-08 실측:
+        # 단수 scanned 0 vs 복수 scanned 1227). 단일 팩도 복수 배열로 동일 동작.
+        args["package_ids"] = [package_id.strip()]
 
     def _ext(resp):
         return _extract_search_evidence(resp, min_score=min_score)
