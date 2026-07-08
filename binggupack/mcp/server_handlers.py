@@ -613,11 +613,57 @@ def _u_harvest_remove(params=None):
 #   - open_g3/save_selected/ledger/state 일절 미접촉(로컬 write 0). 조회 결과는 PII 마스킹 후에만 노출.
 #   - transport 는 운영 설정(env/operating home)에서 read-only 로 구성. 미설정 시 None →
 #     run_query 가 NO_CLOUD_CONFIG/NO_TRANSPORT graceful(네트워크 0). raw 토큰 미노출(fingerprint 만).
-def _cloud_transport():
-    """운영 설정(env/operating home)에서 실 http transport 구성(read-only 설정 조회).
-    미설정 시 None → run_query 가 graceful. 로컬 write 0·raw 토큰 반환 안 함."""
+def _opencrab_url_from_claude_json():
+    """owner ~/.claude.json 의 mcpServers.opencrab-cloud URL/token 재사용(read egress 전용·평문 출력 0).
+
+    URL 은 opencrab.sh/api/mcp/<token> 형태 — 마지막 path 세그먼트가 토큰. token 을 함께 반환해
+    run_query 의 load_cloud_config 게이트(NO_TOKEN)를 통과시킨다. 부재/손상 = (None, None). raise 0.
+    """
+    try:
+        import json as _json
+        p = os.path.join(os.path.expanduser("~"), ".claude.json")
+        if not os.path.exists(p):
+            return None, None
+        with open(p, encoding="utf-8") as f:
+            data = _json.load(f)
+        servers = data.get("mcpServers") if isinstance(data, dict) else None
+        oc = servers.get("opencrab-cloud") if isinstance(servers, dict) else None
+        url = ((oc.get("url") if isinstance(oc, dict) else "") or "").strip() or None
+        token = None
+        if url:
+            seg = url.rstrip("/").split("/")[-1]
+            if seg and (seg.startswith("ocm_") or len(seg) >= 16):
+                token = seg
+        return (url, token)
+    except Exception:   # noqa — 손상/부재 graceful(폴백 없음)
+        return None, None
+
+
+def _cloud_env_with_fallback():
+    """os.environ 복사 + 빙구팩 전용 config(BINGGU_CLOUD_MCP) 부재 시 opencrab-cloud MCP URL/token 폴백 주입.
+
+    run_query 의 load_cloud_config 게이트를 env 로 통과시킨다(read egress 전용·write RPC 는 read
+    화이트리스트로 구조 차단이라 안전). selftest 는 BINGGU_CLOUD_MCP_NO_FALLBACK=1 로 폴백 스킵(네트워크 0).
+    """
+    from binggupack.pack.cloud_query_wire import load_cloud_config
+    env = dict(os.environ)
+    cfg = load_cloud_config(env=env, home=_operating_home())
+    if (not cfg.get("url")) or cfg.get("reason") == "NO_TOKEN":
+        if str(os.environ.get("BINGGU_CLOUD_MCP_NO_FALLBACK", "")).strip() != "1":
+            f_url, f_token = _opencrab_url_from_claude_json()
+            if f_url:
+                env["BINGGU_CLOUD_MCP_URL"] = f_url
+                if f_token:
+                    env["BINGGU_CLOUD_MCP_TOKEN"] = f_token
+    return env
+
+
+def _cloud_transport(env=None):
+    """운영/폴백 env 에서 실 http transport 구성(read-only 조회). 미설정 시 None → run_query graceful.
+    로컬 write 0·raw 토큰 반환 안 함. env 미지정 시 _cloud_env_with_fallback() 사용."""
     from binggupack.pack.cloud_query_wire import load_cloud_config, default_http_transport
-    cfg = load_cloud_config(env=os.environ, home=_operating_home())
+    e = env if env is not None else _cloud_env_with_fallback()
+    cfg = load_cloud_config(env=e, home=_operating_home())
     if not cfg.get("url") or cfg.get("reason") == "NO_TOKEN":
         return None
     return default_http_transport(cfg["url"], cfg["token"])
@@ -641,8 +687,9 @@ def _u_cloud_recall(params=None):
     args = {"query": query}
     if isinstance(params.get("top_k"), int) and not isinstance(params.get("top_k"), bool):
         args["top_k"] = params["top_k"]
-    r = CQ.run_query("opencrab_query", args, transport=_cloud_transport(),
-                     env=os.environ, home=_operating_home())
+    env = _cloud_env_with_fallback()
+    r = CQ.run_query("opencrab_query", args, transport=_cloud_transport(env),
+                     env=env, home=_operating_home())
     return {"action": "cloud_recall", "mode": "read", **_cloud_result_view(r)}
 
 
@@ -655,9 +702,42 @@ def _u_cloud_packs(params=None):
         args["query"] = params["query"].strip()
     if (params.get("category") or "").strip():
         args["category"] = params["category"].strip()
-    r = CQ.run_query("opencrab_search_packs", args, transport=_cloud_transport(),
-                     env=os.environ, home=_operating_home())
+    env = _cloud_env_with_fallback()
+    r = CQ.run_query("opencrab_search_packs", args, transport=_cloud_transport(env),
+                     env=env, home=_operating_home())
     return {"action": "cloud_packs", "mode": "read", **_cloud_result_view(r)}
+
+
+def _u_cloud_search(params=None):
+    """OpenCrab 팩 의미검색(질의확장 lexical·opencrab_search_documents 래핑·read egress-only).
+
+    ★사용법(2026-07-08 4cli+Fable5 실측 확정): query 는 원 질문을 3~6개 자연 동의어로 확장해
+    넣는다. lexical 은 어휘 겹침이 recall 을 좌우하므로 raw 질문보다 확장 질의가 정답을 잡는다
+    (실측: raw "빠른 결정" 은 놓치나 "빠른 의사결정 신속 판단 직감 결단 즉시 실행" 은 정답 top-1).
+    min_score 미만 evidence 는 근거에서 배제(off-topic 오공급 방지). evidence chunk 원문은 PII
+    마스킹 후 노출. package_id 로 특정 팩 한정. 미설정 시 graceful(네트워크 0).
+    """
+    params = params or {}
+    query = (params.get("query") or "").strip()
+    if not query:
+        return {"action": "cloud_search", "mode": "read", "ok": False, "error": "query_required"}
+    from binggupack.pack import cloud_query_wire as CQ
+    tk = params.get("top_k")
+    top_k = tk if isinstance(tk, int) and not isinstance(tk, bool) else 5
+    ms = params.get("min_score")
+    min_score = float(ms) if isinstance(ms, (int, float)) and not isinstance(ms, bool) else 0.0
+    pid = params.get("package_id")
+    package_id = pid if isinstance(pid, str) and pid.strip() else None
+    env = _cloud_env_with_fallback()
+    r = CQ.run_search(query, top_k=top_k, min_score=min_score, package_id=package_id,
+                      transport=_cloud_transport(env), env=env, home=_operating_home())
+    if not r.get("ok"):
+        return {"action": "cloud_search", "mode": "read", "ok": False,
+                "error": r.get("reason"), "source": r.get("source")}
+    return {"action": "cloud_search", "mode": "read", "ok": True,
+            "evidence": r.get("evidence", []), "count": r.get("count", 0),
+            "filtered_out": r.get("filtered_out", 0), "min_score": r.get("min_score"),
+            "residual": r.get("residual"), "source": r.get("source")}
 
 
 # ==== 작업3: 대비(contrast) read 조회 — detect/build/render 만(기록계열 write 함수 절대 호출 0) ====
@@ -926,6 +1006,12 @@ TOOLS = {
                      "input_schema": {"properties": {"query": {"type": "string"},
                                                      "category": {"type": "string"}},
                                       "required": []}},
+    "cloud_search": {"path_params": [], "underlying": _u_cloud_search, "mode": "read",
+                     "input_schema": {"properties": {"query": {"type": "string"},
+                                                     "top_k": {"type": "integer"},
+                                                     "min_score": {"type": "number"},
+                                                     "package_id": {"type": "string"}},
+                                      "required": ["query"]}},
     # ---- 작업3: 판단 근거 회상(why) + 강제조항 대비(contrast) read. node_id 미노출·PII 마스킹·write 0 ----
     "why":      {"path_params": [], "underlying": _u_why, "mode": "read",
                  "input_schema": {"properties": {"query": {"type": "string"},
@@ -1017,6 +1103,8 @@ def _selftest():
     # 클라우드 env(있을 수 있음)를 제거 → load_cloud_config=NO_CLOUD_CONFIG(transport 미구성).
     for _k in ("BINGGU_CLOUD_MCP_URL", "BINGGU_CLOUD_MCP_TOKEN"):
         os.environ.pop(_k, None)
+    # read 폴백(~/.claude.json opencrab-cloud URL 재사용)도 selftest 에선 차단 → 실 네트워크 0.
+    os.environ["BINGGU_CLOUD_MCP_NO_FALLBACK"] = "1"
 
     print("=" * 72)
     print("OpenBinggu MCP server handlers 결선 후보 (synthetic / selftest)")
@@ -1064,6 +1152,8 @@ def _selftest():
         # 트랙 B 클라우드 read(egress-only) — 미설정(BINGGU_HOME=temp·클라우드 env 제거) → graceful(executed=True·write 0).
         ("cloud_recall_read_ok",  "cloud_recall",        {"query": "여행 팁"},                          True,  "read no-path graceful"),
         ("cloud_packs_read_ok",   "cloud_packs",         {"query": "신혼여행"},                         True,  "read no-path graceful"),
+        ("cloud_search_read_ok",  "cloud_search",        {"query": "빠른 의사결정 신속 판단 직감",
+                                                          "min_score": 0.1},                            True,  "read no-path graceful"),
         # 클라우드 write 계열은 노출 금지(_FORBIDDEN). ★pack_qa 는 write 가능 → 절대 노출 금지.
         ("cloud_pack_qa_forbidden",     "opencrab_pack_qa",         {},                               False, "tool_not_exposed:forbidden"),
         ("cloud_pack_update_forbidden", "opencrab_pack_update",     {},                               False, "tool_not_exposed:forbidden"),

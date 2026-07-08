@@ -50,6 +50,7 @@ _TOOL_DESC = {
     "harvest_remove": "외부 소스 제거(dry-run 기본·HARVEST_REMOVE <source_id> confirm)",
     "cloud_recall": "OpenCrab 클라우드 지식 조회(read·egress-only·PII 마스킹·미설정 graceful)",
     "cloud_packs": "OpenCrab 클라우드 팩 검색(read·egress-only·PII 마스킹·미설정 graceful)",
+    "cloud_search": "OpenCrab 팩 의미검색(질의확장 lexical: 원 질문을 3~6개 동의어로 확장해 넣기·score 하한 min_score로 off-topic 배제·chunk 원문 top-k·read·PII 마스킹·미설정 graceful)",
 }
 
 

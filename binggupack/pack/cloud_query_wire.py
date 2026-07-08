@@ -36,6 +36,7 @@ _READ_TOOLS = frozenset({
     "opencrab_query",
     "opencrab_search_packs",
     "opencrab_search_nodes",
+    "opencrab_search_documents",   # 질의확장 lexical 팩검색(evidence chunk 원문 top-k·score 반환)
     "opencrab_status",
 })
 
@@ -109,7 +110,60 @@ def _extract_and_mask(resp):
                 "residual": ["MASK_FAILED:" + type(ex).__name__], "masked": False}
 
 
-def run_query(tool, args=None, *, transport=None, env=None, config_path=None, home=None):
+def _extract_search_evidence(resp, min_score=0.0):
+    """opencrab_search_documents JSON-RPC 응답 → score 하한 필터 + PII 마스킹된 evidence 리스트.
+
+    content[].text 의 JSON(evidence 배열)을 파싱 → 각 evidence 의 score(retrieval.score 폴백)를
+    보고 min_score 미만은 버림. 남은 chunk 원문은 batch_redact 로 마스킹한 뒤에만 노출(raw 0).
+    마스킹 import/런타임 실패 = 안전 판정 불가 → fail-closed(빈 evidence). raise 0.
+    반환: {evidence:[{text,score,chunk_id,pack_title}], count, filtered_out, min_score, residual, masked}
+    """
+    try:
+        result = resp.get("result") if isinstance(resp, dict) else None
+        content = result.get("content") if isinstance(result, dict) else None
+        texts = []
+        if isinstance(content, list):
+            for c in content:
+                if isinstance(c, dict) and isinstance(c.get("text"), str):
+                    texts.append(c["text"])
+        raw = "\n".join(texts)
+        doc = json.loads(raw) if raw.strip() else {}
+    except Exception:   # noqa — 응답/JSON 손상도 흡수(빈 문서로)
+        doc = {}
+    ev_in = doc.get("evidence") if isinstance(doc, dict) else None
+    if not isinstance(ev_in, list):
+        ev_in = []
+    try:
+        from binggupack.safety.pii import batch_redact, scan_residual_pii
+    except Exception as ex:  # noqa — 마스킹 불가 → raw 노출 금지(fail-closed)
+        return {"evidence": [], "count": 0, "filtered_out": 0, "min_score": min_score,
+                "residual": ["MASK_FAILED:" + type(ex).__name__], "masked": False}
+    out, filtered, residual_all = [], 0, []
+    for e in ev_in:
+        if not isinstance(e, dict):
+            continue
+        score = e.get("score")
+        if not isinstance(score, (int, float)) or isinstance(score, bool):
+            r = e.get("retrieval") if isinstance(e.get("retrieval"), dict) else {}
+            sc = r.get("score")
+            score = sc if isinstance(sc, (int, float)) and not isinstance(sc, bool) else 0.0
+        if float(score) < float(min_score):
+            filtered += 1
+            continue
+        text = e.get("text") if isinstance(e.get("text"), str) else ""
+        red, _hits, _review = batch_redact(text, field_name="cloud_search_evidence")
+        residual_all.extend(scan_residual_pii(red))
+        meta = e.get("metadata") if isinstance(e.get("metadata"), dict) else {}
+        out.append({"text": red, "score": round(float(score), 4),
+                    "chunk_id": meta.get("chunk_id"),
+                    "pack_title": meta.get("cloud_pack_title")})
+    out.sort(key=lambda x: -x["score"])
+    return {"evidence": out, "count": len(out), "filtered_out": filtered,
+            "min_score": min_score, "residual": residual_all, "masked": True}
+
+
+def run_query(tool, args=None, *, transport=None, env=None, config_path=None, home=None,
+              extractor=None):
     """OpenCrab 클라우드 read 조회. initialize + 단일 tools/call. raise 0·네트워크 게이트.
 
     게이트(전부 통과해야 실 네트워크 1건):
@@ -146,10 +200,9 @@ def run_query(tool, args=None, *, transport=None, env=None, config_path=None, ho
             reason = cats[0] if len(cats) == 1 else ("SESSION_ERROR" if cats else "EMPTY_RESPONSE")
             base.update({"ok": False, "reason": reason})
             return base
-        masked = _extract_and_mask(call_results[0].get("response"))
-        base.update({"ok": True, "reason": None, "text": masked["text"],
-                     "pii_hits": masked["pii_hits"], "residual": masked["residual"],
-                     "masked": masked["masked"]})
+        ext = extractor or _extract_and_mask
+        extracted = ext(call_results[0].get("response"))
+        base.update({"ok": True, "reason": None, **extracted})
         return base
     except Exception as ex:  # noqa — 방어적 최상위 흡수(상위 raise 0 보장)
         return {"ok": False, "tool": tool, "mode": "read",
@@ -157,11 +210,38 @@ def run_query(tool, args=None, *, transport=None, env=None, config_path=None, ho
                 "token_fingerprint": "none", "source": "none"}
 
 
+def run_search(query, *, top_k=5, min_score=0.0, package_id=None,
+               transport=None, env=None, config_path=None, home=None):
+    """질의확장 lexical 팩검색: opencrab_search_documents 래핑 + score 하한 필터.
+
+    query 는 Claude 가 동의어 확장한 문자열(어휘 겹침이 lexical recall 을 좌우한다 — 2026-07-08
+    실측: raw "빠른 결정" 은 놓치나 "빠른 의사결정 신속 판단 직감" 확장은 정답 top-1). min_score
+    미만 evidence 는 근거에서 배제(off-topic 오공급 방지·Fable5 #3). read egress-only, evidence
+    텍스트는 PII 마스킹 후에만 노출. 게이트(url/token/transport)는 run_query 재사용. raise 0.
+    반환: run_query typed dict + {evidence:[{text,score,chunk_id,pack_title}], count, filtered_out,
+          min_score, residual, masked}.
+    """
+    q = (query or "").strip()
+    if not q:
+        return {"ok": False, "tool": "opencrab_search_documents", "mode": "read",
+                "reason": "query_required", "token_fingerprint": "none", "source": "none"}
+    args = {"query": q, "limit": top_k}
+    if isinstance(package_id, str) and package_id.strip():
+        args["package_id"] = package_id.strip()
+
+    def _ext(resp):
+        return _extract_search_evidence(resp, min_score=min_score)
+
+    return run_query("opencrab_search_documents", args, transport=transport,
+                     env=env, config_path=config_path, home=home, extractor=_ext)
+
+
 # __all__ 에 재노출 심볼 명시 → 핸들러가 cloud_query_wire.{load_cloud_config,default_http_transport}
 # 로 read-only 설정/transport 를 구성할 수 있게 하고, ruff F401(미사용 import) 오탐도 억제.
-__all__ = ["run_query", "build_query_payload", "load_cloud_config",
+__all__ = ["run_query", "run_search", "build_query_payload", "load_cloud_config",
            "default_http_transport", "run_mcp_session", "DEFAULT_CLIENT",
-           "_READ_TOOLS", "_WRITE_TOOLS", "_clamp_args", "_extract_and_mask"]
+           "_READ_TOOLS", "_WRITE_TOOLS", "_clamp_args", "_extract_and_mask",
+           "_extract_search_evidence"]
 
 
 # ───────────────────────────── selftest (mock transport · 네트워크 0) ─────────────────────────────
@@ -277,6 +357,45 @@ def _selftest():
     r_junk = run_query("opencrab_query", {"query": "x"}, transport=junk, env=live_env)
     chk("E3 응답 구조 손상 → text 빈 문자열·ok True·raise 0",
         r_junk["ok"] is True and r_junk["text"] == "")
+
+    # ── S: 질의확장 lexical 팩검색(opencrab_search_documents + score 하한 필터) ──
+    p_sd, r_sd = build_query_payload("opencrab_search_documents", {"query": "직감", "limit": 5})
+    chk("S1 search_documents read 화이트리스트 통과",
+        r_sd is None and p_sd["params"]["name"] == "opencrab_search_documents")
+
+    _mock_sd = {"result": {"content": [{"type": "text", "text": json.dumps({"evidence": [
+        {"text": "높은 점수 chunk", "score": 0.40,
+         "metadata": {"chunk_id": "chunk:01:01", "cloud_pack_title": "P"}},
+        {"text": "낮은 점수 chunk", "score": 0.05, "metadata": {"chunk_id": "chunk:02:01"}},
+        {"text": "연락처 " + "010-" "1234-5678", "retrieval": {"score": 0.20},
+         "metadata": {"chunk_id": "chunk:03:01"}},
+    ]})}]}}
+    ex_hi = _extract_search_evidence(_mock_sd, min_score=0.10)
+    chk("S2 score<min_score(0.10) 필터 — 0.05 배제·2건·filtered 1",
+        ex_hi["count"] == 2 and ex_hi["filtered_out"] == 1)
+    chk("S3 score 내림차순 정렬(0.40 먼저)·chunk_id 보존",
+        ex_hi["evidence"][0]["score"] == 0.40 and ex_hi["evidence"][0]["chunk_id"] == "chunk:01:01")
+    chk("S4 retrieval.score 폴백(0.20) 인식·evidence 텍스트 PII 마스킹",
+        any(e["score"] == 0.20 for e in ex_hi["evidence"])
+        and all(("010-" "1234-5678") not in e["text"] for e in ex_hi["evidence"]))
+
+    def mock_search_transport(payload):
+        if payload.get("method") == "initialize":
+            return {"result": {}}
+        return {"result": {"content": [{"type": "text", "text": json.dumps({"evidence": [
+            {"text": "결론부터 짧게", "score": 0.19, "metadata": {"chunk_id": "chunk:12:01"}},
+            {"text": "노이즈", "score": 0.02, "metadata": {"chunk_id": "chunk:41:01"}},
+        ]})}]}}
+
+    r_search = run_search("보고 분량 간결 결론 요약", top_k=5, min_score=0.10,
+                          transport=mock_search_transport, env=live_env)
+    chk("S5 run_search live → ok·min_score 필터(0.02 배제·1건)·chunk:12 남음",
+        r_search["ok"] and r_search["count"] == 1
+        and r_search["evidence"][0]["chunk_id"] == "chunk:12:01")
+
+    r_snoq = run_search("  ", transport=mock_search_transport, env=live_env)
+    chk("S6 run_search query 공백 → query_required(네트워크 0)",
+        r_snoq["ok"] is False and r_snoq["reason"] == "query_required")
 
     total, passed = len(ok), sum(ok)
     print("\n=== %d/%d ===" % (passed, total))
