@@ -171,39 +171,67 @@ def serve_stdio(allow_root):
     정식 구현. .mcp.json/.claude.json 에 `python openbinggu_mcp_server.py --serve <ROOT>` 엔트리 추가는
     owner 운영 행위(코드 변경 아님). notification(id 없음)은 응답 미발신(JSON-RPC 2.0 표준).
     """
-    # ★readline() 루프 — `for line in sys.stdin` 은 read-ahead 버퍼링이라 실시간 파이프
-    #   (Codex 등 Rust rmcp 클라이언트가 한 줄 write 후 응답 대기)에서 요청을 즉시 못 읽어
-    #   tools/list 응답이 막힌다(로그: startup_complete=true·has_cached_tools=false·30s timeout).
-    #   readline 은 line 단위로 즉시 반환 → 실시간 요청 처리. EOF 시 '' 반환으로 종료.
+    # [진단 wire 로깅] opt-in(BINGGU_MCP_WIRE=1)·기본 off — <home>/mcp_wire.log 에 통신 기록
+    #   (메서드/id/예외만·raw 0). stdio 클라이언트 연결 실패 진단용.
+    import time as _t
+    _wire_on = os.environ.get("BINGGU_MCP_WIRE") == "1"
+    _wp = os.path.join(os.path.expanduser("~"), ".binggupack", "mcp_wire.log")
+
+    def _wire(m):
+        if not _wire_on:
+            return
+        try:
+            with open(_wp, "a", encoding="utf-8") as _f:
+                _f.write("%s %s\n" % (_t.strftime("%H:%M:%S"), m))
+        except Exception:
+            pass
+
+    try:
+        sys.stdin.reconfigure(encoding="utf-8")
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+    _wire("=== START pid=%s in=%s out=%s ===" % (os.getpid(), sys.stdin.encoding, sys.stdout.encoding))
     while True:
-        line = sys.stdin.readline()
+        try:
+            line = sys.stdin.readline()
+        except Exception as _e:
+            _wire("readline EXC=%s" % type(_e).__name__)
+            raise
         if not line:   # EOF → 세션 종료
+            _wire("EOF -> break")
             break
         line = line.strip()
         if not line:
             continue
         try:
             req = json.loads(line)
+            _wire("RECV method=%s id=%s" % (req.get("method"), req.get("id")))
         except Exception:
-            # parse error 는 표준상 응답 의무(id 없이 발신).
+            _wire("RECV parse-error len=%d head=%r" % (len(line), line[:40]))
             sys.stdout.write(json.dumps(_err(None, -32700, "parse error")) + "\n")
             sys.stdout.flush()
             continue
-        # 한 줄 처리 실패가 루프(세션) 전체를 죽이지 않도록 방어. raw 미노출.
         try:
             resp = handle_jsonrpc(req, allow_root)
         except Exception as e:
+            _wire("handle EXC=%s" % type(e).__name__)
             rid = req.get("id") if isinstance(req, dict) else None
             resp = _err(rid, -32603, "internal error: " + type(e).__name__)
         # notification(id 없음)은 응답 미발신. request(id 있음)만 1줄 발신.
         has_id = isinstance(req, dict) and req.get("id") is not None
         if has_id:
             try:
-                sys.stdout.write(json.dumps(resp, ensure_ascii=False) + "\n")
-                sys.stdout.flush()
-            except Exception:
-                # 직렬화/쓰기 실패도 루프 유지(다음 요청 계속 처리).
+                # binary buffer 직접 write — TextIOWrapper 버퍼링 우회(큰 응답 7KB+ 를 Windows
+                # 파이프에서 flush() 로 안 밀리는 경우 방지·Codex rmcp 수신 실패 대응).
+                _data = (json.dumps(resp, ensure_ascii=False) + "\n").encode("utf-8")
+                sys.stdout.buffer.write(_data)
+                sys.stdout.buffer.flush()
+                _wire("SENT id=%s ok=%s bytes=%d" % (req.get("id"), "result" in resp, len(_data)))
+            except Exception as _e:
+                _wire("SEND EXC=%s" % type(_e).__name__)
                 continue
+    _wire("=== END ===")
 
 
 def serve_http(allow_root, port, path_token):
