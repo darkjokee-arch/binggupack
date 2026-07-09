@@ -1,9 +1,20 @@
 # Changelog — BingguPack
 
-## Unreleased — cloud_search 하이브리드 의미검색 (서버 벡터 fusion 배선, 2026-07-08)
+## v1.18.1 — MCP 표준 호환(Codex)·자동 스코프·신규 사용자 온보딩 정비 (2026-07-09)
 
-- **`cloud_search` = 하이브리드 의미검색 현행화**: OpenCrab 서버가 저장된 openai-1536 임베딩을 검색 retrieval 에 낮은 가중 fusion 으로 배선(2026-07-08). `opencrab_query`·`opencrab_search_documents` 양 경로에서 `vector_candidates` 0→32·evidence `sources` 에 `"vector"` 등장 실측. 빙구팩 `cloud_search`(→`opencrab_search_documents`)는 **코드 로직 변경 0** 으로 hybrid evidence 를 그대로 수신 — 도구 설명·docstring 3곳을 "질의확장 lexical"에서 "하이브리드(lexical+vector fusion)"로 현행화. 질의확장(원 질문 3~6 동의어)은 현 fusion 의 벡터 가중이 낮아(≈0.3) lexical 기여가 순위를 지배하므로 lexical recall 보강용으로 여전히 권장. 벡터 가중 상향은 서버측 튜닝 사안.
-- 배경: 3각 검증(실측·문헌·레드팀)으로 "BM25 단독은 lexical gap 질의를 놓치고 dense fusion 이 사각지대를 메운다"를 통합팩 실측(BM25 recall@5 53.3% vs dense 80%·BM25 완전 miss 6건을 dense 가 top-1~3 회수)·문헌(RRF Cormack 2009·BEIR·Anthropic Contextual Retrieval)으로 입증 → 서버 벡터 fusion 배선 유도.
+### Fixed
+- **MCP tools/list 표준 준수**: tool 응답의 비표준 최상위 필드(`mode`·`path_params`) 제거 → `name`/`description`/`inputSchema` 만. Codex 등 엄격한 Rust(rmcp) 클라이언트가 unknown field 로 도구 캐시 생성 실패(`has_cached_tools=false`)하던 문제 해결(Claude Code 는 관대해 기존에도 동작).
+- **scripts selftest 클라우드 격리**: `cloud_recall` selftest 가 `~/.claude.json` opencrab-cloud 폴백을 타 실 클라우드를 치던 격리 결함 봉합(`BINGGU_CLOUD_MCP_NO_FALLBACK` 가드 — server_handlers selftest 와 대칭·GATE NO-GO→GO).
+
+### Added
+- **stdio MCP 진입점 `openbinggu-mcp-server`**: pip 설치 후 clone 없이 stdio MCP 등록 가능(`openbinggu-mcp-server --serve <ROOT>`).
+- **`cloud_search`·`cloud_recall` 개인 온톨로지 자동 스코프**: 미지정 호출이 config 접두어("Binggu Person")로 자동 스코프 — 세션 중 사용자 온톨로지가 검색에 자동으로 붙음(id churn 면역·telemetry 노출).
+- **개인 온톨로지 팩 파이프라인 편입**: `scripts/person_pack_{assemble,split_upload,daily_sync}.py`(`~/.claude/memory` → 90문서 sticky 분할·`owner_label` 개인화). 통합 팩 chunk 유실 복구(4파트 분할).
+
+### Changed
+- **MCP 30도구**(24→30): `cloud_search`·`why`·`contrast`·`abstraction`·`mark_hit`·`mark_miss` 노출·`_TOOL_DESC` 설명 보완(read 20 · dry-run 2 · write-gated 8).
+- **`cloud_search` 하이브리드 의미검색**: OpenCrab 서버가 저장된 openai-1536 임베딩을 낮은 가중 fusion 으로 배선(2026-07-08 · `vector_candidates` 0→32). 빙구팩 `cloud_search` 는 로직 변경 0 으로 hybrid evidence 를 그대로 수신. 질의확장(원 질문 3~6 동의어)은 현 fusion 벡터 가중이 낮아 lexical recall 보강용으로 여전히 권장 — 벡터 가중 상향은 서버측 튜닝 사안.
+- **신규 사용자 온보딩 문서 정비**: Codex(`~/.codex/config.toml`) 등록 예시 · named tunnel 고정 주소 절차 · cloudflared 설치 · 커넥터 URL 2종 구분표(save_mcp `/mcp2` vs webmcp `/mcp`) · `binggu onboard`=clone 필요(hosted 는 pip 미번들) 명시.
 
 ## v1.18.0 — CrabAgent 스키마 팩 · 사용자 온톨로지 자동 동기화 (2026-07-06)
 
