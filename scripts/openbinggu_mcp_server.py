@@ -167,7 +167,14 @@ def serve_stdio(allow_root):
     정식 구현. .mcp.json/.claude.json 에 `python openbinggu_mcp_server.py --serve <ROOT>` 엔트리 추가는
     owner 운영 행위(코드 변경 아님). notification(id 없음)은 응답 미발신(JSON-RPC 2.0 표준).
     """
-    for line in sys.stdin:
+    # ★readline() 루프 — `for line in sys.stdin` 은 read-ahead 버퍼링이라 실시간 파이프
+    #   (Codex 등 Rust rmcp 클라이언트가 한 줄 write 후 응답 대기)에서 요청을 즉시 못 읽어
+    #   tools/list 응답이 막힌다(로그: startup_complete=true·has_cached_tools=false·30s timeout).
+    #   readline 은 line 단위로 즉시 반환 → 실시간 요청 처리. EOF 시 '' 반환으로 종료.
+    while True:
+        line = sys.stdin.readline()
+        if not line:   # EOF → 세션 종료
+            break
         line = line.strip()
         if not line:
             continue
