@@ -1,6 +1,6 @@
-# Install BingguPack v1.17.0
+# Install BingguPack v1.18.0
 
-> 최신 릴리스: `v1.17.0` — **MCP 24도구 · HTTP 모드(웹/앱 커넥터) · ChatGPT 저장 채널 · 원클릭 온보딩(`binggu onboard`) · backup/export/restore** ([CHANGELOG](CHANGELOG.md) 참조).
+> 최신 릴리스: `v1.18.0` — **MCP 30도구 · HTTP 모드(웹/앱 커넥터) · ChatGPT 저장 채널 · 원클릭 온보딩(`binggu onboard`) · backup/export/restore** ([CHANGELOG](CHANGELOG.md) 참조).
 > PyPI 반영이 늦으면 아래 `git clone`으로 최신을 사용하세요.
 
 > `scripts/`·`docs/`의 `openbinggu_`/`OPENBINGGU_` 접두사는 레거시 내부 코드네임입니다(BingguPack과 동일 프로젝트).
@@ -36,7 +36,7 @@ python -m binggupack doctor
 
 - `binggu`와 `python -m binggupack`은 같은 CLI를 실행합니다.
 - `remember`는 미리보기만 합니다. 실제 저장은 화면에 나온 `save ... --confirm "SAVE n"`을 사람이 실행할 때만 됩니다.
-- `scripts/` selftest와 MCP sandbox 등록은 아래 clone 경로에서 실행하는 개발/검증 절차입니다.
+- pip 설치 후에도 stdio MCP를 등록할 수 있습니다(진입점 `openbinggu-mcp-server` · 아래 [pip 설치 사용자](#pip-설치-사용자--진입점으로-등록) 참조). `scripts/` selftest는 clone 경로의 개발/검증 절차입니다.
 
 ## Clone / source install
 
@@ -78,26 +78,53 @@ python scripts/install_claude_mcp.py --sandbox --home ./_binggu_test_home --appl
 - `BINGGU_HOME`으로 sandbox/운영 home 분리(미설정 시 `~/.binggupack`). installer가 MCP config `env`에 주입합니다.
 - 운영 엔트리 `openbinggu-local`은 installer가 건드리지 않습니다(거부). sandbox 이름만 등록됩니다.
 
+### pip 설치 사용자 — 진입점으로 등록
+
+`pip install binggupack` 후에는 `openbinggu-mcp-server` 진입점이 생겨 clone 없이도 등록할 수 있습니다. `<작업폴더>`는 MCP가 파일 접근을 허용할 루트(경로 게이트 allow_root)입니다:
+
+```bash
+claude mcp add openbinggu-local -s user \
+  -e BINGGU_HOME="$HOME/.binggupack" \
+  -- openbinggu-mcp-server --serve "$HOME/binggu-workspace"
+```
+
+### Codex 등록 — `~/.codex/config.toml`
+
+Codex(및 다른 Rust rmcp 클라이언트)는 설정 파일에 MCP 서버 블록을 추가합니다. 빙구팩 서버는 표준 stdio JSON-RPC이고 tools/list가 MCP 표준 필드(name/description/inputSchema)만 노출하므로 그대로 호환됩니다:
+
+```toml
+[mcp_servers.openbinggu-local]
+# pip 설치:
+command = "openbinggu-mcp-server"
+args = ["--serve", "/절대/작업폴더"]
+# clone(진입점 없이)이면 대신:
+#   command = "python"
+#   args = ["/절대/repo/scripts/openbinggu_mcp_server.py", "--serve", "/절대/작업폴더"]
+env = { BINGGU_HOME = "/절대/홈/.binggupack" }
+```
+
+등록 후 Codex를 재시작하면 로그에 `tool_count=30`·`has_cached_tools=true`가 찍힙니다(안 찍히면 config 경로/따옴표 확인).
+
 ## Restart Claude Code
 
 MCP 도구는 **세션 시작 시 고정**됩니다. 등록 후 **Claude Code를 반드시 재시작**해야 도구가 노출됩니다.
 
 ## Confirm MCP tools
 
-재시작 후 sandbox 서버 연결과 24도구 노출을 확인합니다:
+재시작 후 sandbox 서버 연결과 30도구 노출을 확인합니다:
 
 ```bash
 claude mcp list
 claude mcp get openbinggu-local-sandbox    # Status: Connected · env BINGGU_HOME 확인
 ```
 
-노출되어야 하는 **24 MCP 도구**:
+노출되어야 하는 **30 MCP 도구**:
 
-- **조회(read · 16)**: `selftest` · `status` · `list` · `recall` · `preflight` · `trace_review` · `trace_show` · `reminders` · `reflect` · `capture_classify` · `capture_preview` · `pack_validate` · `consumer_smoke` · `harvest_list` · `cloud_recall` · `cloud_packs`
+- **조회(read · 20)**: `selftest` · `status` · `list` · `recall` · `preflight` · `trace_review` · `trace_show` · `reminders` · `reflect` · `capture_classify` · `capture_preview` · `pack_validate` · `consumer_smoke` · `harvest_list` · `cloud_recall` · `cloud_packs` · `cloud_search` · `why` · `contrast` · `abstraction`
 - **dry-run(2)**: `pack_build` · `publish_guard_dryrun`
-- **쓰기(write-gated · 6 · 도구별 confirm 문구 정확 일치 시에만 실행)**: `save_candidate` · `pair` · `deprecate` · `replace` · `harvest_add` · `harvest_remove`
+- **쓰기(write-gated · 8 · 도구별 confirm 문구 정확 일치 시에만 실행)**: `save_candidate` · `pair` · `deprecate` · `replace` · `harvest_add` · `harvest_remove` · `mark_hit` · `mark_miss`
 
-`harvest_run`(실 네트워크 수확) 등 위험 도구 15종은 MCP에 노출되지 않습니다(차단 목록).
+`harvest_run`(실 네트워크 수확) 등 위험 도구는 MCP에 노출되지 않습니다(차단 목록).
 
 ## Confirm save gate
 
@@ -106,7 +133,7 @@ claude mcp get openbinggu-local-sandbox    # Status: Connected · env BINGGU_HOM
 - confirm 부재/불일치 → **REJECT** (`confirm_phrase_mismatch`) · `executed_write=false` · write 0
 - `"SAVE n"` **정확 일치**(사람 승인 증거)일 때만 human 승격 실 저장 — 저장 위치는 `BINGGU_HOME` 장부(sandbox 등록이면 sandbox home, 운영 ledger 불변)
 
-confirm 없이 차단되는 건 실패가 아니라 PASS입니다. 쓰기 도구 6종(`save_candidate`/`pair`/`deprecate`/`replace`/`harvest_add`/`harvest_remove`) 전부 같은 방식의 confirm 게이트(도구별 문구 정확 일치)를 씁니다.
+confirm 없이 차단되는 건 실패가 아니라 PASS입니다. 쓰기 도구 8종(`save_candidate`/`pair`/`deprecate`/`replace`/`harvest_add`/`harvest_remove`/`mark_hit`/`mark_miss`) 전부 같은 방식의 confirm 게이트(도구별 문구 정확 일치)를 씁니다.
 
 ## Operating home vs sandbox home
 
@@ -124,13 +151,22 @@ BINGGU_MCP_PATH_TOKEN=<경로토큰> python scripts/openbinggu_mcp_server.py --h
 
 - `127.0.0.1`에만 바인딩됩니다. 외부 노출은 Cloudflare Tunnel 등 터널을 앞에 두는 구성을 전제합니다.
 - 경로 토큰은 `BINGGU_MCP_PATH_TOKEN` env로만 주입합니다(코드/설정 평문 0).
-- stdio 등록과 같은 도구·같은 게이트입니다(쓰기 6종은 여기서도 confirm 정확 일치 필수).
+- stdio 등록과 같은 도구·같은 게이트입니다(쓰기 8종은 여기서도 confirm 정확 일치 필수).
+
+**터널 준비물 · 주소 안정성**
+
+- `cloudflared` 설치 필요: [공식 가이드](https://developers.cloudflare.com/cloudflared/download-and-install/) 후 PATH 추가 (Windows `winget install Cloudflare.cloudflared` · macOS `brew install cloudflared`).
+- **quick tunnel(trycloudflare)은 재시작·재부팅마다 주소가 바뀝니다.** 그때마다 `~/.binggupack/mcp_web_url.txt`의 새 주소를 커넥터에 다시 붙여야 합니다.
+- **고정 주소가 필요하면 named tunnel** (본인 Cloudflare 계정 + 도메인 필요): `cloudflared tunnel login` → `cloudflared tunnel create binggu` → `cloudflared tunnel route dns binggu mcp.내도메인.com` → tunnel config `service: http://127.0.0.1:8790`. 주소가 고정돼 커넥터를 한 번만 등록하면 됩니다.
+- 부팅 자동 가동: `binggu onboard --webmcp --apply`가 로그온 시 자동 기동(`BingguPack_WebMCP` 스케줄 작업)을 등록합니다(공개 터널=본인 결정 옵트인).
 
 ## ChatGPT 저장 채널 (optional · hosted)
 
 ChatGPT 채팅에서 `SAVE n`으로 승인한 것만 hosted inbox에 잠깐 적재되고, 내 PC가 서명키로 pull해 로컬 장부에 반영합니다(자동 저장 0 유지 · PII 백스톱 reject).
 
 ### 원클릭 온보딩 — `binggu onboard`
+
+> ⚠️ 이 저장 채널은 `hosted/` worker 소스가 필요합니다 — **`git clone` 후** 실행하세요. **pip 배포판엔 `hosted/`가 포함되지 않아** `binggu onboard`가 첫 단계(s0)에서 멈춥니다. Cloudflare 계정이 없으면 먼저 [무료 가입](https://dash.cloudflare.com/sign-up).
 
 본인 Cloudflare 계정에 읽기 worker + 저장 채널(save_mcp) + auto-pull 스케줄러를 한 번에 셋업합니다(멱등 · dry-run 기본):
 
@@ -143,6 +179,15 @@ python binggu.py onboard --show-url       # 4) ChatGPT 커넥터에 붙여넣을
 
 - 경로키/서명키는 `secrets.token_hex`로 자동 생성돼 `<repo>/../workers_port/.dev.vars.save_mcp`(repo 밖)에 저장되고, worker에는 stdin으로만 주입됩니다(argv/히스토리/출력 노출 0 — 화면 표시는 항상 앞8자 마스킹).
 - 커넥터 등록: ChatGPT 설정 → 커넥터 → MCP 서버 URL에 `--show-url`로 확인한 주소(`…/mcp2/<경로키>`)를 붙여넣기. 이 URL은 비밀입니다.
+
+**커넥터 URL은 용도가 2종입니다 — 헷갈리지 마세요:**
+
+| 커넥터 | 용도 | URL 형태 | 등록처 |
+|---|---|---|---|
+| **저장 채널(save_mcp)** | ChatGPT에서 `SAVE n` 승인 → inbox 적재 → PC pull | `…workers.dev/mcp2/<경로키>` | ChatGPT 커넥터 |
+| **웹 MCP(30도구)** | Claude 웹/앱에서 로컬 30도구 직접 사용 | `…trycloudflare.com/mcp/<토큰>` (named tunnel이면 고정 주소) | Claude.ai / 앱 커넥터 |
+
+- 저장 채널(위 온보딩)은 `hosted/` worker, 웹 MCP는 로컬 `--http` 서버 + 터널 — 서로 다른 채널입니다.
 - 무인 반영: `scripts/auto_pull_hosted.py`(후보 있으면 자동 반영) + `scripts/register_autopull.ps1`(Windows 스케줄러 등록 — 경로 자동탐지 · mac/linux는 cron 라인 안내).
 - hosted 경로 설계·경계: [docs/BINGGUPACK_SAVE_INTENT_V2A_MCP_CONNECTOR_DESIGN.md](docs/BINGGUPACK_SAVE_INTENT_V2A_MCP_CONNECTOR_DESIGN.md) · [docs/BINGGUPACK_HOSTED_BOUNDARY.md](docs/BINGGUPACK_HOSTED_BOUNDARY.md).
 
@@ -167,7 +212,7 @@ python -m binggupack.cli.interactive_save --selftest # 비-TTY 검증 (저장 0)
 
 ## Developer: package build (optional)
 
-PyPI publish는 **미수행**입니다. 로컬에서 패키지 build만 확인하려면 격리 venv에서:
+PyPI publish는 v1.17.0부터 Trusted Publisher(OIDC)로 자동화돼 있습니다(태그 릴리스 → GitHub Actions). 로컬에서 패키지 build만 확인하려면 격리 venv에서:
 
 ```bash
 python -m venv .build_venv

@@ -144,7 +144,7 @@ AI와 오래 일하다 보면 이런 일이 반복됩니다.
 
 <p align="center"><img src="assets/channels.svg" width="880" alt="Claude Code·ChatGPT·웹 커넥터 → 내 PC 장부 → 오픈크랩 전문가 팩"></p>
 
-- 🌐 **웹/앱 커넥터(HTTP 모드)** — 로컬 MCP 서버를 HTTP 모드(`--http`)로 열고 Cloudflare Tunnel 뒤에 두면, Claude 웹/앱 커넥터에서도 같은 **24도구**를 그대로 씁니다. 접근은 경로 토큰으로 보호돼요.
+- 🌐 **웹/앱 커넥터(HTTP 모드)** — 로컬 MCP 서버를 HTTP 모드(`--http`)로 열고 Cloudflare Tunnel 뒤에 두면, Claude 웹/앱 커넥터에서도 같은 **30도구**를 그대로 씁니다. 접근은 경로 토큰으로 보호돼요. *(quick tunnel은 재시작마다 주소가 바뀌므로, 고정 주소가 필요하면 named tunnel — [INSTALL](INSTALL.md#webapp-connector--http-모드-optional) 참조.)*
 - 💬 **ChatGPT 저장 채널** — 채팅 중 `SAVE n`으로 승인한 것만 클라우드 inbox에 잠깐 담기고, 내 PC가 서명키로 가져와(pull) 로컬 장부에 반영해요. 여기서도 자동 저장은 없어요.
 - ☁️ **클라우드 읽기 도구** — `cloud_recall`/`cloud_packs`로 오픈크랩의 지식·팩을 조회만 해요 *(읽기 전용 · 민감정보 마스킹)*.
 
@@ -153,8 +153,10 @@ AI와 오래 일하다 보면 이런 일이 반복됩니다.
 ```bash
 pip install binggupack
 binggu start            # 내 PC에 기억 장부 만들기 — 끝
-binggu onboard          # (선택) ChatGPT 저장 채널·자동 동기화·개인 팩까지 원클릭 (--webmcp = 웹 커넥터 등록)
 ```
+
+- 로컬 CLI + **stdio MCP(Claude Code·Codex)**는 `pip install`만으로 충분합니다([INSTALL](INSTALL.md#install-claude-code-mcp-sandbox-entry)에 등록 방법).
+- **ChatGPT/웹 커넥터 저장 채널**(`binggu onboard`)은 hosted worker 소스가 필요해 **`git clone` 후** 실행하세요(pip 배포판엔 `hosted/`가 포함되지 않음 · [INSTALL](INSTALL.md#chatgpt-저장-채널-optional--hosted) 참조).
 
 | 다음 단계 | 문서 |
 |---|---|
@@ -203,7 +205,7 @@ python binggu.py doctor
 - **깊이 탐색(explore `--depth`)**: 주제에서 하위 개념을 재귀(BFS)로 파고들어 소스·후보를 넓게 찾습니다(폭 `--breadth`·관련도 `--rel-min`).
 - **그래프·팩(graph/pack)**: 기억을 근거로 연결해 그래프·팩으로 묶어 내보냅니다(근거 2층·3층·5층).
 - **클라우드 팩**: 묶은 그래프·팩을 오픈크랩(ExpertPlan)에 전문가 지식 팩으로 자동 생성합니다.
-- **Claude Code 연결(hook·MCP)**: 캡처/회상 hook과 MCP 24도구(stdio + HTTP 모드)로 붙습니다.
+- **Claude Code 연결(hook·MCP)**: 캡처/회상 hook과 MCP 30도구(stdio + HTTP 모드)로 붙습니다.
 - **폰·웹·ChatGPT 동기화(hosted)**: 다른 기기에서 승인해 받아둔 메모를 로컬 장부로 가져옵니다.
 - **안전장치(governance/selftest)**: PII·secret 차단, 사람 승인 경계, 자체 검증.
 
@@ -214,7 +216,7 @@ python binggu.py doctor
 | **작업 전 회상** | `ask/recall/why`, `preflight`, `trace`, 회상 근거·효용 기록 |
 | **기억 정리** | `deprecate`, `replace`, `accept/unaccept`, `due`, `reminders`, `resolve`, `route` |
 | **내 말 vs AI 말** | `pair`, `trust`, owner/ai 화자 분리, 수용·반박·수정 관계, 직감 적중률 |
-| **Claude Code·커넥터 연결** | `capture` hook, `preflight` hook, save-gate hook, stdio MCP 서버, HTTP 모드(`--http`), MCP 24도구(read 16 · dry-run 2 · confirm 게이트 쓰기 6) |
+| **Claude Code·커넥터 연결** | `capture` hook, `preflight` hook, save-gate hook, stdio MCP 서버(Claude Code·Codex), HTTP 모드(`--http`), MCP 30도구(read 20 · dry-run 2 · confirm 게이트 쓰기 8) |
 | **폰·웹·클라우드 보조** | `hosted inbox/pull`, `setup-cloud`, ChatGPT 저장 채널(inbox→서명키 pull), `cloud_recall`/`cloud_packs`, TTL/HMAC/purge 경계 |
 | **외부 소스·그래프·팩** | `harvest`, `confirm-edges`, graph schema, pack contract, local ingest, watcher 계열 |
 | **안전·개발자 도구** | path safety, match policy, classifier, governance, selftest, publish/export |

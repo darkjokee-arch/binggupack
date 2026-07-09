@@ -33,6 +33,8 @@ Release = "https://github.com/darkjokee-arch/binggupack/releases/tag/v1.16.0"
 binggu = "binggu:main"
 binggupack = "binggu:main"
 binggu-interactive-save = "binggupack.cli.interactive_save:main"
+# stdio MCP 서버 진입점(pip 설치 후 Claude Code/Codex 등록에 사용): openbinggu-mcp-server --serve <ROOT>
+openbinggu-mcp-server = "scripts.openbinggu_mcp_server:main"
 
 [tool.setuptools]
 py-modules = ["binggu"]

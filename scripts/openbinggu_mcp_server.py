@@ -51,6 +51,11 @@ _TOOL_DESC = {
     "cloud_recall": "OpenCrab 클라우드 지식 조회(read·egress-only·PII 마스킹·미설정 graceful)",
     "cloud_packs": "OpenCrab 클라우드 팩 검색(read·egress-only·PII 마스킹·미설정 graceful)",
     "cloud_search": "OpenCrab 팩 하이브리드 의미검색(서버 lexical+vector fusion·2026-07-08 서버 벡터 retrieval 배선 확인 vector_candidates>0). 질의확장(원 질문 3~6 동의어)은 벡터 가중 낮은 현 fusion에서 lexical 기여 보강용으로 여전히 권장·score 하한 min_score로 off-topic 배제·chunk 원문 top-k·read·PII 마스킹·미설정 graceful)",
+    "why": "판단 근거 회상 — 과거 결정의 이유·근거 사슬 조회(read·node_id 미노출·PII 마스킹)",
+    "contrast": "제안 신호 ↔ 강제조항 대비표(read·양쪽 원문 인용·자동결정 0·write 0)",
+    "abstraction": "반복 판단 → 규칙 후보 제안(read·proposal_id=content hash·자동확정 0·write 0)",
+    "mark_hit": "회상 조언 적중 기록(write-gated·'MARK_HIT <index> <query>' confirm 정확일치·node_id 미노출·자동기록 0)",
+    "mark_miss": "회상 조언 빗나감 기록(write-gated·'MARK_MISS <index> <query>' confirm 정확일치·node_id 미노출·자동기록 0)",
 }
 
 
