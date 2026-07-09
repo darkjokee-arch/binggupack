@@ -7,7 +7,7 @@
 > 4. 분류: **현행**=현재 라인에서 import되거나 게이트로 사용(strangler thin wrapper 포함) / **1회성**=owner GO 1회 실연·canary(현재 직속 0 — 전부 `_archived_oneoff_20260612/` 이동 완료) / **레거시**=참조 0 실측·설계만·이전 버전.
 > 5. raw 경로·secret·PII는 어떤 스크립트도 출력하지 않는다(id/hash/count/reason_code만) — 새 스크립트도 이 규약을 따를 것.
 
-총 142개 직속 .py(= 141 운영 모듈 + 패키징 marker `__init__.py` 1개). 6/13 v1.4.0(73) 이후 strangler Phase2 thin wrapper 이관·2차 라인(discover/harvest/parser/topic_to_pack)·branch_explorer/knowledge_graph·publish 파이프라인(P1~P8)·거버넌스(hit/contrast/policy/merkle) 신규 반영. archived 하위폴더는 표 제외(별도 집계): `_archived/` 14개 · `_archived_oneoff_20260612/` 4개. 분류 근거 = 각 파일 머리 docstring + import 참조 관계 실측(`grep "import <모듈>"` 교차).
+총 145개 직속 .py(= 144 운영 모듈 + 패키징 marker `__init__.py` 1개). 6/13 v1.4.0(73) 이후 strangler Phase2 thin wrapper 이관·2차 라인(discover/harvest/parser/topic_to_pack)·branch_explorer/knowledge_graph·publish 파이프라인(P1~P8)·거버넌스(hit/contrast/policy/merkle) 신규 반영. archived 하위폴더는 표 제외(별도 집계): `_archived/` 14개 · `_archived_oneoff_20260612/` 4개. 분류 근거 = 각 파일 머리 docstring + import 참조 관계 실측(`grep "import <모듈>"` 교차).
 
 | 파일명 | 분류 | 한 줄 역할 | selftest |
 | :--- | :--- | :--- | :--- |
@@ -144,6 +144,9 @@
 | openbinggu_scope_envelope_dryrun.py | 현행 | scope envelope 통합 dry-run(reader contract+visibility+access 묶음) | --selftest |
 | openbinggu_staging_write_selftest.py | 현행 | staging SQLite 엔진 정본(StagingDB/staging_apply)+selftest(다수 import) | 자체 |
 | openbinggu_verb_edge_schema.py | 현행 | 동사형 엣지 6종 스키마 검증기(thin wrapper→binggupack.schema.verb_edge) | --selftest |
+| person_pack_assemble.py | 현행 | ~/.claude/memory(박제·traj·debate)→개인 온톨로지 팩 보조소스 조립(PII 이중방어·멱등) | ✗(운영) |
+| person_pack_daily_sync.py | 현행 | 개인 온톨로지 팩 일1회 갱신 orchestrator(assemble→split_upload --daily·스케줄러 진입) | ✗(운영) |
+| person_pack_split_upload.py | 현행 | 개인 온톨로지 소스→~90문서 sticky 분할 팩 업로드(owner_label 개인화·NO_CHANGE 스킵) | ✗(운영) |
 | smoke_test.py | 현행 | clone 직후 offline smoke test(thin wrapper→binggupack.pack.smoke·등록 불필요) | 자체 |
 | strangler_wrapper_compat_selftest.py | 현행 | strangler 이관 wrapper 호환 회귀 하니스(package↔scripts byte-identical) | 자체 |
 | version_consistency_selftest.py | 현행 | version SSOT(__about__↔pyproject) 일치 검증 selftest(fail-closed) | --selftest |
@@ -157,7 +160,7 @@
 | watcher_pack_builder_m0.py | 현행 | M0 산출→temp pack 조립+pack_validate 계약 검증(pack 빌더 정본) | --selftest |
 
 ## 집계
-- 총 142 = 현행 141 · 1회성 0 · 레거시 1 (직속 .py 142 = 141 운영 모듈 + 패키징 marker `__init__.py` 1)
+- 총 145 = 현행 144 · 1회성 0 · 레거시 1 (직속 .py 145 = 144 운영 모듈 + 패키징 marker `__init__.py` 1)
 - 레거시 1 = `openbinggu_reviewed_plan_preview.py`(v0.15 설계만·production 참조 0 실측 — strangler thin wrapper 로만 유지).
 - 1회성 0 = 6/13 v1.4.0 의 1회성 5종(real_staging_cycle/g3·v08_real_cycle·v1_candidate_cycle·save_intent_v23_live 등)은 전부 `_archived_oneoff_20260612/` 이동 완료. 직속에 잔존 0.
 - archived 하위폴더(표 제외): `_archived/` 14개 · `_archived_oneoff_20260612/` 4개. (6/13 대비 직속에서 빠진 18개 = finalize_dryrun·phase2_staging_reread_e2e·promotion_preview·reviewed_apply_plan_validate·upload_preflight·v08_review_resolve_4values·real_staging 3종·v08_real_cycle·v1_candidate_cycle·save_intent canary/deploy/e2e 다수 → archived 이동분과 정합.)
