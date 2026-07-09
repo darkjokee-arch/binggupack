@@ -49,6 +49,22 @@ def find_cloudflared():
     return shutil.which("cloudflared")
 
 
+def named_config():
+    """named tunnel 설정(<home>/web_tunnel.json) 감지 — 있으면 (tunnel_name, hostname),
+    없으면 None(quick 폴백). named = 고정 주소(재부팅에도 불변), quick = 가변 주소."""
+    p = os.path.join(HOME_DIR, "web_tunnel.json")
+    if not os.path.exists(p):
+        return None
+    try:
+        import json
+        d = json.loads(open(p, encoding="utf-8").read())
+        if d.get("tunnel_name") and d.get("hostname"):
+            return d["tunnel_name"], d["hostname"]
+    except Exception:
+        pass
+    return None
+
+
 def ensure_token():
     """경로 토큰 — 없으면 최초 1회 생성(48hex). 값은 파일에만(화면/로그 출력 0)."""
     if os.path.exists(TOKFILE):
@@ -79,31 +95,47 @@ def main():
     )
     time.sleep(2)
 
-    # 2) cloudflared quick tunnel (창 없이) — 출력에서 공개 URL 파싱
-    proc = subprocess.Popen(
-        [cf, "tunnel", "--url", "http://127.0.0.1:" + PORT],
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        creationflags=CREATE_NO_WINDOW, text=True, encoding="utf-8", errors="replace",
-    )
-    log("[start] http pid=%s cf pid=%s port=%s" % (http.pid, proc.pid, PORT))
+    # 2) 터널 — named(고정 주소·web_tunnel.json) 우선, 없으면 quick(가변 주소)
+    named = named_config()
+    if named:
+        tname, host = named
+        # named tunnel run — ~/.cloudflared/config.yml(tunnel+ingress) 사용. 주소 고정(mcp.<도메인>).
+        proc = subprocess.Popen(
+            [cf, "tunnel", "run", tname],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            creationflags=CREATE_NO_WINDOW, text=True, encoding="utf-8", errors="replace",
+        )
+        url = "https://" + host   # 고정 — stdout 파싱 불필요
+        with open(URLFILE, "w", encoding="ascii") as f:
+            f.write(url + "/mcp/" + tok)
+        log("[start-named] http pid=%s cf pid=%s host=%s (고정 주소·URLFILE 기록·재부팅 불변)"
+            % (http.pid, proc.pid, host))
+    else:
+        # quick tunnel (창 없이) — 출력에서 가변 공개 URL 파싱
+        proc = subprocess.Popen(
+            [cf, "tunnel", "--url", "http://127.0.0.1:" + PORT],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            creationflags=CREATE_NO_WINDOW, text=True, encoding="utf-8", errors="replace",
+        )
+        log("[start] http pid=%s cf pid=%s port=%s" % (http.pid, proc.pid, PORT))
 
-    url = None
-    for _ in range(120):
-        line = proc.stdout.readline()
-        if not line:
-            time.sleep(0.5)
-            continue
-        m = re.search(r"https://[a-z0-9-]+\.trycloudflare\.com", line)
-        if m:
-            url = m.group(0)
-            with open(URLFILE, "w", encoding="ascii") as f:
-                f.write(url + "/mcp/" + tok)
-            log("[url] 기록됨 → %s (전체 주소는 파일 참조 — 로그에 토큰 0)" % URLFILE)
-            break
+        url = None
+        for _ in range(120):
+            line = proc.stdout.readline()
+            if not line:
+                time.sleep(0.5)
+                continue
+            m = re.search(r"https://[a-z0-9-]+\.trycloudflare\.com", line)
+            if m:
+                url = m.group(0)
+                with open(URLFILE, "w", encoding="ascii") as f:
+                    f.write(url + "/mcp/" + tok)
+                log("[url] 기록됨 → %s (전체 주소는 파일 참조 — 로그에 토큰 0)" % URLFILE)
+                break
 
-    if not url:
-        log("[error] tunnel url not found")
-        sys.exit(1)
+        if not url:
+            log("[error] tunnel url not found")
+            sys.exit(1)
 
     # 3) 상주 — cloudflared 가 죽으면 종료(스케줄러가 재기동)
     proc.wait()
