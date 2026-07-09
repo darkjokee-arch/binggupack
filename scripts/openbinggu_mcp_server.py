@@ -126,7 +126,11 @@ def handle_jsonrpc(req, allow_root):
         return _err(rid, -32602, "invalid params")
 
     if method == "initialize":
-        return _ok(rid, {"protocolVersion": "2024-11-05",
+        # ★client 가 보낸 protocolVersion 을 echo(협상 호환). 서버 고정 버전과 다르면 엄격한
+        #   client(Codex rmcp)가 initialize 를 cancel(task cancelled·Child exit 1·tools/list
+        #   30s timeout) 하는 것을 방지. 미지정 시 기본 2024-11-05.
+        client_ver = params.get("protocolVersion") if isinstance(params, dict) else None
+        return _ok(rid, {"protocolVersion": client_ver or "2024-11-05",
                          "serverInfo": {"name": "openbinggu", "version": "0.1-candidate"},
                          "capabilities": {"tools": {"listChanged": False}}})
 
