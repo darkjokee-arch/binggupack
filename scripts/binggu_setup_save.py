@@ -402,12 +402,46 @@ def register_opencrab_mcp(url, apply=False, claude_json_path=None, now_fn=None):
                 % (OPENCRAB_MCP_NAME, mask_opencrab_url(url)), hint)
 
 
+def enforce_hooks_step(settings_path, apply=False, register_fn=None):
+    """[s11] 강제 회상/학습/가드 hook 4개 등록 — 신규 사용자 AGI 구동 배선.
+
+    register_hook(binggu_capture_profile) 재사용 · marker idempotent(owner·기존 사용자 재실행 skip) ·
+    전부 SYNC(is_async=False — Stop exit 2 차단력·UserPromptSubmit 감지 확정). 다른 키
+    (statusLine/permissions) 보존은 register_hook 이 json.loads→setdefault→write 로 보장(.bak 백업)."""
+    hooks_dir = os.path.join(REPO, "hooks")
+    specs = [
+        ("user-prompt-enforce-recall", "user-prompt-enforce-recall.js", ("UserPromptSubmit",)),
+        ("stop-enforce-recall", "stop-enforce-recall.js", ("Stop",)),
+        ("user-prompt-learn-outcome", "user-prompt-learn-outcome.js", ("UserPromptSubmit",)),
+        ("pre-enforce-guard", "pre-enforce-guard.js", ("PreToolUse",)),
+    ]
+    if not apply:
+        return step("s11", INFO,
+                    "강제 회상/학습/가드 hook(4) 등록 대기 — --apply 시 SYNC 등록: %s" % settings_path,
+                    "UserPromptSubmit(enforce·learn) · Stop(enforce=recall 미이행 시 재답변 강제) · PreToolUse(guard)")
+    try:
+        from binggu_capture_profile import register_hook
+        rf = register_fn or register_hook
+        added = []
+        for marker, fname, events in specs:
+            cmd = 'node "%s"' % os.path.join(hooks_dir, fname)
+            for ev in rf(settings_path, cmd, events=events, marker=marker, is_async=False):
+                added.append("%s→%s" % (marker.rsplit("-", 1)[-1], ev))
+    except Exception as e:
+        return step("s11", STOP, "enforce hook 등록 실패: %s" % e, "settings.json .bak 확인 후 수동 등록")
+    return step("s11", OK if added else SKIP,
+                "강제 회상/학습/가드 hook: %s" % (", ".join(added) or "이미 등록됨(marker skip)"),
+                "재시작 시 반영 — 결정/검토 답변 전 recall 미이행이면 Stop 이 재답변 강제 "
+                "(끄기: ~/.claude/state/recall_enforce_disabled)")
+
+
 # ── 오케스트레이터 ─────────────────────────────────────────────────
 def run_save_setup(apply=False, deploy=False, show_url=False, os_name=None, wp_dir=None,
                    login_runner=None, deploy_runner=None, secret_runner=None,
                    sched_runner=None, task_exists=None, keygen=None, toml_path=None,
                    webmcp=False, webmcp_runner=None, webmcp_task_exists=None,
-                   cloudflared=None, pp_home=None, opencrab_url=None, claude_json_path=None):
+                   cloudflared=None, pp_home=None, opencrab_url=None, claude_json_path=None,
+                   settings_path=None, enforce_register_fn=None):
     """저장 채널 셋업 1회. 기본 dry-run(변경 0). 모든 runner 는 selftest 주입용."""
     os_name = os_name or P.detect_os()
     wp_dir = wp_dir or default_wp_dir()
@@ -467,6 +501,14 @@ def run_save_setup(apply=False, deploy=False, show_url=False, os_name=None, wp_d
     steps.append(s10)
     if s10["status"] == STOP:
         return {"apply": apply, "deploy": deploy, "steps": steps, "halted_at": "s10"}
+
+    # [s11] 강제 회상/학습/가드 hook 등록 — 신규 사용자 AGI 구동(안 따를 수 없는 recall 강제)
+    _sp = settings_path or (P.default_settings() if hasattr(P, "default_settings")
+                            else os.path.join(os.path.expanduser("~"), ".claude", "settings.json"))
+    s11 = enforce_hooks_step(_sp, apply=apply, register_fn=enforce_register_fn)
+    steps.append(s11)
+    if s11["status"] == STOP:
+        return {"apply": apply, "deploy": deploy, "steps": steps, "halted_at": "s11"}
 
     return {"apply": apply, "deploy": deploy, "steps": steps, "halted_at": None}
 
@@ -732,6 +774,41 @@ def _selftest():
         os.environ.pop("BINGGU_PACK_ID", None)
         import shutil as _sh
         _sh.rmtree(_pph, ignore_errors=True)
+
+    # s11. enforce hooks 등록 실경로(temp settings — 멀티키 소실 0·SYNC·idempotent · 회상 반영: 실수 방지)
+    st_enf = os.path.join(wp, "settings_enforce.json")
+    with open(st_enf, "w", encoding="utf-8") as _ef:
+        json.dump({"statusLine": {"x": 1}, "permissions": {"allow": ["a"]}, "hooks": {}},
+                  _ef, ensure_ascii=False)
+    _er = enforce_hooks_step(st_enf, apply=True)
+    _ed = json.load(open(st_enf, encoding="utf-8"))
+    chk("s11a enforce_hooks 등록 OK", _er["status"] == OK)
+    chk("s11b 멀티키 소실 0(statusLine·permissions 보존)",
+        _ed.get("statusLine") == {"x": 1} and _ed.get("permissions") == {"allow": ["a"]})
+
+    def _ehas(groups, name):
+        return any(name in (h.get("command") or "") for g in groups for h in g.get("hooks", []))
+
+    def _esync(groups, name):
+        for g in groups:
+            for h in g.get("hooks", []):
+                if name in (h.get("command") or ""):
+                    return "async" not in h
+        return False
+    _eups = _ed["hooks"].get("UserPromptSubmit", [])
+    _estops = _ed["hooks"].get("Stop", [])
+    _epts = _ed["hooks"].get("PreToolUse", [])
+    chk("s11c enforce-recall+learn(UP)+guard(PreToolUse) 등록",
+        _ehas(_eups, "user-prompt-enforce-recall") and _ehas(_eups, "user-prompt-learn-outcome")
+        and _ehas(_epts, "pre-enforce-guard"))
+    chk("s11d stop-enforce SYNC(exit2 차단력·async 키 없음)",
+        _ehas(_estops, "stop-enforce-recall") and _esync(_estops, "stop-enforce-recall"))
+    _enb = len(_eups)
+    _er2 = enforce_hooks_step(st_enf, apply=True)
+    _ed2 = json.load(open(st_enf, encoding="utf-8"))
+    chk("s11e idempotent 재실행 SKIP+중복 0",
+        _er2["status"] == SKIP and len(_ed2["hooks"].get("UserPromptSubmit", [])) == _enb)
+    chk("s11f dry-run(apply=False) 무변경 INFO", enforce_hooks_step(st_enf, apply=False)["status"] == INFO)
 
     print("\n" + "=" * 62)
     print("binggu_setup_save — selftest (mock + temp · 실 CF/스케줄러 미접촉)")
