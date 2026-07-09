@@ -678,7 +678,18 @@ def _cloud_result_view(r):
 
 
 def _u_cloud_recall(params=None):
-    """OpenCrab 클라우드 지식 조회(opencrab_query 래핑·read egress-only). 미설정 시 graceful."""
+    """OpenCrab 클라우드 지식 조회(opencrab_query 래핑·read egress-only). 미설정 시 graceful.
+
+    ★스코프(2026-07-09): cloud_search 와 동일 규약 — 명시 > config 기본("Binggu Person") > unscoped.
+      미지정 호출은 person_pack.json 의 cloud_search_default_pack_query 를 자동 적용해 개인 온톨로지가
+      세션 중 자동으로 "떠 있게" 하고, 무필터 넓은 검색의 벡터 timeout(57014)을 회피한다. 서버
+      opencrab_query 는 pack_query/package_id(s) 스코프 인자를 지원(2026-07-09 실측: pack_scope
+      packages 5·scanned 1214·vector 32·정답 top1). package_id 단수는 다중 pack_key 통합 팩 scanned=0
+      이슈 회피 위해 package_ids 복수로 승격(cloud_search 정합). 이 도구는 빙구팩 개인 온톨로지 전용이다
+      (전체 코퍼스 회상은 오픈크랩 opencrab_query 를 직접 쓴다 — 역할 분리). applied_scope/scope_source
+      로 적용 스코프를 관측할 수 있다. build_query_payload._clamp_args 가 top_k/limit 외 인자를 보존해
+      pack_query/package_ids 가 그대로 서버 arguments 에 실린다.
+    """
     params = params or {}
     query = (params.get("query") or "").strip()
     if not query:
@@ -687,10 +698,42 @@ def _u_cloud_recall(params=None):
     args = {"query": query}
     if isinstance(params.get("top_k"), int) and not isinstance(params.get("top_k"), bool):
         args["top_k"] = params["top_k"]
+    # 스코프 결정: 명시(개인 팩) > config 기본("Binggu Person") > unscoped(하위호환). cloud_search 와 대칭.
+    pid = params.get("package_id")
+    package_id = pid if isinstance(pid, str) and pid.strip() else None
+    _pids = params.get("package_ids")
+    package_ids = ([p.strip() for p in _pids if isinstance(p, str) and p.strip()]
+                   if isinstance(_pids, list) else None) or None
+    _pq = params.get("pack_query")
+    pack_query = _pq.strip() if isinstance(_pq, str) and _pq.strip() else None
+    if package_ids or package_id or pack_query:
+        scope_source = "explicit"
+    else:
+        _dflt = _cloud_search_default_scope()
+        if _dflt:
+            pack_query = _dflt
+            scope_source = "config_default"
+        else:
+            scope_source = "unscoped"
+    # 서버 스코프 인자 주입. package_id 단수는 통합 팩 scanned=0 회피 위해 package_ids 로 승격(개수 상한 32).
+    _ids = list(package_ids) if package_ids else ([package_id] if package_id else None)
+    if _ids:
+        args["package_ids"] = _ids[:32]
+    if pack_query:
+        args["pack_query"] = pack_query
+    if package_ids:
+        applied_scope = "package_ids:" + ",".join(package_ids)
+    elif package_id:
+        applied_scope = "package_id:" + package_id
+    elif pack_query:
+        applied_scope = "pack_query:" + pack_query
+    else:
+        applied_scope = "all"
     env = _cloud_env_with_fallback()
     r = CQ.run_query("opencrab_query", args, transport=_cloud_transport(env),
                      env=env, home=_operating_home())
-    return {"action": "cloud_recall", "mode": "read", **_cloud_result_view(r)}
+    return {"action": "cloud_recall", "mode": "read", **_cloud_result_view(r),
+            "applied_scope": applied_scope, "scope_source": scope_source}
 
 
 def _u_cloud_packs(params=None):
@@ -1054,7 +1097,10 @@ TOOLS = {
     # ---- 트랙 B: OpenCrab 클라우드 read 조회(egress-only). path 입력 없음·write RPC 미생성·PII 마스킹·미설정 graceful ----
     "cloud_recall": {"path_params": [], "underlying": _u_cloud_recall, "mode": "read",
                      "input_schema": {"properties": {"query": {"type": "string"},
-                                                     "top_k": {"type": "integer"}},
+                                                     "top_k": {"type": "integer"},
+                                                     "package_id": {"type": "string"},
+                                                     "package_ids": {"type": "array", "items": {"type": "string"}},
+                                                     "pack_query": {"type": "string"}},
                                       "required": ["query"]}},
     "cloud_packs":  {"path_params": [], "underlying": _u_cloud_packs, "mode": "read",
                      "input_schema": {"properties": {"query": {"type": "string"},
@@ -1296,6 +1342,37 @@ def _selftest():
         _sc_cfg.get("scope_source") == "config_default"
         and _sc_cfg.get("applied_scope") == "pack_query:Binggu Person"))
     for _nm, _cond in _scope_checks:
+        all_ok = all_ok and _cond
+        print("  [%s] %s" % ("OK" if _cond else "FAIL", _nm))
+
+    # ----- cloud_recall 스코프 결정 로직 검증(cloud_search 대칭·개인 온톨로지 자동 스코프·네트워크 0 graceful) -----
+    def _cr(p):
+        return handle_tool("cloud_recall", p, allow_root).get("tool_result", {})
+    _rc_pq = _cr({"query": "x", "pack_query": "Binggu Person"})
+    _rc_pid = _cr({"query": "x", "package_id": "uuid-1"})
+    _rc_none = _cr({"query": "x"})   # temp 홈에 person_pack.json 없음 → unscoped(하위호환)
+    os.environ["BINGGU_HOME"] = _cfg_home   # CS4 가 만든 person_pack.json(config_default) 재사용
+    try:
+        _rc_cfg = _cr({"query": "x"})
+    finally:
+        if _prev_home is None:
+            os.environ.pop("BINGGU_HOME", None)
+        else:
+            os.environ["BINGGU_HOME"] = _prev_home
+    _rc_checks = [
+        ("CR1 pack_query 명시 → explicit·applied=pack_query:Binggu Person",
+         _rc_pq.get("scope_source") == "explicit"
+         and _rc_pq.get("applied_scope") == "pack_query:Binggu Person"),
+        ("CR2 package_id 명시 → explicit·applied=package_id:uuid-1",
+         _rc_pid.get("scope_source") == "explicit"
+         and _rc_pid.get("applied_scope") == "package_id:uuid-1"),
+        ("CR3 무지정+config 부재 → unscoped(하위호환·무필터)",
+         _rc_none.get("scope_source") == "unscoped" and _rc_none.get("applied_scope") == "all"),
+        ("CR4 무지정+config 有 → config_default·applied=pack_query:Binggu Person",
+         _rc_cfg.get("scope_source") == "config_default"
+         and _rc_cfg.get("applied_scope") == "pack_query:Binggu Person"),
+    ]
+    for _nm, _cond in _rc_checks:
         all_ok = all_ok and _cond
         print("  [%s] %s" % ("OK" if _cond else "FAIL", _nm))
 
