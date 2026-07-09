@@ -94,16 +94,16 @@ Codex(및 다른 Rust rmcp 클라이언트)는 설정 파일에 MCP 서버 블�
 
 ```toml
 [mcp_servers.openbinggu-local]
-# pip 설치:
-command = "openbinggu-mcp-server"
-args = ["--serve", "/절대/작업폴더"]
-# clone(진입점 없이)이면 대신:
-#   command = "python"
-#   args = ["/절대/repo/scripts/openbinggu_mcp_server.py", "--serve", "/절대/작업폴더"]
-env = { BINGGU_HOME = "/절대/홈/.binggupack" }
+# 권장(전 OS 안정) — python 을 절대경로로 직접 실행:
+command = 'C:\path\to\python.exe'    # 예: ...\Programs\Python\Python3xx\python.exe
+args = ['C:\path\to\repo\scripts\openbinggu_mcp_server.py', '--serve', 'C:\작업폴더']
+[mcp_servers.openbinggu-local.env]
+BINGGU_HOME = 'C:\Users\<you>\.binggupack'
 ```
 
-등록 후 Codex를 재시작하면 로그에 `tool_count=30`·`has_cached_tools=true`가 찍힙니다(안 찍히면 config 경로/따옴표 확인).
+> ⚠️ **Windows 주의**: `command = "openbinggu-mcp-server"`(pip 진입점 이름)로도 등록되지만, Windows에서 Codex(Rust)가 실행할 때 **pip 진입점 .exe launcher stub + PATH 문제로 `tools/list` 30초 timeout**이 날 수 있습니다(서버는 정상, 클라이언트 spawn 문제). **python 을 절대경로로 직접 실행**하면 stub·PATH 둘 다 배제돼 안정적입니다. TOML은 Windows 경로에 `'…'`(작은따옴표=literal)를 쓰세요.
+
+등록 후 Codex를 재시작하면 로그에 `tool_count=30`·`has_cached_tools=true`가 찍힙니다(timeout이면 위 python 직접 방식으로 교체).
 
 ## Restart Claude Code
 
