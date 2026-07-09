@@ -76,9 +76,11 @@ def _list_tools():
         if extra:
             props.update(extra.get("properties", {}))
             req += [r for r in extra.get("required", []) if r not in req]
-        out.append({"name": name, "mode": spec["mode"],
+        # MCP 표준 tool 필드만(name/description/inputSchema). mode/path_params 는 서버 내부용이라
+        # 최상위 노출 금지 — Codex/Rust(rmcp) 등 엄격 클라이언트가 unknown field 로 파싱 실패(도구 캐시
+        # 생성 0·연결 무력화). mode 는 위 필터(라인 69)에서만, path_params 는 inputSchema 에 이미 반영됨.
+        out.append({"name": name,
                     "description": _TOOL_DESC.get(name, name),
-                    "path_params": list(spec["path_params"]),
                     "inputSchema": {"type": "object",
                                     "properties": props,
                                     "required": req}})
@@ -256,6 +258,9 @@ def _selftest():
     # 트랙 B 클라우드 조회 네트워크 0 보장 — 앰비언트 클라우드 env 제거(→ NO_CLOUD_CONFIG graceful).
     for _k in ("BINGGU_CLOUD_MCP_URL", "BINGGU_CLOUD_MCP_TOKEN"):
         os.environ.pop(_k, None)
+    # read 폴백(~/.claude.json opencrab-cloud URL 재사용)도 selftest 에선 차단 → 실 네트워크 0.
+    # server_handlers selftest 와 동일 가드 — 7/9 cloud_recall 자동스코프 fallback 이 이 격리를 우회하던 것 봉합.
+    os.environ["BINGGU_CLOUD_MCP_NO_FALLBACK"] = "1"
     print("=" * 72)
     print("OpenBinggu MCP server (stdio JSON-RPC) wrapper (synthetic / selftest)")
     print("=" * 72)
@@ -276,7 +281,8 @@ def _selftest():
     r = call({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
     tools = r.get("result", {}).get("tools", [])
     names = {t["name"] for t in tools}
-    list_ok = (all(t["mode"] in ("read", "dry-run", "write-gated") for t in tools)
+    # mode 는 tools/list 응답 최상위에 더 이상 없음(MCP 표준 필드만) → TOOLS 소스에서 검증.
+    list_ok = (all(TOOLS[t["name"]]["mode"] in ("read", "dry-run", "write-gated") for t in tools)
                and names == set(TOOLS.keys())
                and "save_candidate" in names
                and not (names & _FORBIDDEN))
