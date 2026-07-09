@@ -133,11 +133,21 @@ def _extract_search_evidence(resp, min_score=0.0):
     ev_in = doc.get("evidence") if isinstance(doc, dict) else None
     if not isinstance(ev_in, list):
         ev_in = []
+    # ── telemetry 보존(Fable5 C2): 벡터 timeout(warnings)·스캔 규모·적용 스코프를 버리지 않고 노출 →
+    #    stale 스코프/벡터 소거를 호출자(Claude)가 관측 가능. 숫자/메타라 PII 아님(마스킹 불필요). ──
+    _retr = doc.get("retrieval") if isinstance(doc, dict) and isinstance(doc.get("retrieval"), dict) else {}
+    _tel = {"scanned": (doc.get("scanned") if isinstance(doc, dict) and isinstance(doc.get("scanned"), int)
+                        else _retr.get("scanned")),
+            "vector_candidates": _retr.get("vector_candidates"),
+            "lexical_candidates": _retr.get("lexical_candidates"),
+            "warnings": _retr.get("warnings"),
+            "pack_scope": (doc.get("pack_scope") if isinstance(doc, dict)
+                           and isinstance(doc.get("pack_scope"), dict) else None)}
     try:
         from binggupack.safety.pii import batch_redact, scan_residual_pii
     except Exception as ex:  # noqa — 마스킹 불가 → raw 노출 금지(fail-closed)
         return {"evidence": [], "count": 0, "filtered_out": 0, "min_score": min_score,
-                "residual": ["MASK_FAILED:" + type(ex).__name__], "masked": False}
+                "residual": ["MASK_FAILED:" + type(ex).__name__], "masked": False, **_tel}
     out, filtered, residual_all = [], 0, []
     for e in ev_in:
         if not isinstance(e, dict):
@@ -159,7 +169,7 @@ def _extract_search_evidence(resp, min_score=0.0):
                     "pack_title": meta.get("cloud_pack_title")})
     out.sort(key=lambda x: -x["score"])
     return {"evidence": out, "count": len(out), "filtered_out": filtered,
-            "min_score": min_score, "residual": residual_all, "masked": True}
+            "min_score": min_score, "residual": residual_all, "masked": True, **_tel}
 
 
 def run_query(tool, args=None, *, transport=None, env=None, config_path=None, home=None,
@@ -210,8 +220,8 @@ def run_query(tool, args=None, *, transport=None, env=None, config_path=None, ho
                 "token_fingerprint": "none", "source": "none"}
 
 
-def run_search(query, *, top_k=5, min_score=0.0, package_id=None,
-               transport=None, env=None, config_path=None, home=None):
+def run_search(query, *, top_k=5, min_score=0.0, package_id=None, package_ids=None,
+               pack_query=None, transport=None, env=None, config_path=None, home=None):
     """하이브리드 의미검색: opencrab_search_documents 래핑 + score 하한 필터.
 
     ★서버 retrieval = lexical(BM25) + vector fusion + graph. 2026-07-08 서버가 벡터 다리를 배선
@@ -230,11 +240,19 @@ def run_search(query, *, top_k=5, min_score=0.0, package_id=None,
         return {"ok": False, "tool": "opencrab_search_documents", "mode": "read",
                 "reason": "query_required", "token_fingerprint": "none", "source": "none"}
     args = {"query": q, "limit": top_k}
-    if isinstance(package_id, str) and package_id.strip():
-        # ★package_id(단수)는 서버가 다중 pack_key 통합 팩(pack_keys>1)을 scanned=0 처리 →
-        # package_ids(복수 배열)로 전송해야 통합 팩도 정상 스캔됨(2026-07-08 실측:
-        # 단수 scanned 0 vs 복수 scanned 1227). 단일 팩도 복수 배열로 동일 동작.
-        args["package_ids"] = [package_id.strip()]
+    # 스코프 우선순위: package_ids(복수) > package_id(단수) > pack_query(접두어). 셋 다 없으면 무필터.
+    # ★package_id 단수는 서버가 다중 pack_key 통합 팩을 scanned=0 처리 → 항상 package_ids(복수 배열)로
+    # 전송(2026-07-08 실측: 단수 scanned 0 vs 복수 scanned 1227). pack_query 는 팩 title 접두어 스코프
+    # 축소(2026-07-09 실측: "Binggu Person" 접두어 하나로 4파트+판단팩 5팩 scanned 1214·vector 32·id churn 면역).
+    _ids = None
+    if isinstance(package_ids, (list, tuple)):
+        _ids = [str(p).strip() for p in package_ids if isinstance(p, str) and p.strip()]
+    if not _ids and isinstance(package_id, str) and package_id.strip():
+        _ids = [package_id.strip()]
+    if _ids:
+        args["package_ids"] = _ids[:32]   # 개수 상한(구조 오염 방지·Fable5 R4)
+    if isinstance(pack_query, str) and pack_query.strip():
+        args["pack_query"] = pack_query.strip()
 
     def _ext(resp):
         return _extract_search_evidence(resp, min_score=min_score)
@@ -403,6 +421,33 @@ def _selftest():
     r_snoq = run_search("  ", transport=mock_search_transport, env=live_env)
     chk("S6 run_search query 공백 → query_required(네트워크 0)",
         r_snoq["ok"] is False and r_snoq["reason"] == "query_required")
+
+    # S7 — pack_query/package_ids 가 payload arguments 에 실림(스코프 전송·빈 원소 제거)
+    _cap = {}
+
+    def cap_transport(payload):
+        if payload.get("method") == "initialize":
+            return {"result": {}}
+        _cap["args"] = payload.get("params", {}).get("arguments", {})
+        return {"result": {"content": [{"type": "text", "text": json.dumps({"evidence": []})}]}}
+
+    run_search("빠른 결정", pack_query="Binggu Person", package_ids=["u1", " ", "u2"],
+               transport=cap_transport, env=live_env)
+    chk("S7 pack_query·package_ids arguments 전송(빈 원소 제거)",
+        _cap["args"].get("pack_query") == "Binggu Person"
+        and _cap["args"].get("package_ids") == ["u1", "u2"])
+
+    # S8 — telemetry(scanned/vector_candidates/warnings/pack_scope) 보존(Fable5 C2 관측성)
+    _mock_tel = {"result": {"content": [{"type": "text", "text": json.dumps({
+        "scanned": 1214,
+        "evidence": [{"text": "x", "score": 0.3, "metadata": {"chunk_id": "c:1"}}],
+        "retrieval": {"vector_candidates": 32, "lexical_candidates": 468,
+                      "warnings": ["vector: canceling statement due to statement timeout"]},
+        "pack_scope": {"packages": 5}})}]}}
+    ex_tel = _extract_search_evidence(_mock_tel, min_score=0.0)
+    chk("S8 telemetry 보존: scanned/vector_candidates/warnings/pack_scope",
+        ex_tel["scanned"] == 1214 and ex_tel["vector_candidates"] == 32
+        and bool(ex_tel["warnings"]) and ex_tel["pack_scope"] == {"packages": 5})
 
     total, passed = len(ok), sum(ok)
     print("\n=== %d/%d ===" % (passed, total))

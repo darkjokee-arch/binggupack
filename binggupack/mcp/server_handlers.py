@@ -708,16 +708,36 @@ def _u_cloud_packs(params=None):
     return {"action": "cloud_packs", "mode": "read", **_cloud_result_view(r)}
 
 
+def _cloud_search_default_scope():
+    """cloud_search 미지정 호출의 기본 스코프 — <home>/person_pack.json 의 cloud_search_default_pack_query
+    (팩 title 접두어, 예 "Binggu Person"). 부재/손상 시 None(= 무필터 유지·하위호환).
+
+    ★id 가 아닌 접두어라 팩 재업로드(package_id churn)·파트 증설에도 stale 0(Fable5 C2 회피). 온보딩이
+    성공 시 이 키를 1회 기록하면 이후 갱신 불필요. read-only(파일 write 0)."""
+    import json as _json
+    try:
+        with open(os.path.join(_operating_home(), "person_pack.json"), encoding="utf-8") as f:
+            cfg = _json.load(f)
+        v = cfg.get("cloud_search_default_pack_query")
+        return v.strip() if isinstance(v, str) and v.strip() else None
+    except Exception:  # noqa — 부재/손상 → None(기존 무필터 동작 유지)
+        return None
+
+
 def _u_cloud_search(params=None):
     """OpenCrab 팩 하이브리드 의미검색(서버 lexical+vector+graph fusion·opencrab_search_documents 래핑·read egress-only).
 
-    ★서버 벡터 배선(2026-07-08): 서버 retrieval 이 저장 openai-1536 임베딩을 낮은 가중 fusion 으로
-    반영(vector_candidates 0→32 실측·evidence sources 에 "vector" 등장). 빙구팩은 코드 로직 변경 0 으로 수신.
-    ★사용법: query 는 원 질문을 3~6개 자연 동의어로 확장해 넣기를 권장한다. 현 fusion 은 벡터 가중이
-    낮아(≈0.3) lexical 이 최종 순위를 지배하므로 확장이 lexical recall 을 보강한다(실측: raw "빠른
-    결정" 은 놓치나 "빠른 의사결정 신속 판단 직감 결단 즉시 실행" 은 정답 top-1). 벡터 가중 상향은 서버측 튜닝 사안.
-    min_score 미만 evidence 는 근거에서 배제(off-topic 오공급 방지). evidence chunk 원문은 PII
-    마스킹 후 노출. package_id 로 특정 팩 한정. 미설정 시 graceful(네트워크 0).
+    ★서버 벡터 배선(2026-07-08): 서버 retrieval 이 저장 openai-1536 임베딩을 낮은 가중 fusion 으로 반영
+    (vector_candidates 0→32 실측). query 는 원 질문을 3~6개 자연 동의어로 확장해 넣기를 권장(lexical recall 보강).
+
+    ★스코프(2026-07-09): 명시 > config 기본 > unscoped(하위호환).
+      - package_ids(복수)/package_id(단수)/pack_query(팩 title 접두어) 명시 → 그 스코프.
+      - 미지정 → person_pack.json 의 cloud_search_default_pack_query("Binggu Person") 자동 적용
+        (사용자 온톨로지가 세션 중 자동으로 "떠 있게"·벡터 timeout 회피). config 없으면 unscoped(무필터·하위호환).
+    ★이 도구는 빙구팩 개인 온톨로지 전용이다. 여행/전체 코퍼스 검색은 이 도구가 아니라 오픈크랩
+      (opencrab_search_documents)을 직접 쓴다(owner 지적 2026-07-09·역할 분리). 응답에 applied_scope/
+      scope_source·telemetry(scanned/vector_candidates/warnings) 노출로 적용 스코프를 관측할 수 있다.
+    evidence chunk 원문은 PII 마스킹 후 노출. 미설정 시 graceful(네트워크 0).
     """
     params = params or {}
     query = (params.get("query") or "").strip()
@@ -730,16 +750,48 @@ def _u_cloud_search(params=None):
     min_score = float(ms) if isinstance(ms, (int, float)) and not isinstance(ms, bool) else 0.0
     pid = params.get("package_id")
     package_id = pid if isinstance(pid, str) and pid.strip() else None
+    _pids = params.get("package_ids")
+    package_ids = ([p.strip() for p in _pids if isinstance(p, str) and p.strip()]
+                   if isinstance(_pids, list) else None) or None
+    _pq = params.get("pack_query")
+    pack_query = _pq.strip() if isinstance(_pq, str) and _pq.strip() else None
+
+    # 스코프 결정: 명시(개인 팩) > config 기본("Binggu Person") > unscoped(하위호환).
+    # ★cloud_search 는 빙구팩 개인 온톨로지 전용 도구다. 여행/전체 코퍼스 검색은 이 도구가 아니라
+    #   오픈크랩(opencrab_search_documents)을 직접 쓴다(owner 지적 2026-07-09 — 역할 분리·전체
+    #   탈출구는 사족). 그래서 config 기본이 붙어도 비-person 질의를 오염시킬 표면이 없다(Fable5 C1 무력화).
+    if package_ids or package_id or pack_query:
+        scope_source = "explicit"
+    else:
+        _dflt = _cloud_search_default_scope()
+        if _dflt:
+            pack_query = _dflt
+            scope_source = "config_default"
+        else:
+            scope_source = "unscoped"
+    if package_ids:
+        applied_scope = "package_ids:" + ",".join(package_ids)
+    elif package_id:
+        applied_scope = "package_id:" + package_id
+    elif pack_query:
+        applied_scope = "pack_query:" + pack_query
+    else:
+        applied_scope = "all"
+
     env = _cloud_env_with_fallback()
     r = CQ.run_search(query, top_k=top_k, min_score=min_score, package_id=package_id,
+                      package_ids=package_ids, pack_query=pack_query,
                       transport=_cloud_transport(env), env=env, home=_operating_home())
+    scope_view = {"applied_scope": applied_scope, "scope_source": scope_source}
     if not r.get("ok"):
         return {"action": "cloud_search", "mode": "read", "ok": False,
-                "error": r.get("reason"), "source": r.get("source")}
+                "error": r.get("reason"), "source": r.get("source"), **scope_view}
     return {"action": "cloud_search", "mode": "read", "ok": True,
             "evidence": r.get("evidence", []), "count": r.get("count", 0),
             "filtered_out": r.get("filtered_out", 0), "min_score": r.get("min_score"),
-            "residual": r.get("residual"), "source": r.get("source")}
+            "residual": r.get("residual"), "source": r.get("source"),
+            "scanned": r.get("scanned"), "vector_candidates": r.get("vector_candidates"),
+            "warnings": r.get("warnings"), "pack_scope": r.get("pack_scope"), **scope_view}
 
 
 # ==== 작업3: 대비(contrast) read 조회 — detect/build/render 만(기록계열 write 함수 절대 호출 0) ====
@@ -1012,7 +1064,9 @@ TOOLS = {
                      "input_schema": {"properties": {"query": {"type": "string"},
                                                      "top_k": {"type": "integer"},
                                                      "min_score": {"type": "number"},
-                                                     "package_id": {"type": "string"}},
+                                                     "package_id": {"type": "string"},
+                                                     "package_ids": {"type": "array", "items": {"type": "string"}},
+                                                     "pack_query": {"type": "string"}},
                                       "required": ["query"]}},
     # ---- 작업3: 판단 근거 회상(why) + 강제조항 대비(contrast) read. node_id 미노출·PII 마스킹·write 0 ----
     "why":      {"path_params": [], "underlying": _u_why, "mode": "read",
@@ -1209,6 +1263,41 @@ def _selftest():
         rc = r.get("reason_code") or (r.get("blocked") and r["blocked"][0].get("reason_code")) or ""
         print("  [%s] %-26s tool=%-20s executed=%-5s verdict=%-7s %s"
               % ("OK" if ok else "FAIL", name, tool, executed, verdict, rc))
+
+    # ----- cloud_search 스코프 결정 로직 검증(applied_scope/scope_source·Fable5 C1·네트워크 0 graceful) -----
+    def _cs(p):
+        return handle_tool("cloud_search", p, allow_root).get("tool_result", {})
+    _sc_pq = _cs({"query": "x", "pack_query": "Binggu Person"})
+    _sc_pid = _cs({"query": "x", "package_id": "uuid-1"})
+    _sc_none = _cs({"query": "x"})   # temp 홈에 person_pack.json 없음 → unscoped(하위호환)
+    _scope_checks = [
+        ("CS1 pack_query 명시 → explicit·applied=pack_query:Binggu Person",
+         _sc_pq.get("scope_source") == "explicit"
+         and _sc_pq.get("applied_scope") == "pack_query:Binggu Person"),
+        ("CS2 package_id 명시 → explicit·applied=package_id:uuid-1",
+         _sc_pid.get("scope_source") == "explicit"
+         and _sc_pid.get("applied_scope") == "package_id:uuid-1"),
+        ("CS3 무지정+config 부재 → unscoped(하위호환·무필터)",
+         _sc_none.get("scope_source") == "unscoped" and _sc_none.get("applied_scope") == "all"),
+    ]
+    # CS6 무지정 + person_pack.json(cloud_search_default_pack_query) → config_default 자동 폴백
+    import tempfile as _tf
+    _cfg_home = _tf.mkdtemp(prefix="cs_cfg_")
+    with open(os.path.join(_cfg_home, "person_pack.json"), "w", encoding="utf-8") as _f:
+        _json.dump({"cloud_search_default_pack_query": "Binggu Person"}, _f)
+    _prev_home = os.environ.get("BINGGU_HOME")
+    os.environ["BINGGU_HOME"] = _cfg_home
+    try:
+        _sc_cfg = _cs({"query": "x"})
+    finally:
+        os.environ["BINGGU_HOME"] = _prev_home
+    _scope_checks.append((
+        "CS4 무지정+config 有 → config_default·applied=pack_query:Binggu Person",
+        _sc_cfg.get("scope_source") == "config_default"
+        and _sc_cfg.get("applied_scope") == "pack_query:Binggu Person"))
+    for _nm, _cond in _scope_checks:
+        all_ok = all_ok and _cond
+        print("  [%s] %s" % ("OK" if _cond else "FAIL", _nm))
 
     # ----- save 도구 전용 검증 (실 ledger write 0 보장: temp DB·dry-run·mock만) -----
     from binggupack.paths import OPERATING_PATHS
