@@ -22,10 +22,11 @@ if (-not $Python) {
 if (-not $Python) { Write-Error "python(w)을 찾지 못했습니다 — -Python <경로> 로 지정하세요"; exit 1 }
 $script = Join-Path $PSScriptRoot "start_binggu_web.py"
 if (-not (Test-Path $script)) { Write-Error "start_binggu_web.py 없음: $script"; exit 1 }
+# -Principal 미지정 = 기본값(현재 사용자·Limited). 명시적 -Principal(UserId)은 비관리자 셸에서
+# Access denied(0x80070005) 유발 — register_autopull.ps1 과 동일하게 생략(AtLogOn 은 현재 사용자로 실행).
 Register-ScheduledTask -TaskName $TaskName `
   -Action (New-ScheduledTaskAction -Execute $Python -Argument "`"$script`"") `
-  -Trigger (New-ScheduledTaskTrigger -AtLogOn) `
-  -Principal (New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive) `
+  -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME) `
   -Description "빙구팩 로컬 MCP를 웹/앱 커넥터에 노출(HTTP+cloudflared quick tunnel). 로그온시 자동 가동." `
   -Force | Out-Null
 Write-Host "=== $TaskName 등록 완료 — 재부팅/로그온 시 웹 MCP 자동 가동 ($Python) ==="
