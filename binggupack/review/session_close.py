@@ -141,16 +141,16 @@ def detect_session_close(signal, home=None):
 
 # ---------------- 2. 저장 preview 빌드 (candidate-only · read-only) ----------------
 
-def _build_preview(home=None):
-    """capture 버퍼 candidate 목록(저장 0 · candidate-only). 버퍼 모듈 부재/빈 버퍼 → graceful.
-    반환 {available, count, items, note}. items 는 capture 버퍼의 render_preview 결과 그대로."""
+def _build_preview(home=None, session_id=None):
+    """capture 버퍼 candidate 목록(저장 0 · candidate-only). session_id 지정 시 그 세션 발화만
+    (세션 경계 — 이전 세션 잔존 배제·2026-07-10). 버퍼 모듈 부재/빈 버퍼 → graceful."""
     try:
         from binggu_capture_persist import PersistentCaptureBuffer
     except Exception:
         return {"available": False, "count": 0, "items": [],
                 "note": "capture 버퍼 모듈 미사용(preview 생략)"}
     try:
-        pv = PersistentCaptureBuffer(home=_home(home)).render_preview()
+        pv = PersistentCaptureBuffer(home=_home(home)).render_preview(session_id=session_id)
         return {"available": True, "count": pv.get("count", 0),
                 "items": pv.get("items", []),
                 "note": pv.get("note", "owner 승인 전 candidate (active 아님)")}
@@ -229,11 +229,11 @@ def _build_governance(home=None, cwd=None, ledger_path=None):
         ro.close()
 
 
-def build_close_summary(home=None, cwd=None, ledger_path=None):
+def build_close_summary(home=None, cwd=None, ledger_path=None, session_id=None):
     """세션 마무리 표시용 요약 빌드(저장 0 · read-only). preview + 거버넌스 정리 묶음.
-    반환 {preview, governance, save_action}. save_action 은 '사람이 직접' 안내(자동 실행 0)."""
+    session_id 지정 시 preview 를 그 세션 발화로 한정(세션 경계). 반환 {preview, governance, save_action}."""
     return {
-        "preview": _build_preview(home),
+        "preview": _build_preview(home, session_id=session_id),
         "governance": _build_governance(home, cwd, ledger_path),
         "save_action": {
             "auto_save": False,
@@ -305,7 +305,8 @@ def process(signal, home=None, cwd=None, ledger_path=None):
     det = detect_session_close(signal, home)
     if not det["is_close"]:
         return {**det, "summary": None, "rendered": None}
-    summary = build_close_summary(home, cwd, ledger_path)
+    sid = signal.get("session_id") if isinstance(signal, dict) else None
+    summary = build_close_summary(home, cwd, ledger_path, session_id=sid)
     return {**det, "summary": summary, "rendered": render_close_md(summary)}
 
 

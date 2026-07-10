@@ -16,6 +16,24 @@ binggupack.classifier.capture_classifier.classify 와 동일 객체다.
 
 from binggupack.classifier import classify
 
+# 시스템 주입 텍스트 마커 — task-notification·hook feedback·command·reminder 등은 사용자 판단이
+# 아니라 하네스가 주입한 텍스트다. capture 오염(preview 에 시스템 메시지 원문이 candidate 로 뜸)
+# 차단을 위해 하나라도 포함되면 capture skip(2026-07-10).
+_SYSTEM_NOISE_MARKERS = (
+    "<task-notification>", "</task-notification>", "<task-id>", "<tool-use-id>",
+    "<output-file>", "<command-message>", "<command-name>", "<local-command",
+    "<system-reminder>", "</system-reminder>", "hook feedback", "PreToolUse:",
+    "hook additional context", "Stop hook", "<result>\n<name>", "task-notification>",
+)
+
+
+def _is_system_noise(utterance):
+    """시스템 주입 텍스트(알림·hook·command·reminder)인지 — 사용자 판단 아님(capture 오염 차단)."""
+    if not utterance or not str(utterance).strip():
+        return True
+    u = str(utterance)
+    return any(m in u for m in _SYSTEM_NOISE_MARKERS)
+
 
 class CaptureBuffer:
     """메모리 내 candidate 누적 버퍼. 영속화 일절 없음."""
@@ -25,7 +43,9 @@ class CaptureBuffer:
 
     def feed(self, utterance, prev_turn=None):
         """발화 1건 처리. captured_candidate면 누적, preview_trigger면 렌더 반환.
-        반환: {"action": "captured"|"preview"|"ignored", "verdict": <classify dict>, "preview": <list|None>}"""
+        반환: {"action": "captured"|"preview"|"ignored"|"system_noise", "verdict": <classify dict>, "preview": <list|None>}"""
+        if _is_system_noise(utterance):
+            return {"action": "system_noise", "verdict": {"state": "system_noise"}, "preview": None}
         v = classify(utterance, prev_turn)
         if v["state"] == "preview_trigger":
             return {"action": "preview", "verdict": v, "preview": self.render_preview()}

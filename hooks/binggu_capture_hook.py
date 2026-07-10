@@ -63,7 +63,7 @@ def _run(data):
             except Exception:
                 pass
         else:  # UserPromptSubmit
-            buf.feed(data.get("prompt", ""), cwd)
+            buf.feed(data.get("prompt", ""), cwd, session_id=data.get("session_id"))
     except Exception:
         return
 

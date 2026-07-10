@@ -24,6 +24,24 @@ TEXT_CAP = 1000         # 자동수집 버퍼 발화 보존 상한 = capture_pre
                         # 문장 전체 보존(80자 발췌 폐기 — 개인 온톨로지 정체성). 1000 초과 = 대화 덩어리 → 절단(원문=대화 전문 저장 금지).
 DEFAULT_TTL_DAYS = 7    # TTL 자동 폐기 기본값
 
+# 시스템 주입 텍스트 마커 — task-notification·hook feedback·command·reminder 등은 사용자 판단이
+# 아니라 시스템/하네스가 prompt 에 주입한 텍스트다. capture 오염(2026-07-10 발견: preview 에
+# task-notification 원문이 candidate 로 뜸)을 차단하기 위해 하나라도 포함되면 capture skip.
+_SYSTEM_NOISE_MARKERS = (
+    "<task-notification>", "</task-notification>", "<task-id>", "<tool-use-id>",
+    "<output-file>", "<command-message>", "<command-name>", "<local-command",
+    "<system-reminder>", "</system-reminder>", "hook feedback", "PreToolUse:",
+    "hook additional context", "Stop hook", "<result>\n<name>", "task-notification>",
+)
+
+
+def _is_system_noise(utterance):
+    """시스템 주입 텍스트(알림·hook·command·reminder)인지 — 사용자 판단 아님(capture 오염 차단)."""
+    if not utterance or not str(utterance).strip():
+        return True
+    u = str(utterance)
+    return any(m in u for m in _SYSTEM_NOISE_MARKERS)
+
 
 def binggu_home(home=None):
     """buffer 루트. 테스트는 home 인자/ BINGGU_HOME 으로 운영 경로 미접촉."""
@@ -127,17 +145,30 @@ class PersistentCaptureBuffer:
                 signals TEXT,
                 state TEXT NOT NULL DEFAULT 'captured_candidate',
                 captured_at REAL NOT NULL,
-                cwd TEXT)"""
+                cwd TEXT,
+                session_id TEXT)"""
         )
+        # 기존 테이블(session_id 컬럼 없음) 하위호환 마이그레이션 — 세션 경계(2026-07-10).
+        try:
+            cols = [r[1] for r in c.execute("PRAGMA table_info(capture_candidates)")]
+            if "session_id" not in cols:
+                c.execute("ALTER TABLE capture_candidates ADD COLUMN session_id TEXT")
+                c.commit()
+        except Exception:
+            pass
         return c
 
-    def feed(self, utterance, cwd, prev_turn=None, now=None):
+    def feed(self, utterance, cwd, prev_turn=None, now=None, session_id=None):
         """발화 1건. 게이트 통과 + captured_candidate 만 영속.
-        게이트 차단 시 classify 조차 호출 안 함(타 세션 발화 미분류)."""
+        게이트 차단 시 classify 조차 호출 안 함(타 세션 발화 미분류).
+        session_id: 세션 경계용(세션 마무리 preview 가 그 세션 발화만 표시하도록 태깅)."""
         now = time.time() if now is None else now
         if not self.scope.should_capture(cwd):
             return {"action": "skipped_scope", "stored": False,
                     "enabled": self.scope.enabled(), "in_scope": self.scope.in_scope(cwd)}
+        # 시스템 주입 텍스트(task-notification·hook feedback·command 등)는 사용자 판단 아님 → 미수집(오염 차단).
+        if _is_system_noise(utterance):
+            return {"action": "system_noise", "stored": False}
         v = classify(utterance, prev_turn)
         if v["state"] == "preview_trigger":
             self._purge(now)
@@ -151,11 +182,11 @@ class PersistentCaptureBuffer:
         c = self._conn()
         try:
             c.execute(
-                "INSERT INTO capture_candidates(text,pinned,confidence,signals,state,captured_at,cwd)"
-                " VALUES(?,?,?,?,?,?,?)",
+                "INSERT INTO capture_candidates(text,pinned,confidence,signals,state,captured_at,cwd,session_id)"
+                " VALUES(?,?,?,?,?,?,?,?)",
                 (text, 1 if v["pinned"] else 0, v["confidence"],
                  json.dumps(list(v["signals"]), ensure_ascii=False),
-                 "captured_candidate", now, str(cwd)),
+                 "captured_candidate", now, str(cwd), session_id),
             )
             c.commit()
             self._purge(now, conn=c)
@@ -176,15 +207,21 @@ class PersistentCaptureBuffer:
             if own:
                 c.close()
 
-    def render_preview(self, now=None, semantic=None):
-        """captured 후보 목록. semantic 인자는 테스트 주입용(미지정 시 opt-in ON에서 lazy 생성)."""
+    def render_preview(self, now=None, semantic=None, session_id=None):
+        """captured 후보 목록. session_id 지정 시 그 세션 발화만(세션 경계 — 이전 세션 잔존 배제·
+        2026-07-10). semantic 인자는 테스트 주입용(미지정 시 opt-in ON에서 lazy 생성)."""
         now = time.time() if now is None else now
         c = self._conn()
         try:
             self._purge(now, conn=c)
-            rows = c.execute(
-                "SELECT text,pinned,confidence FROM capture_candidates ORDER BY pinned DESC, id ASC"
-            ).fetchall()
+            if session_id is not None:
+                rows = c.execute(
+                    "SELECT text,pinned,confidence FROM capture_candidates WHERE session_id=? "
+                    "ORDER BY pinned DESC, id ASC", (session_id,)).fetchall()
+            else:
+                rows = c.execute(
+                    "SELECT text,pinned,confidence FROM capture_candidates ORDER BY pinned DESC, id ASC"
+                ).fetchall()
         finally:
             c.close()
         items = []

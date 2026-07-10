@@ -435,6 +435,32 @@ def enforce_hooks_step(settings_path, apply=False, register_fn=None):
                 "(끄기: ~/.claude/state/recall_enforce_disabled)")
 
 
+def session_close_hook_step(settings_path, apply=False, register_fn=None, home=None):
+    """[s12] 세션 마무리 저장 트리거 hook + close_phrases 기본 표현 등록(신규 사용자).
+
+    "빙구팩 저장해" 등 마무리 발화 → 저장 preview 표(candidate·번호) 자동 주입 → owner 가 SAVE n
+    직접 선택(저장 0·G4). register_hook 재사용·SYNC(표 주입 현 turn)·marker idempotent(재실행 skip)."""
+    hook_cmd = 'py "%s"' % os.path.join(REPO, "hooks", "binggu_session_close_hook.py")
+    if not apply:
+        return step("s12", INFO,
+                    "세션 마무리 저장 트리거 hook 등록 대기 — --apply 시 SYNC 등록: %s" % settings_path,
+                    "UserPromptSubmit(session_close) + close_phrases.json 기본 마무리 표현")
+    try:
+        from binggu_capture_profile import register_hook
+        from binggupack.review.session_close import register_close_phrase
+        rf = register_fn or register_hook
+        added = rf(settings_path, hook_cmd, events=("UserPromptSubmit",),
+                   marker="binggu_session_close_hook", is_async=False)
+        bh = home or os.environ.get("BINGGU_HOME") or os.path.join(os.path.expanduser("~"), ".binggupack")
+        for ph in ("빙구팩 저장해", "운영 세션 마무리", "세션 마무리", "오늘 여기까지", "마무리하자"):
+            register_close_phrase(ph, home=bh)
+    except Exception as e:
+        return step("s12", STOP, "세션 마무리 hook 등록 실패: %s" % e, "settings.json .bak 확인 후 수동 등록")
+    return step("s12", OK if added else SKIP,
+                "세션 마무리 저장 트리거: %s" % (", ".join(added) or "이미 등록됨(marker skip)"),
+                "재시작 후 '빙구팩 저장해' → 저장 preview 표(candidate·번호) 자동 · owner 가 SAVE n 직접 선택")
+
+
 # ── 오케스트레이터 ─────────────────────────────────────────────────
 def run_save_setup(apply=False, deploy=False, show_url=False, os_name=None, wp_dir=None,
                    login_runner=None, deploy_runner=None, secret_runner=None,
@@ -509,6 +535,12 @@ def run_save_setup(apply=False, deploy=False, show_url=False, os_name=None, wp_d
     steps.append(s11)
     if s11["status"] == STOP:
         return {"apply": apply, "deploy": deploy, "steps": steps, "halted_at": "s11"}
+
+    # [s12] 세션 마무리 저장 트리거 hook("빙구팩 저장해" → preview 표 자동 · owner SAVE n)
+    s12 = session_close_hook_step(_sp, apply=apply, register_fn=enforce_register_fn)
+    steps.append(s12)
+    if s12["status"] == STOP:
+        return {"apply": apply, "deploy": deploy, "steps": steps, "halted_at": "s12"}
 
     return {"apply": apply, "deploy": deploy, "steps": steps, "halted_at": None}
 
@@ -809,6 +841,25 @@ def _selftest():
     chk("s11e idempotent 재실행 SKIP+중복 0",
         _er2["status"] == SKIP and len(_ed2["hooks"].get("UserPromptSubmit", [])) == _enb)
     chk("s11f dry-run(apply=False) 무변경 INFO", enforce_hooks_step(st_enf, apply=False)["status"] == INFO)
+
+    # s12. 세션 마무리 트리거 hook 등록 실경로(register + close_phrases · 멀티키 소실 0)
+    st_sc = os.path.join(wp, "settings_sc.json")
+    with open(st_sc, "w", encoding="utf-8") as _sf:
+        json.dump({"statusLine": {"x": 1}, "hooks": {}}, _sf, ensure_ascii=False)
+    hc = os.path.join(wp, "sc_home")
+    os.makedirs(hc, exist_ok=True)
+    _scr = session_close_hook_step(st_sc, apply=True, home=hc)
+    _scd = json.load(open(st_sc, encoding="utf-8"))
+    chk("s12a session_close hook 등록 OK", _scr["status"] == OK and any(
+        "binggu_session_close_hook" in (h.get("command") or "")
+        for g in _scd["hooks"].get("UserPromptSubmit", []) for h in g["hooks"]))
+    _cp = json.load(open(os.path.join(hc, "close_phrases.json"), encoding="utf-8"))
+    chk("s12b close_phrases 기본 표현('빙구팩 저장해') 등록", "빙구팩 저장해" in _cp.get("phrases", []))
+    chk("s12c 멀티키 소실 0(statusLine 보존)", _scd.get("statusLine") == {"x": 1})
+    chk("s12d SYNC(async 키 없음 · 표 주입 현 turn)", all(
+        "async" not in h for g in _scd["hooks"].get("UserPromptSubmit", []) for h in g["hooks"]
+        if "binggu_session_close_hook" in (h.get("command") or "")))
+    chk("s12e dry-run(apply=False) 무변경 INFO", session_close_hook_step(st_sc, apply=False)["status"] == INFO)
 
     print("\n" + "=" * 62)
     print("binggu_setup_save — selftest (mock + temp · 실 CF/스케줄러 미접촉)")
