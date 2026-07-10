@@ -127,7 +127,32 @@ def init_profile(home, cwd, hook_command=None, settings_path=None, global_scope=
         if p["paused"].exists():
             p["paused"].unlink()  # init = 활성 상태
         capture_on = True
-    if global_scope:
+    # ★멱등: 기존 scope 가 있으면 덮어쓰지 않고 병합한다(7/9 회귀 방지 — init 무조건 덮어쓰기가
+    #   owner 커스텀 allow[system32]·deny 를 날려 capture 전멸시킨 사고). 병합 전 .json.bak 백업.
+    existing_scope = None
+    if p["scope"].exists():
+        try:
+            _es = json.loads(p["scope"].read_text(encoding="utf-8"))
+            existing_scope = _es if isinstance(_es, dict) else None
+        except Exception:
+            existing_scope = None
+    if existing_scope is not None:
+        try:  # 병합 전 기존 scope 백업(원복 지점 · 1회)
+            bak = p["scope"].with_suffix(".json.bak")
+            if not bak.exists():
+                bak.write_text(json.dumps(existing_scope, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+        prefixes = [str(x) for x in existing_scope.get("allowed_cwd_prefixes", [])]
+        cwd_prefix = str(Path(cwd).resolve())
+        if not global_scope and cwd_prefix not in prefixes:
+            prefixes.append(cwd_prefix)  # 현재 cwd 추가(기존 allow 소실 0)
+        scope = {
+            "global": bool(existing_scope.get("global", False)) or bool(global_scope),
+            "allowed_cwd_prefixes": prefixes,
+            "denied_cwd_substrings": [str(x) for x in existing_scope.get("denied_cwd_substrings", [])],
+        }
+    elif global_scope:
         scope = {"global": True, "allowed_cwd_prefixes": [], "denied_cwd_substrings": []}
     else:
         scope = {"global": False,
@@ -304,6 +329,22 @@ def _selftest():
         r_f = init_profile(home, cwd, hook_command=cmd, settings_path=settings, force_enable=True)
         check(status(home, cwd, settings)["enabled"] and r_f["enabled"],
               "T11b init --force-capture → sticky 해제 ON")
+
+        # T12 init 멱등 병합: 기존 커스텀 scope(추가 allow[system32]·deny)가 재init 에 보존(7/9 회귀 방지)
+        pscope = profile_paths(home)["scope"]
+        bakp = pscope.with_suffix(".json.bak")
+        if bakp.exists():
+            bakp.unlink()  # 이전 백업 정리(격리)
+        custom = {"global": False,
+                  "allowed_cwd_prefixes": [str(Path(cwd).resolve()), "C:/WINDOWS/system32"],
+                  "denied_cwd_substrings": ["bid-engine", "safety-app"]}
+        pscope.write_text(json.dumps(custom, ensure_ascii=False), encoding="utf-8")
+        init_profile(home, cwd, hook_command=cmd, settings_path=settings)  # 재init
+        merged = json.loads(pscope.read_text(encoding="utf-8"))
+        check("C:/WINDOWS/system32" in merged["allowed_cwd_prefixes"]
+              and merged["denied_cwd_substrings"] == ["bid-engine", "safety-app"],
+              "T12 재init 멱등 병합: 커스텀 allow(system32)·deny 보존(7/9 회귀 방지)")
+        check(bakp.exists(), "T12b 병합 전 기존 scope .json.bak 백업 생성")
 
         print(f"\nGATE={'GO' if ok else 'NO-GO'}")
         return 0 if ok else 1

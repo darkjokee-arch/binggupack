@@ -18,7 +18,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-from binggu_capture_classifier import classify
+from binggu_capture_classifier import EXPLICIT_SAVE, PREVIEW_TRIGGER, _any, classify
 
 TEXT_CAP = 1000         # 자동수집 버퍼 발화 보존 상한 = capture_preview.MAX_NODE_SENTENCE 정합(owner GO 2026-06-15).
                         # 문장 전체 보존(80자 발췌 폐기 — 개인 온톨로지 정체성). 1000 초과 = 대화 덩어리 → 절단(원문=대화 전문 저장 금지).
@@ -41,6 +41,19 @@ def _is_system_noise(utterance):
         return True
     u = str(utterance)
     return any(m in u for m in _SYSTEM_NOISE_MARKERS)
+
+
+def _is_explicit_signal(utterance):
+    """명시 저장/preview 신호(EXPLICIT_SAVE·PREVIEW_TRIGGER 패턴)인지 — A3 scope 우회 판정.
+
+    owner 가 개인 온톨로지 저장을 이름으로 지목한 발화("빙구팩 저장해"·"이거 저장해")는 cwd
+    화이트리스트(중립 시작 위치=system32)에 막히면 안 된다(Fable5-A: 빙구팩이 빙구팩 게이트에
+    막히는 부조리). classify 최상위 우선 패턴만 정규식으로 선검사한다 — 전체 classify 를 scope
+    앞으로 빼지 않음(타 세션 일반 발화의 전면 분류 0 유지). enabled·deny 는 여전히 존중(feed)."""
+    if not utterance or not str(utterance).strip():
+        return False
+    t = str(utterance).strip()
+    return bool(_any(t, PREVIEW_TRIGGER) or _any(t, EXPLICIT_SAVE))
 
 
 def binggu_home(home=None):
@@ -93,19 +106,24 @@ class CaptureScope:
         except Exception:
             return empty
 
+    def _denied(self, cwd):
+        """deny substring 매치(명시 배제 프로젝트) 여부. in_scope 와 A3 explicit bypass 가 공유하는
+        '절대 우선 차단' 판정 — global 이든 explicit 명시신호든 deny 는 항상 존중한다."""
+        cwd_n = _norm(cwd)
+        return any(_norm(d) in cwd_n for d in self._scope()["denied_cwd_substrings"])
+
     def in_scope(self, cwd):
         """deny 우선 → global(전역) → allow 화이트리스트. allow 비면 fail-closed(False).
         global=true 라도 denied_cwd_substrings 는 항상 우선 차단."""
+        if self._denied(cwd):
+            return False
         sc = self._scope()
-        cwd_n = _norm(cwd)
-        for d in sc["denied_cwd_substrings"]:
-            if _norm(d) in cwd_n:
-                return False
         if sc["global"]:
             return True
         allow = sc["allowed_cwd_prefixes"]
         if not allow:
             return False
+        cwd_n = _norm(cwd)
         return any(cwd_n.startswith(_norm(a)) for a in allow)
 
     def should_capture(self, cwd):
@@ -163,12 +181,19 @@ class PersistentCaptureBuffer:
         게이트 차단 시 classify 조차 호출 안 함(타 세션 발화 미분류).
         session_id: 세션 경계용(세션 마무리 preview 가 그 세션 발화만 표시하도록 태깅)."""
         now = time.time() if now is None else now
-        if not self.scope.should_capture(cwd):
-            return {"action": "skipped_scope", "stored": False,
-                    "enabled": self.scope.enabled(), "in_scope": self.scope.in_scope(cwd)}
-        # 시스템 주입 텍스트(task-notification·hook feedback·command 등)는 사용자 판단 아님 → 미수집(오염 차단).
+        # 시스템 주입 텍스트(task-notification·hook feedback·command 등)는 사용자 판단 아님 → 미수집.
+        #   명시신호 우회보다 먼저 차단(task-notification 원문이 "저장" 포함해도 오염 안 되게).
         if _is_system_noise(utterance):
             return {"action": "system_noise", "stored": False}
+        # A3: 명시 저장/preview 신호는 cwd allow 화이트리스트를 우회(중립 cwd=system32 에서도 통과).
+        #   enabled(기능 ON)·deny(명시 배제 프로젝트)는 존중 — 우회는 allow 미스에만(오염 표면 ≈0).
+        if _is_explicit_signal(utterance):
+            if not self.scope.enabled() or self.scope._denied(cwd):
+                return {"action": "skipped_scope", "stored": False,
+                        "enabled": self.scope.enabled(), "in_scope": self.scope.in_scope(cwd)}
+        elif not self.scope.should_capture(cwd):
+            return {"action": "skipped_scope", "stored": False,
+                    "enabled": self.scope.enabled(), "in_scope": self.scope.in_scope(cwd)}
         v = classify(utterance, prev_turn)
         if v["state"] == "preview_trigger":
             self._purge(now)
@@ -216,24 +241,31 @@ class PersistentCaptureBuffer:
             self._purge(now, conn=c)
             if session_id is not None:
                 rows = c.execute(
-                    "SELECT text,pinned,confidence FROM capture_candidates WHERE session_id=? "
+                    "SELECT text,pinned,confidence,cwd FROM capture_candidates WHERE session_id=? "
                     "ORDER BY pinned DESC, id ASC", (session_id,)).fetchall()
             else:
                 rows = c.execute(
-                    "SELECT text,pinned,confidence FROM capture_candidates ORDER BY pinned DESC, id ASC"
+                    "SELECT text,pinned,confidence,cwd FROM capture_candidates ORDER BY pinned DESC, id ASC"
                 ).fetchall()
         finally:
             c.close()
         items = []
-        for i, (text, pinned, conf) in enumerate(rows, 1):
+        for i, (text, pinned, conf, cwd) in enumerate(rows, 1):
             tags = []
             if pinned:
                 tags.append("PINNED")
             if conf == "weak":
                 tags.append("약함")
+            # 출처(Fable5-A 권장): candidate 가 명시 배제(deny) cwd 에서 유입됐으면 SAVE 식별용 경고
+            #   태그. explicit bypass 가 deny 를 존중하므로 대개 안 뜸(과거/global 데이터 대비). cwd
+            #   필드는 소비처가 출처를 참고하도록 데이터로 상시 노출(label 소음은 최소).
+            foreign = bool(cwd and self.scope._denied(cwd))
+            if foreign:
+                tags.append("타 세션?")
             tag = f" [{' · '.join(tags)}]" if tags else ""
             items.append({
                 "idx": i, "text": text, "pinned": bool(pinned), "confidence": conf,
+                "cwd": cwd, "foreign": foreign,
                 "label": f"{i}. {text}{tag}", "state": "captured_candidate",
             })
         if self.scope.semantic_preview():
@@ -418,6 +450,9 @@ def _selftest():
         pv2 = buf2.render_preview()
         check(pv2["count"] == 2 and pv2["items"][0]["pinned"],
               "T11 preview pinned 상단 정렬")
+        check(all("cwd" in it and "foreign" in it for it in pv2["items"])
+              and not any(it["foreign"] for it in pv2["items"]),
+              "T11b preview items 출처 cwd/foreign 필드(정상 cwd → foreign False)")
 
         # T12 rollback: 파일 삭제 → size 0
         bak = buf2.backup()
@@ -546,6 +581,40 @@ def _selftest():
         check(buf3.db_path.stat().st_mtime_ns == db_mtime_r and ledger.stat().st_mtime_ns == ledger_mtime_r,
               "T23 rationale preview ON → buffer DB·ledger write 0")
         scope2.rationale_preview_flag.unlink()
+
+        # ── T24~T28 A3: 명시 저장/preview 신호의 cwd allow 우회(deny·disabled 는 존중) ──
+        buf4 = PersistentCaptureBuffer(home=home)
+        buf4.rollback()  # 깨끗한 버퍼(운영 ledger 미접촉)
+        scope3 = CaptureScope(home=home)
+        scope3.flag.write_text("1", encoding="utf-8")
+        scope3.scope_file.write_text(json.dumps({
+            "global": False,
+            "allowed_cwd_prefixes": ["C:/Users/PC/binggupack"],
+            "denied_cwd_substrings": ["bid-engine"],
+        }, ensure_ascii=False), encoding="utf-8")
+        neutral = "C:/WINDOWS/system32"    # allow 미스 · deny 미스(중립 시작 위치)
+        denied = "C:/Users/PC/bid-engine"  # deny 매치
+        # T24 명시 preview 신호 "빙구팩 저장해" → 중립 cwd allow 우회(preview)
+        r = buf4.feed("빙구팩 저장해", neutral)
+        check(r["action"] == "preview", "T24 명시 preview 신호 → 중립 cwd allow 우회(preview)")
+        # T25 명시 저장 "이거 저장해" → 중립 cwd captured(pinned·scope 우회)
+        r = buf4.feed("이거 저장해", neutral)
+        check(r["action"] == "captured" and r["stored"] and buf4.size == 1,
+              "T25 명시 저장 신호 → 중립 cwd allow 우회 captured")
+        # T26 일반 판단(비명시)은 A3 우회 없음 → 중립 cwd 에서 여전히 skipped_scope
+        r = buf4.feed("B안으로 결정한다", neutral)
+        check(r["action"] == "skipped_scope" and buf4.size == 1,
+              "T26 일반 발화(비명시) → 중립 cwd 우회 없음(skipped·size 불변)")
+        # T27 명시신호라도 deny 매치 cwd 는 차단(명시 배제 프로젝트 존중)
+        r = buf4.feed("이거 저장해", denied)
+        check(r["action"] == "skipped_scope" and buf4.size == 1,
+              "T27 명시 저장 + deny cwd → 차단(deny 존중·size 불변)")
+        # T28 명시신호라도 capture OFF(플래그 제거)면 차단(enabled 존중)
+        scope3.flag.unlink()
+        r = buf4.feed("이거 저장해", neutral)
+        check(r["action"] == "skipped_scope" and not r["stored"],
+              "T28 명시 저장 + capture OFF → 차단(enabled 존중)")
+        scope3.flag.write_text("1", encoding="utf-8")
 
         gate = "GO" if ok else "NO-GO"
         print(f"\nGATE={gate}")

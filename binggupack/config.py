@@ -134,7 +134,8 @@ def _default_capture_scope(home=None):
 
 
 def _default_close_phrases(home=None):
-    return {"phrases": []}
+    # phrases=세션 마무리 표현 · suffixes=표현 뒤 짧은 종결/조사 접미(N3 유한폐포 opt-in).
+    return {"phrases": [], "suffixes": []}
 
 
 def _default_harvest_sources(home=None):
@@ -167,7 +168,7 @@ def _selftest():
 
         # 1) 부재 → 기본값 사본
         cp = load_config("close_phrases", home)
-        ck(cp == {"phrases": []}, "close_phrases 부재 → 기본값")
+        ck(cp == {"phrases": [], "suffixes": []}, "close_phrases 부재 → 기본값")
         hs = load_config("harvest_sources", home)
         ck(hs == {"sources": []}, "harvest_sources 부재 → 기본값")
         cs = load_config("capture_scope", home)
@@ -193,7 +194,7 @@ def _selftest():
         (home / "close_phrases.json").write_text("{not valid json", encoding="utf-8")
         invalidate("close_phrases", home)
         cp3 = load_config("close_phrases", home)
-        ck(cp3 == {"phrases": []}, "close_phrases 손상 → 기본값(예외 0)")
+        ck(cp3 == {"phrases": [], "suffixes": []}, "close_phrases 손상 → 기본값(예외 0)")
 
         # 3b) 비-dict JSON(리스트) → 기본값
         (home / "harvest_sources.json").write_text("[1,2,3]", encoding="utf-8")

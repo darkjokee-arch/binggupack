@@ -17,7 +17,10 @@
 
 ★감지 = 모델 의미감지(Layer1):
   ① is_close 의 1차 원천 = 호출측이 준 의미감지 결과(signal['model_detected_close']).
-  ② 보조 = 사용자별 등록 표현(close_phrases.json, opt-in) — 정확 일치(키워드 부분매칭 아님).
+  ② 보조 = 사용자별 등록 표현(close_phrases.json, opt-in) — 정규화 후 유한폐포 정확 membership
+     (부분 키워드 매칭 아님). 정규화(_norm)=NFKC+casefold+isalnum 필터로 공백·구두점·전각·이모지
+     변형을 흡수하고, 등록 표현 × 등록 접미(suffixes)의 유한 후보집합에 대한 == 검사라 좌/우
+     부분매칭이 구조적으로 불가능하다(T5 오발동 차단 증명 가능). "정확 일치" 계약 불변.
   ③ 둘 다 없으면 is_close=False(graceful, 표시 0). 빙구팩이 자유문자열 키워드로 추정 0.
 
 불변(헌법):
@@ -42,6 +45,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import unicodedata
 from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))          # <repo>/binggupack/review
@@ -79,13 +83,61 @@ def _load_close_phrases(home=None):
         return []
 
 
+def _norm(s):
+    """세션 마무리 매칭용 정규화 — NFKC(전각→반각·호환자모) + casefold(라틴 대소문자) +
+    isalnum 필터(공백·구두점·기호·이모지·제어문자 제거). 한글/영숫자는 alnum=True 로 보존되고,
+    부정어(안/못/말/않/마)는 '글자'라 살아남는다 → 구두점 제거가 의미반전을 만들지 못한다.
+    두 문자열의 _norm 이 같으면 공백·구두점·전각 변형만 다른 동일 표현이다."""
+    s = unicodedata.normalize("NFKC", str(s or ""))
+    return "".join(c for c in s.casefold() if c.isalnum())
+
+
+def _load_close_suffixes(home=None, max_norm_len=8):
+    """세션 마무리 표현 뒤에 붙는 짧은 종결/조사 접미(opt-in). close_phrases.json 의 "suffixes" 키.
+    등록 표현과 유한폐포 합성(phrase+suffix)에만 쓰이며, 다음 접미는 무시한다(부분매칭 재현 봉쇄 — G-c):
+      - 공백 포함(= 2어절 이상): 접미는 '단일 종결어'만. "그리고 한가지 더" 같은 다어절은 배제
+        (norm 후 길이만으로는 못 막는다 — "그리고한가지더"=7자 < 8. 어절 제약이 정본 방어).
+      - _norm 길이 max_norm_len(기본 8) 초과: 단일 어절이라도 과도하게 긴 접미 보조 차단.
+    부재→[](graceful). ★부정계(안/못/말/마/않)는 접미로 등록 금지(의미반전 오발동) — onboard seed 주석에 명기."""
+    try:
+        from binggupack.config import load_config
+        data = load_config("close_phrases", home, use_cache=False)
+        sfx = data.get("suffixes", []) if isinstance(data, dict) else []
+        out = []
+        for x in sfx:
+            s = str(x).strip()
+            if not s or any(c.isspace() for c in s):
+                continue  # 빈/다어절(공백 포함) 접미 배제 — 단일 종결어만
+            if 0 < len(_norm(s)) <= max_norm_len:
+                out.append(s)
+        return out
+    except Exception:
+        return []
+
+
+def _load_close_config(home=None):
+    """close_phrases.json 전체({phrases, suffixes}) 로드 — writer 가 상대 키를 보존하도록.
+    부재/손상 → {"phrases": [], "suffixes": []}(config 로더 기본값)."""
+    try:
+        from binggupack.config import load_config
+        data = load_config("close_phrases", home, use_cache=False)
+        if not isinstance(data, dict):
+            return {"phrases": [], "suffixes": []}
+        return data
+    except Exception:
+        return {"phrases": [], "suffixes": []}
+
+
 def register_close_phrase(phrase, home=None):
     """사용자 세션 마무리 표현 등록(opt-in 옵션). close_phrases.json 에 append(중복 무시).
     빙구팩 거버넌스 자산이 아닌 사용자 설정 파일만 write — 박제/CLAUDE.md/ledger 미접촉.
+    ★suffixes 키 보존(phrase 등록이 접미 목록을 날리지 않도록 전체 config 로드 후 write).
     반환 {registered, phrases}. 빈/공백 phrase → registered=False(graceful)."""
     phrase = str(phrase or "").strip()
     home_dir = _home(home)
-    existing = _load_close_phrases(home)
+    data = _load_close_config(home)
+    existing = [str(x).strip() for x in data.get("phrases", []) if str(x).strip()]
+    suffixes = data.get("suffixes", [])
     if not phrase:
         return {"registered": False, "reason": "empty_phrase", "phrases": existing}
     if phrase in existing:
@@ -94,11 +146,38 @@ def register_close_phrase(phrase, home=None):
         home_dir.mkdir(parents=True, exist_ok=True)
         phrases = existing + [phrase]
         (home_dir / "close_phrases.json").write_text(
-            json.dumps({"phrases": phrases}, ensure_ascii=False, indent=2), encoding="utf-8")
+            json.dumps({"phrases": phrases, "suffixes": suffixes}, ensure_ascii=False, indent=2),
+            encoding="utf-8")
         return {"registered": True, "phrases": phrases}
     except Exception as e:
         return {"registered": False, "reason": "write_error:%s" % type(e).__name__,
                 "phrases": existing}
+
+
+def register_close_suffix(suffix, home=None):
+    """세션 마무리 접미 등록(opt-in). close_phrases.json "suffixes" 에 append(phrases 보존).
+    등록 표현 × 접미 유한폐포로 종결/조사 변형을 흡수한다. 단일 종결어만(공백 포함=다어절 거부)·
+    빈/구두점-only 거부. ★부정계(안/못/말/마/않)는 등록 금지 — 의미반전 오발동(호출측·onboard 책임).
+    반환 {registered, suffixes}. 잘못된 접미 → registered=False(graceful)."""
+    suffix = str(suffix or "").strip()
+    home_dir = _home(home)
+    data = _load_close_config(home)
+    phrases = data.get("phrases", [])
+    existing = [str(x).strip() for x in data.get("suffixes", []) if str(x).strip()]
+    if not suffix or any(c.isspace() for c in suffix) or not _norm(suffix):
+        return {"registered": False, "reason": "invalid_suffix", "suffixes": existing}
+    if suffix in existing:
+        return {"registered": False, "reason": "duplicate", "suffixes": existing}
+    try:
+        home_dir.mkdir(parents=True, exist_ok=True)
+        suffixes = existing + [suffix]
+        (home_dir / "close_phrases.json").write_text(
+            json.dumps({"phrases": phrases, "suffixes": suffixes}, ensure_ascii=False, indent=2),
+            encoding="utf-8")
+        return {"registered": True, "suffixes": suffixes}
+    except Exception as e:
+        return {"registered": False, "reason": "write_error:%s" % type(e).__name__,
+                "suffixes": existing}
 
 
 def detect_session_close(signal, home=None):
@@ -128,12 +207,22 @@ def detect_session_close(signal, home=None):
             conf = 1.0
         return {"is_close": True, "source": "model", "confidence": max(0.0, min(1.0, conf))}
 
-    # ② 보조: 사용자별 등록 표현 정확 일치(부분 키워드 매칭 금지 — 등록 문구 == 발화).
+    # ② 보조: 사용자 등록 표현 정규화 후 유한폐포 정확 membership(부분 키워드 매칭 금지).
+    #   후보집합 = {norm(ph)} ∪ {norm(ph)+norm(sfx)} — 유한·열거가능이라 좌/우 부분매칭 구조적 불가.
+    #   가드: G-a(순 구두점 등록 skip)·G-b(순 구두점 발화 skip)·G-c(접미 8자 초과 무시=_load)·G-d(1회 후미 합성만).
     utter = str(signal.get("utterance", "")).strip()
-    if utter:
+    nu = _norm(utter)
+    if nu:  # G-b
+        suffixes = _load_close_suffixes(home)
         for ph in _load_close_phrases(home):
-            if utter == ph:
+            np = _norm(ph)
+            if not np:
+                continue  # G-a: 등록 표현이 순 구두점 → skip("!!" 오발동 방지)
+            if nu == np:
                 return {"is_close": True, "source": "registered_phrase", "confidence": 1.0}
+            for sfx in suffixes:  # G-d: 등록 접미 1회·후미 합성만(재귀·prefix 0)
+                if nu == np + _norm(sfx):
+                    return {"is_close": True, "source": "registered_phrase", "confidence": 1.0}
 
     # ③ 그 외 → 표시 0(빙구팩 추정 0).
     return {"is_close": False, "source": None, "confidence": 0.0}
@@ -365,6 +454,17 @@ def _selftest():
         check(not register_close_phrase("   ", home=home)["registered"],
               "T6b 빈/공백 표현 거부")
 
+        # T6c register_close_suffix + phrase↔suffix 상호 보존(writer 가 상대 키를 안 날림)
+        register_close_suffix("해줘", home=home)
+        register_close_phrase("빙구팩 마무리", home=home)  # suffix 등록 후 phrase 등록
+        _cfg = _load_close_config(home)
+        check("해줘" in _cfg.get("suffixes", []) and "빙구팩 마무리" in _cfg.get("phrases", []),
+              "T6c suffix+phrase 등록 상호 보존(상대 키 안 날림)")
+        # T6d 잘못된 접미 거부(다어절=공백 포함 · 구두점-only)
+        check(not register_close_suffix("세션 마무리 후", home=home)["registered"]
+              and not register_close_suffix("...", home=home)["registered"],
+              "T6d 다어절/구두점-only 접미 거부(graceful)")
+
         # --- preview / 거버넌스 (빈 상태 graceful) ---
         # T7 빈 버퍼 + 무 ledger → 요약 graceful(에러 0 · 저장 0)
         s = build_close_summary(home=home)
@@ -437,6 +537,38 @@ def _selftest():
         gov_assets_clean = not (home / "CLAUDE.md").exists() and not (home / "박제").exists() \
             and not (home / "binggu_policy.json").exists()
         check(gov_assets_clean, "T12b 거버넌스 자산(박제/CLAUDE.md/정책) write 0")
+
+        # ── T13~T17 정규화 유한폐포(N3): 공백·구두점·전각·접미 변형 흡수 + T5류 오발동 구조적 차단 ──
+        cp_path = home / "close_phrases.json"
+        cp_path.write_text(json.dumps(
+            {"phrases": ["오늘 여기까지 하자", "세션 마무리"],
+             "suffixes": ["요", "그리고 한가지 더"]}, ensure_ascii=False), encoding="utf-8")
+        # T13 정발동: 구두점/전각/공백/붙여쓰기 변형 → True (norm 동치)
+        for utt, note in (("오늘 여기까지 하자!", "구두점"),
+                          ("  오늘 여기까지 하자...  ", "구두점+공백"),
+                          ("오늘여기까지하자", "공백 제거"),
+                          ("오늘 여기까지 하자！", "전각 구두점(NFKC)")):
+            check(detect_session_close(utt, home=home)["is_close"], "T13 정발동(%s)→True" % note)
+        # T14 접미 유한폐포: "세션 마무리"+"요" → True (구성성). 긴 접미는 무시(길이 가드).
+        check(detect_session_close("세션 마무리요", home=home)["is_close"],
+              "T14 접미 폐포(세션 마무리+요)→True")
+        # T15 오발동 차단(전부 False): 부정계·선행어·긴 접미(길이가드로 T5 여전 False)
+        for utt, note in (("세션 마무리 안해", "부정계(부정어 보존)"),
+                          ("세션 마무리 말고", "부정계(말고)"),
+                          ("이제 세션 마무리", "선행 자유텍스트=좌측 부분매칭 금지"),
+                          ("오늘 여기까지 하자 그리고 한가지 더", "T5 원본(긴 접미 8자↑ 무시)")):
+            check(not detect_session_close(utt, home=home)["is_close"],
+                  "T15 오발동 차단(%s)→False" % note)
+        # T16 빈 norm 가드: 순 구두점 등록 + 순 구두점 발화 → False
+        cp_path.write_text(json.dumps({"phrases": ["..."], "suffixes": []}, ensure_ascii=False),
+                           encoding="utf-8")
+        check(not detect_session_close("!!", home=home)["is_close"],
+              "T16 빈 norm 가드(순 구두점)→False")
+        # T17 casefold(비한국어 신규 사용자): "Wrap Up!" ≡ 등록 "wrap up" → True
+        cp_path.write_text(json.dumps({"phrases": ["wrap up"], "suffixes": []}, ensure_ascii=False),
+                           encoding="utf-8")
+        check(detect_session_close("Wrap Up!", home=home)["is_close"],
+              "T17 casefold(Wrap Up!≡wrap up)→True")
 
         print("\nGATE=%s" % ("GO" if ok else "NO-GO"))
         return ok

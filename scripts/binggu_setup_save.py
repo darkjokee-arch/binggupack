@@ -447,13 +447,17 @@ def session_close_hook_step(settings_path, apply=False, register_fn=None, home=N
                     "UserPromptSubmit(session_close) + close_phrases.json 기본 마무리 표현")
     try:
         from binggu_capture_profile import register_hook
-        from binggupack.review.session_close import register_close_phrase
+        from binggupack.review.session_close import register_close_phrase, register_close_suffix
         rf = register_fn or register_hook
         added = rf(settings_path, hook_cmd, events=("UserPromptSubmit",),
                    marker="binggu_session_close_hook", is_async=False)
         bh = home or os.environ.get("BINGGU_HOME") or os.path.join(os.path.expanduser("~"), ".binggupack")
         for ph in ("빙구팩 저장해", "운영 세션 마무리", "세션 마무리", "오늘 여기까지", "마무리하자"):
             register_close_phrase(ph, home=bh)
+        # N3 접미(단일 종결어만) — 등록 표현 × 접미 유한폐포로 "…하자/해줘/요" 변형 흡수.
+        #   ★부정계(안/못/말/마/않)는 seed 영구 금지 — "세션 마무리 안해" 의미반전 오발동(등록 정책·정규화 아님).
+        for sfx in ("하자", "해", "해요", "해줘", "요", "입니다", "합시다"):
+            register_close_suffix(sfx, home=bh)
     except Exception as e:
         return step("s12", STOP, "세션 마무리 hook 등록 실패: %s" % e, "settings.json .bak 확인 후 수동 등록")
     return step("s12", OK if added else SKIP,
@@ -855,6 +859,8 @@ def _selftest():
         for g in _scd["hooks"].get("UserPromptSubmit", []) for h in g["hooks"]))
     _cp = json.load(open(os.path.join(hc, "close_phrases.json"), encoding="utf-8"))
     chk("s12b close_phrases 기본 표현('빙구팩 저장해') 등록", "빙구팩 저장해" in _cp.get("phrases", []))
+    chk("s12b2 close 접미(suffixes '하자') seed · 부정계 없음", "하자" in _cp.get("suffixes", [])
+        and not any(neg in _cp.get("suffixes", []) for neg in ("안", "못", "말", "마", "않")))
     chk("s12c 멀티키 소실 0(statusLine 보존)", _scd.get("statusLine") == {"x": 1})
     chk("s12d SYNC(async 키 없음 · 표 주입 현 turn)", all(
         "async" not in h for g in _scd["hooks"].get("UserPromptSubmit", []) for h in g["hooks"]
