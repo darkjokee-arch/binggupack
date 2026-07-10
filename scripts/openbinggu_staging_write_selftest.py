@@ -160,12 +160,16 @@ class StagingDB:
                 body = json.dumps([actor,action,pid,res,rc,bh,ah,ph], ensure_ascii=False)
             if _hash(body) != eh: return False
             prev = eh
-        # 꼬리 삭제 검출 — 메타(엔트리 수·head 앵커) 대조 (메타 없는 기존 장부는 skip)
+        # 꼬리 삭제 검출 — 메타(엔트리 수·head 앵커) 대조. ★ 각 앵커가 존재할 때만 대조:
+        # audit_append 가 기록하는 앵커라, 신규 ledger(audit 0 건)는 audit_meta 에 ledger_id
+        # (apply_schema)만 있고 앵커 없음 → skip = INTACT. 앵커 있으면 stale/삭제 그대로 검출
+        # (rows 삭제 시 head=GENESIS != 저장 head → False).
         meta = {k: v for k, v in self.con.execute("SELECT key,value FROM audit_meta")}
-        if meta:
+        if meta.get("entry_count") is not None:
             if meta.get("entry_count") != str(len(rows)): return False
+        if meta.get("head_entry_hash") is not None:
             head = rows[-1][9] if rows else "GENESIS"
-            if meta.get("head_entry_hash", head) != head: return False
+            if meta.get("head_entry_hash") != head: return False
         return True
 
     def verify_tail_state(self):
