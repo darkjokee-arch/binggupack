@@ -46,7 +46,30 @@ from binggu import (  # noqa: E402
 )
 
 
+class _FakeTTY:
+    """대화형 owner 터미널 시뮬 — P1-A.1: index-op(deprecate/replace/mark 등)는 sentence 앵커가 없어
+    사람 근거로 '대화형 TTY'만 가능. binggu.py --selftest·pytest 양 진입점 모두 비대화형이므로 여기서
+    owner-interactive 를 시뮬한다. FE 블록은 내부에서 StringIO(isatty False)로 fail-closed 경로를 별도
+    검증(스스로 stdin 저장·복원)."""
+    def isatty(self):
+        return True
+
+    def readline(self, *a):
+        return "\n"
+
+    def read(self, *a):
+        return ""
+
+    def fileno(self):
+        return 0
+
+
 def selftest():
+    # P1-A.1: 양 진입점(binggu.py --selftest · pytest 래퍼) 모두 비대화형 stdin 이므로 여기서 owner
+    #         대화형 TTY 를 시뮬한다(아래 FE 블록만 StringIO 로 fail-closed 경로를 별도 검증). 정상 경로에서
+    #         복원하고, 예외 누수 대비는 pytest 래퍼의 try/finally 가 담당한다.
+    _real_stdin = sys.stdin
+    sys.stdin = _FakeTTY()
     print("=" * 74)
     print("binggu CLI — temp 장부 풀 사이클 selftest (영속 장부·운영 store 접근 0)")
     print("=" * 74)
@@ -111,6 +134,11 @@ def selftest():
     ck("2b_preview없는_save_BLOCK", cmd_save(args(text=TEXT, preview_id="deadbeef",
                                                   pick="1,2,3", confirm="SAVE 1,2,3",
                                                   due=None)) == 1)
+    # P1-A.1: 비대화형(pytest·isatty False)에선 save 가 fail-closed(reader). 사장님 SAVE 시뮬로
+    #         선택 문장의 save_gate 앵커를 seed(정당 사람 근거 · env 백도어 아님) → 저장 성공.
+    import binggu_save_gate as _sg3
+    _c3 = capture_preview(TEXT, explicit=False)["candidates"]
+    _sg3.gate_record([c["sentence"] for c in _c3], path=_gate_log_for_ledger(ledger))
     ck("3_save", cmd_save(args(text=TEXT, preview_id=_preview_id(TEXT),
                                pick="1,2,3", confirm="SAVE 1,2,3",
                                due="2099-12-31")) == 0)
@@ -119,9 +147,9 @@ def selftest():
     db.close()
     ck("4_list_3건", len(rows) == 3 and cmd_list(args(status=None, kind=None)) == 0)
 
-    # ---- Fix E: CLI 'human' 주장 → 위조방지 게이트(save_gate) write 경로 소비 ----
-    # 종전엔 actor="human" 하드코딩이라 gate_human_for 가 미소비(AI 가 preview_id·confirm 합성 시
-    # 사람 확인 없이 운영 저장 가능). 이제 write 직전 게이트를 실제 소비 + 비대화형 자동화 강제차단(opt-in).
+    # ---- Fix E / P1-A.1: CLI 'human' 승격 = 사람 근거(save_gate 앵커 or 대화형 TTY)로만 ----
+    # P1-A.1: fail-closed 가 기본이다. 비대화형 + 앵커없음 → reader → BLOCK(환경변수 우회 불가·
+    # BINGGU_TRUSTED_CLI 는 사람 승인이 아님·BINGGU_STRICT_HUMAN_GATE 는 deprecated no-op).
     # 결정성 위해 sys.stdin 을 비-TTY 로 치환(실제 실행 터미널 TTY 여부와 무관).
     import io as _io
     fe_ledger = os.path.join(tmp, "fixE.sqlite")
@@ -152,18 +180,19 @@ def selftest():
         _feB = cmd_save(args(ledger=fe_ledger, text=FE_TEXT, preview_id=_preview_id(FE_TEXT),
                              pick="1", confirm="SAVE 1", due=None))
         ck("FE2_strict+게이트기록→저장성공(gate 소비)", _feB == 0 and _fe_nodes() == 1)
-        # FE3: 기본(비-strict) + 비대화형 + 게이트 없음 → 오버블록 안 함(경고+저장) — 회귀0 보증
+        # FE3: 기본(비-strict) + 비대화형 + 게이트 없음 → **BLOCK(저장 0)** — P1-A.1 fail-closed 기본.
+        #      (종전엔 오버블록회피로 저장됐으나 환경변수/비대화형은 사람 승인이 아니다 · RFC §6.)
         os.environ.pop("BINGGU_STRICT_HUMAN_GATE", None)
         _feC = cmd_save(args(ledger=fe_ledger, text=FE_TEXT2, preview_id=_preview_id(FE_TEXT2),
                              pick="1", confirm="SAVE 1", due=None))
-        ck("FE3_기본_비대화형_오버블록없음(경고+저장)", _feC == 0 and _fe_nodes() == 2)
-        # FE4: 신뢰 플래그(BINGGU_TRUSTED_CLI) → strict 여도 human 유지(대화형 동치)
-        os.environ["BINGGU_STRICT_HUMAN_GATE"] = "1"
+        ck("FE3_기본_비대화형_앵커없음→BLOCK(fail-closed)", _feC == 1 and _fe_nodes() == 1)
+        # FE4: BINGGU_TRUSTED_CLI 환경변수는 사람 승인이 아니다 → 비대화형이면 여전히 BLOCK(env 백도어 봉인).
+        os.environ["BINGGU_STRICT_HUMAN_GATE"] = "1"   # deprecated no-op
         os.environ["BINGGU_TRUSTED_CLI"] = "1"
         FE_TEXT3 = "이 계약은 조건이 불리해서 이번에는 포기하기로 결정했다."
         _feD = cmd_save(args(ledger=fe_ledger, text=FE_TEXT3, preview_id=_preview_id(FE_TEXT3),
                              pick="1", confirm="SAVE 1", due=None))
-        ck("FE4_신뢰플래그→strict여도_저장성공", _feD == 0 and _fe_nodes() == 3)
+        ck("FE4_env_TRUSTED_CLI→비대화형이면_BLOCK(env는승인아님)", _feD == 1 and _fe_nodes() == 1)
     finally:
         sys.stdin = _stdin_keep
         for _k, _v in _env_keep.items():
@@ -298,6 +327,7 @@ def selftest():
     shutil.rmtree(tmp, ignore_errors=True)
     ck("12_temp_정리", not os.path.exists(tmp))
 
+    sys.stdin = _real_stdin   # P1-A.1: 대화형 owner 시뮬 종료(정상 경로 복원)
     ok = all(checks)
     print("-" * 74)
     print("RESULT: %d/%d PASS" % (sum(checks), len(checks)))
@@ -306,5 +336,12 @@ def selftest():
 
 
 def test_binggu_cli_selftest():
-    """pytest 수집용 얇은 래퍼 — 임베드 selftest 전 케이스 GATE=GO(exit 0)."""
-    assert selftest() == 0
+    """pytest 수집용 얇은 래퍼 — 임베드 selftest 전 케이스 GATE=GO(exit 0).
+
+    stdin 대화형 시뮬은 selftest() 본체에서 수행(양 진입점 공통). 여기 try/finally 는 selftest 가
+    예외로 중단돼도 다른 pytest 케이스에 stdin 오염이 새지 않도록 하는 안전망이다."""
+    _real = sys.stdin
+    try:
+        assert selftest() == 0
+    finally:
+        sys.stdin = _real

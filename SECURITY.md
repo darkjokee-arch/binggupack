@@ -29,7 +29,11 @@
 - MCP 로 preview→confirm 을 재현해도 저장/기각/교체가 차단된다(fail-closed) — `binggupack/mcp/server_handlers.py --selftest` (`*_preview_then_confirm_BLOCKED`)
 - trusted approval: owner 승인은 **정확히 1회만** 실행되고, 재생·payload 변경·다른 ledger·만료·거절/회수·동시 consume 은 전부 차단된다 — `scripts/openbinggu_trusted_approval_boundary_selftest.py`, `tests/test_trusted_approval_e2e.py`
 - 승인 provider 미구성 시 모든 MCP mutation 은 fail-closed 이고 **운영 ledger mtime 는 불변**이다 — 위 하니스의 `no_provider_fail_closed` · `운영 ledger sentinel`
-- `binggu approval approve` 는 비대화형(pipe/redirect) 입력을 하드 거부한다 — `tests/test_trusted_approval_e2e.py`
+- `binggu approval approve` 는 **환경변수(BINGGU_TRUSTED_CLI 포함)·비대화형(pipe/redirect) 입력을 하드 거부**하고(no-write·exit≠0), 승인 발행은 대화형 TTY 에서만 한다 — `tests/test_trusted_approval_e2e.py`, `scripts/binggu_approval_origin_selftest.py`
+- 승인 기원 계약(P1-A.1) — 두 층위로 정확히:
+  - **trusted approval 이벤트 발행**(`approval approve`): 환경변수·stdin pipe·confirm 문구·bare isatty **단독**으로는 이벤트를 못 만든다 — 대화형 TTY **와** typed `APPROVE <rid8>` 문구가 모두 있어야 한다. (isatty 는 pipe/자동화를 거르는 UX 경계이지 암호학적 사람증명이 아니다 · 아래 "범위 밖" 참조.)
+  - **CLI 운영 write**(save/pair/deprecate/replace/…): 환경변수·confirm 문구 단독은 사람 승인이 아니고, 비대화형(pipe)·앵커 없음이면 write 0(fail-closed). 사람 근거는 save_gate 앵커 **또는** 대화형 TTY 뿐이며, 이 중 대화형 TTY 는 UX 경계(비-암호학적)라 셸 병재 호스트에선 PTY 위조 가능 — 그 배포는 hard control 아님(정직 경계). `BINGGU_STRICT_HUMAN_GATE` 는 deprecated no-op(0/false 로 fail-open 불가).
+  - production wheel 에 test 백도어(test_double 채널·환경변수 승인 read) 0. 검증: `scripts/binggu_approval_origin_selftest.py`(env/pipe/strict/save/pair/ship-guard/inventory) · `tests/test_trusted_approval_e2e.py`(PTY 대화형 성공경로·Unix). (MCP 표면의 client actor 무시 하드 오버라이드는 `binggupack/mcp/server_handlers.py --selftest`.)
 - 키보드 `SAVE n` 앵커가 있을 때만 확정된다 — `scripts/smoke_test.py` (case 9b/9c)
 - 교체된 기억은 기존 provenance(`replaced_by`/`supersedes`)를 잃지 않는다 — `openbinggu_candidate_replace_ux.py --selftest`
 - 회상 결과는 사용된 기억의 식별자·근거를 제공한다 — `binggu recall`/`binggu explain`

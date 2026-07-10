@@ -370,6 +370,37 @@ binggu approval reject <req-id> / revoke <req-id>   # tombstone
 - MCP tool 은 approve/reject/revoke 직접 생성 불가 · approval secret 응답 반환 0 · owner 미검토
   payload 는 승인 범위 밖(review 레코드 == committed digest).
 
+### 19.1 P1-A.1 — 승인 기원 계약 이행(declared → enforced)
+
+§6/§19/TAE-5 는 계약을 **선언**했으나 초기 P1-A 코드는 이를 완전히 강제하지 않았다. P1-A.1 이 그 격차를
+봉인했다(변경은 계약 강화만 · 새 표면 0):
+
+- **`cmd_approval approve` 의 `BINGGU_TRUSTED_CLI` 백도어 제거(AOB-1).** env truthy 로 비대화형 mint 하던
+  경로 삭제 → 비대화형은 항상 `exit 2 · no-mint`. mint 는 isatty 검증 + typed `APPROVE <rid8>` 후에만,
+  `channel="cli_tty"` 로만.
+- **`_resolve_human_ctx` fail-closed 기본(AOB-2).** 기본 actor=`reader`. 사람 근거 2가지(save_gate 앵커·
+  대화형 TTY)만 `human` 승격. `BINGGU_STRICT_HUMAN_GATE` 는 **deprecated no-op**(0/false 로 fail-open 불가).
+- **레거시 CLI mutation 12곳 재배선(AOB-3).** `deprecate/replace/accept/unaccept/due/resolve/mark/
+  trace mark/confirm-edges` + `save --accept`/`pair --accept` 가 하드코딩 `{"actor":"human"}` 대신 전부
+  `_resolve_human_ctx` 경유(검증된 ctx 재사용 · fresh human 위조 금지). 잔존 리터럴 human write = **0**
+  (AST 인벤토리로 강제).
+- **회귀:** `scripts/binggu_approval_origin_selftest.py`(run_all 등재) — env_var_cannot_approve ·
+  noninteractive_always_blocked · strict_false_no_fail_open · noninteractive save/pair blocked ·
+  ship-guard(test_double 채널·env 승인 read 0) · AST 인벤토리. 대화형 성공경로는 PTY(Unix)로 검증
+  (`tests/test_trusted_approval_e2e.py::test_interactive_approve_pty`).
+
+**여전히 P1-B(비대화형 owner 승인 스키마 필요 — 이 계약의 범위 밖):** ① `accept/unaccept/due/resolve/
+confirm_edges` 는 approval-event `binding_fields` 스키마가 없어 현재 **대화형 TTY/앵커로만** 승인(비대화형
+owner 경로 부재). ② hosted save-intent 커밋 경로 — transported confirm(`LIVE SAVE n`)으로 literal
+`{"actor":"human"}` 을 찍는 3파일: `scripts/binggu_hosted_inbox.py:168`(CLI `hosted pull` write) ·
+`scripts/openbinggu_save_intent_live_runner.py:145` · `scripts/openbinggu_save_intent_outbox_runner.py:271`
+(binding_fields 프레임에 미편입 · CLI-only · MCP 표면 미노출). ③ FS/Bash 도구 병재 호스트의 직접 import
+mint 및 대화형 TTY PTY 위조(대화형 leg 은 UX 경계 · 암호학적 사람증명 아님 · §4/§5 배포 경계). ④
+`scripts/hybrid_agi/hag_sync_adapter.py` 는 `--actor human` **CLI arg** 를 운영 edges write 의 사람 근거로
+받는다(owner 셸 전용 도구 · 정식 wheel 패키지 아님이나 source-clone 존재) — `binggu.py` 가이드 출력에서
+참조. 이들은 §23 STILL-OPEN 라벨 유지. (`scripts/binggu_approval_origin_selftest.py` 인벤토리가 ②를 매
+실행 명시 출력 · binggu.py CLI 진입점 자체는 리터럴 0.)
+
 ## 20. Migration (additive · idempotent · Wave2 R3 SOUND)
 
 - `binggu_schema.py`: `approval_requests`·`approval_consumptions` 를 `_TABLE_COLUMNS` 에 추가

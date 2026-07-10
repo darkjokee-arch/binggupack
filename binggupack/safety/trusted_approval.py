@@ -402,9 +402,11 @@ def find_approve(home, request_id):
     return None
 
 
-def mint_approval(home, request, ttl_seconds, now, channel="cli_tty"):
+def mint_approval(home, request, ttl_seconds, now, channel="unverified_direct"):
     """owner CLI 가 승인 발행 — ≥128-bit nonce 생성 후 EVENT append. request = get_request dict.
-    ★ 반드시 CLI(대화형 TTY 검증 후)에서만 호출(이 모듈은 발행 도구를 MCP 에 노출하지 않는다)."""
+    ★ 반드시 CLI(대화형 TTY 검증 후)에서만 호출(이 모듈은 발행 도구를 MCP 에 노출하지 않는다).
+    channel 은 호출부가 검증 후 명시 전달한다(CLI TTY = 'cli_tty', 테스트 = 'test_double'). 기본값은
+    'unverified_direct' — 직접 import 등 미검증 발행이 'cli_tty' 로 거짓 라벨되지 않게(P1-A.1 · AOB-1)."""
     nonce = secrets.token_hex(16)  # 128-bit
     record = {"request_id": request["request_id"], "protocol_version": request["protocol_version"],
               "operation": request["operation"], "payload_digest": request["payload_digest"],
@@ -415,8 +417,12 @@ def mint_approval(home, request, ttl_seconds, now, channel="cli_tty"):
     return record
 
 
-def tombstone(home, request, record_type, now, channel="cli_tty"):
-    """reject/revoke tombstone append(owner CLI 전용)."""
+def tombstone(home, request, record_type, now, channel="unverified_direct"):
+    """reject/revoke tombstone append(owner CLI 전용).
+
+    P1-A.1: 기본 channel 은 mint 와 동일하게 'unverified_direct' — reject/revoke 는 approve 와 달리 isatty
+    검증이 없으므로 'cli_tty' 라벨은 정직하지 않다(pipe 로도 tombstone 가능). deny-direction(write 부여
+    아님)이라 보안 중립이나 라벨 정직성 원칙(approver_channel 은 감사 메타 · verify_event 미검증)을 지킨다."""
     append_event(home, {"request_id": request["request_id"], "record_type": record_type,
                         "at": now, "approver_channel": channel})
 
