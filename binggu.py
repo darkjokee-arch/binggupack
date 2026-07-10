@@ -1043,6 +1043,10 @@ def cmd_learn_consume(a):
             print("  이 query 로 회상되는 판단이 없습니다(장부 변경 가능).")
         elif reason == "no_query":
             print("  큐 항목에 회상 query 가 없습니다(소비 불가).")
+        elif reason == "empty_feedback":
+            print("  큐 항목에 발화 근거(feedback)가 없습니다(소비 불가).")
+        elif reason == "dup_decision":
+            print("  같은 발화가 이미 적중률에 반영됨(이중계상 차단).")
         return 1
     # dry-run(기본): 소비 대기 목록 + 회상 top preview(read-only · 저장 0)
     pv = LC.preview(ledger, qpath, home=os.path.dirname(ledger))

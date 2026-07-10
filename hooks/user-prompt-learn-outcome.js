@@ -49,7 +49,10 @@ const RECALL_RE = /recall|cloud_recall|opencrab_(search|query)|__why(\b|"|$)/i;
 // ★한글에는 \b(word boundary)를 쓰지 않는다 — 한글 음절은 \w 밖이라 "맞네"에서 경계 매칭 실패.
 //   우연 매칭은 아래 SHORT_LEN/HEAD_WINDOW 게이트가 방어(어미까지 그룹으로 좁게).
 const POS_RE = /(정확해|정확하(네|다)|맞(네|아|았|다|어|지)|맞았(어|다|네)|딩동|바로\s*그거|그래\s*맞|오\s*맞|좋아\s*맞|훌륭|잘\s*했|잘했|맞음|맞다|굳(?=[\s!.,]|$)|굿)/;
-const NEG_RE = /(아니(야|다|네|지|에요|예요|었어|었다|긴)|아닌(데|가|것)|틀렸|틀린|그게\s*아니|그거\s*아니|잘못(됐|짚|알)|아냐|노노|반대야)/;
+// ★A 재설계(2026-07-10): owner 실제 지적/정정 스타일 확장 — "산으로 간다"·"그대로다"·"다시 봐"·
+//   "안 고쳐졌"·"왜 안" 등. 기존은 "아니야/틀렸어" 명시 리액션만 잡아 owner 실사용 지적 0건 매칭이었다.
+//   SHORT_LEN/HEAD_WINDOW 게이트가 긴 문장 중간 우연 매칭을 방어(과대포착은 큐→owner 승인 소비가 최종 차단).
+const NEG_RE = /(아니(야|다|네|지|에요|예요|었어|었다|긴)|아닌(데|가|것)|틀렸|틀린|그게\s*아니|그거\s*아니|잘못(됐|짚|알)|아냐|노노|반대야|산으로|다시\s*(봐|보자|확인)|안\s*(고쳐|됐|돼|바뀌)|그대로(다|네|잖|인데)|왜\s*안)/;
 
 // 우연 매칭 방지: 발화가 짧거나(대략 피드백성) 앞머리에서 매칭돼야 채택.
 // 긴 서술문 중간에 "맞아" 가 우연히 섞인 경우(예: "일정 맞춰서 진행해줘")를 배제.
@@ -182,10 +185,11 @@ function main(rawData) {
   // transcript_path: stdin JSON 에 오면 사용(없으면 무기록=안전 실패, 표본만 덜 쌓임).
   let tp = data.transcript_path || '';
   const scan = scanRecall(tp, prompt);
-  if (!scan.found) {
-    log(`SKIP feedback=${outcome} recall=none len=${prompt.length}`);
-    return;   // 직전 turn 에 회상 없음 → 무기록(학습 대상 아님)
-  }
+  // ★A 재설계(2026-07-10): recall 커플링 제거. owner 지적/정정 대부분은 recall 무관(AI 작업
+  //   피드백)이라 scan.found 필수 게이트가 owner 실사용 피드백을 구조적으로 0건 만들었다
+  //   (hit_events n=1 근본원인). recall 있으면 query 연결, 없으면 recall_linked=false 로 큐에 남긴다.
+  //   자동 확정 0 유지 — 큐는 owner 승인 소비(learn-consume)/세션마무리 SAVE 로만 hit_events 적재.
+  const recallLinked = scan.found;
 
   fs.mkdirSync(STATE, { recursive: true });
   if (queueLineCount() >= QUEUE_MAX) {
@@ -196,7 +200,8 @@ function main(rawData) {
   const entry = {
     ts: new Date().toISOString(),
     outcome,                                   // 'hit' | 'miss'
-    queries: scan.queries,                     // recall input.query 추정(짧게 절단·중복 제거)
+    recall_linked: recallLinked,               // ★recall 연결 여부(true=회상결과 피드백 / false=일반 작업 지적)
+    queries: scan.queries,                     // recall input.query 추정(recall_linked 시만 채워짐·중복 제거)
     evidence: {
       feedback: prompt.slice(0, QUERY_MAX),    // 사람 발화 근거(PII 최소 절단)
       recall_count: scan.queries.length,
@@ -206,7 +211,7 @@ function main(rawData) {
   };
   try {
     fs.appendFileSync(QUEUE, JSON.stringify(entry) + '\n', 'utf-8');
-    log(`QUEUED outcome=${outcome} queries=${scan.queries.length}`);
+    log(`QUEUED outcome=${outcome} linked=${recallLinked} queries=${scan.queries.length}`);
   } catch (e) {
     log(`ERR append ${e && e.message}`);
   }

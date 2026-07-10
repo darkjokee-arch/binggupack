@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "binggupack"
-version = "1.18.2"   # v1.18.2 — 자동수집 부활(scope 회귀 봉합)·세션 마무리 정규화(N3)·대화 덩어리 veto(길이+줄바꿈). version SSOT = binggupack/__about__.py.
+version = "1.18.3"   # v1.18.3 — 문서/문구 정밀화(Release 링크·SECURITY.md·README 2트랙)·적중률 학습 재설계(발화 앵커). version SSOT = binggupack/__about__.py.
 description = "BingguPack — local-first, evidence-backed memory/context pack framework with an installable Claude Code MCP server (stdio JSON-RPC). Python stdlib only."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -26,7 +26,8 @@ search = ["ddgs>=9"]
 
 [project.urls]
 Homepage = "https://github.com/darkjokee-arch/binggupack"
-Release = "https://github.com/darkjokee-arch/binggupack/releases/tag/v1.16.0"
+Release = "https://github.com/darkjokee-arch/binggupack/releases/latest"
+Changelog = "https://github.com/darkjokee-arch/binggupack/blob/main/CHANGELOG.md"
 
 [project.scripts]
 # PyPI 설치 후 바로 쓰는 공개 CLI. clone 사용자는 기존 `python binggu.py ...` 그대로 동작한다.

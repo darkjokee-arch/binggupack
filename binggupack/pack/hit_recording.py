@@ -127,6 +127,47 @@ def mark_miss(db, ledger_path, recall_query, index, ctx, nonce=None, domain=None
                         nonce=nonce, domain=domain, home=home)
 
 
+def mark_outcome_uttered(db, feedback, ts, outcome, ctx, domain=None):
+    """★A 재설계(2026-07-10): recall 무관 owner 지적/정정을 **발화 앵커**로 hit/miss 기록.
+
+    회상 조언(mark_outcome)이 아닌 owner 실시간 지적("산으로 간다"·"틀렸어" 등)의 적중을 센다.
+    owner 가 측정하려는 건 "내 직감/지적이 맞았나"인데, 그 지적 대부분은 recall 결과가 아니라
+    AI 작업/진단에 대한 정정이라 회상 재실행(why_search)으로 node_id 를 확보할 대상이 없다.
+
+    ★안전(위조 차단은 다른 방식으로 이미 충족):
+      - 큐는 UserPromptSubmit hook(사람만 발생·AI 위조 불가)만 append → 발화 자체가 앵커.
+      - 소비는 owner 승인 경로(ctx.actor=human) — AI 자동 기록 표면 0(learn-consume 게이트).
+      - hit_events.node_id 는 nodes FK 가 아닌 자유 TEXT → 발화 앵커 ID("utter:<sha16>")로
+        노드 생성 없이 직접 INSERT. 적중률(both_sides)은 speaker 별 outcome 개수만 세므로
+        노드에 묶지 않아도 owner 적중률에 그대로 반영된다.
+      - dup 가드: 같은 발화 앵커의 반복 소비 = 같은 decision_id → skip(이중계상 0).
+    """
+    if (ctx or {}).get("actor", "").strip().lower() != "human":
+        return {"recorded": False, "reason": "G4_no_auto"}
+    if outcome not in ("hit", "miss"):
+        return {"recorded": False, "reason": "invalid_outcome"}
+    fb = (feedback or "").strip()
+    if not fb:
+        return {"recorded": False, "reason": "empty_feedback"}
+    # 발화 앵커 node_id — 발화+ts 로 안정 해시(같은 발화·같은 시각 = 같은 앵커 → dup 방지).
+    anchor_raw = (fb + _UNIT_SEP + str(ts or "")).encode("utf-8", "replace")
+    node_id = "utter:" + hashlib.sha256(anchor_raw).hexdigest()[:16]
+    fb_hash = hashlib.sha256(fb.encode("utf-8", "replace")).hexdigest()[:16]
+    did = HIT._decision_id(node_id, fb_hash)
+    dom = HIT._domain_norm(domain)
+    speaker = "owner"
+    if HIT._dup_exists(db, did, node_id, speaker):
+        return {"recorded": False, "reason": "dup_decision"}
+    now = HIT._now_iso(ts)
+    db.con.execute(
+        "INSERT INTO hit_events(node_id,speaker,kind,outcome,subtype,ts,domain,context_hash,decision_id) "
+        "VALUES(?,?,?,?,?,?,?,?,?)",
+        (node_id, speaker, "지적", outcome, None, now, dom, None, did))
+    db.con.commit()
+    return {"recorded": True, "outcome": outcome, "node_id": node_id,
+            "decision_id": did, "domain": dom, "anchor": "utterance"}
+
+
 # ---------------- selftest (temp DB · 운영 write 0) ----------------
 
 def _selftest():
@@ -210,6 +251,31 @@ def _selftest():
         r8 = mark_hit(db8, os.path.join(tmp, "led8.sqlite"), "백업 파괴작업 승인", 1, {"actor": "human"})
         rec(8, "nonce 미지정 허용(재실행으로 node 확보·recorded True)", r8.get("recorded"))
         db8.close()
+
+        # T9~T11 ★A 재설계: 발화 앵커 hit/miss(recall 무관 owner 지적 — nodes 없이 직접 기록).
+        before_u = db.con.execute("SELECT count(*) FROM hit_events").fetchone()[0]
+        ru1 = mark_outcome_uttered(db, "산으로 간다", "2026-07-10T00:00:00Z", "miss", {"actor": "human"})
+        after_u = db.con.execute("SELECT count(*) FROM hit_events").fetchone()[0]
+        owner_utt = db.con.execute(
+            "SELECT speaker,kind,outcome FROM hit_events WHERE node_id LIKE 'utter:%'").fetchone()
+        rec(9, "발화 앵커 기록(recorded True·+1·node_id utter:·speaker owner·kind 지적·outcome miss)",
+            ru1.get("recorded") and after_u == before_u + 1
+            and str(ru1.get("node_id")).startswith("utter:") and owner_utt == ("owner", "지적", "miss"))
+
+        # T10 발화 앵커 이중계상 차단 — 같은 발화+ts 재소비 → dup_decision·INSERT 0.
+        ru2 = mark_outcome_uttered(db, "산으로 간다", "2026-07-10T00:00:00Z", "miss", {"actor": "human"})
+        after_u2 = db.con.execute("SELECT count(*) FROM hit_events").fetchone()[0]
+        rec(10, "발화 앵커 이중계상 차단(같은 발화+ts → dup_decision·INSERT 0)",
+            (not ru2.get("recorded")) and ru2.get("reason") == "dup_decision" and after_u2 == after_u)
+
+        # T11 발화 앵커 안전 — actor!=human → G4_no_auto / 빈 발화 → empty_feedback (둘 다 이벤트 0).
+        before_u3 = db.con.execute("SELECT count(*) FROM hit_events").fetchone()[0]
+        ru3 = mark_outcome_uttered(db, "다른 지적", "2026-07-10T00:01:00Z", "hit", {"actor": "ai"})
+        ru4 = mark_outcome_uttered(db, "   ", "2026-07-10T00:02:00Z", "hit", {"actor": "human"})
+        after_u3 = db.con.execute("SELECT count(*) FROM hit_events").fetchone()[0]
+        rec(11, "발화 앵커 안전(actor!=human→G4_no_auto·빈발화→empty_feedback·이벤트 0)",
+            ru3.get("reason") == "G4_no_auto" and ru4.get("reason") == "empty_feedback"
+            and before_u3 == after_u3)
 
     finally:
         db.close()

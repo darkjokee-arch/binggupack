@@ -149,7 +149,18 @@ def consume(db, ledger_path, qpath, qi, index=1, home=None):
     outcome = entry.get("outcome")
     queries = entry.get("queries") or []
     if not queries:
-        return {"consumed": False, "reason": "no_query"}
+        # ★A 재설계(2026-07-10): recall 무관 owner 지적(recall_linked=false) — 발화 앵커로 직접
+        #   hit/miss 기록. hit_events 는 speaker 별 outcome 개수만 세므로 노드에 안 묶어도 owner
+        #   적중률에 반영된다. 위조 차단은 발화 앵커(UserPromptSubmit hook)+owner 승인(human)이 보장.
+        fb = (entry.get("evidence") or {}).get("feedback") or ""
+        r = HR.mark_outcome_uttered(db, fb, entry.get("ts"), outcome,
+                                    {"actor": "human"}, domain=entry.get("domain"))
+        if not r.get("recorded"):
+            return {"consumed": False, "reason": r.get("reason"), "mark": r}
+        _mark_consumed(qpath, line_idx)
+        return {"consumed": True, "outcome": outcome, "index": index,
+                "node_claim": fb[:70], "query": None, "anchor": "utterance",
+                "node_id": r.get("node_id"), "decision_id": r.get("decision_id")}
     query = queries[0]
     # mark_outcome 이 actor=human 게이트·D-1·D-2·nonce(None=stale skip) 을 그대로 강제.
     r = HR.mark_outcome(db, ledger_path, query, index, outcome, {"actor": "human"},
@@ -256,11 +267,22 @@ def _selftest():
             parse_confirm("CONSUME 3") == 3 and parse_confirm("consume 3") is None
             and parse_confirm(None) is None)
 
-        # T8 no_query graceful.
+        # T8 query 빈 + 발화 근거도 없음 → empty_feedback graceful(기록 0).
         write_queue([{"ts": "x", "outcome": "hit", "queries": [], "consumed": False}])
         r8 = consume(db, ledger, qpath, 0, index=1, home=tmp)
-        rec(8, "no_query graceful(consumed False·에러 0)",
-            (not r8.get("consumed")) and r8.get("reason") == "no_query")
+        rec(8, "query 빈+발화없음 → empty_feedback graceful(consumed False·에러 0)",
+            (not r8.get("consumed")) and r8.get("reason") == "empty_feedback")
+
+        # T9 ★A 재설계: recall 무관 owner 지적(query 빈·feedback 있음) → 발화 앵커로 hit/miss 소비.
+        ev_b = db.con.execute("SELECT count(*) FROM hit_events WHERE node_id LIKE 'utter:%'").fetchone()[0]
+        write_queue([{"ts": "2026-07-10T09:00:00Z", "outcome": "miss", "queries": [],
+                      "recall_linked": False, "evidence": {"feedback": "산으로 간다"}, "consumed": False}])
+        r9 = consume(db, ledger, qpath, 0, index=1, home=tmp)
+        ev_a = db.con.execute("SELECT count(*) FROM hit_events WHERE node_id LIKE 'utter:%'").fetchone()[0]
+        pend9 = load_pending(qpath)
+        rec(9, "발화 앵커 소비(recall 무관 owner 지적 → recorded·anchor=utterance·hit_events +1·consumed)",
+            r9.get("consumed") and r9.get("anchor") == "utterance"
+            and ev_a == ev_b + 1 and len(pend9) == 0)
 
     finally:
         db.close()

@@ -1,5 +1,20 @@
 # Changelog — BingguPack
 
+## v1.18.3 — 문서/문구 정밀화 + 적중률 학습 재설계(발화 앵커) (2026-07-10)
+
+### Fixed
+- **적중률 학습 갭 해소(hit_events n=1)**: owner 실시간 지적("산으로 간다"·"그대로다"·"틀렸어")이 적중률 장부로 자동으로 흐르지 않던 근본 갭 해소. 원인 = `user-prompt-learn-outcome.js` 가 (1)"맞네/틀렸어" 명시 리액션만 잡고 (2)직전 turn 에 `recall` tool_use 가 있어야만 큐잉(`scan.found`) → owner 지적 대부분(recall 무관 작업 정정)이 0건 매칭.
+  - **recall 커플링 제거** + owner 지적/정정 패턴 확장("산으로"·"다시 봐"·"안 고쳐"·"그대로다"·"왜 안") + `recall_linked` 구분. 과대포착은 `SHORT_LEN`/`HEAD_WINDOW` 게이트 + 큐→owner 승인 소비가 방어.
+  - `hit_recording.mark_outcome_uttered`: **발화 앵커**(`utter:<sha16>`)로 hit/miss 직접 기록 — `hit_events.node_id` 는 nodes FK 가 아닌 자유 TEXT 이고 `both_sides` 는 speaker 별 outcome 개수만 세므로 노드 생성 없이 owner 적중률에 반영. 위조차단 = UserPromptSubmit hook(사람만·AI 위조 불가) + owner 승인(actor=human). dup 가드로 이중계상 0.
+  - `learn_consume`: `recall_linked=false`(recall 무관) 항목을 발화 앵커로 소비. selftest hit_recording 11/11 · learn_consume 9/9 · e2e(지적 3건 → owner 적중률 분모 반영).
+
+### Changed
+- **pyproject Release 링크 최신화**: stale `v1.16.0` → `releases/latest`(자동 최신) + `Changelog` 링크 추가.
+- **README 저장 문구 정밀화**: "자동 저장 절대 없음"(절대문구) → 기록/인정 2트랙 정합("기억할 만한 말은 임시 후보에 자동 / 장부 **확정**은 내 승인만"). "변조 감지" → "손상·변조 감지"(우발/부분 손상 탐지·장부 직접 접근자는 위협모델 밖).
+
+### Added
+- **SECURITY.md**: 취약점 신고 채널 + 위협모델 명시 — in scope(민감정보 차단·승인 없는 확정 방지·우발/부분 변조 감지·클라우드 읽기 마스킹) · out of scope(장부 직접 쓰기 권한 주체·다중 사용자 서버).
+
 ## v1.18.2 — 자동수집 부활(scope 회귀 봉합)·세션 마무리 정규화·대화 덩어리 veto (2026-07-10)
 
 ### Fixed

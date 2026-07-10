@@ -25,5 +25,14 @@ v1.18.2 — 자동수집 0 부활(init_profile scope 무조건 덮어쓰기 2026
 재발방지·명시저장 중립 cwd 우회)·세션 마무리 감지 정규화(N3: NFKC+casefold 유한폐포 membership·
 변형 흡수·부정계/선행텍스트 오발동 구조 차단)·대화 덩어리/붙여넣기/AI 응답문 자동 제외(bulk veto:
 길이+줄바꿈 밀도·줄바꿈 없는 장문 보존·명시저장 우회·preview "n건 제외" 노출·화자축 오염 방지).
+
+v1.18.3 — 문서/문구 정밀화(pyproject Release 링크 stale[v1.16.0]→releases/latest·SECURITY.md
+위협모델 명시[로컬 개인도구·전권 접근자 out of scope·우발/부분 변조 감지]·README 저장 문구를
+기록/인정 2트랙 정합["임시 후보 자동 / 장부 확정은 내 승인만"]·"변조 감지"→"손상·변조 감지")·
+적중률 학습 재설계(owner 실시간 지적을 hit_events 로 흐르게: learn-outcome hook recall 커플링
+제거 + 지적/정정 패턴 확장["산으로"·"그대로다"·"다시 봐"·"안 고쳐"·"왜 안"], hit_recording.
+mark_outcome_uttered 발화 앵커[utter:<sha16>] hit/miss 직접 기록[nodes 불필요·both_sides 는
+speaker 별 개수 집계], learn_consume 발화 앵커 소비 — hit_events n=1 영구 갭 해소, 위조차단은
+UserPromptSubmit hook[사람만·AI 위조 불가]+owner 승인[actor=human]).
 """
-__version__ = "1.18.2"
+__version__ = "1.18.3"
