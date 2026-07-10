@@ -66,6 +66,8 @@ GATES = [
     ("knowledge graph",   "binggu_knowledge_graph.py",                 ["--selftest"], "GATE: GO"),
     ("P3 self-improve",   "openbinggu_p3_self_improve.py",             ["--selftest"], "GATE: GO"),
     ("mcp handlers",      "openbinggu_mcp_server_handlers.py",         ["--selftest"], "GATE: GO"),
+    ("trusted approval",  "openbinggu_trusted_approval_boundary_selftest.py", ["--selftest"], "GATE=GO"),
+    ("trusted appr bind",  "binggu_trusted_approval_binding_characterization_selftest.py", ["--selftest"], "GATE=GO"),
     ("setup-save onboard","binggu_setup_save.py",                      ["--selftest"], "GATE: GO"),
     ("archive backup/export", os.path.join("..", "binggupack", "workspace", "archive.py"), [], "GATE=GO"),
     ("tree scan",         "openbinggu_public_tree_scan.py",            ["--tree", REPO, "--public"], "verdict=CLEAN"),
