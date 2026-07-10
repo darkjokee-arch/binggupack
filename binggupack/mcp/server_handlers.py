@@ -111,14 +111,9 @@ def _u_save_candidate(params=None):
     confirm = params.get("confirm", "")
     dry_run = params.get("dry_run", True)  # 기본 dry-run (비가역 write default-deny)
 
-    # actor 는 항상 reader 로 넘긴다. confirm 문자열은 모델이 dry-run 응답(confirm_expected)에서 얻어
-    # 그대로 재현할 수 있어 "사람-선택 증거"가 되지 못한다 — confirm 자칭 human 승격은 모델이 사람 발화 0으로
-    # 운영 ledger 에 write 하는 우회로였다(P0, 2026-07-10 재현 확증). 진짜 사람 승격은 save_selected 내부
-    # _maybe_promote_actor_by_gate 가 save_gate_log(사장님이 실제 'SAVE n' 을 키보드로 입력할 때 UserPromptSubmit
-    # hook 이 남기는 앵커 · AI 위조 불가)를 확인해서만 결정한다. confirm 은 아래 형식 검증(정확일치)에만 쓴다.
-    # → 사장님 실입력 시 저장(7/4 개방 유지) / 모델 confirm 재현 시 save_gate 앵커 부재로 G4_no_auto BLOCK.
-    actor = "reader"
-
+    # P1-A: actor 는 approval_gate.authorize 가 결정한다(write 경로). confirm 문자열은 dry-run 응답
+    # (confirm_expected)에서 모델이 재현 가능 → "사람 증거"가 아니라 형식 검증(정확일치)에만 쓴다(§6).
+    # 진짜 사람 승격 = out-of-band trusted approval event(owner CLI 발행·MCP 미접근).
     from binggupack.capture import preview as cvp
     pv = cvp.capture_preview(text)
     cands = pv["candidates"]
@@ -133,32 +128,40 @@ def _u_save_candidate(params=None):
                 "preview": [{"index": j + 1, "label_kind": c["label_kind"], "sentence": c["sentence"]}
                             for j, c in enumerate(cands)]}
 
-    # dry_run=False (명시 opt-out): confirm 정확일치 1차 게이트 — 불일치면 write 진입 0.
+    # dry_run=False (명시 opt-out): confirm 정확일치 형식 게이트 — 불일치면 write 진입 0.
     if confirm != expected:
         return {"action": "save_candidate", "mode": "write-gated", "verdict": "REJECT",
                 "executed_write": False, "reason": "confirm_phrase_mismatch",
                 "confirm_expected": expected}
 
-    # 실 write 경로 — read-only 해제: 운영 ledger(BINGGU_HOME 우선·없으면 ~/.binggupack)에 저장.
-    # MCP 외부 경로 입력은 여전히 무시(경로 주입 차단) — 운영 ledger 경로는 서버가 결정한다.
+    # 실 write 경로 — 운영 ledger(BINGGU_HOME 우선·없으면 ~/.binggupack). MCP 외부 경로 입력은 무시(주입 차단).
+    # actor=human 은 authorize 가 유효 trusted approval 을 확인·1회 consume 했을 때만. 아니면 reader → G4.
     from binggupack.storage import open_g3, save_selected
+    from binggupack.mcp import approval_gate
     home = os.environ.get("BINGGU_HOME") or os.path.join(os.path.expanduser("~"), ".binggupack")
     db_path = os.path.join(home, "ledger.sqlite")
     snap_dir = os.path.join(home, "snapshots")
     os.makedirs(snap_dir, exist_ok=True)  # staging_apply snapshot 복사 대상 폴더 보장
+    # MCP save 는 auto-classifier(explicit=False) 고정 — 렌더러/실행기 동일 explicit 바인딩(TAE-P2-04).
+    bind = {"text": text, "indices": indices, "explicit": False,
+            "speaker": params.get("speaker"), "due_date": params.get("due_date"),
+            "approval_id": params.get("approval_id")}
     db = open_g3(db_path)
     try:
-        r = save_selected(db, text, indices, {"actor": actor, "confirm": confirm},
-                          snap_dir, due_date=params.get("due_date"))
+        with approval_gate.authorize("save_candidate", bind, home, db) as auth:
+            r = save_selected(db, text, indices, {"actor": auth.actor, "confirm": confirm},
+                              snap_dir, due_date=params.get("due_date"),
+                              speaker=params.get("speaker"), explicit=False)
+            auth.settle(r)
+        extra = auth.response_extra()
     finally:
         db.close()
-    # confirm='SAVE n' 정확일치(사람 직접선택 증거) → actor=human → 실 write. 불일치/부재 → reader → G4 BLOCK(자동저장 방지 불변).
     return {"action": "save_candidate", "mode": "write-gated",
             "verdict": "ALLOW" if r.get("applied") else "BLOCK",
             "executed_write": bool(r.get("applied")),
             "saved": r.get("saved"), "skipped_existing": r.get("skipped_existing"),
             "rejected": r.get("rejected"), "reason": r.get("reason"),
-            "pack_id": r.get("pack_id"), "ledger": "operating"}
+            "pack_id": r.get("pack_id"), "ledger": "operating", **extra}
 
 
 # ==== Phase 2 배치 A: 조회(read) 도구 — CLI recall/preflight/trace/status/list/reminders 노출 ====
@@ -451,24 +454,29 @@ def _u_pair(params=None):
                 "relation": rel, "confirm_expected": expected,
                 "owner_preview": _pv(owner_text),
                 "ai_preview": _pv(ai_text) if ai_text else [], **_MCP_FAIL_CLOSED}
-    # 승인 경계(P0·save_candidate 봉인과 동일): confirm 문구는 dry_run 응답이 그대로 노출하므로 모델이
-    # 재현 가능 → "사람 승격 증거"가 되지 못한다(자율 에이전트 preview→confirm 우회 재현 확증, 2026-07-10).
-    # actor 를 reader 로 하드 오버라이드 → save_paired G4_no_auto(사람 앵커 없는 자동저장 차단). confirm 은
-    # 형식검증(정확일치)에만 쓴다. owner 정당 pair 저장은 CLI(cmd_pair·TTY 신뢰 경로)로 수행한다.
-    actor = "reader"
+    # P1-A: actor 는 authorize 가 결정(유효 trusted approval → human, else reader → save_paired G4).
+    # confirm 은 형식검증 전용(§6). owner 정당 pair = CLI(cmd_pair·TTY) 또는 approval 승인.
     ledger = _operating_ledger()
     if not os.path.exists(ledger):
         return {"action": "pair", "mode": "write-gated", "verdict": "REJECT",
                 "executed_write": False, "reason": "ledger_not_found"}
     from openbinggu_owner_accept_ux import open_accept
     from binggupack.storage import save_paired
+    from binggupack.mcp import approval_gate
     snap_dir = os.path.join(_operating_home(), "snapshots")
     os.makedirs(snap_dir, exist_ok=True)
+    bind = {"owner_text": owner_text, "ai_text": ai_text, "owner_pick": owner_pick,
+            "ai_pick": ai_pick, "by": by, "relation": relation,
+            "due_date": params.get("due_date"),   # TA-ATK-1: due_date 도 바인딩(리마인더 주입 차단)
+            "approval_id": params.get("approval_id")}
     db = open_accept(ledger)
     try:
-        r = save_paired(db, owner_text, ai_text, {"actor": actor, "confirm": confirm},
-                        snap_dir, relation_kind=rel, owner_pick=owner_pick, ai_pick=ai_pick,
-                        due_date=params.get("due_date"))
+        with approval_gate.authorize("pair", bind, _operating_home(), db) as auth:
+            r = save_paired(db, owner_text, ai_text, {"actor": auth.actor, "confirm": confirm},
+                            snap_dir, relation_kind=rel, owner_pick=owner_pick, ai_pick=ai_pick,
+                            due_date=params.get("due_date"))
+            auth.settle(r)
+        extra = auth.response_extra()
     finally:
         db.close()
     return {"action": "pair", "mode": "write-gated",
@@ -476,7 +484,7 @@ def _u_pair(params=None):
             "executed_write": bool(r.get("applied")),
             "saved": r.get("saved"), "reason": r.get("reason"),
             "relation": r.get("relation"), "paired": r.get("paired"),
-            "pack_id": r.get("pack_id"), "ledger": "operating", **_MCP_FAIL_CLOSED_INFO}
+            "pack_id": r.get("pack_id"), "ledger": "operating", **extra}
 
 
 def _u_deprecate(params=None):
@@ -503,24 +511,27 @@ def _u_deprecate(params=None):
                 "note": "미리보기입니다. MCP 로는 confirm 만으로 실행되지 않습니다(fail-closed) — "
                         "실제 기각은 로컬 CLI: binggu deprecate <n> <id8> --reason ... --confirm ...",
                 **_MCP_FAIL_CLOSED}
-    # 승인 경계(P0): confirm 은 dry_run 이 노출 → 모델 재현 가능(사람 증거 아님). actor 하드 reader →
-    # deprecate_from_list G4_no_auto. owner 정당 기각은 CLI(cmd_deprecate·TTY). confirm=형식검증 전용.
-    actor = "reader"
+    # P1-A: actor 는 authorize 가 결정(유효 approval → human, else reader → deprecate_from_list G4).
+    # confirm=형식검증 전용(§6). owner 정당 기각 = CLI(cmd_deprecate·TTY) 또는 approval 승인.
     _ensure_scripts_path()
     from openbinggu_owner_accept_ux import open_accept
     from openbinggu_candidate_deprecate_ux import deprecate_from_list
+    from binggupack.mcp import approval_gate
     snap_dir = os.path.join(_operating_home(), "snapshots")
     os.makedirs(snap_dir, exist_ok=True)
+    bind = {"index": index, "id8": id8, "reason": reason, "approval_id": params.get("approval_id")}
     db = open_accept(ledger)
     try:
-        r = deprecate_from_list(db, index, id8, reason, {"actor": actor, "confirm": confirm}, snap_dir)
+        with approval_gate.authorize("deprecate", bind, _operating_home(), db) as auth:
+            r = deprecate_from_list(db, index, id8, reason, {"actor": auth.actor, "confirm": confirm}, snap_dir)
+            auth.settle(r)
+        extra = auth.response_extra()
     finally:
         db.close()
     return {"action": "deprecate", "mode": "write-gated",
             "verdict": "ALLOW" if r.get("applied") else "BLOCK",
             "executed_write": bool(r.get("applied")),
-            "reason": r.get("reason"), "node_id": r.get("node_id"), "ledger": "operating",
-            **_MCP_FAIL_CLOSED_INFO}
+            "reason": r.get("reason"), "node_id": r.get("node_id"), "ledger": "operating", **extra}
 
 
 def _u_replace(params=None):
@@ -548,25 +559,34 @@ def _u_replace(params=None):
                 "note": "미리보기입니다. MCP 로는 confirm 만으로 실행되지 않습니다(fail-closed) — "
                         "실제 교체는 로컬 CLI: binggu replace <n> <id8> --with ... --reason ... --confirm ...",
                 **_MCP_FAIL_CLOSED}
-    # 승인 경계(P0): confirm 은 dry_run 이 노출 → 모델 재현 가능(사람 증거 아님). actor 하드 reader →
-    # replace_from_list G4_no_auto. owner 정당 교체는 CLI(cmd_replace·TTY). confirm=형식검증 전용.
-    actor = "reader"
+    # P1-A: actor 는 authorize 가 결정. confirm=형식검증 전용(§6). ★replace 는 비-멱등(deprecate+save)
+    # 이라 crash 시 반쪽변형 가능 → consume 진입 전 pending journal all-or-nothing 복원(TAE-3).
     _ensure_scripts_path()
     from openbinggu_owner_accept_ux import open_accept
-    from openbinggu_candidate_replace_ux import replace_from_list
+    from openbinggu_candidate_replace_ux import (
+        replace_from_list, pending_replace_journals, recover_pending_replace)
+    from binggupack.mcp import approval_gate
     snap_dir = os.path.join(_operating_home(), "snapshots")
     os.makedirs(snap_dir, exist_ok=True)
+    bind = {"index": index, "id8": id8, "new_sentence": new_sentence, "reason": reason,
+            "approval_id": params.get("approval_id")}
     db = open_accept(ledger)
     try:
-        r = replace_from_list(db, index, id8, new_sentence, reason,
-                              {"actor": actor, "confirm": confirm}, snap_dir)
+        resid = pending_replace_journals(snap_dir)
+        if resid:
+            recover_pending_replace(db, resid[0])   # 반쪽변형 복원 후 재평가(all-or-nothing)
+        with approval_gate.authorize("replace", bind, _operating_home(), db) as auth:
+            r = replace_from_list(db, index, id8, new_sentence, reason,
+                                  {"actor": auth.actor, "confirm": confirm}, snap_dir)
+            auth.settle(r)
+        extra = auth.response_extra()
     finally:
         db.close()
     return {"action": "replace", "mode": "write-gated",
             "verdict": "ALLOW" if r.get("applied") else "BLOCK",
             "executed_write": bool(r.get("applied")),
             "reason": r.get("reason"), "old_node_id": r.get("old_node_id"),
-            "new_node_id": r.get("new_node_id"), "ledger": "operating", **_MCP_FAIL_CLOSED_INFO}
+            "new_node_id": r.get("new_node_id"), "ledger": "operating", **extra}
 
 
 # ==== Phase 2 배치 C: 작업 도구 — reflect(회고→후보·read) + harvest(외부 소스 관리) ====
@@ -623,13 +643,29 @@ def _u_harvest_add(params=None):
     if confirm != expected:
         return {"action": "harvest_add", "mode": "write-gated", "verdict": "REJECT",
                 "executed_write": False, "reason": "confirm_phrase_mismatch", "confirm_expected": expected}
+    # P1-A TAE-7: harvest 도 trusted approval 로 봉인(confirm-only 창 제거). ledger 는 consumption
+    # 추적 + ledger_id 용(harvest 자체는 JSON write). auth.actor!=human 이면 add_source 미호출(fail-closed).
     _ensure_scripts_path()
     import binggu_harvest as HV
-    r = HV.add_source(kind, url, keyword=keyword, path=HV.sources_path(_operating_home()))
-    ok = r.get("status") == "OK"
+    from binggupack.storage import open_g3
+    from binggupack.mcp import approval_gate
+    home = _operating_home()
+    bind = {"kind": kind, "url": url, "keyword": keyword, "approval_id": params.get("approval_id")}
+    db = open_g3(os.path.join(home, "ledger.sqlite"))
+    try:
+        with approval_gate.authorize("harvest_add", bind, home, db) as auth:
+            if auth.actor == "human":
+                r = HV.add_source(kind, url, keyword=keyword, path=HV.sources_path(home))
+                ok = r.get("status") == "OK"
+            else:
+                r, ok = {}, False
+            auth.settle({"applied": ok, "reason": r.get("reason")})
+        extra = auth.response_extra()
+    finally:
+        db.close()
     return {"action": "harvest_add", "mode": "write-gated",
             "verdict": "ALLOW" if ok else "BLOCK", "executed_write": ok,
-            "source_id": r.get("source_id"), "reason": r.get("reason")}
+            "source_id": r.get("source_id"), "reason": r.get("reason"), **extra}
 
 
 def _u_harvest_remove(params=None):
@@ -648,13 +684,28 @@ def _u_harvest_remove(params=None):
     if confirm != expected:
         return {"action": "harvest_remove", "mode": "write-gated", "verdict": "REJECT",
                 "executed_write": False, "reason": "confirm_phrase_mismatch", "confirm_expected": expected}
+    # P1-A TAE-7: harvest_remove 도 trusted approval 봉인(confirm-only 제거). auth.actor!=human → 미호출.
     _ensure_scripts_path()
     import binggu_harvest as HV
-    r = HV.remove_source(source_id, path=HV.sources_path(_operating_home()))
-    removed = r.get("removed", 0)
+    from binggupack.storage import open_g3
+    from binggupack.mcp import approval_gate
+    home = _operating_home()
+    bind = {"source_id": source_id, "approval_id": params.get("approval_id")}
+    db = open_g3(os.path.join(home, "ledger.sqlite"))
+    try:
+        with approval_gate.authorize("harvest_remove", bind, home, db) as auth:
+            if auth.actor == "human":
+                r = HV.remove_source(source_id, path=HV.sources_path(home))
+                removed = r.get("removed", 0)
+            else:
+                r, removed = {}, 0
+            auth.settle({"applied": bool(removed), "reason": r.get("reason")})
+        extra = auth.response_extra()
+    finally:
+        db.close()
     return {"action": "harvest_remove", "mode": "write-gated",
             "verdict": "ALLOW" if removed else "BLOCK", "executed_write": bool(removed),
-            "removed": removed, "reason": r.get("reason")}
+            "removed": removed, "reason": r.get("reason"), **extra}
 
 
 # ==== 트랙 B: OpenCrab 클라우드 read 조회(egress-only) — cloud_recall / cloud_packs ====
@@ -1022,17 +1073,24 @@ def _mark_outcome_handler(params, outcome):
                 "note": "미리보기입니다. MCP 로는 confirm 만으로 기록되지 않습니다(fail-closed) — "
                         "실제 기록은 로컬 CLI: binggu %s <query> --index %d" % (act.replace("_", "-"), index),
                 **_MCP_FAIL_CLOSED}
-    # 승인 경계(P0): actor 하드 reader → mark_outcome G4_no_auto. MCP 로는 사람-확인 유용성 기록 불가
-    # (앵커 없음·confirm 은 모델 재현 가능) — owner 는 CLI(binggu mark-hit/mark-miss)로 기록한다.
-    actor = "reader"
+    # P1-A: actor 는 authorize 가 결정(유효 approval → human, else reader → mark_outcome G4). mark 는
+    # hit_events(audit_log row 없음) → approval consume 이 audit 패리티(§16). recall_nonce 바인딩(TAE-P2-05):
+    # 승인 후 ledger 변동 시 mark_outcome stale_recall(recall_nonce 제시 시 스냅샷 재검증).
     _ensure_scripts_path()
     from openbinggu_owner_accept_ux import open_accept
+    from binggupack.mcp import approval_gate
     db = open_accept(ledger)
     from binggupack.pack import hit_recording as HR
+    recall_nonce = params.get("recall_nonce")
+    bind = {"recall_query": recall_query, "index": index, "domain": domain,
+            "recall_nonce": recall_nonce, "approval_id": params.get("approval_id")}
     try:
-        # nonce 미지정 — 서버가 why_search 재실행으로 스냅샷 확보(D-1). ledger 는 서버결정(MCP 경로입력 무시).
-        r = HR.mark_outcome(db, ledger, recall_query, index, outcome, {"actor": actor},
-                            nonce=None, domain=domain, home=_operating_home())
+        with approval_gate.authorize(act, bind, _operating_home(), db) as auth:
+            r = HR.mark_outcome(db, ledger, recall_query, index, outcome, {"actor": auth.actor},
+                                nonce=recall_nonce, domain=domain, home=_operating_home())
+            auth.settle({"applied": bool(r.get("recorded")), "reason": r.get("reason"),
+                         "decision_id": r.get("decision_id")})
+        extra = auth.response_extra()
     finally:
         db.close()
     claim = r.get("node_claim")
@@ -1044,7 +1102,7 @@ def _mark_outcome_handler(params, outcome):
             "nonce": r.get("nonce"), "domain": r.get("domain"),
             "events": r.get("events"),
             "node_claim": _redact_pii(claim) if claim else None,  # PII 마스킹(node_id 미포함)
-            "ledger": "operating", **_MCP_FAIL_CLOSED_INFO}
+            "ledger": "operating", **extra}
 
 
 def _u_mark_hit(params=None):
@@ -1588,7 +1646,7 @@ def _selftest():
                                      "confirm": "MARK_HIT 9 wrong", "dry_run": False}, allow_root)
         tr = r.get("tool_result") or {}
         m2 = (tr.get("executed_write") is False and tr.get("recorded") is False
-              and tr.get("reason") == "G4_no_auto")
+              and tr.get("reason") in ("G4_no_auto", "provider_not_configured"))
         mark_ok = mark_ok and m2
         mark_notes.append(("mark_confirm_mismatch_write0", m2))
 
@@ -1597,7 +1655,7 @@ def _selftest():
                                      "dry_run": False, "actor": "human"}, allow_root)
         tr = r.get("tool_result") or {}
         m3 = (tr.get("executed_write") is False and tr.get("recorded") is False
-              and tr.get("reason") == "G4_no_auto")
+              and tr.get("reason") in ("G4_no_auto", "provider_not_configured"))
         mark_ok = mark_ok and m3
         mark_notes.append(("mark_actor_forge_reader_write0", m3))
 
@@ -1607,7 +1665,7 @@ def _selftest():
                                      "confirm": "MARK_HIT 1 " + _mq, "dry_run": False}, allow_root)
         tr = r.get("tool_result") or {}
         m4 = (tr.get("executed_write") is False and tr.get("recorded") is False
-              and tr.get("reason") == "G4_no_auto")
+              and tr.get("reason") in ("G4_no_auto", "provider_not_configured"))
         mark_ok = mark_ok and m4
         mark_notes.append(("mark_confirm_reproduced_BLOCKED(no_human_anchor)", m4))
 
@@ -1621,7 +1679,7 @@ def _selftest():
         r = handle_tool("mark_hit", {"recall_query": _mq, "index": 1,
                                      "confirm": "MARK_HIT 1 " + _mq, "dry_run": False}, allow_root)
         tr = r.get("tool_result") or {}
-        m6 = (tr.get("executed_write") is False and tr.get("reason") == "G4_no_auto")
+        m6 = (tr.get("executed_write") is False and tr.get("reason") in ("G4_no_auto", "provider_not_configured"))
         mark_ok = mark_ok and m6
         mark_notes.append(("mark_reMark_still_BLOCKED", m6))
 
@@ -1630,7 +1688,7 @@ def _selftest():
                                       "confirm": "MARK_MISS 2 " + _mq, "dry_run": False}, allow_root)
         tr = r.get("tool_result") or {}
         m7 = (tr.get("executed_write") is False and tr.get("recorded") is False
-              and tr.get("reason") == "G4_no_auto")
+              and tr.get("reason") in ("G4_no_auto", "provider_not_configured"))
         mark_ok = mark_ok and m7
         mark_notes.append(("mark_miss_confirm_reproduced_BLOCKED", m7))
 
@@ -1646,7 +1704,7 @@ def _selftest():
                   .get("tool_result") or {}).get("confirm_expected")
         tr = (handle_tool("pair", {"owner_text": _SAVE_CONVO, "dry_run": False,
                                    "confirm": _pconf}, allow_root).get("tool_result") or {})
-        pw1 = (bool(_pconf) and tr.get("executed_write") is False and tr.get("reason") == "G4_no_auto")
+        pw1 = (bool(_pconf) and tr.get("executed_write") is False and tr.get("reason") in ("G4_no_auto", "provider_not_configured"))
         mark_notes.append(("pair_preview_then_confirm_BLOCKED", pw1))
 
         # PW2) deprecate 우회 재현 — 실제 index/id8 + 재현 confirm 이어도 active 노드 기각 차단.
@@ -1656,7 +1714,7 @@ def _selftest():
         tr = (handle_tool("deprecate", {"index": 1, "id8": _id8, "reason": "x",
                                         "confirm": _dconf, "dry_run": False}, allow_root)
               .get("tool_result") or {})
-        pw2 = (bool(_dconf) and tr.get("executed_write") is False and tr.get("reason") == "G4_no_auto")
+        pw2 = (bool(_dconf) and tr.get("executed_write") is False and tr.get("reason") in ("G4_no_auto", "provider_not_configured"))
         mark_notes.append(("deprecate_preview_then_confirm_BLOCKED", pw2))
 
         # PW3) replace 우회 재현 — 재현 confirm 이어도 active 노드 교체 차단.
@@ -1667,7 +1725,7 @@ def _selftest():
         tr = (handle_tool("replace", {"index": 1, "id8": _id8, "new_sentence": _new,
                                       "reason": "x", "confirm": _rconf, "dry_run": False}, allow_root)
               .get("tool_result") or {})
-        pw3 = (bool(_rconf) and tr.get("executed_write") is False and tr.get("reason") == "G4_no_auto")
+        pw3 = (bool(_rconf) and tr.get("executed_write") is False and tr.get("reason") in ("G4_no_auto", "provider_not_configured"))
         mark_notes.append(("replace_preview_then_confirm_BLOCKED", pw3))
 
         # PW4) 우회 시도 후 격리 ledger 불변 — 신규 노드 0(pair)·mk1 active 유지(deprecate/replace).

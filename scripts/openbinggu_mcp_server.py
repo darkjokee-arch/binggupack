@@ -41,9 +41,9 @@ _TOOL_DESC = {
     "status": "장부 요약 — active/deprecated/검증예정/수용/audit chain(read)",
     "list": "저장 후보 목록(status/kind 필터·read)",
     "reminders": "due 경과 판단 리마인더(read)",
-    "pair": "owner+ai 페어 저장 미리보기(read/dry-run). MCP 실행은 일시적으로 fail-closed(confirm 만으로 저장 안 됨) — 실제 저장은 로컬 CLI. P1 승인이벤트 예정",
-    "deprecate": "목록 1건 기각 미리보기(read/dry-run). MCP 실행은 fail-closed(confirm 만으로 기각 안 됨) — 실제 기각은 로컬 CLI. P1 승인이벤트 예정",
-    "replace": "목록 1건 교체 미리보기(read/dry-run). MCP 실행은 fail-closed(confirm 만으로 교체 안 됨) — 실제 교체는 로컬 CLI. P1 승인이벤트 예정",
+    "pair": "owner+ai 페어 저장. dry-run=미리보기. 실행은 trusted approval 필요: dry_run=false 로 요청→approval_required+request_id, owner 가 'binggu approval approve <id>'(대화형 TTY) 후 approval_id 로 재호출→정확 1회 저장. provider 미구성/승인 없으면 fail-closed",
+    "deprecate": "목록 1건 기각. dry-run=미리보기. 실행은 trusted approval 필요(요청→owner 'binggu approval approve <id>'→approval_id 로 재호출·정확 1회). 승인 없으면 fail-closed",
+    "replace": "목록 1건 교체. dry-run=미리보기. 실행은 trusted approval 필요(요청→owner 'binggu approval approve <id>'→approval_id 로 재호출·정확 1회). 승인 없으면 fail-closed",
     "reflect": "회고·자가평가 → 지식 후보 preview(read·저장 0)",
     "harvest_list": "등록된 외부 수확 소스 목록(read)",
     "harvest_add": "외부 소스 등록(dry-run 기본·HARVEST_ADD <kind> <url> confirm·URL 안전검증)",
@@ -54,8 +54,8 @@ _TOOL_DESC = {
     "why": "판단 근거 회상 — 과거 결정의 이유·근거 사슬 조회(read·node_id 미노출·PII 마스킹)",
     "contrast": "제안 신호 ↔ 강제조항 대비표(read·양쪽 원문 인용·자동결정 0·write 0)",
     "abstraction": "반복 판단 → 규칙 후보 제안(read·proposal_id=content hash·자동확정 0·write 0)",
-    "mark_hit": "회상 적중 미리보기(read/dry-run·node_id 미노출). MCP 기록은 fail-closed(confirm 만으로 기록 안 됨) — 실제 기록은 로컬 CLI binggu mark-hit. P1 승인이벤트 예정",
-    "mark_miss": "회상 빗나감 미리보기(read/dry-run·node_id 미노출). MCP 기록은 fail-closed(confirm 만으로 기록 안 됨) — 실제 기록은 로컬 CLI binggu mark-miss. P1 승인이벤트 예정",
+    "mark_hit": "회상 적중 기록(node_id 미노출). dry-run=미리보기. 실행은 trusted approval 필요(요청→owner 'binggu approval approve <id>'→approval_id 로 재호출·정확 1회). 승인 없으면 fail-closed",
+    "mark_miss": "회상 빗나감 기록(node_id 미노출). dry-run=미리보기. 실행은 trusted approval 필요(요청→owner 'binggu approval approve <id>'→approval_id 로 재호출·정확 1회). 승인 없으면 fail-closed",
 }
 
 
@@ -81,6 +81,12 @@ def _list_tools():
         if extra:
             props.update(extra.get("properties", {}))
             req += [r for r in extra.get("required", []) if r not in req]
+        # P1-A: write-gated 도구는 trusted approval 소비용 approval_id(optional) 를 표준 노출 —
+        # dry_run=false 요청이 준 request_id 를 owner 승인 후 그대로 넘겨 정확 1회 실행(CC-2).
+        if spec["mode"] == "write-gated":
+            props.setdefault("approval_id",
+                             {"type": "string",
+                              "description": "trusted approval event id (owner 'binggu approval approve' 후 정확 1회 실행)"})
         # MCP 표준 tool 필드만(name/description/inputSchema). mode/path_params 는 서버 내부용이라
         # 최상위 노출 금지 — Codex/Rust(rmcp) 등 엄격 클라이언트가 unknown field 로 파싱 실패(도구 캐시
         # 생성 0·연결 무력화). mode 는 위 필터(라인 69)에서만, path_params 는 inputSchema 에 이미 반영됨.
