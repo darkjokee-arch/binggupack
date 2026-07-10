@@ -661,6 +661,11 @@ def _resolve_human_ctx(ledger, sents, confirm=None):
          암호학적 사람증명이 아니다(셸/파일 도구가 붙은 호스트에선 하드 통제 아님 · SECURITY.md).
     그 외(비대화형·앵커없음) → actor='reader' → 모든 core 게이트가 BLOCK(fail-closed). 환경변수로 우회
     불가. BINGGU_STRICT_HUMAN_GATE 는 **deprecated no-op**(strict 가 기본 · 0/false 로 fail-open 안 됨).
+
+    (비대화형 owner 의 제3 경로 = exact-bound approval event(P1-B A2): `binggu approval approve <rid>` 로
+     대화형 TTY 에서 mint 한 뒤 mutation 에 `--approval-id <rid>` 제시 → approval_gate.authorize 가
+     (protocol,operation,payload digest,ledger) 정확 바인딩 검증 + one-time consume. 이 함수는 대화형/앵커
+     전용이고, approval event 경로는 cmd_* 가 approval_id 제시 시 _mutation_via_approval 로 분기한다.)
     """
     ctx = {"actor": "reader"}                    # 기본 fail-closed (reader 는 denylist·allowlist 게이트 모두 BLOCK)
     if confirm is not None:
@@ -688,6 +693,30 @@ def _resolve_human_ctx(ledger, sents, confirm=None):
     # 3) 비대화형 + 앵커없음 = 사람 미검증 → fail-closed(reader). 환경변수 우회 없음.
     ctx["actor_source"] = "unverified_noninteractive"
     return ctx
+
+
+def _mutation_via_approval(a, db, operation, bind, core_call):
+    """비대화형 owner 의 exact-bound approval 경로(P1-B A2). approval_id 제시 시에만 이 경로.
+
+    approval_gate.authorize 컨텍스트로 (protocol,operation,payload digest,ledger) 바인딩 검증 +
+    one-time consume(reserve/finalize). provider 미구성/미승인/바인딩 불일치 → auth.actor='reader'
+    → core 게이트 fail-closed(G4). 대화형 TTY/앵커 경로(_resolve_human_ctx)와 배타.
+    core_call(ctx) 은 ctx={"actor","confirm"} 를 받아 core mutation 을 실행하고 결과 dict 를 반환한다.
+    """
+    from binggupack.mcp import approval_gate
+    home = _approval_home(a)
+    os.makedirs(home, exist_ok=True)
+    with approval_gate.authorize(operation, bind, home, db) as auth:
+        r = core_call({"actor": auth.actor, "confirm": getattr(a, "confirm", None)})
+        auth.settle(r)
+    extra = auth.response_extra()
+    if not r.get("applied"):
+        r = dict(r)
+        if extra.get("reason") and not r.get("reason"):
+            r["reason"] = extra["reason"]      # provider_not_configured / approval_required / binding_mismatch…
+        if extra.get("guidance"):
+            r["guidance"] = extra["guidance"]  # owner 안내(binggu approval show/approve <rid>)
+    return r
 
 
 def cmd_save(a):
@@ -859,14 +888,28 @@ def cmd_replace(a):
 
 def cmd_accept(a):
     db, _ = _open(a.ledger)
-    r = accept_from_list(db, a.n, a.id8, a.reason, _resolve_human_ctx(a.ledger, None, a.confirm))
+    _aid = getattr(a, "approval_id", None)
+    if _aid is not None:  # 비대화형 owner exact-bound approval 경로
+        r = _mutation_via_approval(
+            a, db, "accept",
+            {"index": a.n, "id8": a.id8, "reason": a.reason, "approval_id": _aid},
+            lambda ctx: accept_from_list(db, a.n, a.id8, a.reason, ctx))
+    else:                 # 대화형 TTY / save_gate 앵커 (기존)
+        r = accept_from_list(db, a.n, a.id8, a.reason, _resolve_human_ctx(a.ledger, None, a.confirm))
     db.close()
     return _show(r)
 
 
 def cmd_unaccept(a):
     db, _ = _open(a.ledger)
-    r = unaccept_from_list(db, a.n, a.id8, a.reason, _resolve_human_ctx(a.ledger, None, a.confirm))
+    _aid = getattr(a, "approval_id", None)
+    if _aid is not None:
+        r = _mutation_via_approval(
+            a, db, "unaccept",
+            {"index": a.n, "id8": a.id8, "reason": a.reason, "approval_id": _aid},
+            lambda ctx: unaccept_from_list(db, a.n, a.id8, a.reason, ctx))
+    else:
+        r = unaccept_from_list(db, a.n, a.id8, a.reason, _resolve_human_ctx(a.ledger, None, a.confirm))
     db.close()
     return _show(r)
 
@@ -879,7 +922,14 @@ def cmd_due(a):
         db.close()
         print("BLOCK: node_hash_mismatch (목록을 다시 확인하세요: binggu.py list)")
         return 1
-    r = set_review_due(db, nid, a.date, _resolve_human_ctx(a.ledger, None))   # P1-A.1 fail-closed
+    _aid = getattr(a, "approval_id", None)
+    if _aid is not None:  # 비대화형 owner exact-bound approval 경로
+        r = _mutation_via_approval(
+            a, db, "due",
+            {"node_id": nid, "due_date": a.date, "approval_id": _aid},
+            lambda ctx: set_review_due(db, nid, a.date, ctx))
+    else:
+        r = set_review_due(db, nid, a.date, _resolve_human_ctx(a.ledger, None))   # P1-A.1 fail-closed
     db.close()
     return _show(r)
 
@@ -892,12 +942,24 @@ def cmd_resolve(a):
         db.close()
         print("BLOCK: node_hash_mismatch (목록을 다시 확인하세요: binggu.py list)")
         return 1
-    _ctx = _resolve_human_ctx(a.ledger, None)                # P1-A.1: 비대화형/env → reader → fail-closed
-    r = resolve_review(db, nid, a.outcome, a.reason, _ctx)
-    # 양방향 신뢰도 연동 — 성공/실패만 hit_events 기록(불확실/판정불가 skip). 사람 resolve 한정(불변식6).
-    if r.get("applied") and a.outcome in ("성공", "실패"):
-        import binggu_hit_stats as _HS
-        _HS.record_resolution(db, nid, a.outcome == "성공", _ctx)
+
+    def _resolve_core(ctx):
+        rr = resolve_review(db, nid, a.outcome, a.reason, ctx)
+        # 양방향 신뢰도 연동 — 성공/실패만 hit_events(불확실/판정불가 skip). 사람 resolve 한정(불변식6).
+        # M1(사전검증): record_resolution 은 pair-ai fan-out 을 포함 — ctx.actor 재사용(human 위조 없음).
+        if rr.get("applied") and a.outcome in ("성공", "실패"):
+            import binggu_hit_stats as _HS
+            _HS.record_resolution(db, nid, a.outcome == "성공", ctx)
+        return rr
+
+    _aid = getattr(a, "approval_id", None)
+    if _aid is not None:  # 비대화형 owner exact-bound approval 경로
+        r = _mutation_via_approval(
+            a, db, "resolve",
+            {"node_id": nid, "outcome": a.outcome, "reason": a.reason, "approval_id": _aid},
+            _resolve_core)
+    else:
+        r = _resolve_core(_resolve_human_ctx(a.ledger, None))   # P1-A.1: 비대화형/env → reader → fail-closed
     db.close()
     return _show(r)
 
@@ -1799,14 +1861,18 @@ def main():
     for name in ("deprecate", "accept", "unaccept"):
         sp = sub.add_parser(name); sp.add_argument("n", type=int); sp.add_argument("id8")
         sp.add_argument("--reason", required=True); sp.add_argument("--confirm", required=True)
+        if name in ("accept", "unaccept"):   # P1-B A2 — 비대화형 owner exact-bound approval 경로
+            sp.add_argument("--approval-id", dest="approval_id", default=None)
     sp = sub.add_parser("replace"); sp.add_argument("n", type=int); sp.add_argument("id8")
     sp.add_argument("--with", required=True, dest="with")
     sp.add_argument("--reason", required=True); sp.add_argument("--confirm", required=True)
     sp = sub.add_parser("due"); sp.add_argument("n", type=int); sp.add_argument("id8")
     sp.add_argument("--date", required=True)
+    sp.add_argument("--approval-id", dest="approval_id", default=None)   # P1-B A2 비대화형 owner 경로
     sp = sub.add_parser("resolve"); sp.add_argument("n", type=int); sp.add_argument("id8")
     sp.add_argument("--outcome", required=True, choices=OUTCOMES)
     sp.add_argument("--reason", required=True)
+    sp.add_argument("--approval-id", dest="approval_id", default=None)   # P1-B A2 비대화형 owner 경로
     # 회상 조언 적중 기록(작업A) — mark-hit / mark-miss (query+index, node_id 미노출·nonce 방어)
     for _mk in ("mark-hit", "mark-miss"):
         mkp = sub.add_parser(_mk); mkp.add_argument("query")

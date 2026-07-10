@@ -177,6 +177,43 @@ def binding_fields(operation, payload):
         return {"kind": s(p.get("kind", "")), "url": s(p.get("url", "")), "keyword": s(p.get("keyword"))}
     if operation == "harvest_remove":
         return {"source_id": s(p.get("source_id", ""))}
+    # P1-B Track A — CLI mutation surface closure(§2). write되는 값 전부 바인딩.
+    if operation in ("accept", "unaccept"):
+        # accept/unaccept 는 owner_acceptances event append. event 는 operation 이 구분(중복 제거).
+        return {"index": p.get("index"), "id8": s(p.get("id8", "")), "reason": s(p.get("reason", ""))}
+    if operation == "due":
+        # set_review_due 가 judgment_reviews 에 (node_id, due_date) INSERT.
+        return {"node_id": s(p.get("node_id", "")), "due_date": s(p.get("due_date", ""))}
+    if operation == "resolve":
+        # resolve_review 가 judgment_reviews 에 outcome/resolved_reason UPDATE.
+        return {"node_id": s(p.get("node_id", "")), "outcome": s(p.get("outcome", "")),
+                "reason": s(p.get("reason", ""))}
+    if operation in ("confirm_edges", "import_edges"):
+        # ★C1(Fable5 사전검증): edge_key(src|dst|rel|kmap)만으론 evidence_refs 미바인딩 →
+        # 승인 후 evidence 위조가 운영 ledger provenance 를 오염(TA-ATK-1 클래스). evidence 도 바인딩.
+        # ★M4: 실제 적재될 post-filter subset 기준(호출부가 필터 통과분만 넘긴다).
+        def _norm_edge(e):
+            ev = [s(x) for x in (e.get("evidence") or []) if x is not None]
+            return {"src": s(e.get("src", "")), "dst": s(e.get("dst", "")),
+                    "rel": s(e.get("rel", "")), "evidence": sorted(x for x in ev if x is not None)}
+        edges = [_norm_edge(e) for e in (p.get("edges") or [])]
+        edges.sort(key=lambda d: (d["src"] or "", d["dst"] or "", d["rel"] or ""))
+        return {"edges": edges}
+    if operation == "hosted_bundle":
+        # 묶음 승인(owner 16계약 · A3). 선택 intent 집합에 immutable 바인딩 — 각 intent 의 save_candidate
+        # digest + intent_id 정렬. 전체 bundle digest = canonical_payload_digest("hosted_bundle", …) 자체.
+        # membership 수정 시 digest 변화 → request_id 변화 → 기존 승인 무효(계약 2·3). raw 미포함(digest 만).
+        out = []
+        for it in (p.get("items") or []):
+            sub = {"text": s(it.get("text", "")),
+                   "indices": sorted(int(i) for i in (it.get("indices") or [])
+                                     if isinstance(i, int) and not isinstance(i, bool)),
+                   "explicit": False,                    # H4: hosted 는 explicit=False 고정(3곳 동일)
+                   "speaker": s(it.get("speaker")), "due_date": None}
+            out.append({"intent_id": s(it.get("intent_id", "")),
+                        "digest": canonical_payload_digest("save_candidate", sub)})
+        out.sort(key=lambda d: d["intent_id"] or "")
+        return {"items": out}
     raise ValueError("unknown operation: %s" % operation)
 
 
@@ -221,6 +258,14 @@ def summary_for(operation, payload, ledger_identity):
         detail = "recall #%s" % p.get("index")
     elif operation in ("harvest_add", "harvest_remove"):
         detail = "source"
+    elif operation in ("accept", "unaccept"):
+        detail = "node #%s" % p.get("index")
+    elif operation in ("due", "resolve"):
+        detail = "node %s" % str(p.get("node_id"))[:12]
+    elif operation in ("confirm_edges", "import_edges"):
+        detail = "%d edge(s)" % len(p.get("edges") or [])
+    elif operation == "hosted_bundle":
+        detail = "%d intent(s)" % len(p.get("items") or [])
     else:
         detail = ""
     return "%s: %s -> ledger %s" % (operation, detail, str(ledger_identity)[:8])
@@ -326,6 +371,33 @@ def render_review(operation, payload):
         field("kind", p.get("kind")); field("url", p.get("url"))
     elif operation == "harvest_remove":
         field("source_id", p.get("source_id"))
+    elif operation in ("accept", "unaccept"):
+        if p.get("_target_sentence"):
+            field("대상 문장", p.get("_target_sentence"))
+        field("대상 #", p.get("index")); field("id8", p.get("id8")); field("사유", p.get("reason"))
+    elif operation == "due":
+        if p.get("_target_sentence"):
+            field("판단 문장", p.get("_target_sentence"))
+        field("node_id", p.get("node_id")); field("검증 예정일", p.get("due_date"))
+    elif operation == "resolve":
+        if p.get("_target_sentence"):
+            field("판단 문장", p.get("_target_sentence"))
+        field("node_id", p.get("node_id")); field("결과", p.get("outcome")); field("사유", p.get("reason"))
+    elif operation in ("confirm_edges", "import_edges"):
+        for e in (p.get("edges") or []):
+            field("엣지", "%s → %s (%s)" % (e.get("src"), e.get("dst"), e.get("rel")))
+    elif operation == "hosted_bundle":
+        # 묶음 전체 항목을 owner 가 검토(계약: 화면에 표시된 것만 승인 범위). raw 복제 아님 — 선택 문장 발췌만.
+        for it in (p.get("items") or []):
+            iid = str(it.get("intent_id") or "")[:8]
+            try:
+                from binggupack.capture import preview as cvp
+                cands = cvp.capture_preview(it.get("text", ""), explicit=False)["candidates"]
+                for i in (it.get("indices") or []):
+                    if isinstance(i, int) and 1 <= i <= len(cands):
+                        field("intent %s #%d" % (iid, i), cands[i - 1]["sentence"])
+            except Exception:
+                field("intent %s" % iid, (it.get("text") or "")[:60])
     return items
 
 
