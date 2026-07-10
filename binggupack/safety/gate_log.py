@@ -131,7 +131,12 @@ def gate_human_for(sentences, path=None, now=None):
         ts = rec.get(sent_hash(s))
         if ts is None:
             return False
-        if GATE_WINDOW_SEC and (now - ts) > GATE_WINDOW_SEC:
+        # P1-A TAE-P2-08: 미래 ts(now-ts<0)는 "영원히 fresh" 가 아니라 무효(clock 역행/future-date
+        # 앵커로 TTL 우회 차단). freshness window 초과도 무효.
+        age = now - ts
+        if age < 0:
+            return False
+        if GATE_WINDOW_SEC and age > GATE_WINDOW_SEC:
             return False
     return True
 

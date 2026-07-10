@@ -23,7 +23,8 @@ for _p in (_SCRIPTS, _ROOT):
 from binggu_schema import (  # noqa: E402,F401  (정본 re-export)
     SCHEMA_VERSION,
     apply_schema,
+    ledger_id,
     schema_version,
 )
 
-__all__ = ["SCHEMA_VERSION", "apply_schema", "schema_version"]
+__all__ = ["SCHEMA_VERSION", "apply_schema", "ledger_id", "schema_version"]

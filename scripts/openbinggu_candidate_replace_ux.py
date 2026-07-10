@@ -109,8 +109,9 @@ def replace_from_list(db, index, node_hash8, new_sentence, reason, ctx, snap_dir
         return {"applied": False, "reason": rc}
 
     # ---- preflight (DB 무변 — 전부 통과해야 스냅샷·묶음 진입) ----
-    # 1) 사람만
-    if ctx.get("actor") in ("auto", "reader"):
+    # 1) 사람만 — P1-A TAE-2 hardening: allowlist(== 'human'). 기존 denylist(auto/reader)는
+    #    non-'reader' sentinel(agent/system/'unapproved'/대문자)에 fail-OPEN 이었다. human 만 허용.
+    if ctx.get("actor") != "human":
         return block("G4_no_auto")
     # 2) confirm 문구 정확 일치 — 인덱스+id8+수정문장 삼중 바인딩 (transaction 밖, 잠금 0)
     if ctx.get("confirm") != "REPLACE %s %s WITH %s" % (index, node_hash8, new_sentence):

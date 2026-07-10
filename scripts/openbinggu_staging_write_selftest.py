@@ -180,7 +180,10 @@ class StagingDB:
 
 def c2_check(db, pack, ctx):
     """C-2 자동검사 (freshness/duplicate/backup/checksum/evidence_refs). 통과 시 None, 실패 시 reason."""
-    if ctx.get("actor") in ("auto", "reader"): return "G4_no_auto"
+    # P1-A TAE-2 hardening: allowlist(== 'human') — 기존 denylist(auto/reader 만 차단)는 'agent'/
+    # 'system'/누락/대문자 등 임의 sentinel 이 fail-OPEN 이었다(trusted approval no-approval actor 가
+    # 'reader' 가 아니면 통과). human 정확 매칭만 허용 → 어떤 non-human sentinel 도 write 0.
+    if ctx.get("actor") != "human": return "G4_no_auto"
     # evidence_refs 필수(헌법)
     for e in pack["edges"]:
         if not e.get("evidence_refs"): return "evidence_refs_missing"

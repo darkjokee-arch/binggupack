@@ -1624,6 +1624,106 @@ def _home_screen():
     return 0
 
 
+def _approval_home(a):
+    """approval store home = ledger 디렉토리(MCP 핸들러 _operating_home() 과 일치)."""
+    return os.path.dirname(os.path.abspath(a.ledger))
+
+
+def cmd_approvals(a):
+    """대기 중인 trusted approval 요청 목록(조회 only)."""
+    from binggupack.safety import trusted_approval as ta
+    from binggupack.storage import open_g3
+    home = _approval_home(a)
+    os.makedirs(home, exist_ok=True)   # 신규/부재 home 도 graceful(open_g3 는 부모 dir 필요)
+    db = open_g3(a.ledger)
+    try:
+        reqs = ta.list_requests(db.con)
+    finally:
+        db.close()
+    if ta.provider_for(home) is None:
+        print("※ trusted approval provider 미구성 — 활성화: %s 에 {\"enabled\": true}"
+              % ta.config_path(home))
+    if not reqs:
+        print("대기 중인 승인 요청이 없습니다.")
+        return 0
+    print("승인 요청 (요청ID · 작업 · 요약 · 상태 · 만료):")
+    for r in reqs:
+        print("  %s  %-14s  %s  [%s]  ~%s"
+              % (r["request_id"], r["operation"], r["summary"], r["state"], r["expires_at"]))
+    print("\n검토: binggu approval show <요청ID>   ·   승인: binggu approval approve <요청ID>")
+    return 0
+
+
+def cmd_approval(a):
+    """approval show/approve/reject/revoke <request-id>. approve 는 대화형 TTY 필수(비대화형 거부)."""
+    import time as _t
+    from binggupack.safety import trusted_approval as ta
+    from binggupack.storage import open_g3
+    action, rid = a.action, a.request_id
+    home = _approval_home(a)
+    os.makedirs(home, exist_ok=True)   # 신규/부재 home 도 graceful(open_g3 는 부모 dir 필요)
+    db = open_g3(a.ledger)
+    try:
+        req = ta.get_request(db.con, rid)
+    finally:
+        db.close()
+    if not req:
+        print("요청을 찾을 수 없습니다: %s" % rid)
+        return 1
+
+    def _render():
+        rev = ta.read_review(home, rid)
+        print("요청ID : %s" % rid)
+        print("작업   : %s" % req["operation"])
+        print("대상 ledger : %s" % req["ledger_id"])
+        print("만료   : %s" % req["expires_at"])
+        print("상태   : %s" % req["state"])
+        print("─ 실제 저장/변경 내용 ─")
+        if rev:
+            for it in rev.get("items", []):
+                print("  %s: %s" % (it["label"], it["value"]))
+        else:
+            print("  (검토 레코드 없음 — 만료/정리됨)")
+
+    if action == "show":
+        _render()
+        print("\n승인: binggu approval approve %s   ·   거절: binggu approval reject %s" % (rid, rid))
+        return 0
+
+    if action == "approve":
+        # TAE-5: 비대화형(pipe/redirect/자동화)은 하드 거부(exit 2). isatty 는 보조 필터일 뿐(§6) —
+        # 승인 권한은 사장님이 직접 터미널에서 실행하는 데서 나온다. STRICT 플래그 없이도 기본 fail-closed.
+        try:
+            interactive = sys.stdin.isatty()
+        except Exception:
+            interactive = False
+        trusted = os.environ.get("BINGGU_TRUSTED_CLI", "").strip().lower() in ("1", "true", "yes", "on")
+        if not interactive and not trusted:
+            print("BLOCK: approval 은 대화형 터미널에서만 가능합니다(비대화형 stdin 거부).")
+            print("  사장님이 직접 터미널에서 실행하세요. owner 자동화는 BINGGU_TRUSTED_CLI=1 (명시 신뢰).")
+            return 2
+        _render()
+        if interactive:
+            ans = input("\n승인하려면 정확히 'APPROVE %s' 입력: " % rid[:8])
+            if ans.strip() != ("APPROVE %s" % rid[:8]):
+                print("승인 취소(문구 불일치).")
+                return 1
+        cfg = ta.load_config(home) or {}
+        ttl = int(cfg.get("ttl_seconds", ta.DEFAULT_TTL_SECONDS))
+        ta.mint_approval(home, req, ttl, _t.time())
+        print("승인 발행 완료: %s (만료 %ds). MCP/앱에서 이 작업이 정확히 1회 실행됩니다." % (rid, ttl))
+        return 0
+
+    if action in ("reject", "revoke"):
+        ta.tombstone(home, req, action, _t.time())
+        ta.purge_review(home, rid)
+        print("%s 처리 완료: %s" % (action, rid))
+        return 0
+
+    print("알 수 없는 action: %s (show/approve/reject/revoke)" % action)
+    return 2
+
+
 def main():
     if sys.argv[1:] == ["--selftest"]:
         sys.exit(selftest())
@@ -1776,6 +1876,11 @@ def main():
     rsp = sub.add_parser("restore")  # 백업 → 장부 교체(파괴적 · confirm 정확 일치 게이트)
     rsp.add_argument("backup")                           # 백업 sqlite 경로
     rsp.add_argument("--confirm", default=None)          # "RESTORE <백업파일명>" 정확 일치
+    # P1-A trusted approval event — owner 검토·승인 채널(MCP tool surface 밖).
+    sub.add_parser("approvals")                          # 대기 승인 요청 목록(조회)
+    apv = sub.add_parser("approval")
+    apv.add_argument("action", choices=["show", "approve", "reject", "revoke"])
+    apv.add_argument("request_id")
     a = p.parse_args()
     fn = {"init": cmd_init, "start": cmd_init, "status": cmd_status, "doctor": cmd_status,
           "preview": cmd_preview, "remember": lambda a: cmd_preview(a, explicit=True),  # remember=명시 입력
@@ -1792,7 +1897,8 @@ def main():
           "confirm-edges": cmd_confirm_edges, "pair": cmd_pair, "trust": cmd_trust,
           "route": cmd_route, "backup": cmd_backup, "export": cmd_export,
           "restore": cmd_restore, "demo": cmd_demo, "explain": cmd_explain,
-          "forget": cmd_forget, "inbox": cmd_inbox}[a.cmd]
+          "forget": cmd_forget, "inbox": cmd_inbox,
+          "approvals": cmd_approvals, "approval": cmd_approval}[a.cmd]
     sys.exit(fn(a))
 
 
