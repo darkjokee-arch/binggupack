@@ -32,24 +32,35 @@ from binggupack.classifier.capture_classifier import classify
 
 # ---- underlying 도구(dry-run mock, FS write 0) ----
 # 실제로는 각 스크립트의 read/dry-run 동작에 결선. 여기선 synthetic mock(파일 작업 0).
+# ★ 이 5개는 미결선 stub 이다 — 실제 검사/빌드 로직 0(고정 응답). 실 검사는 CLI/scripts 경로
+#   (python scripts/openbinggu_*.py --selftest 등)에 있다. MCP 표면에서 "성공"처럼 읽혀 실검증
+#   통과로 오인되지 않도록 synthetic=True + NOT_IMPLEMENTED 를 명시한다(응답만 정직화, 기능 무변경).
+_STUB_NOTE = "미결선 stub — 실제 검사는 CLI/scripts 경로. MCP 노출은 존재/경로 안내용."
+
+
 def _u_pack_build(params=None):
-    return {"action": "pack_build", "mode": "dry-run", "pack": "candidate(temp)"}
+    return {"action": "pack_build", "mode": "dry-run", "synthetic": True,
+            "verdict": "NOT_IMPLEMENTED", "note": _STUB_NOTE}
 
 
 def _u_pack_validate(params=None):
-    return {"action": "pack_validate", "mode": "read", "verdict": "checked"}
+    return {"action": "pack_validate", "mode": "read", "synthetic": True,
+            "verdict": "NOT_IMPLEMENTED", "note": _STUB_NOTE}
 
 
 def _u_consumer_smoke(params=None):
-    return {"action": "consumer_smoke", "mode": "read", "read": "ok"}
+    return {"action": "consumer_smoke", "mode": "read", "synthetic": True,
+            "verdict": "NOT_IMPLEMENTED", "note": _STUB_NOTE}
 
 
 def _u_publish_guard_dryrun(params=None):
-    return {"action": "publish_guard_dryrun", "mode": "dry-run", "guard": "evaluated"}
+    return {"action": "publish_guard_dryrun", "mode": "dry-run", "synthetic": True,
+            "verdict": "NOT_IMPLEMENTED", "note": _STUB_NOTE}
 
 
 def _u_selftest(params=None):
-    return {"action": "selftest", "mode": "read", "gate": "see scripts"}
+    return {"action": "selftest", "mode": "read", "synthetic": True,
+            "verdict": "NOT_IMPLEMENTED", "note": _STUB_NOTE + " 실 게이트: scripts/*_selftest.py"}
 
 
 def _u_capture_classify(params=None):
@@ -100,10 +111,13 @@ def _u_save_candidate(params=None):
     confirm = params.get("confirm", "")
     dry_run = params.get("dry_run", True)  # 기본 dry-run (비가역 write default-deny)
 
-    # read-only 해제(owner 명시 2026-07-04): confirm='SAVE n' 정확일치 = 사용자가 preview 인덱스를
-    # 직접 재현한 사람-선택 증거이므로 그 경우에만 actor=human 으로 승격해 실 write 허용.
-    # confirm 불일치/부재는 reader 유지 → save_selected G4_no_auto 가 여전히 BLOCK(자동/추론 저장 방지 불변).
-    actor = "human" if (confirm and confirm == "SAVE " + ",".join(str(i) for i in indices)) else "reader"
+    # actor 는 항상 reader 로 넘긴다. confirm 문자열은 모델이 dry-run 응답(confirm_expected)에서 얻어
+    # 그대로 재현할 수 있어 "사람-선택 증거"가 되지 못한다 — confirm 자칭 human 승격은 모델이 사람 발화 0으로
+    # 운영 ledger 에 write 하는 우회로였다(P0, 2026-07-10 재현 확증). 진짜 사람 승격은 save_selected 내부
+    # _maybe_promote_actor_by_gate 가 save_gate_log(사장님이 실제 'SAVE n' 을 키보드로 입력할 때 UserPromptSubmit
+    # hook 이 남기는 앵커 · AI 위조 불가)를 확인해서만 결정한다. confirm 은 아래 형식 검증(정확일치)에만 쓴다.
+    # → 사장님 실입력 시 저장(7/4 개방 유지) / 모델 confirm 재현 시 save_gate 앵커 부재로 G4_no_auto BLOCK.
+    actor = "reader"
 
     from binggupack.capture import preview as cvp
     pv = cvp.capture_preview(text)
@@ -337,12 +351,18 @@ def _u_list(params=None):
     ledger = _operating_ledger()
     if not os.path.exists(ledger):
         return {"action": "list", "mode": "read", "empty": True, "count": 0, "markdown": "장부 없음"}
+    status = params.get("status") or "all"
     _ensure_scripts_path()
     from openbinggu_owner_accept_ux import open_accept, accepted_view
-    from openbinggu_candidate_list_view import list_candidates
+    from openbinggu_candidate_list_view import list_candidates, STATUSES
+    if status not in STATUSES:
+        # 미지 status(예: 'active')를 조용히 all 로 폴백하면 deprecated 까지 섞여 나온다
+        # (사람이 폐기한 판단을 live 로 재서빙 = 빙구팩 본질 위반). fail-closed: 거부 + 허용값 안내.
+        return {"action": "list", "mode": "read", "error": "unknown_status",
+                "status": status, "allowed": list(STATUSES)}
     db = open_accept(ledger)
     try:
-        v = list_candidates(db, params.get("status") or "all", params.get("kind"))
+        v = list_candidates(db, status, params.get("kind"))
         acc = len(accepted_view(db))
     finally:
         db.close()
