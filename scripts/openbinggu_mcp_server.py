@@ -41,9 +41,9 @@ _TOOL_DESC = {
     "status": "장부 요약 — active/deprecated/검증예정/수용/audit chain(read)",
     "list": "저장 후보 목록(status/kind 필터·read)",
     "reminders": "due 경과 판단 리마인더(read)",
-    "pair": "owner 발화(+ai 요약) 화자축 페어 저장(dry-run 기본·PAIR confirm 정확일치·자동차단)",
-    "deprecate": "목록 인덱스 1건 기각(dry-run 기본·DEPRECATE <n> <id8> confirm·자동차단)",
-    "replace": "목록 인덱스 1건 교체(dry-run 기본·REPLACE <n> <id8> WITH <new> confirm·자동차단)",
+    "pair": "owner+ai 페어 저장 미리보기(read/dry-run). MCP 실행은 일시적으로 fail-closed(confirm 만으로 저장 안 됨) — 실제 저장은 로컬 CLI. P1 승인이벤트 예정",
+    "deprecate": "목록 1건 기각 미리보기(read/dry-run). MCP 실행은 fail-closed(confirm 만으로 기각 안 됨) — 실제 기각은 로컬 CLI. P1 승인이벤트 예정",
+    "replace": "목록 1건 교체 미리보기(read/dry-run). MCP 실행은 fail-closed(confirm 만으로 교체 안 됨) — 실제 교체는 로컬 CLI. P1 승인이벤트 예정",
     "reflect": "회고·자가평가 → 지식 후보 preview(read·저장 0)",
     "harvest_list": "등록된 외부 수확 소스 목록(read)",
     "harvest_add": "외부 소스 등록(dry-run 기본·HARVEST_ADD <kind> <url> confirm·URL 안전검증)",
@@ -54,8 +54,8 @@ _TOOL_DESC = {
     "why": "판단 근거 회상 — 과거 결정의 이유·근거 사슬 조회(read·node_id 미노출·PII 마스킹)",
     "contrast": "제안 신호 ↔ 강제조항 대비표(read·양쪽 원문 인용·자동결정 0·write 0)",
     "abstraction": "반복 판단 → 규칙 후보 제안(read·proposal_id=content hash·자동확정 0·write 0)",
-    "mark_hit": "회상 조언 적중 기록(write-gated·'MARK_HIT <index> <query>' confirm 정확일치·node_id 미노출·자동기록 0)",
-    "mark_miss": "회상 조언 빗나감 기록(write-gated·'MARK_MISS <index> <query>' confirm 정확일치·node_id 미노출·자동기록 0)",
+    "mark_hit": "회상 적중 미리보기(read/dry-run·node_id 미노출). MCP 기록은 fail-closed(confirm 만으로 기록 안 됨) — 실제 기록은 로컬 CLI binggu mark-hit. P1 승인이벤트 예정",
+    "mark_miss": "회상 빗나감 미리보기(read/dry-run·node_id 미노출). MCP 기록은 fail-closed(confirm 만으로 기록 안 됨) — 실제 기록은 로컬 CLI binggu mark-miss. P1 승인이벤트 예정",
 }
 
 
