@@ -116,14 +116,16 @@ def main_selftest():
 
     db = open_g3(os.path.join(tmp, "s.sqlite"))
     # 시나리오: 저장 3건(판단/상태/개념, 판단 due) → 판단 resolve(성공) → 상태 기각 → 추가 판단 1건 pending
+    # ★explicit=True 필수: 명시 저장 시나리오다. 자동수집(explicit=False)은 판단/개념문을 candidate 로
+    #   뽑지 않아(1인칭 주관문만) saved 0 → judgment_reviews 공백 → 아래 조회 크래시(v1.18.3 이하 회귀).
     r1 = save_selected(db, T1, [1, 2, 3], {"actor": "human", "confirm": "SAVE 1,2,3"},
-                       snap_dir, due_date="2026-06-20")
+                       snap_dir, due_date="2026-06-20", explicit=True)
     j1 = db.con.execute("SELECT node_id FROM judgment_reviews ORDER BY review_id LIMIT 1").fetchone()[0]
     resolve_review(db, j1, "성공", "목록 뷰 검증 시나리오", {"actor": "human"})
     s2 = [r[0] for r in db.con.execute("SELECT node_id,sentence FROM nodes") if "진행 중" in r[1]][0]
     deprecate_item(db, "node", s2, "목록 뷰 검증 — 기각 표본", {"actor": "human"}, snap_dir)
     r2 = save_selected(db, T2, [1], {"actor": "human", "confirm": "SAVE 1"}, snap_dir,
-                       due_date="2026-06-30")
+                       due_date="2026-06-30", explicit=True)
     ck("0_시나리오_구성", r1["saved"] == 3 and r2["saved"] == 1)
 
     cs1 = db.store_checksum()
