@@ -91,11 +91,30 @@ def run_smoke(home=None):
     chk("9.save_no_confirm_REJECT_write0",
         tr.get("executed_write") is False and tr.get("reason") == "confirm_phrase_mismatch")
 
-    # 9b. confirm 정확일치("SAVE 1") → human 승격 저장(격리 BINGGU_HOME 에만). 운영 ledger 불변은 케이스 10 이 검증.
+    # 9b. confirm 정확일치("SAVE 1")만으로는 저장 안 됨 — 사람 SAVE 앵커(save_gate_log) 없으면
+    #     actor=reader 유지 → G4_no_auto 차단(P0 봉인: 모델이 dry-run 의 confirm_expected 를 재현해
+    #     사람 발화 0으로 write 하던 우회 차단, 2026-07-10).
     r = handle_tool("save_candidate",
                     {"text": KO, "indices": [1], "dry_run": False, "confirm": "SAVE 1"}, allow_root)
     tr = r.get("tool_result") or {}
-    chk("9b.save_exact_confirm_isolated_write",
+    chk("9b.confirm_alone_BLOCKED(no_human_anchor)",
+        tr.get("executed_write") is False and tr.get("reason") == "G4_no_auto")
+
+    # 9c. 사장님이 실제 'SAVE 1' 을 키보드 입력하면 save_gate hook 이 앵커를 남긴다(여기선 그 앵커를 직접
+    #     기록해 시뮬). 그때만 confirm 정확일치가 human 승격 저장으로 이어진다(격리 BINGGU_HOME 에만).
+    import os as _os
+    import sys as _sys
+    _sd = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))), "scripts")
+    if _sd not in _sys.path:
+        _sys.path.insert(0, _sd)
+    import binggu_save_gate as _sgate
+    from binggupack.capture import preview as _cvp
+    _sgate.write_last_preview(_cvp.capture_preview(KO)["candidates"])
+    _sgate.gate_record_from_prompt("SAVE 1")
+    r = handle_tool("save_candidate",
+                    {"text": KO, "indices": [1], "dry_run": False, "confirm": "SAVE 1"}, allow_root)
+    tr = r.get("tool_result") or {}
+    chk("9c.human_anchor_confirm_isolated_write",
         tr.get("executed_write") is True and tr.get("saved") == 1)
 
     op_after = {p: (os.path.getmtime(p) if os.path.exists(p) else None) for p in OPERATING_PATHS}
