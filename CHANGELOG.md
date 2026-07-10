@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added (P1-A) — Trusted Approval Event
+- **owner-controlled 승인으로 MCP mutation 정확히 1회 실행**: P0/P0.1 에서 fail-closed(`trusted_approval_event_required`) 로 봉인된 MCP 저장/기각/교체/기록(`save_candidate`·`pair`·`deprecate`·`replace`·`mark_hit`/`mark_miss`·`harvest_add`/`harvest_remove`)을, owner 가 로컬에서 승인하면 안전하게 실행하는 경로. 설계 정본 `docs/BINGGUPACK_TRUSTED_APPROVAL_EVENT_RFC.md`(v2).
+  - **신뢰 분리**: MCP/모델은 승인 **요청**(PENDING)만 만들고, 승인 **발행**은 모델 도구 표면 밖 owner 채널(`binggu approval approve`, 대화형 TTY — 비대화형 stdin 하드 거부)만 한다. `binggupack/safety/trusted_approval.py`(core) + `binggupack/mcp/approval_gate.py`(핸들러 결선).
+  - **정확 바인딩**: 승인은 `(protocol_version, operation, canonical payload digest, ledger_id)` 에 묶인다. canonical digest = NFC 정규화 + bidi/control 거부 + sort_keys JSON(concat 충돌 불가) + versioned. `save_candidate` 는 `explicit`/`speaker`/`due_date` 까지 바인딩(렌더러=실행기 정합), `mark` 는 recall 스냅샷(nonce) 바인딩.
+  - **1회용 consume + lease**: `approval_consumptions.approval_nonce` UNIQUE PK single-winner + `reserved_at` lease. 재생(replay)→`already_consumed`+receipt·2차 write 0 / 동시 consume→정확히 1 winner / payload 한 글자 변경·다른 operation·다른 ledger·다른 protocol·만료·거절/회수→전부 차단. reason 분할표(IDEMPOTENT_DONE/TRANSIENT/HARD_BLOCK/RECOVER)로 crash-후-재시도 정확히 1회 완성. `replace`(비-멱등)는 consume 진입 전 pending journal all-or-nothing 복원.
+  - **privacy**: 승인 store 는 digest/hash + payload-agnostic summary 만(원문 저장 0). owner 실내용 검토는 별도 `approval_review` 레코드(PII/개인사 게이트·cap·TTL·결정 시 purge). 응답에 approval nonce 미노출.
+  - **CLI**: `binggu approvals` / `binggu approval show|approve|reject|revoke <req-id>`.
+  - **한계(정직)**: 하드 통제는 모델 도구 표면이 승인 저장 위치에 쓰지 못하는 배포(웹/앱 커넥터·잠긴 에이전트)에서만 성립. Filesystem/Bash MCP 를 함께 물린 호스트에서는 fail-closed 보존 intent-routing(하드 통제 아님). provider 미구성 시 fail-closed 는 모든 배포 공통. SECURITY.md 위협모델 참조.
+  - **schema v2**(additive·비파괴): `approval_requests`·`approval_consumptions` 테이블 + `audit_meta['ledger_id']`(최초 open 시 무조건 발행). 구 ledger 는 auto-grant 0 으로 마이그레이트.
+  - **하드닝(TAE-2)**: `replace_from_list`·`c2_check` 의 actor 게이트를 denylist→allowlist(`== "human"`)로 전환(non-`reader` sentinel fail-open 제거). `gate_human_for` 음수-age(미래 ts) 무효화(TAE-P2-08).
+  - **적대 회귀**: `scripts/openbinggu_trusted_approval_boundary_selftest.py`(24체크·run_all 등재) + `scripts/binggu_trusted_approval_binding_characterization_selftest.py`(TIER-4 canonical 19체크·run_all 등재) + `tests/test_trusted_approval_e2e.py`(CLI subprocess). Fable5 사전 3-reviewer(8 High) RFC v2 해소 후 구현 → 사후 3-reviewer(1 High=pair due_date 미바인딩·1 High=smoke 9b reason 회귀·3 Medium·2 Low) 전부 수정.
+
 ### Security / Hardening (P0.1)
 - **demo 격리 경로 하드닝**: `--home` 비교를 `expanduser→abspath→realpath→normcase` + `os.path.samefile` 로 강화. (1) 운영 홈을 가리키는 **symlink**, (2) **대소문자만 다른** 동일 경로, (3) `--home` 아래 **기존 `ledger.sqlite`** 는 전부 BLOCK(기존 장부 재사용/오염 금지 — 재사용은 향후 `--reuse-demo-home` 로 명시 설계). `try/finally` 로 **subprocess·예외·조기 return 어디로 빠지든 BINGGU_HOME 복구 + 자동 생성 임시 홈 정리**. `--keep` 은 새 데이터 보존일 뿐 기존 장부 재사용 수단이 아님.
 - **MCP fail-closed 안내 정합**: `pair`/`deprecate`/`replace`/`mark` dry-run·실행 응답에 `write_available: false` · `reason: trusted_approval_event_required` · `owner_action: use_local_cli` · `guidance`(로컬 CLI 안내) 추가. "dry_run=false + confirm 으로 실행" 류 오해 문구 제거(`confirm_expected` 는 호환 유지, 단 그것만으로 실행된다는 안내는 삭제). 도구 설명·README MCP 도구 분류(조회 / 미리보기 / 사람 앵커 저장 / 일시 fail-closed mutation)를 실제 상태로 수정. 보안 동작(actor=reader fail-closed)은 그대로.

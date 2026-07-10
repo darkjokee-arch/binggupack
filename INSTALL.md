@@ -132,7 +132,7 @@ claude mcp get openbinggu-local-sandbox    # Status: Connected · env BINGGU_HOM
 자동/무단 저장은 차단되어야 정상입니다. `save_candidate`는 `dry_run` 기본이고, `dry_run=false`로 호출해도:
 
 - confirm 부재/불일치 → **REJECT** (`confirm_phrase_mismatch`) · `executed_write=false` · write 0
-- `"SAVE n"` **정확 일치**(사람 승인 증거)일 때만 human 승격 실 저장 — 저장 위치는 `BINGGU_HOME` 장부(sandbox 등록이면 sandbox home, 운영 ledger 불변)
+- `"SAVE n"` confirm 은 **형식 검증**일 뿐 사람 승인 증거가 아닙니다(모델이 dry-run 응답을 재현 가능). 실 저장은 **사람 앵커**(키보드 `SAVE n` → `save_gate`) 또는 **trusted approval event**(P1-A: 요청→owner `binggu approval approve`)가 있을 때만 human 승격 — 저장 위치는 `BINGGU_HOME` 장부(sandbox 등록이면 sandbox home, 운영 ledger 불변)
 
 confirm 없이 차단되는 건 실패가 아니라 PASS입니다. 쓰기 도구 8종(`save_candidate`/`pair`/`deprecate`/`replace`/`harvest_add`/`harvest_remove`/`mark_hit`/`mark_miss`) 전부 같은 방식의 confirm 게이트(도구별 문구 정확 일치)를 씁니다.
 

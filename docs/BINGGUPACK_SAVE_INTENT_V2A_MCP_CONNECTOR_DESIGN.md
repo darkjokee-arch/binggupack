@@ -1,5 +1,11 @@
 # RFC — save-intent V2-A: MCP 커넥터 어댑터 (폰 연결 마지막 조각)
 
+> **[P1-A 정합 노트]** §1 save_intent description 의 "'SAVE n,m' 발화 시 호출"은 승인 신호가 아니라
+> **UNTRUSTED_INTENT_ONLY**(모델 행동 힌트). §0 "적재 강도 ≠ 저장 안전"은 KEEP 이나, "최종 저장 권한은
+> 로컬 러너 게이트(…confirm)에만 있음" 중 **confirm=권한 절만 SUPERSEDED_IN_PART**(confirm 은 형식 검증일 뿐
+> 사람 승인 아님). 사람 승인 = trusted approval event(`docs/BINGGUPACK_TRUSTED_APPROVAL_EVENT_RFC.md`).
+> transport/HMAC/inbox/injection 격리는 유지(직교). 상세 = RFC §23.
+
 > 작성 2026-06-12. owner A안 GO + 자물쇠 "읽기 동급" 선택.
 > 배경: V2-2/V2-3에서 금고(DO inbox)는 검증됐으나 **폰 claude.ai → 금고 호출선이 부재**.
 >   원인 = save worker가 커스텀 HMAC API라 MCP 커넥터가 등록 불가(initialize 400).

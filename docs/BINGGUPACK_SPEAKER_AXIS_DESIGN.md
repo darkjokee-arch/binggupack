@@ -1,5 +1,10 @@
 # BingguPack — Personal Speaker Axis (화자 축) 설계
 
+> **[P1-A 정합 노트]** §7 표의 "사람 confirm 게이트 = `PAIR ... owner:N ai:M` 정확 일치"는 MCP `_u_pair`
+> 경로에서 **SUPERSEDED_IN_PART**(P0 이 actor=reader 로 재봉인). MCP 경유 PAIR confirm 은 untrusted intent 이며,
+> 사람 승인은 trusted approval event(`docs/BINGGUPACK_TRUSTED_APPROVAL_EVENT_RFC.md`) 또는 CLI TTY 로만.
+> §4 G4_no_auto 불변은 유지. 상세 = RFC §23.
+
 > v1.12.0 신기능. 사용자 발화(owner)와 AI 요약(ai)을 **따로 저장**하고 **수용/반박/수정 엣지**로 연결하며, **양방향 신뢰도**(내 직감·AI 반박 적중률)를 기록한다. 빙구팩이 "AI 작업일지"가 아니라 **"사용자 본체"** 를 쌓게 하는 핵심 축.
 
 ## 1. 왜 필요한가 (동기)

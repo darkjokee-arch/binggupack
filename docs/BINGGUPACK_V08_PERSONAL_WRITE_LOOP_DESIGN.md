@@ -1,5 +1,11 @@
 # v0.8 개인용 쓰기 루프 설계 (2026-06-11, GOAL MODE — 설계 단계)
 
+> **[P1-A 정합 노트]** §2 `save_selected` step1 의 "confirm 문구 = 사람 발화 유래 증거 → actor=human 승격"
+> 서술은 MCP/hosted 표면에서 **SUPERSEDED_IN_PART** 다. 전송된 confirm 문자열은 모델이 재현 가능한
+> untrusted intent 이며, 사람 승인은 out-of-band **trusted approval event**
+> (`docs/BINGGUPACK_TRUSTED_APPROVAL_EVENT_RFC.md`)로만 증명된다. CLI TTY/save_gate 앵커 경로는 유지.
+> 상세 정합표 = RFC §23.
+
 > ⚠️ **종속 고지 (2026-06-17):** `BINGGUPACK_CONSTITUTION_2026-06-17.md`(헌법)에 종속. 충돌 시 헌법 우선. 본 문서의 "자동 승격 0"·"자동 관찰 daemon/hook HOLD"는 다음으로 갱신: 상시 백그라운드 **daemon은 HOLD 유지**, trigger 기반 **capture(후보)는 허용**(헌법 §2). 점진 승격은 **사람 승인 게이트** 하에 허용(헌법 §2·§6).
 
 > **루프**: preview → 사용자 선택 → candidate 저장 → 피드백 기록 → real staging 검증.
