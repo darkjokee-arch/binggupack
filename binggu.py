@@ -1005,6 +1005,51 @@ def cmd_mark(a):
     return 1
 
 
+def cmd_learn_consume(a):
+    """학습 큐(hit/miss 후보) owner 승인 소비 — dry-run 기본 · CONSUME <n> 정확 confirm(작업C).
+
+    user-prompt-learn-outcome.js 가 owner 자연 피드백("맞네"/"틀렸어")을 append 한 큐를 사람이
+    확인하고 승인 소비한다. 스케줄러 자동 소비 배제(owner_refutes '안전장치 우회 자동반복' ·
+    owner '무차별 적재=노이즈'). mark_outcome 의 actor=human·D-1·D-2·nonce 방어 그대로 통과."""
+    from binggupack.pack import learn_consume as LC
+    ledger, _ = _ledger_paths(a.ledger)
+    qpath = LC.queue_path()
+    if a.confirm:
+        qi = LC.parse_confirm(a.confirm)
+        if qi is None:
+            print('BLOCK: --confirm 는 정확히 "CONSUME <번호>" 여야 합니다(자동확정 0).')
+            return 1
+        if not os.path.exists(ledger):
+            print("장부가 없습니다: %s · 먼저 python binggu.py init" % ledger)
+            return 2
+        db, _ = _open(ledger)
+        r = LC.consume(db, ledger, qpath, qi, index=a.index, home=os.path.dirname(ledger))
+        db.close()
+        if r.get("consumed"):
+            print('OK: %s 소비 — [%d] "%s"' % (r["outcome"], r["index"], r.get("node_claim") or ""))
+            print("    decision=%s · 큐 consumed=true · 사람 확정(actor=human·자동 0)"
+                  % r.get("decision_id"))
+            return 0
+        reason = r.get("reason")
+        print("BLOCK: %s" % reason)
+        if reason == "qi_out_of_range":
+            print("  소비 대기 %s건. dry-run(python binggu.py learn-consume) 으로 번호 확인."
+                  % r.get("pending", "?"))
+        elif reason == "index_out_of_range":
+            mark = r.get("mark") or {}
+            print("  --index 가 회상 건수를 벗어남(회상 %s건). dry-run 으로 top 확인."
+                  % mark.get("recall_count", "?"))
+        elif reason == "no_recall":
+            print("  이 query 로 회상되는 판단이 없습니다(장부 변경 가능).")
+        elif reason == "no_query":
+            print("  큐 항목에 회상 query 가 없습니다(소비 불가).")
+        return 1
+    # dry-run(기본): 소비 대기 목록 + 회상 top preview(read-only · 저장 0)
+    pv = LC.preview(ledger, qpath, home=os.path.dirname(ledger))
+    print(LC.render_preview_md(pv))
+    return 0
+
+
 def cmd_reminders(a):
     db, _ = _open(a.ledger)
     today = a.today or datetime.date.today().isoformat()
@@ -1349,6 +1394,10 @@ def main():
         mkp.add_argument("--index", type=int, default=1)   # recall 표시 번호(1-based)
         mkp.add_argument("--nonce", default=None)           # recall 이 발급한 회상 봉인(stale 방어)
         mkp.add_argument("--domain", default=None)          # 분모 분리 키(선택)
+    # 학습 큐(hit/miss 후보) owner 승인 소비(작업C) — dry-run 기본 · CONSUME <n> 정확 confirm(자동 0)
+    lcp = sub.add_parser("learn-consume")
+    lcp.add_argument("--confirm", default=None)        # "CONSUME <n>" 정확 일치(자동확정 0)
+    lcp.add_argument("--index", type=int, default=1)   # 회상 top 중 적중 노드(1-based·dry-run 확인)
     # 추상화 규칙 후보 제안(작업4·C) — read-only·자동확정 0. --promote 로 candidate 등록(승격 연결)
     abp = sub.add_parser("abstraction"); abp.add_argument("--domain", default=None)
     abp.add_argument("--promote", default=None,
@@ -1418,6 +1467,7 @@ def main():
           "list": cmd_list, "deprecate": cmd_deprecate, "replace": cmd_replace,
           "accept": cmd_accept, "unaccept": cmd_unaccept, "due": cmd_due,
           "resolve": cmd_resolve, "mark-hit": cmd_mark, "mark-miss": cmd_mark,
+          "learn-consume": cmd_learn_consume,
           "abstraction": cmd_abstraction,
           "reminders": cmd_reminders, "capture": cmd_capture,
           "recall": cmd_recall, "why": cmd_recall, "ask": cmd_recall, "trace": cmd_trace, "preflight": cmd_preflight,
