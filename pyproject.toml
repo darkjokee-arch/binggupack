@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "binggupack"
-version = "1.18.1"   # v1.18.1 — MCP tools/list 표준 호환(Codex)·자동 스코프·30도구·신규 사용자 온보딩 정비. version SSOT = binggupack/__about__.py.
+version = "1.18.2"   # v1.18.2 — 자동수집 부활(scope 회귀 봉합)·세션 마무리 정규화(N3)·대화 덩어리 veto(길이+줄바꿈). version SSOT = binggupack/__about__.py.
 description = "BingguPack — local-first, evidence-backed memory/context pack framework with an installable Claude Code MCP server (stdio JSON-RPC). Python stdlib only."
 readme = "README.md"
 requires-python = ">=3.10"

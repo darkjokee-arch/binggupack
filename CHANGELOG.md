@@ -1,5 +1,14 @@
 # Changelog — BingguPack
 
+## v1.18.2 — 자동수집 부활(scope 회귀 봉합)·세션 마무리 정규화·대화 덩어리 veto (2026-07-10)
+
+### Fixed
+- **자동수집 0 부활**: `init_profile` 이 `capture_scope.json` 을 무조건 덮어써(2026-07-09 회귀) owner 커스텀 allow/deny 가 소실 → 자동수집이 조용히 멈추던 문제 봉합. init 멱등 병합(기존 scope 보존 + `.json.bak` 백업)으로 재발 방지. 명시 저장 신호("빙구팩 저장해"·"이거 저장해")는 중립 cwd allow 미스에서도 우회 통과(deny·비활성은 존중).
+- **세션 마무리 감지 정규화(N3)**: `detect_session_close` 를 NFKC+casefold+isalnum 정규화 후 등록 표현 × 접미 유한폐포 membership 으로 교체 — 구두점·전각·공백·붙여쓰기 변형 흡수, 부정계("세션 마무리 안 해")·선행 자유텍스트 오발동은 구조적 차단.
+
+### Added
+- **대화 덩어리/붙여넣기/AI 응답문 자동 제외(bulk veto)**: 자동수집 candidate 가 긴 붙여넣기·AI 응답문으로 오염되던 문제(실측 55%) 차단. 길이 단독이 아닌 **길이(>300자) + 줄바꿈 밀도(≥3)**, 또는 초장문(>2000자) 게이트 — 줄바꿈 없는 장문 판단은 보존(문장 절단 회귀 없음). 명시 저장은 우회(owner 의도). 제외 건수는 세션 마무리 preview 에 "긴 발화 n건 제외"로 노출(무음 폐기 방지 — 명시 저장으로 회수). C(문장 발췌)는 AI 응답문을 owner 판단으로 둔갑시키는 화자축 오염이라 기각. `binggupack/capture/buffer.py`(메모리)·`binggu_capture_persist.py`(영속) 대칭.
+
 ## v1.18.1 — MCP 표준 호환(Codex)·자동 스코프·신규 사용자 온보딩 정비 (2026-07-09)
 
 ### Fixed

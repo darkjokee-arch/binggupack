@@ -20,5 +20,10 @@ v1.18.1 — MCP tools/list 표준 준수(Codex/Rust rmcp 호환·비표준 최�
 path_params 제거)·stdio MCP 진입점(openbinggu-mcp-server: pip 설치 후 clone 없이 등록)·
 cloud_search/cloud_recall 개인 온톨로지 자동 스코프·MCP 30도구(24→30)·개인 온톨로지 팩
 파이프라인 편입(person_pack_*)·신규 사용자 온보딩 문서 정비(Codex 등록·named tunnel·URL 2종).
+
+v1.18.2 — 자동수집 0 부활(init_profile scope 무조건 덮어쓰기 2026-07-09 회귀 봉합·멱등 병합
+재발방지·명시저장 중립 cwd 우회)·세션 마무리 감지 정규화(N3: NFKC+casefold 유한폐포 membership·
+변형 흡수·부정계/선행텍스트 오발동 구조 차단)·대화 덩어리/붙여넣기/AI 응답문 자동 제외(bulk veto:
+길이+줄바꿈 밀도·줄바꿈 없는 장문 보존·명시저장 우회·preview "n건 제외" 노출·화자축 오염 방지).
 """
-__version__ = "1.18.1"
+__version__ = "1.18.2"

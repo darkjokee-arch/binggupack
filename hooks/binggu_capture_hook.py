@@ -56,10 +56,12 @@ def _run(data):
         buf = PersistentCaptureBuffer()
         if event == "Stop":
             pv = buf.render_preview()
-            # 세션말: 건수만 상태 파일에 기록(원문/발췌 stdout 출력 0)
+            # 세션말: 건수 + 대화 덩어리 veto 건수만 상태 파일에 기록(원문/발췌 stdout 출력 0).
+            #   bulk_vetoed = 긴 발화 제외 건수(무음 폐기 방지 — owner 가 명시저장으로 회수 인지).
             try:
                 (_home() / "capture_last_preview.json").write_text(
-                    json.dumps({"count": pv["count"]}, ensure_ascii=False), encoding="utf-8")
+                    json.dumps({"count": pv["count"], "bulk_vetoed": pv.get("bulk_vetoed", 0)},
+                               ensure_ascii=False), encoding="utf-8")
             except Exception:
                 pass
         else:  # UserPromptSubmit

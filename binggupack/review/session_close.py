@@ -242,6 +242,7 @@ def _build_preview(home=None, session_id=None):
         pv = PersistentCaptureBuffer(home=_home(home)).render_preview(session_id=session_id)
         return {"available": True, "count": pv.get("count", 0),
                 "items": pv.get("items", []),
+                "bulk_vetoed": pv.get("bulk_vetoed", 0),
                 "note": pv.get("note", "owner 승인 전 candidate (active 아님)")}
     except Exception:
         return {"available": False, "count": 0, "items": [],
@@ -347,6 +348,10 @@ def render_close_md(summary):
         lines.append("> %s" % pv.get("note", "owner 승인 전 candidate"))
     else:
         lines.append("- (수집된 candidate 없음 — 표시할 preview 0)")
+    bv = pv.get("bulk_vetoed", 0)
+    if bv:
+        lines.append("- ⚠️ 긴 발화 %d건 자동 제외(붙여넣기·대화 덩어리·AI 응답문 — 화자축 오염 방지). "
+                     "진짜 저장하려면 그 내용에 `이거 저장해` 명시." % bv)
 
     gv = summary.get("governance", {}) or {}
     lines.append("")

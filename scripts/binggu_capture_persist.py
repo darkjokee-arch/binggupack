@@ -24,6 +24,14 @@ TEXT_CAP = 1000         # 자동수집 버퍼 발화 보존 상한 = capture_pre
                         # 문장 전체 보존(80자 발췌 폐기 — 개인 온톨로지 정체성). 1000 초과 = 대화 덩어리 → 절단(원문=대화 전문 저장 금지).
 DEFAULT_TTL_DAYS = 7    # TTL 자동 폐기 기본값
 
+# 대화 덩어리/붙여넣기/AI 응답문 veto 임계 — 길이 단독 아닌 "길이 + 줄바꿈 밀도"(2026-07-10 Fable5 2각 수렴).
+#   실측(owner buffer 79건): owner 진짜 판단 med 91자·줄바꿈 med 0 / noise+AI응답 med 1000자·줄바꿈 med 17.
+#   BULK_SOFT+NL_MIN 게이트가 noise+ai_resp 43/43(100%) 차단·owner 판단 14/16 보존(장문 2건은 명시저장 회수).
+#   ★줄바꿈 조건이 기존 T7b(1110자·줄바꿈0 단일문 판단) 보존 — 순수 길이 veto 회귀 회피.
+BULK_SOFT_LEN = 300     # 이 이상 + 줄바꿈 다수 = 붙여넣기/AI응답 덩어리로 판정
+BULK_NL_MIN = 3         # 줄바꿈 밀도 임계(owner 타이핑 판단은 줄바꿈 0~2, 붙여넣기는 3+)
+BULK_HARD_LEN = 2000    # 줄바꿈 없어도 이 이상 = 덩어리(단일행 초장문 안전망)
+
 # 시스템 주입 텍스트 마커 — task-notification·hook feedback·command·reminder 등은 사용자 판단이
 # 아니라 시스템/하네스가 prompt 에 주입한 텍스트다. capture 오염(2026-07-10 발견: preview 에
 # task-notification 원문이 candidate 로 뜸)을 차단하기 위해 하나라도 포함되면 capture skip.
@@ -54,6 +62,18 @@ def _is_explicit_signal(utterance):
         return False
     t = str(utterance).strip()
     return bool(_any(t, PREVIEW_TRIGGER) or _any(t, EXPLICIT_SAVE))
+
+
+def _is_bulk_text(utterance):
+    """대화 덩어리/붙여넣기/AI 응답문 판정 — 길이 + 줄바꿈 밀도(2026-07-10 Fable5 2각 + 실측 수렴).
+
+    owner 진짜 판단은 짧고(med 91자) 줄바꿈 없음(med 0). 노이즈/AI응답은 길고(med 1000자) 줄바꿈 다수(med 17).
+    C(문장 발췌)는 AI 응답문에서 문장을 뽑아 owner 온톨로지에 넣는 '화자축 오염'(owner 3회 지적 교훈:
+    owner=자연어 원문 그대로·AI 정리 저장 금지)이라 기각 → 덩어리는 발췌 아닌 veto(안 담음).
+    명시저장('이거 저장해')은 feed 에서 이 함수 앞에서 우회하므로 긴 의도적 저장 경로는 보존."""
+    t = str(utterance or "")
+    n = len(t)
+    return n > BULK_HARD_LEN or (n > BULK_SOFT_LEN and t.count("\n") >= BULK_NL_MIN)
 
 
 def binggu_home(home=None):
@@ -166,6 +186,15 @@ class PersistentCaptureBuffer:
                 cwd TEXT,
                 session_id TEXT)"""
         )
+        # 대화 덩어리 veto 카운트(무음 폐기 방지 — preview 에 "긴 발화 n건 제외" 노출). 원문 미저장(길이만).
+        c.execute(
+            """CREATE TABLE IF NOT EXISTS bulk_vetoes(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                captured_at REAL NOT NULL,
+                cwd TEXT,
+                session_id TEXT,
+                length INTEGER)"""
+        )
         # 기존 테이블(session_id 컬럼 없음) 하위호환 마이그레이션 — 세션 경계(2026-07-10).
         try:
             cols = [r[1] for r in c.execute("PRAGMA table_info(capture_candidates)")]
@@ -187,13 +216,19 @@ class PersistentCaptureBuffer:
             return {"action": "system_noise", "stored": False}
         # A3: 명시 저장/preview 신호는 cwd allow 화이트리스트를 우회(중립 cwd=system32 에서도 통과).
         #   enabled(기능 ON)·deny(명시 배제 프로젝트)는 존중 — 우회는 allow 미스에만(오염 표면 ≈0).
-        if _is_explicit_signal(utterance):
+        explicit = _is_explicit_signal(utterance)
+        if explicit:
             if not self.scope.enabled() or self.scope._denied(cwd):
                 return {"action": "skipped_scope", "stored": False,
                         "enabled": self.scope.enabled(), "in_scope": self.scope.in_scope(cwd)}
         elif not self.scope.should_capture(cwd):
             return {"action": "skipped_scope", "stored": False,
                     "enabled": self.scope.enabled(), "in_scope": self.scope.in_scope(cwd)}
+        # 대화 덩어리/붙여넣기/AI 응답문 veto(길이+줄바꿈) — 단 명시저장(explicit)은 owner 의도라 우회.
+        #   veto 시 원문 미저장, 카운트만 남겨 preview 에 "긴 발화 n건 제외" 노출(무음 폐기 방지).
+        if not explicit and _is_bulk_text(utterance):
+            self._record_bulk_veto(now, cwd, session_id, len(str(utterance)))
+            return {"action": "bulk_veto", "stored": False, "length": len(str(utterance))}
         v = classify(utterance, prev_turn)
         if v["state"] == "preview_trigger":
             self._purge(now)
@@ -219,13 +254,42 @@ class PersistentCaptureBuffer:
             c.close()
         return {"action": "captured", "verdict": v, "stored": True, "truncated": truncated}
 
+    def _record_bulk_veto(self, now, cwd, session_id, length):
+        """대화 덩어리 veto 1건 카운트 기록(원문 미저장 — 길이만). preview 노출용·graceful."""
+        try:
+            c = self._conn()
+            try:
+                c.execute(
+                    "INSERT INTO bulk_vetoes(captured_at,cwd,session_id,length) VALUES(?,?,?,?)",
+                    (now, str(cwd), session_id, int(length)))
+                c.commit()
+            finally:
+                c.close()
+        except Exception:
+            pass  # 카운트 실패는 capture 결정에 무영향(veto 자체는 이미 확정)
+
+    def _bulk_veto_count(self, now, session_id=None, conn=None):
+        """TTL 유효 bulk veto 건수(세션 경계). session_id 지정 시 그 세션만."""
+        cutoff = now - self.ttl_days * 86400
+        own = conn is None
+        c = conn or self._conn()
+        try:
+            if session_id is not None:
+                return c.execute("SELECT COUNT(*) FROM bulk_vetoes WHERE session_id=? AND captured_at>=?",
+                                 (session_id, cutoff)).fetchone()[0]
+            return c.execute("SELECT COUNT(*) FROM bulk_vetoes WHERE captured_at>=?", (cutoff,)).fetchone()[0]
+        finally:
+            if own:
+                c.close()
+
     def _purge(self, now, conn=None):
-        """TTL 경과분 삭제. 반환=삭제 건수."""
+        """TTL 경과분 삭제. 반환=삭제 건수(candidate + bulk_vetoes)."""
         cutoff = now - self.ttl_days * 86400
         own = conn is None
         c = conn or self._conn()
         try:
             n = c.execute("DELETE FROM capture_candidates WHERE captured_at < ?", (cutoff,)).rowcount
+            c.execute("DELETE FROM bulk_vetoes WHERE captured_at < ?", (cutoff,))
             c.commit()
             return n
         finally:
@@ -247,6 +311,7 @@ class PersistentCaptureBuffer:
                 rows = c.execute(
                     "SELECT text,pinned,confidence,cwd FROM capture_candidates ORDER BY pinned DESC, id ASC"
                 ).fetchall()
+            bulk_vetoed = self._bulk_veto_count(now, session_id, conn=c)
         finally:
             c.close()
         items = []
@@ -270,7 +335,8 @@ class PersistentCaptureBuffer:
             })
         if self.scope.semantic_preview():
             self._attach_semantic(items, semantic)
-        result = {"count": len(items), "items": items, "note": "owner 승인 전 candidate (active 아님)"}
+        result = {"count": len(items), "items": items, "bulk_vetoed": bulk_vetoed,
+                  "note": "owner 승인 전 candidate (active 아님)"}
         if self.scope.rationale_preview():
             self._attach_rationale(items, result)
         return result
@@ -615,6 +681,36 @@ def _selftest():
         check(r["action"] == "skipped_scope" and not r["stored"],
               "T28 명시 저장 + capture OFF → 차단(enabled 존중)")
         scope3.flag.write_text("1", encoding="utf-8")
+
+        # ── T29~T34 대화 덩어리/붙여넣기/AI 응답문 veto (길이 + 줄바꿈 밀도) ──
+        buf5 = PersistentCaptureBuffer(home=home)
+        buf5.rollback()  # 깨끗한 버퍼(scope3: binggupack allow · bid-engine deny · flag ON)
+        # T29 긴 붙여넣기(>300자 + 줄바꿈 3+) → bulk_veto 미저장
+        long_paste = "이건 붙여넣기 " + ("가나다 결정한다 위험 항상\n" * 25)  # ~383자 · 줄바꿈 25
+        r = buf5.feed(long_paste, repo_cwd)
+        check(r["action"] == "bulk_veto" and not r["stored"] and buf5.size == 0,
+              "T29 긴 붙여넣기(>300자+줄바꿈3+) → bulk_veto 미저장")
+        # T30 긴 단일문 판단(줄바꿈 0) → bulk 아님 · captured + TEXT_CAP 절단(★T7b 보존 = 순수길이veto 회귀 회피)
+        long_single = "이 방법이 더 낫다 " + ("가" * 1100)  # ~1109자 · 줄바꿈 0 < HARD 2000
+        r = buf5.feed(long_single, repo_cwd)
+        check(r["action"] == "captured" and r.get("truncated") and buf5.size == 1,
+              "T30 긴 단일문(줄바꿈0) → bulk 아님·captured+truncated(T7b 보존)")
+        # T31 명시저장 + 긴 덩어리 → explicit 우회(veto 면제) → captured
+        r = buf5.feed("이거 저장해\n" + ("결정 위험\n" * 60), repo_cwd)
+        check(r["action"] == "captured" and buf5.size == 2,
+              "T31 명시저장+긴 덩어리 → explicit 우회 captured(veto 면제)")
+        # T32 짧은 판단(줄바꿈 0) → 정상 captured(veto 무관)
+        r = buf5.feed("B안으로 결정한다", repo_cwd)
+        check(r["action"] == "captured" and buf5.size == 3,
+              "T32 짧은 판단 → 정상 captured(veto 무관)")
+        # T33 render_preview 에 bulk_vetoed 카운트 노출(무음 폐기 방지)
+        pv = buf5.render_preview()
+        check(pv.get("bulk_vetoed", 0) >= 1,
+              "T33 preview bulk_vetoed 카운트 노출(긴 발화 제외 인지)")
+        # T34 2000자+ 줄바꿈 0 → HARD veto(단일행 초장문 안전망)
+        r = buf5.feed("가" * 2100, repo_cwd)
+        check(r["action"] == "bulk_veto",
+              "T34 2000자+ 줄바꿈0 → HARD veto(단일행 초장문)")
 
         gate = "GO" if ok else "NO-GO"
         print(f"\nGATE={gate}")
