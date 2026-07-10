@@ -1,5 +1,9 @@
 # BingguPack — save-intent D4 4조건 게이트 검증표 (2026-06-12, 실측)
 
+> **[P1-A 정합 노트]** confirm 을 "사람 발화 유래 증거"로 다루는 서술은 **NOT_A_TRUSTED_APPROVAL_CHANNEL**
+> (전송된 confirm = 형식/무결성 검증일 뿐 사람 승인 아님). intent_id rehash 등 무결성 검증 결과는 유지.
+> 사람 승인 = out-of-band trusted approval event(`docs/BINGGUPACK_TRUSTED_APPROVAL_EVENT_RFC.md`). 상세 = RFC §23.
+
 > 설계 정본 `BINGGUPACK_HOSTED_SAVE_INTENT_DESIGN.md` §4·§5 D4 단계.
 > 실측 도구: `scripts/openbinggu_save_intent_d4_e2e.py` — E2E(worker 적재 → pull → outbox → 러너 게이트 → temp DB).
 > **결과 = 13/13 GATE=GO.** 전 DB temp 전용 · real staging 0 · live 0 · deploy 0 · 네트워크 127.0.0.1 한정.

@@ -1,5 +1,12 @@
 # BingguPack — hosted save-intent 설계 (정본, 2026-06-11)
 
+> **[P1-A 정합 노트]** §1 스키마의 confirm "사람 발화 증거" 라벨은 **UNTRUSTED_INTENT_ONLY**(전송된
+> confirm = untrusted intent binding/형식 검증일 뿐), §3 step5 "ctx.actor auto/reader 불가"는 hosted 유래
+> intent 에 대해 **SUPERSEDED_IN_PART**(trusted approval event 없으면 fail-closed=actor=reader). transport
+> ≠ authority(§0) 및 intent_id rehash(무결성)는 유지. 사람 승인 = out-of-band trusted approval event
+> (`docs/BINGGUPACK_TRUSTED_APPROVAL_EVENT_RFC.md`). ★ hosted save-intent **runner** 봉인은 STILL-OPEN(P1-B).
+> 상세 = RFC §23.
+
 > DRAFT(`BINGGUPACK_HOSTED_SAVE_BUTTON_DESIGN_DRAFT.md`)를 승격·구체화한 정본. **설계만 — 코드 0.**
 > live 노출 = D5 owner 명시 GO 전 영구 금지 (fail-closed).
 

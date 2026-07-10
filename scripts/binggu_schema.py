@@ -25,9 +25,11 @@ CLI: python scripts/binggu_schema.py --selftest
 from __future__ import annotations
 
 import sqlite3
+import uuid
 
 # user_version(PRAGMA)로 기록되는 정본 스키마 버전. 마이그레이션 게이트 키.
-SCHEMA_VERSION = 1
+# v2 (P1-A trusted approval event): approval_requests·approval_consumptions 테이블 + audit_meta['ledger_id'].
+SCHEMA_VERSION = 2
 
 # ── 테이블 정본 정의 ──────────────────────────────────────────────────────────
 # 각 테이블: 컬럼 DDL 리스트(합집합). 첫 항목은 대개 PRIMARY KEY.
@@ -156,6 +158,32 @@ _TABLE_COLUMNS = {
         "key TEXT PRIMARY KEY",
         "value TEXT",
     ],
+    # ── P1-A trusted approval event ────────────────────────────────────────────
+    # approval_requests: 모델이 MCP 로 만들 수 있는 PENDING 요청(승인 아님). raw payload 저장 0 —
+    #   payload_digest(§9 canonical) + payload-agnostic summary 만. owner 실내용 검토는 별도
+    #   approval_review 파일(cap/TTL/PII 게이트·결정 시 purge). state 는 정보용(신뢰=EVENT store).
+    "approval_requests": [
+        "request_id TEXT PRIMARY KEY",
+        "protocol_version TEXT",
+        "operation TEXT",
+        "payload_digest TEXT",
+        "ledger_id TEXT",
+        "summary TEXT",
+        "state TEXT DEFAULT 'pending'",
+        "created_at TEXT",
+        "expires_at TEXT",
+    ],
+    # approval_consumptions: one-time consume dedup ledger. approval_nonce UNIQUE PK = single-winner.
+    #   reserved_at = reserve 시각(lease 판정). receipt = node_id/decision_id(nonce 절대 미포함).
+    #   MCP-writable 이나 승인을 부여하지 않음(사용 사실만 기록).
+    "approval_consumptions": [
+        "approval_nonce TEXT PRIMARY KEY",
+        "request_id TEXT",
+        "state TEXT",
+        "reserved_at TEXT",
+        "receipt TEXT",
+        "consumed_at TEXT",
+    ],
 }
 
 # 복합 PK / UNIQUE 등 컬럼 리스트로 표현 못하는 테이블 제약을 별도 부여.
@@ -252,8 +280,24 @@ def apply_schema(con, staging=False):
         con.execute("PRAGMA user_version = %d" % SCHEMA_VERSION)
     for name, table, cols in _INDEXES:
         con.execute("CREATE INDEX IF NOT EXISTS %s ON %s(%s)" % (name, table, cols))
+    # P1-A: stable ledger identity — 최초 open 시 무조건 발행(user_version 게이트 밖 · INSERT OR
+    # IGNORE 라 재open 멱등·기존 값 보존). approval 은 이 ledger_id 에 바인딩되어 ledger 간 replay 차단.
+    # (downgrade/upgrade churn 으로 ledger_id 누락 시 binding 실패를 막기 위해 user_version 무관 무조건.)
+    con.execute("INSERT OR IGNORE INTO audit_meta(key,value) VALUES('ledger_id',?)",
+                (uuid.uuid4().hex,))
     con.commit()
     return _user_version(con)
+
+
+def ledger_id(con) -> str:
+    """이 ledger 의 안정 식별자(audit_meta['ledger_id']). apply_schema 미실행 시 발행 후 반환."""
+    row = con.execute("SELECT value FROM audit_meta WHERE key='ledger_id'").fetchone()
+    if row and row[0]:
+        return row[0]
+    lid = uuid.uuid4().hex
+    con.execute("INSERT OR IGNORE INTO audit_meta(key,value) VALUES('ledger_id',?)", (lid,))
+    con.commit()
+    return con.execute("SELECT value FROM audit_meta WHERE key='ledger_id'").fetchone()[0]
 
 
 def schema_version(con) -> int:

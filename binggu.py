@@ -446,8 +446,8 @@ def cmd_trace(a):
             print("verdict 는 used|ignored|corrected (받음: %r)" % verdict)
             return 2
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        res = RT.mark_by_index(n, verdict, {"actor": "human"}, ts,
-                               reason_code=getattr(a, "note", None), home=home)
+        res = RT.mark_by_index(n, verdict, _resolve_human_ctx(a.ledger, None), ts,
+                               reason_code=getattr(a, "note", None), home=home)   # P1-A.1 fail-closed
         if res["recorded"]:
             note = (" · note=%s" % res["reason_code"]) if res.get("reason_code") else ""
             print("판정 기록: #%d → %s%s (actor=human)" % (n, verdict, note))
@@ -651,44 +651,42 @@ def _gate_log_for_ledger(ledger):
                         os.path.basename(_sg.gate_path()))
 
 
-def _resolve_human_ctx(ledger, sents, confirm):
-    """운영 ledger write 의 'human' 주장을 신뢰 신호로 검증해 실제 actor ctx 를 만든다.
+def _resolve_human_ctx(ledger, sents, confirm=None):
+    """운영 write 의 'human' 승격 = 실제 사람 근거가 있을 때만(fail-closed 기본 · P1-A.1).
 
-    Fix E: 종전엔 CLI 가 actor="human" 을 하드코딩해 위조방지 기록장(save_gate.gate_human_for)이
-    write 경로에서 미소비였다(텍스트만 알면 preview_id·confirm 을 AI 도 합성 가능 → 사람 확인 없이
-    운영 저장). 이제 write 직전 게이트를 실제로 소비한다. ★오버블록 회피(회귀0):
-      1) 게이트 기록 존재(사람 SAVE 발화를 hook 이 append — AI 위조 불가) → human 확정(save_gate)
-      2) 대화형 TTY(사장님 키보드) 또는 명시 신뢰 플래그(BINGGU_TRUSTED_CLI) → human 유지 + 감사표식
-      3) 비대화형(자동화/파이프) + 게이트 기록 없음 = 사람 확인 미검증 → 기본은 경고+감사(강등 안 함,
-         정당한 대화형 저장·pair 를 안 깨기 위함), BINGGU_STRICT_HUMAN_GATE=1 이면 비-human 으로
-         강등해 기존 G4_no_auto BLOCK 으로 **코드 강제**(opt-in).
+    환경변수(BINGGU_TRUSTED_CLI)·비대화형 자동화는 사람 승인이 아니다(RFC §6: env var/isatty !=
+    human approval). 사람 근거 2가지만:
+      1) save_gate 앵커 — 사장님이 키보드로 친 SAVE 발화를 UserPromptSubmit hook 이 기록(AI 위조 불가).
+      2) 대화형 TTY — 사장님이 직접 터미널에서 실행. **isatty 는 pipe/자동화를 거르는 UX 경계**일 뿐
+         암호학적 사람증명이 아니다(셸/파일 도구가 붙은 호스트에선 하드 통제 아님 · SECURITY.md).
+    그 외(비대화형·앵커없음) → actor='reader' → 모든 core 게이트가 BLOCK(fail-closed). 환경변수로 우회
+    불가. BINGGU_STRICT_HUMAN_GATE 는 **deprecated no-op**(strict 가 기본 · 0/false 로 fail-open 안 됨).
     """
-    ctx = {"actor": "human", "confirm": confirm}
+    ctx = {"actor": "reader"}                    # 기본 fail-closed (reader 는 denylist·allowlist 게이트 모두 BLOCK)
+    if confirm is not None:
+        ctx["confirm"] = confirm
+    if os.environ.get("BINGGU_STRICT_HUMAN_GATE", "").strip():
+        print("NOTE: BINGGU_STRICT_HUMAN_GATE 는 deprecated no-op 입니다(strict 가 기본 · fail-open 불가).")
     # 1) 위조방지 기록장 대조 (hook 이 쓴 사람 SAVE 발화 hash — AI 는 UserPromptSubmit 를 못 거쳐 위조 불가)
     try:
         import binggu_save_gate as _sg
         if sents and _sg.gate_human_for(sents, path=_gate_log_for_ledger(ledger)):
+            ctx["actor"] = "human"
             ctx["actor_source"] = "save_gate"
             return ctx
     except Exception:
-        pass  # 게이트 부재/오류 → 아래 신뢰 신호로 판단(default 는 오버블록 회피)
-    # 2) 대화형 터미널(사장님이 직접 타이핑) / 명시 신뢰 플래그
-    trusted = os.environ.get("BINGGU_TRUSTED_CLI", "").strip().lower() in ("1", "true", "yes", "on")
+        pass  # 게이트 부재/오류 → 아래 신뢰 신호로 판단(fail-closed 유지)
+    # 2) 대화형 TTY(사장님 직접 실행) — UX 경계. 비대화형(pipe/redirect/자동화)은 사람 증명 아님.
     try:
         interactive = sys.stdin.isatty()
     except Exception:
         interactive = False
-    if interactive or trusted:
-        ctx["actor_source"] = "tty" if interactive else "trust_flag"
+    if interactive:
+        ctx["actor"] = "human"
+        ctx["actor_source"] = "tty"
         return ctx
-    # 3) 비대화형 + 게이트 기록 없음 = 사람 확인 미검증
-    if os.environ.get("BINGGU_STRICT_HUMAN_GATE", "").strip().lower() in ("1", "true", "yes", "on"):
-        ctx["actor"] = "cli_unverified"          # → save_selected/save_paired 의 G4_no_auto BLOCK
-        ctx["actor_source"] = "strict_block"
-    else:
-        ctx["actor_source"] = "unverified_noninteractive"
-        print("WARN: 사람 확인 미검증(비대화형·게이트 기록 없음) — actor_source=unverified_noninteractive "
-              "로 진행합니다. 코드 강제 차단은 BINGGU_STRICT_HUMAN_GATE=1.")
+    # 3) 비대화형 + 앵커없음 = 사람 미검증 → fail-closed(reader). 환경변수 우회 없음.
+    ctx["actor_source"] = "unverified_noninteractive"
     return ctx
 
 
@@ -738,7 +736,7 @@ def cmd_save(a):
         accepted = 0
         for nid in r.get("node_ids", []):
             ar = accept_by_node_id(db, nid, "save --accept 통합 확정(SAVE confirm 편승)",
-                                   {"actor": "human"})
+                                   {"actor": ctx["actor"]})   # P1-A.1: 저장에 쓴 검증된 actor 재사용(fresh human 위조 금지)
             if ar.get("applied"):
                 accepted += 1
         r["accepted"] = accepted
@@ -771,7 +769,7 @@ def cmd_pair(a):
     if r.get("applied") and getattr(a, "accept", False):
         # 저장과 동시에 owner_accepted 확정 — 별도 ACCEPT 문구 면제(PAIR confirm 이 이미 사람 확인)
         ar = accept_by_node_id(db, r["owner_node_id"],
-                               "pair --accept 통합 확정(PAIR confirm 편승)", {"actor": "human"})
+                               "pair --accept 통합 확정(PAIR confirm 편승)", {"actor": ctx["actor"]})   # P1-A.1: 검증된 actor 재사용
         acc_note = " · 확정 OK" if ar.get("applied") else (" · 확정 실패(%s)" % ar.get("reason"))
     db.close()
     if r.get("applied"):
@@ -844,30 +842,31 @@ def cmd_list(a):
 
 def cmd_deprecate(a):
     db, snap_dir = _open(a.ledger)
-    r = deprecate_from_list(db, a.n, a.id8, a.reason,
-                            {"actor": "human", "confirm": a.confirm}, snap_dir)
+    # P1-A.1: actor 는 사람 근거(save_gate 앵커/대화형 TTY)로만 human. 비대화형/env → reader → fail-closed.
+    ctx = _resolve_human_ctx(a.ledger, None, a.confirm)
+    r = deprecate_from_list(db, a.n, a.id8, a.reason, ctx, snap_dir)
     db.close()
     return _show(r)
 
 
 def cmd_replace(a):
     db, snap_dir = _open(a.ledger)
-    r = replace_from_list(db, a.n, a.id8, getattr(a, "with"), a.reason,
-                          {"actor": "human", "confirm": a.confirm}, snap_dir)
+    ctx = _resolve_human_ctx(a.ledger, None, a.confirm)   # P1-A.1 fail-closed
+    r = replace_from_list(db, a.n, a.id8, getattr(a, "with"), a.reason, ctx, snap_dir)
     db.close()
     return _show(r)
 
 
 def cmd_accept(a):
     db, _ = _open(a.ledger)
-    r = accept_from_list(db, a.n, a.id8, a.reason, {"actor": "human", "confirm": a.confirm})
+    r = accept_from_list(db, a.n, a.id8, a.reason, _resolve_human_ctx(a.ledger, None, a.confirm))
     db.close()
     return _show(r)
 
 
 def cmd_unaccept(a):
     db, _ = _open(a.ledger)
-    r = unaccept_from_list(db, a.n, a.id8, a.reason, {"actor": "human", "confirm": a.confirm})
+    r = unaccept_from_list(db, a.n, a.id8, a.reason, _resolve_human_ctx(a.ledger, None, a.confirm))
     db.close()
     return _show(r)
 
@@ -880,7 +879,7 @@ def cmd_due(a):
         db.close()
         print("BLOCK: node_hash_mismatch (목록을 다시 확인하세요: binggu.py list)")
         return 1
-    r = set_review_due(db, nid, a.date, {"actor": "human"})
+    r = set_review_due(db, nid, a.date, _resolve_human_ctx(a.ledger, None))   # P1-A.1 fail-closed
     db.close()
     return _show(r)
 
@@ -893,11 +892,12 @@ def cmd_resolve(a):
         db.close()
         print("BLOCK: node_hash_mismatch (목록을 다시 확인하세요: binggu.py list)")
         return 1
-    r = resolve_review(db, nid, a.outcome, a.reason, {"actor": "human"})
+    _ctx = _resolve_human_ctx(a.ledger, None)                # P1-A.1: 비대화형/env → reader → fail-closed
+    r = resolve_review(db, nid, a.outcome, a.reason, _ctx)
     # 양방향 신뢰도 연동 — 성공/실패만 hit_events 기록(불확실/판정불가 skip). 사람 resolve 한정(불변식6).
     if r.get("applied") and a.outcome in ("성공", "실패"):
         import binggu_hit_stats as _HS
-        _HS.record_resolution(db, nid, a.outcome == "성공", {"actor": "human"})
+        _HS.record_resolution(db, nid, a.outcome == "성공", _ctx)
     db.close()
     return _show(r)
 
@@ -982,8 +982,8 @@ def cmd_mark(a):
         return 2
     outcome = "hit" if a.cmd == "mark-hit" else "miss"
     db, _ = _open(ledger)
-    r = HR.mark_outcome(db, ledger, a.query, a.index, outcome, {"actor": "human"},
-                        nonce=a.nonce, domain=a.domain, home=os.path.dirname(ledger))
+    r = HR.mark_outcome(db, ledger, a.query, a.index, outcome, _resolve_human_ctx(a.ledger, None),
+                        nonce=a.nonce, domain=a.domain, home=os.path.dirname(ledger))   # P1-A.1 fail-closed
     db.close()
     if r.get("recorded"):
         print("OK: %s 기록 — [%d] \"%s\"" % (outcome, a.index, r.get("node_claim") or ""))
@@ -1023,7 +1023,10 @@ def cmd_learn_consume(a):
             print("장부가 없습니다: %s · 먼저 python binggu.py init" % ledger)
             return 2
         db, _ = _open(ledger)
-        r = LC.consume(db, ledger, qpath, qi, index=a.index, home=os.path.dirname(ledger))
+        # P1-A.1: 소비 승인 actor 는 사람 근거(save_gate 앵커/대화형 TTY)로만 human. 비대화형/env → reader
+        #   → mark_outcome G4_no_auto(fail-closed). CONSUME <n> 문구 단독으로 human 승격 금지(AOB-3 동종).
+        _ctx = _resolve_human_ctx(a.ledger, None)
+        r = LC.consume(db, ledger, qpath, qi, index=a.index, home=os.path.dirname(ledger), ctx=_ctx)
         db.close()
         if r.get("consumed"):
             print('OK: %s 소비 — [%d] "%s"' % (r["outcome"], r["index"], r.get("node_claim") or ""))
@@ -1210,7 +1213,8 @@ def cmd_confirm_edges(a):
     sync_db = os.path.join(os.path.dirname(ledger), "sync_edges.sqlite")
     try:
         r = GC.apply_confirm_to_sync(confirm["approved"], sync_db, nodes_by_id=nbi,
-                                     actor="human", now=int(__import__("time").time()))
+                                     actor=_resolve_human_ctx(a.ledger, None)["actor"],   # P1-A.1 fail-closed
+                                     now=int(__import__("time").time()))
     except SA.SyncError as e:
         print("BLOCK:", e)
         return 2
@@ -1624,6 +1628,105 @@ def _home_screen():
     return 0
 
 
+def _approval_home(a):
+    """approval store home = ledger 디렉토리(MCP 핸들러 _operating_home() 과 일치)."""
+    return os.path.dirname(os.path.abspath(a.ledger))
+
+
+def cmd_approvals(a):
+    """대기 중인 trusted approval 요청 목록(조회 only)."""
+    from binggupack.safety import trusted_approval as ta
+    from binggupack.storage import open_g3
+    home = _approval_home(a)
+    os.makedirs(home, exist_ok=True)   # 신규/부재 home 도 graceful(open_g3 는 부모 dir 필요)
+    db = open_g3(a.ledger)
+    try:
+        reqs = ta.list_requests(db.con)
+    finally:
+        db.close()
+    if ta.provider_for(home) is None:
+        print("※ trusted approval provider 미구성 — 활성화: %s 에 {\"enabled\": true}"
+              % ta.config_path(home))
+    if not reqs:
+        print("대기 중인 승인 요청이 없습니다.")
+        return 0
+    print("승인 요청 (요청ID · 작업 · 요약 · 상태 · 만료):")
+    for r in reqs:
+        print("  %s  %-14s  %s  [%s]  ~%s"
+              % (r["request_id"], r["operation"], r["summary"], r["state"], r["expires_at"]))
+    print("\n검토: binggu approval show <요청ID>   ·   승인: binggu approval approve <요청ID>")
+    return 0
+
+
+def cmd_approval(a):
+    """approval show/approve/reject/revoke <request-id>. approve 는 대화형 TTY 필수(비대화형 거부)."""
+    import time as _t
+    from binggupack.safety import trusted_approval as ta
+    from binggupack.storage import open_g3
+    action, rid = a.action, a.request_id
+    home = _approval_home(a)
+    os.makedirs(home, exist_ok=True)   # 신규/부재 home 도 graceful(open_g3 는 부모 dir 필요)
+    db = open_g3(a.ledger)
+    try:
+        req = ta.get_request(db.con, rid)
+    finally:
+        db.close()
+    if not req:
+        print("요청을 찾을 수 없습니다: %s" % rid)
+        return 1
+
+    def _render():
+        rev = ta.read_review(home, rid)
+        print("요청ID : %s" % rid)
+        print("작업   : %s" % req["operation"])
+        print("대상 ledger : %s" % req["ledger_id"])
+        print("만료   : %s" % req["expires_at"])
+        print("상태   : %s" % req["state"])
+        print("─ 실제 저장/변경 내용 ─")
+        if rev:
+            for it in rev.get("items", []):
+                print("  %s: %s" % (it["label"], it["value"]))
+        else:
+            print("  (검토 레코드 없음 — 만료/정리됨)")
+
+    if action == "show":
+        _render()
+        print("\n승인: binggu approval approve %s   ·   거절: binggu approval reject %s" % (rid, rid))
+        return 0
+
+    if action == "approve":
+        # P1-A.1: 승인 EVENT 발행은 사장님이 직접 대화형 터미널에서 실행하는 데서만 나온다. 비대화형
+        # (pipe/redirect/자동화)·환경변수는 승인 권한이 아니다(RFC §6). 하드 거부(exit 2·no-mint).
+        # ★ BINGGU_TRUSTED_CLI 우회 제거: env truthy 로 비대화형 mint 하던 백도어(AOB-1 Critical) 봉인.
+        try:
+            interactive = sys.stdin.isatty()
+        except Exception:
+            interactive = False
+        if not interactive:
+            print("BLOCK: approval 은 대화형 터미널에서만 가능합니다(비대화형 stdin·환경변수 거부·no-write).")
+            print("  사장님이 직접 터미널에서 'binggu approval approve %s' 를 실행하세요." % rid)
+            return 2
+        _render()
+        ans = input("\n승인하려면 정확히 'APPROVE %s' 입력: " % rid[:8])   # 대화형 필수 · typed phrase 항상
+        if ans.strip() != ("APPROVE %s" % rid[:8]):
+            print("승인 취소(문구 불일치).")
+            return 1
+        cfg = ta.load_config(home) or {}
+        ttl = int(cfg.get("ttl_seconds", ta.DEFAULT_TTL_SECONDS))
+        ta.mint_approval(home, req, ttl, _t.time(), channel="cli_tty")   # isatty 검증 후에만 = 정직한 라벨
+        print("승인 발행 완료: %s (만료 %ds). MCP/앱에서 이 작업이 정확히 1회 실행됩니다." % (rid, ttl))
+        return 0
+
+    if action in ("reject", "revoke"):
+        ta.tombstone(home, req, action, _t.time())
+        ta.purge_review(home, rid)
+        print("%s 처리 완료: %s" % (action, rid))
+        return 0
+
+    print("알 수 없는 action: %s (show/approve/reject/revoke)" % action)
+    return 2
+
+
 def main():
     if sys.argv[1:] == ["--selftest"]:
         sys.exit(selftest())
@@ -1776,6 +1879,11 @@ def main():
     rsp = sub.add_parser("restore")  # 백업 → 장부 교체(파괴적 · confirm 정확 일치 게이트)
     rsp.add_argument("backup")                           # 백업 sqlite 경로
     rsp.add_argument("--confirm", default=None)          # "RESTORE <백업파일명>" 정확 일치
+    # P1-A trusted approval event — owner 검토·승인 채널(MCP tool surface 밖).
+    sub.add_parser("approvals")                          # 대기 승인 요청 목록(조회)
+    apv = sub.add_parser("approval")
+    apv.add_argument("action", choices=["show", "approve", "reject", "revoke"])
+    apv.add_argument("request_id")
     a = p.parse_args()
     fn = {"init": cmd_init, "start": cmd_init, "status": cmd_status, "doctor": cmd_status,
           "preview": cmd_preview, "remember": lambda a: cmd_preview(a, explicit=True),  # remember=명시 입력
@@ -1792,7 +1900,8 @@ def main():
           "confirm-edges": cmd_confirm_edges, "pair": cmd_pair, "trust": cmd_trust,
           "route": cmd_route, "backup": cmd_backup, "export": cmd_export,
           "restore": cmd_restore, "demo": cmd_demo, "explain": cmd_explain,
-          "forget": cmd_forget, "inbox": cmd_inbox}[a.cmd]
+          "forget": cmd_forget, "inbox": cmd_inbox,
+          "approvals": cmd_approvals, "approval": cmd_approval}[a.cmd]
     sys.exit(fn(a))
 
 

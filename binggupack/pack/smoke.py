@@ -97,8 +97,11 @@ def run_smoke(home=None):
     r = handle_tool("save_candidate",
                     {"text": KO, "indices": [1], "dry_run": False, "confirm": "SAVE 1"}, allow_root)
     tr = r.get("tool_result") or {}
+    # P1-A: save_candidate 가 approval_gate.authorize 를 거치며, provider 미구성 시 응답 reason 이
+    #       G4_no_auto(core) → provider_not_configured(승인 게이트)로 이동. write 0(fail-closed)은 불변.
     chk("9b.confirm_alone_BLOCKED(no_human_anchor)",
-        tr.get("executed_write") is False and tr.get("reason") == "G4_no_auto")
+        tr.get("executed_write") is False
+        and tr.get("reason") in ("G4_no_auto", "provider_not_configured", "trusted_approval_event_required"))
 
     # 9c. 사장님이 실제 'SAVE 1' 을 키보드 입력하면 save_gate hook 이 앵커를 남긴다(여기선 그 앵커를 직접
     #     기록해 시뮬). 그때만 confirm 정확일치가 human 승격 저장으로 이어진다(격리 BINGGU_HOME 에만).

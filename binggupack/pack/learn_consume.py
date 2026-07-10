@@ -137,11 +137,16 @@ def render_preview_md(pv):
 
 
 # ── consume — owner 승인 소비(mark_outcome actor=human) ───────────────────────────
-def consume(db, ledger_path, qpath, qi, index=1, home=None):
+def consume(db, ledger_path, qpath, qi, index=1, home=None, ctx=None):
     """qi 번째 소비 대기 항목을 mark_outcome 으로 적재하고 consumed=true 마킹.
+
+    P1-A.1: actor 는 하드코딩 'human' 이 아니라 호출자가 넘긴 `ctx` (owner 근거로만 human). binggu CLI
+    는 `_resolve_human_ctx`(save_gate 앵커·대화형 TTY 만 human · 비대화형/env → reader) 를 넘긴다. ctx
+    미지정 시 fail-closed 기본(reader) → mark_outcome/mark_outcome_uttered 의 actor=human 게이트가 BLOCK.
 
     반환: {consumed, reason?, outcome?, node_claim?, decision_id?, query?, index?, mark?}.
     """
+    ctx = ctx if ctx is not None else {"actor": "reader"}   # fail-closed 기본
     pend = load_pending(qpath)
     if not isinstance(qi, int) or qi < 0 or qi >= len(pend):
         return {"consumed": False, "reason": "qi_out_of_range", "pending": len(pend)}
@@ -154,7 +159,7 @@ def consume(db, ledger_path, qpath, qi, index=1, home=None):
         #   적중률에 반영된다. 위조 차단은 발화 앵커(UserPromptSubmit hook)+owner 승인(human)이 보장.
         fb = (entry.get("evidence") or {}).get("feedback") or ""
         r = HR.mark_outcome_uttered(db, fb, entry.get("ts"), outcome,
-                                    {"actor": "human"}, domain=entry.get("domain"))
+                                    ctx, domain=entry.get("domain"))
         if not r.get("recorded"):
             return {"consumed": False, "reason": r.get("reason"), "mark": r}
         _mark_consumed(qpath, line_idx)
@@ -163,7 +168,7 @@ def consume(db, ledger_path, qpath, qi, index=1, home=None):
                 "node_id": r.get("node_id"), "decision_id": r.get("decision_id")}
     query = queries[0]
     # mark_outcome 이 actor=human 게이트·D-1·D-2·nonce(None=stale skip) 을 그대로 강제.
-    r = HR.mark_outcome(db, ledger_path, query, index, outcome, {"actor": "human"},
+    r = HR.mark_outcome(db, ledger_path, query, index, outcome, ctx,
                         nonce=None, domain=entry.get("domain"), home=home)
     if not r.get("recorded"):
         return {"consumed": False, "reason": r.get("reason"), "mark": r}
@@ -237,7 +242,7 @@ def _selftest():
             and os.path.getmtime(qpath) == q_mtime_before)
 
         # T3 정상 소비(qi=0 hit index=1) → recorded · consumed=true · hit_events 1.
-        r3 = consume(db, ledger, qpath, 0, index=1, home=tmp)
+        r3 = consume(db, ledger, qpath, 0, index=1, home=tmp, ctx={"actor": "human"})
         n_ev = db.con.execute("SELECT count(*) FROM hit_events").fetchone()[0]
         pend_after = load_pending(qpath)
         rec(3, "소비 qi=0(hit) → recorded·consumed=true·hit_events 1·대기 1건",
@@ -250,14 +255,14 @@ def _selftest():
             len(all_lines) == 3 and consumed_flags == [True, False, True])
 
         # T5 miss 소비(qi=0 은 이제 원래 [1] miss) index=2 → 다른 node → 정상.
-        r5 = consume(db, ledger, qpath, 0, index=2, home=tmp)
+        r5 = consume(db, ledger, qpath, 0, index=2, home=tmp, ctx={"actor": "human"})
         miss_ev = db.con.execute("SELECT count(*) FROM hit_events WHERE outcome='miss'").fetchone()[0]
         rec(5, "소비 qi=0(miss·index=2) → recorded·hit_events miss 1",
             r5.get("consumed") and r5.get("outcome") == "miss" and miss_ev == 1)
 
         # T6 대기 0 → preview 안내 · consume qi 범위 밖.
         pv6 = preview(ledger, qpath, home=tmp)
-        r6 = consume(db, ledger, qpath, 0, index=1, home=tmp)
+        r6 = consume(db, ledger, qpath, 0, index=1, home=tmp, ctx={"actor": "human"})
         rec(6, "대기 0건 → preview pending 0 · consume qi_out_of_range",
             pv6["pending"] == 0 and (not r6.get("consumed"))
             and r6.get("reason") == "qi_out_of_range")
@@ -269,7 +274,7 @@ def _selftest():
 
         # T8 query 빈 + 발화 근거도 없음 → empty_feedback graceful(기록 0).
         write_queue([{"ts": "x", "outcome": "hit", "queries": [], "consumed": False}])
-        r8 = consume(db, ledger, qpath, 0, index=1, home=tmp)
+        r8 = consume(db, ledger, qpath, 0, index=1, home=tmp, ctx={"actor": "human"})
         rec(8, "query 빈+발화없음 → empty_feedback graceful(consumed False·에러 0)",
             (not r8.get("consumed")) and r8.get("reason") == "empty_feedback")
 
@@ -277,12 +282,31 @@ def _selftest():
         ev_b = db.con.execute("SELECT count(*) FROM hit_events WHERE node_id LIKE 'utter:%'").fetchone()[0]
         write_queue([{"ts": "2026-07-10T09:00:00Z", "outcome": "miss", "queries": [],
                       "recall_linked": False, "evidence": {"feedback": "산으로 간다"}, "consumed": False}])
-        r9 = consume(db, ledger, qpath, 0, index=1, home=tmp)
+        r9 = consume(db, ledger, qpath, 0, index=1, home=tmp, ctx={"actor": "human"})
         ev_a = db.con.execute("SELECT count(*) FROM hit_events WHERE node_id LIKE 'utter:%'").fetchone()[0]
         pend9 = load_pending(qpath)
         rec(9, "발화 앵커 소비(recall 무관 owner 지적 → recorded·anchor=utterance·hit_events +1·consumed)",
             r9.get("consumed") and r9.get("anchor") == "utterance"
             and ev_a == ev_b + 1 and len(pend9) == 0)
+
+        # T10 ★P1-A.1 fail-closed: ctx 미지정(기본 reader)·recall 큐 → mark_outcome G4_no_auto·소비 0.
+        write_queue([{"ts": "z", "outcome": "hit", "queries": ["이 입찰 보류"], "consumed": False}])
+        ev10b = db.con.execute("SELECT count(*) FROM hit_events").fetchone()[0]
+        r10 = consume(db, ledger, qpath, 0, index=1, home=tmp)   # ctx 미지정 → reader(fail-closed)
+        ev10a = db.con.execute("SELECT count(*) FROM hit_events").fetchone()[0]
+        rec(10, "ctx 기본(reader)·비대화형 → G4_no_auto·hit_events 불변·미소비(fail-closed)",
+            (not r10.get("consumed")) and ev10a == ev10b
+            and (r10.get("mark") or {}).get("reason") == "G4_no_auto")
+
+        # T11 ★P1-A.1 발화 앵커도 reader → G4_no_auto(fail-closed · 발화 경로 동일 게이트).
+        write_queue([{"ts": "z2", "outcome": "miss", "queries": [], "recall_linked": False,
+                      "evidence": {"feedback": "다시 봐"}, "consumed": False}])
+        ev11b = db.con.execute("SELECT count(*) FROM hit_events WHERE node_id LIKE 'utter:%'").fetchone()[0]
+        r11 = consume(db, ledger, qpath, 0, index=1, home=tmp)   # ctx 미지정 → reader
+        ev11a = db.con.execute("SELECT count(*) FROM hit_events WHERE node_id LIKE 'utter:%'").fetchone()[0]
+        rec(11, "발화 앵커도 reader → G4_no_auto·utter hit_events 불변(fail-closed)",
+            (not r11.get("consumed")) and ev11a == ev11b
+            and (r11.get("mark") or {}).get("reason") == "G4_no_auto")
 
     finally:
         db.close()

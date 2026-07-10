@@ -160,12 +160,16 @@ class StagingDB:
                 body = json.dumps([actor,action,pid,res,rc,bh,ah,ph], ensure_ascii=False)
             if _hash(body) != eh: return False
             prev = eh
-        # 꼬리 삭제 검출 — 메타(엔트리 수·head 앵커) 대조 (메타 없는 기존 장부는 skip)
+        # 꼬리 삭제 검출 — 메타(엔트리 수·head 앵커) 대조. ★ 각 앵커가 존재할 때만 대조:
+        # audit_append 가 기록하는 앵커라, 신규 ledger(audit 0 건)는 audit_meta 에 ledger_id
+        # (apply_schema)만 있고 앵커 없음 → skip = INTACT. 앵커 있으면 stale/삭제 그대로 검출
+        # (rows 삭제 시 head=GENESIS != 저장 head → False).
         meta = {k: v for k, v in self.con.execute("SELECT key,value FROM audit_meta")}
-        if meta:
+        if meta.get("entry_count") is not None:
             if meta.get("entry_count") != str(len(rows)): return False
+        if meta.get("head_entry_hash") is not None:
             head = rows[-1][9] if rows else "GENESIS"
-            if meta.get("head_entry_hash", head) != head: return False
+            if meta.get("head_entry_hash") != head: return False
         return True
 
     def verify_tail_state(self):
@@ -180,7 +184,10 @@ class StagingDB:
 
 def c2_check(db, pack, ctx):
     """C-2 자동검사 (freshness/duplicate/backup/checksum/evidence_refs). 통과 시 None, 실패 시 reason."""
-    if ctx.get("actor") in ("auto", "reader"): return "G4_no_auto"
+    # P1-A TAE-2 hardening: allowlist(== 'human') — 기존 denylist(auto/reader 만 차단)는 'agent'/
+    # 'system'/누락/대문자 등 임의 sentinel 이 fail-OPEN 이었다(trusted approval no-approval actor 가
+    # 'reader' 가 아니면 통과). human 정확 매칭만 허용 → 어떤 non-human sentinel 도 write 0.
+    if ctx.get("actor") != "human": return "G4_no_auto"
     # evidence_refs 필수(헌법)
     for e in pack["edges"]:
         if not e.get("evidence_refs"): return "evidence_refs_missing"
