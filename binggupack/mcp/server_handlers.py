@@ -400,6 +400,21 @@ def _u_reminders(params=None):
 #   - 운영 ledger 는 서버 결정(BINGGU_HOME/~/.binggupack). MCP 경로 입력 무시(주입 차단).
 #   - owner 정당 write 는 CLI(cmd_pair/cmd_deprecate/cmd_replace·_resolve_human_ctx TTY 신뢰)로 수행.
 #     MCP 표면은 read/dry-run/미리보기 + (사람 앵커 있는) save_candidate 저장에 한정된다.
+# P0.1 안내 정합 — pair/deprecate/replace/mark 는 사람 앵커 경로가 없어 MCP 로는 실행 불가(fail-closed).
+# 응답에 이 필드를 실어 "confirm 만으로 실행된다"는 오해를 제거한다. dry-run 미리보기(confirm_expected 포함)는
+# 호환 위해 유지하되, '그것만으로 실행된다'는 안내는 하지 않는다. 실제 mutation 은 로컬 CLI/TTY 경로로.
+_FAIL_CLOSED_GUIDANCE = (
+    "MCP mutation is temporarily fail-closed. A confirmation phrase alone is not human "
+    "approval. Use the local CLI/TTY flow for an owner-approved mutation. App/web mutation "
+    "will return in P1 through a trusted approval event.")
+# dry-run 응답용(reason 필드가 없으므로 승인요건 reason 을 함께 노출).
+_MCP_FAIL_CLOSED = {"write_available": False, "reason": "trusted_approval_event_required",
+                    "owner_action": "use_local_cli", "guidance": _FAIL_CLOSED_GUIDANCE}
+# 실행 시도(write-gated) 응답용 — 기존 reason(G4_no_auto 등)을 덮어쓰지 않도록 reason 제외.
+_MCP_FAIL_CLOSED_INFO = {"write_available": False, "owner_action": "use_local_cli",
+                         "guidance": _FAIL_CLOSED_GUIDANCE}
+
+
 def _u_pair(params=None):
     """owner 발화(+ai 요약) 화자축 페어 저장. dry_run 기본·PAIR confirm 정확일치·자동저장 차단.
     relation: accepts/refutes/revises · by: owner(사용자가 AI 발화에 반응)/ai. ai_text 생략=owner 단독."""
@@ -429,12 +444,13 @@ def _u_pair(params=None):
             return []
 
     if dry_run:
-        # dry-run: write 0. owner/ai 후보 preview + 기대 confirm 안내(사용자가 pick 을 골라야 하므로).
+        # dry-run: write 0. owner/ai 후보 preview + confirm_expected(호환 유지). 단 confirm 만으로는
+        # 실행되지 않는다(fail-closed) — write_available=False 로 명시(실행은 로컬 CLI).
         return {"action": "pair", "mode": "dry-run", "verdict": "PREVIEW",
                 "executed_write": False, "would_write_ledger": False,
                 "relation": rel, "confirm_expected": expected,
                 "owner_preview": _pv(owner_text),
-                "ai_preview": _pv(ai_text) if ai_text else []}
+                "ai_preview": _pv(ai_text) if ai_text else [], **_MCP_FAIL_CLOSED}
     # 승인 경계(P0·save_candidate 봉인과 동일): confirm 문구는 dry_run 응답이 그대로 노출하므로 모델이
     # 재현 가능 → "사람 승격 증거"가 되지 못한다(자율 에이전트 preview→confirm 우회 재현 확증, 2026-07-10).
     # actor 를 reader 로 하드 오버라이드 → save_paired G4_no_auto(사람 앵커 없는 자동저장 차단). confirm 은
@@ -460,7 +476,7 @@ def _u_pair(params=None):
             "executed_write": bool(r.get("applied")),
             "saved": r.get("saved"), "reason": r.get("reason"),
             "relation": r.get("relation"), "paired": r.get("paired"),
-            "pack_id": r.get("pack_id"), "ledger": "operating"}
+            "pack_id": r.get("pack_id"), "ledger": "operating", **_MCP_FAIL_CLOSED_INFO}
 
 
 def _u_deprecate(params=None):
@@ -484,7 +500,9 @@ def _u_deprecate(params=None):
         return {"action": "deprecate", "mode": "dry-run", "verdict": "PREVIEW",
                 "executed_write": False, "would_write_ledger": False,
                 "confirm_expected": expected,
-                "note": "list 도구로 index/id8 확인 후 dry_run=false + confirm 으로 실행(사유 reason 필수)"}
+                "note": "미리보기입니다. MCP 로는 confirm 만으로 실행되지 않습니다(fail-closed) — "
+                        "실제 기각은 로컬 CLI: binggu deprecate <n> <id8> --reason ... --confirm ...",
+                **_MCP_FAIL_CLOSED}
     # 승인 경계(P0): confirm 은 dry_run 이 노출 → 모델 재현 가능(사람 증거 아님). actor 하드 reader →
     # deprecate_from_list G4_no_auto. owner 정당 기각은 CLI(cmd_deprecate·TTY). confirm=형식검증 전용.
     actor = "reader"
@@ -501,7 +519,8 @@ def _u_deprecate(params=None):
     return {"action": "deprecate", "mode": "write-gated",
             "verdict": "ALLOW" if r.get("applied") else "BLOCK",
             "executed_write": bool(r.get("applied")),
-            "reason": r.get("reason"), "node_id": r.get("node_id"), "ledger": "operating"}
+            "reason": r.get("reason"), "node_id": r.get("node_id"), "ledger": "operating",
+            **_MCP_FAIL_CLOSED_INFO}
 
 
 def _u_replace(params=None):
@@ -526,7 +545,9 @@ def _u_replace(params=None):
         return {"action": "replace", "mode": "dry-run", "verdict": "PREVIEW",
                 "executed_write": False, "would_write_ledger": False,
                 "confirm_expected": expected,
-                "note": "list 도구로 index/id8 확인 후 dry_run=false + confirm 으로 실행(사유 reason 필수)"}
+                "note": "미리보기입니다. MCP 로는 confirm 만으로 실행되지 않습니다(fail-closed) — "
+                        "실제 교체는 로컬 CLI: binggu replace <n> <id8> --with ... --reason ... --confirm ...",
+                **_MCP_FAIL_CLOSED}
     # 승인 경계(P0): confirm 은 dry_run 이 노출 → 모델 재현 가능(사람 증거 아님). actor 하드 reader →
     # replace_from_list G4_no_auto. owner 정당 교체는 CLI(cmd_replace·TTY). confirm=형식검증 전용.
     actor = "reader"
@@ -545,7 +566,7 @@ def _u_replace(params=None):
             "verdict": "ALLOW" if r.get("applied") else "BLOCK",
             "executed_write": bool(r.get("applied")),
             "reason": r.get("reason"), "old_node_id": r.get("old_node_id"),
-            "new_node_id": r.get("new_node_id"), "ledger": "operating"}
+            "new_node_id": r.get("new_node_id"), "ledger": "operating", **_MCP_FAIL_CLOSED_INFO}
 
 
 # ==== Phase 2 배치 C: 작업 도구 — reflect(회고→후보·read) + harvest(외부 소스 관리) ====
@@ -994,11 +1015,13 @@ def _mark_outcome_handler(params, outcome):
         return {"action": act, "mode": "write-gated", "verdict": "REJECT",
                 "executed_write": False, "reason": "ledger_not_found"}
     if dry_run:
-        # dry-run: write 0. 기대 confirm 안내(사용자가 recall 로 index 확인 후 opt-out 해야 하므로).
+        # dry-run: write 0. confirm_expected(호환 유지). 단 MCP 로는 confirm 만으로 기록되지 않는다(fail-closed).
         return {"action": act, "mode": "dry-run", "verdict": "PREVIEW",
                 "executed_write": False, "would_write_ledger": False,
                 "confirm_expected": expected,
-                "note": "recall 로 순위(index) 확인 후 dry_run=false + confirm 으로 기록(node_id 입력 불필요·서버 재실행 확보)"}
+                "note": "미리보기입니다. MCP 로는 confirm 만으로 기록되지 않습니다(fail-closed) — "
+                        "실제 기록은 로컬 CLI: binggu %s <query> --index %d" % (act.replace("_", "-"), index),
+                **_MCP_FAIL_CLOSED}
     # 승인 경계(P0): actor 하드 reader → mark_outcome G4_no_auto. MCP 로는 사람-확인 유용성 기록 불가
     # (앵커 없음·confirm 은 모델 재현 가능) — owner 는 CLI(binggu mark-hit/mark-miss)로 기록한다.
     actor = "reader"
@@ -1021,7 +1044,7 @@ def _mark_outcome_handler(params, outcome):
             "nonce": r.get("nonce"), "domain": r.get("domain"),
             "events": r.get("events"),
             "node_claim": _redact_pii(claim) if claim else None,  # PII 마스킹(node_id 미포함)
-            "ledger": "operating"}
+            "ledger": "operating", **_MCP_FAIL_CLOSED_INFO}
 
 
 def _u_mark_hit(params=None):
@@ -1655,7 +1678,21 @@ def _selftest():
         pw4 = (_n_after == 3 and _mk1 is not None and _mk1[0] == "active")
         mark_notes.append(("bypass_attempts_ledger_unchanged", pw4))
 
-        mark_ok = mark_ok and pw1 and pw2 and pw3 and pw4
+        # PW5) 안내 정합(P0.1) — pair/deprecate/replace/mark dry-run 응답이 fail-closed 를 정확히 안내.
+        #      write_available=False · reason=trusted_approval_event_required · owner_action=use_local_cli.
+        pw5 = True
+        for _t, _p in (("pair", {"owner_text": _SAVE_CONVO}),
+                       ("deprecate", {"index": 1, "id8": _id8}),
+                       ("replace", {"index": 1, "id8": _id8, "new_sentence": "교체문"}),
+                       ("mark_hit", {"recall_query": _mq, "index": 1})):
+            _dr = (handle_tool(_t, dict(_p, dry_run=True), allow_root).get("tool_result") or {})
+            pw5 = pw5 and (_dr.get("write_available") is False
+                           and _dr.get("owner_action") == "use_local_cli"
+                           and _dr.get("reason") == "trusted_approval_event_required"
+                           and bool(_dr.get("guidance")))
+        mark_notes.append(("mcp_mutation_fail_closed_guidance", pw5))
+
+        mark_ok = mark_ok and pw1 and pw2 and pw3 and pw4 and pw5
     finally:
         if _saved_home is None:
             os.environ.pop("BINGGU_HOME", None)

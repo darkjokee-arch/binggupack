@@ -1344,45 +1344,94 @@ def _operating_home():
     return os.path.dirname(os.path.abspath(DEFAULT_LEDGER))
 
 
+def _canonical_path(p):
+    """경로 표준화 — expanduser → abspath → realpath → normcase.
+    심링크·상대경로·대소문자 별칭을 전부 해소해 '같은 실제 대상'을 문자열로 비교 가능하게 한다."""
+    return os.path.normcase(os.path.realpath(os.path.abspath(os.path.expanduser(str(p)))))
+
+
+def _same_path(x, y):
+    """두 경로가 같은 실제 대상인지. 둘 다 존재하면 os.path.samefile(장치/inode 동일성)으로,
+    아니면 canonical 문자열로 비교(심링크·대소문자 별칭 포함). 존재/미존재 어느 쪽이든 안전."""
+    try:
+        if os.path.exists(x) and os.path.exists(y):
+            return os.path.samefile(x, y)
+    except OSError:
+        pass
+    return _canonical_path(x) == _canonical_path(y)
+
+
 def cmd_demo(a):
     """60초 데모 — 격리 임시 장부에서 후보→검토→승인→저장→회상→근거 전 과정을 보여준다.
 
-    안전 불변식:
-      · 운영 장부 접근 0 — 격리 데모 홈(임시 폴더 또는 --home)만 사용. 운영 홈과 같으면 거부.
-      · 승인 전 활성 기억 0 · 승인한 후보만 저장 · 거절 후보는 저장 안 함.
-      · 비대화형(--non-interactive)은 CI/자동화용. 승인은 데모 격리 홈에서만 시뮬레이션하며
-        (source="demo" 앵커), 운영 승인 절차를 우회하는 범용 수단이 아니다(운영 홈 write 0).
+    안전 불변식(P0.1 하드닝):
+      · 운영 장부 접근 0 — 격리 데모 홈(임시 폴더 또는 --home)만 사용.
+        · demo 홈이 운영 홈과 같은 실제 디렉터리면 BLOCK(심링크·대소문자 별칭·samefile 포함).
+        · demo 장부가 운영 장부와 같은 실제 파일이면 BLOCK.
+        · --home 아래에 기존 ledger.sqlite 가 있으면 BLOCK(기존 장부 재사용/오염 금지). 재사용은
+          향후 별도 --reuse-demo-home 로 명시 설계 — 이번엔 안전하게 거부.
+      · subprocess·예외·조기 return 어디로 빠지든 기존 BINGGU_HOME 복구 + 자동생성 임시 홈 정리(finally).
+      · --keep 은 '새로 만든 데모 데이터를 남기는' 기능일 뿐, 기존 장부 재사용 수단이 아니다.
+      · 승인 전 활성 기억 0 · 승인한 후보만 저장 · 거절 후보 저장 안 함.
+      · 비대화형(--non-interactive)은 CI/자동화용. 승인은 데모 격리 홈에서만 시뮬레이션(source="demo"
+        앵커), 운영 승인 절차를 우회하는 범용 수단이 아니다(운영 홈 write 0).
     """
     import shutil
-    import subprocess
     import tempfile
 
-    non_interactive = bool(getattr(a, "non_interactive", False))
     keep = bool(getattr(a, "keep", False))
     user_home = getattr(a, "home", None)
 
     op_home = _operating_home()
+    op_ledger = os.path.abspath(DEFAULT_LEDGER)
     created_tmp = False
     if user_home:
         demo_home = os.path.abspath(os.path.expanduser(user_home))
-        if os.path.normpath(demo_home) == os.path.normpath(op_home):
-            print("BLOCK: demo 는 운영 장부를 쓰지 않습니다 — --home 에 다른 경로를 지정하세요.")
-            print("       (운영 장부 홈: %s)" % op_home)
+        demo_ledger = os.path.join(demo_home, "ledger.sqlite")
+        # 운영 장부 오염 차단 — 심링크/대소문자 별칭/실파일까지 해소해 비교(가드는 env 변경 전에 수행).
+        if _same_path(demo_home, op_home):
+            print("BLOCK: --home 이 운영 장부 홈과 같은 실제 폴더입니다 — 다른 경로를 지정하세요.")
+            print("       (운영 홈: %s)" % op_home)
+            return 1
+        if _same_path(demo_ledger, op_ledger):
+            print("BLOCK: --home 아래 장부가 운영 장부와 같은 실제 파일입니다 — 다른 경로를 지정하세요.")
+            return 1
+        # 기존 ledger.sqlite 재사용 금지 — 기존 장부에 노드 추가·덮어쓰기 방지.
+        if os.path.exists(demo_ledger):
+            print("BLOCK: --home 아래에 이미 ledger.sqlite 가 있습니다 — 기존 장부 재사용은 지원하지 않습니다.")
+            print("       빈 폴더를 지정하세요(재사용은 향후 --reuse-demo-home 로 명시 설계 예정).")
             return 1
     else:
         demo_home = tempfile.mkdtemp(prefix="binggu-demo-")
         created_tmp = True
-    os.makedirs(demo_home, exist_ok=True)
 
-    # 이 프로세스의 홈을 데모 홈으로 고정 → gate/snapshot/ledger 전부 격리 정렬(운영 홈 미접촉).
-    os.environ["BINGGU_HOME"] = demo_home
-    ledger = os.path.join(demo_home, "ledger.sqlite")
-    snap_dir = os.path.join(demo_home, "snapshots")
-    os.makedirs(snap_dir, exist_ok=True)
+    _saved_home = os.environ.get("BINGGU_HOME")
+    try:
+        os.makedirs(demo_home, exist_ok=True)
+        # 이 프로세스의 홈을 데모 홈으로 고정 → gate/snapshot/ledger 전부 격리 정렬(운영 홈 미접촉).
+        os.environ["BINGGU_HOME"] = demo_home
+        return _demo_body(a, demo_home, keep, created_tmp, op_home)
+    finally:
+        # subprocess/예외/조기 return 무관하게 BINGGU_HOME 복구 + 자동생성 임시 홈 정리(예외에도).
+        if _saved_home is None:
+            os.environ.pop("BINGGU_HOME", None)
+        else:
+            os.environ["BINGGU_HOME"] = _saved_home
+        if created_tmp and not keep:
+            shutil.rmtree(demo_home, ignore_errors=True)
 
+
+def _demo_body(a, demo_home, keep, created_tmp, op_home):
+    """cmd_demo 본체(후보→승인→저장→회상→근거). 정리/BINGGU_HOME 복구는 호출부 finally 담당."""
+    import subprocess
     from openbinggu_deprecate_and_remind_g3 import open_g3
     import binggu_save_gate as sgate
     import binggu_recall as RC
+
+    non_interactive = bool(getattr(a, "non_interactive", False))
+    ledger = os.path.join(demo_home, "ledger.sqlite")
+    snap_dir = os.path.join(demo_home, "snapshots")
+    os.makedirs(snap_dir, exist_ok=True)
 
     print("=" * 60)
     print("BingguPack 데모 — AI가 기억해도, 결정권은 나에게")
@@ -1437,8 +1486,6 @@ def cmd_demo(a):
 
     if not r.get("applied"):
         print("데모 저장 실패: %s" % r.get("reason"))
-        if created_tmp and not keep:
-            shutil.rmtree(demo_home, ignore_errors=True)
         return 1
 
     print("[3] 승인한 항목만 로컬 장부에 확정 기록했습니다.")
@@ -1489,10 +1536,9 @@ def cmd_demo(a):
             print("    근거: 원문 발화에서 캡처(evidence_supports 연결) · memory-id = %s" % node_id)
         print("    더 보기:  binggu explain %s\n" % node_id)
 
-    # 6) 정리 안내
+    # 6) 정리 안내 (실제 삭제/BINGGU_HOME 복구는 cmd_demo finally 담당)
     print("-" * 60)
     if created_tmp and not keep:
-        shutil.rmtree(demo_home, ignore_errors=True)
         print("데모 데이터를 정리했습니다(임시 폴더 삭제).")
     else:
         print("데모 데이터 위치: %s  (직접 삭제 가능)" % demo_home)

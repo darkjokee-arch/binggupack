@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Security / Hardening (P0.1)
+- **demo 격리 경로 하드닝**: `--home` 비교를 `expanduser→abspath→realpath→normcase` + `os.path.samefile` 로 강화. (1) 운영 홈을 가리키는 **symlink**, (2) **대소문자만 다른** 동일 경로, (3) `--home` 아래 **기존 `ledger.sqlite`** 는 전부 BLOCK(기존 장부 재사용/오염 금지 — 재사용은 향후 `--reuse-demo-home` 로 명시 설계). `try/finally` 로 **subprocess·예외·조기 return 어디로 빠지든 BINGGU_HOME 복구 + 자동 생성 임시 홈 정리**. `--keep` 은 새 데이터 보존일 뿐 기존 장부 재사용 수단이 아님.
+- **MCP fail-closed 안내 정합**: `pair`/`deprecate`/`replace`/`mark` dry-run·실행 응답에 `write_available: false` · `reason: trusted_approval_event_required` · `owner_action: use_local_cli` · `guidance`(로컬 CLI 안내) 추가. "dry_run=false + confirm 으로 실행" 류 오해 문구 제거(`confirm_expected` 는 호환 유지, 단 그것만으로 실행된다는 안내는 삭제). 도구 설명·README MCP 도구 분류(조회 / 미리보기 / 사람 앵커 저장 / 일시 fail-closed mutation)를 실제 상태로 수정. 보안 동작(actor=reader fail-closed)은 그대로.
+
 ### Added
 - **`binggu demo` — 60초 체험**: 설치 직후 격리 임시 장부에서 후보 발견 → 승인 → 확정 → **새 프로세스 회상** → 근거(provenance) 전 과정을 오프라인(네트워크·API 키 0)으로 보여준다. `--non-interactive`(CI/자동화·데모 격리 홈에서만 승인 시뮬), `--home`/`--keep`. 운영 장부는 구조적으로 미접촉(운영 홈과 같으면 거부). `tests/test_demo.py` 회귀 + CI 스텝.
 - **기본 사용자 흐름 UX**: 인자 없이 `binggu` → 홈 화면(장부 상태 + 다음 행동 안내). 별칭 `explain <id>`(=trace show)·`forget <id>`(deprecate 안내·확인 문구 유지)·`inbox`(=hosted inbox).

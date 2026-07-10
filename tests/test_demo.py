@@ -8,7 +8,11 @@ import sqlite3
 import subprocess
 import sys
 
+import pytest
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
 
 
 def _run_demo(args, env=None, timeout=120):
@@ -81,3 +85,97 @@ def test_demo_cleans_up_temp_home_by_default(tmp_path):
     r = _run_demo(["--non-interactive"])
     assert r.returncode == 0, r.stderr
     assert "데모 데이터를 정리했습니다" in r.stdout
+
+
+# ===== P0.1 격리 경로 하드닝 회귀 =====
+
+def test_demo_blocks_existing_ledger_in_home(tmp_path):
+    # --home 아래에 이미 ledger.sqlite 가 있으면 BLOCK(기존 장부 재사용/오염 금지).
+    dh = tmp_path / "dh_existing"
+    dh.mkdir()
+    (dh / "ledger.sqlite").write_bytes(b"EXISTING-SENTINEL")
+    r = _run_demo(["--non-interactive", "--home", str(dh)])
+    assert r.returncode == 1
+    assert "BLOCK" in r.stdout
+    assert (dh / "ledger.sqlite").read_bytes() == b"EXISTING-SENTINEL"  # sentinel byte 불변
+
+
+def test_demo_blocks_symlink_to_operating_home(tmp_path):
+    # --home 이 운영 홈을 가리키는 symlink 면 BLOCK(realpath/samefile 해소). symlink 미지원 환경은 skip.
+    op = tmp_path / "op"
+    op.mkdir()
+    (op / "ledger.sqlite").write_bytes(b"OP-SENTINEL")
+    link = tmp_path / "demolink"
+    try:
+        os.symlink(str(op), str(link), target_is_directory=True)
+    except (OSError, NotImplementedError, AttributeError):
+        pytest.skip("symlink unsupported on this platform/privilege")
+    r = _run_demo(["--non-interactive", "--home", str(link)], env={"BINGGU_HOME": str(op)})
+    assert r.returncode == 1
+    assert "BLOCK" in r.stdout
+    assert (op / "ledger.sqlite").read_bytes() == b"OP-SENTINEL"
+
+
+def test_demo_blocks_case_alias_of_operating_home(tmp_path):
+    # 대소문자만 다른 동일 경로(대소문자 무시 FS: Windows/macOS 기본)면 BLOCK. 대소문자 구분 FS는 skip.
+    if os.path.normcase("A") != os.path.normcase("a"):
+        pytest.skip("case-sensitive filesystem")
+    op = tmp_path / "OpHome"
+    op.mkdir()
+    (op / "ledger.sqlite").write_bytes(b"OP-SENTINEL")
+    alias = str(tmp_path / "ophome")  # 대소문자 무시 FS 에서 op 와 같은 실제 폴더
+    r = _run_demo(["--non-interactive", "--home", alias], env={"BINGGU_HOME": str(op)})
+    assert r.returncode == 1
+    assert (op / "ledger.sqlite").read_bytes() == b"OP-SENTINEL"
+
+
+def _demo_args(**kw):
+    class _A:
+        pass
+    a = _A()
+    a.non_interactive = kw.get("non_interactive", True)
+    a.keep = kw.get("keep", False)
+    a.home = kw.get("home", None)
+    return a
+
+
+def test_demo_restores_binggu_home_after_success(monkeypatch, tmp_path):
+    # 정상 종료 후 기존 BINGGU_HOME 복구(in-process).
+    import binggu
+    monkeypatch.setenv("BINGGU_HOME", "SENTINEL_HOME_VALUE")
+    rc = binggu.cmd_demo(_demo_args(home=str(tmp_path / "dh_ok")))
+    assert rc == 0
+    assert os.environ.get("BINGGU_HOME") == "SENTINEL_HOME_VALUE"
+
+
+def test_demo_restores_home_and_cleans_temp_on_exception(monkeypatch, tmp_path):
+    # 예외가 나도 BINGGU_HOME 복구 + 자동 생성 임시 홈 정리(finally).
+    import binggu
+    import tempfile as _tf
+    monkeypatch.setenv("BINGGU_HOME", "SENTINEL_HOME_VALUE")
+    known = tmp_path / "known_tmp_home"
+    monkeypatch.setattr(_tf, "mkdtemp", lambda *a, **k: str(known))
+
+    def _boom(*a, **k):
+        raise RuntimeError("demo boom")
+
+    monkeypatch.setattr(binggu, "capture_preview", _boom)
+    with pytest.raises(RuntimeError):
+        binggu.cmd_demo(_demo_args(home=None))  # 자동 임시 홈 → created_tmp
+    assert os.environ.get("BINGGU_HOME") == "SENTINEL_HOME_VALUE"  # 예외에도 복구
+    assert not known.exists()  # 예외에도 임시 홈 정리
+
+
+def test_same_path_helper_symlink_and_case(tmp_path):
+    # canonical 경로 비교 헬퍼 단위 검증(심링크·대소문자).
+    import binggu
+    d = tmp_path / "Dir"
+    d.mkdir()
+    if os.path.normcase("A") == os.path.normcase("a"):
+        assert binggu._same_path(str(d), str(tmp_path / "dir"))  # 대소문자 별칭
+    link = tmp_path / "lnk"
+    try:
+        os.symlink(str(d), str(link), target_is_directory=True)
+    except (OSError, NotImplementedError, AttributeError):
+        return
+    assert binggu._same_path(str(link), str(d))  # 심링크 → 같은 실제 대상
