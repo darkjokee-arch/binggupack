@@ -1,5 +1,19 @@
 # Changelog — BingguPack
 
+## [Unreleased]
+
+### Added
+- **`binggu demo` — 60초 체험**: 설치 직후 격리 임시 장부에서 후보 발견 → 승인 → 확정 → **새 프로세스 회상** → 근거(provenance) 전 과정을 오프라인(네트워크·API 키 0)으로 보여준다. `--non-interactive`(CI/자동화·데모 격리 홈에서만 승인 시뮬), `--home`/`--keep`. 운영 장부는 구조적으로 미접촉(운영 홈과 같으면 거부). `tests/test_demo.py` 회귀 + CI 스텝.
+- **기본 사용자 흐름 UX**: 인자 없이 `binggu` → 홈 화면(장부 상태 + 다음 행동 안내). 별칭 `explain <id>`(=trace show)·`forget <id>`(deprecate 안내·확인 문구 유지)·`inbox`(=hosted inbox).
+- **영문 진입점** `README.en.md` + README 상단 재편(60초 체험·Candidate→Review→Commit→Recall→Explain/Replace 멘탈모델·Core/Bridge 구분·Consent-first/Local-first/Auditable/Model-agnostic).
+
+### Security
+- **MCP 승인 경계 봉인(P0)**: `pair`/`deprecate`/`replace`/`mark_hit`/`mark_miss` 핸들러가 `confirm` 정확일치만으로 `actor="human"` 을 부여하던 우회를 제거하고 **`actor="reader"` 하드 오버라이드**(2026-07-10 `save_candidate` 봉인과 동일 패턴). dry_run 응답이 노출하는 `confirm_expected` 를 모델이 재현해도 사람 승격이 되지 않으며, 사람 앵커(키보드 `SAVE n`·CLI TTY) 없는 MCP write 는 **fail-closed(`G4_no_auto`)**. owner 정당 저장/기각/교체는 CLI 경로(TTY 신뢰) 그대로. `autonomous_agent_preview_then_confirm` 재현 회귀 테스트 추가(`*_preview_then_confirm_BLOCKED`), 오해 소지 주석·SECURITY.md 정합.
+
+### Changed
+- **CI**: `selftest` 잡에 Python 버전 매트릭스(Linux 3.10/3.12/3.13) + macOS/Windows 대표버전 smoke 추가(`requires-python>=3.10` 증명). `typecheck-workers` `npm install`→lockfile 있으면 `npm ci`. 데모 회귀 스텝 추가.
+- **문서**: `SECURITY.md` 승인 경계 설명을 대역 외 앵커·MCP fail-closed 로 정밀화 + "검증되는 불변식(테스트로 강제)" 추가. `INSTALL.md` 버전 하드코딩 제거(releases/latest 참조).
+
 ## v1.18.3 — 문서/문구 정밀화 + 적중률 학습 재설계(발화 앵커) (2026-07-10)
 
 ### Fixed

@@ -4,8 +4,10 @@
 
 # BingguPack
 
-**기억을 얼려, 신선하게 —
-AI와 일하면서 쌓이는 내 판단·실수·취향을 내 PC 안의 기억 장부로**
+**AI가 기억해도, 결정권은 나에게.**
+AI와 일하며 쌓이는 내 판단·취향·교훈을 내 PC에 기록하되, **활성 기억은 내가 승인한 것만.**
+
+_AI memory under your control — Git처럼 검토하고 커밋하는 개인 AI 기억._
 
 [![PyPI](https://img.shields.io/pypi/v/binggupack?color=3775A9&logo=pypi&logoColor=white&label=PyPI)](https://pypi.org/project/binggupack/)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://pypi.org/project/binggupack/)
@@ -13,13 +15,25 @@ AI와 일하면서 쌓이는 내 판단·실수·취향을 내 PC 안의 기억 
 [![Release](https://img.shields.io/github/v/release/darkjokee-arch/binggupack?label=Release&color=success)](https://github.com/darkjokee-arch/binggupack/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-**자동 저장 없음 · 내가 승인한 것만 · 로컬 우선**
+**Consent-first · Local-first · Auditable · Model-agnostic**
+*후보는 자동으로 모여도, 장부에 **확정**되는 건 내가 승인한 것만.*
 
-[⚡ 시작하기](#7--시작하기) · [✨ 무엇을 해주나](#3--무엇을-해주나) · [🛡 왜 믿을 만한가](#4--왜-믿을-만한가) · [🗂 문서](#8--더-깊게-보기)
+[⚡ 60초 체험](#-60초-체험) · [🧭 작동 방식](#-작동-방식) · [🛡 안전 모델](#4--왜-믿을-만한가) · [🇬🇧 English](README.en.md) · [🗂 문서](#8--더-깊게-보기)
 
 </div>
 
 ---
+
+## ⚡ 60초 체험
+
+```bash
+pip install binggupack
+binggu demo            # 설치만으로 · 네트워크 0 · 격리 임시 장부(내 장부 안 건드림)
+```
+
+`binggu demo` 한 번이면 빙구팩의 핵심을 눈으로 봅니다 — 대화에서 **기억 후보 발견 → 내가 승인 → 승인한 것만 로컬 장부에 확정 → 새 프로세스에서 회상 → 무엇에 근거했는지 확인.** 데모는 임시 폴더에서 돌고 끝나면 스스로 정리합니다. 실제 장부는 `binggu init` 으로 시작하세요.
+
+> CI·자동화용 비대화형: `binggu demo --non-interactive` *(승인은 데모 격리 홈에서만 시뮬레이션 — 운영 승인 우회 아님)*
 
 ## 1 · 왜 만들었나
 
@@ -33,15 +47,22 @@ AI와 오래 일하다 보면 이런 일이 반복됩니다.
 **BingguPack은 모든 대화를 긁어모으는 도구가 아닙니다.**
 다음에도 써먹을 판단·교훈·선호·규칙만 후보로 보여주고, **내가 직접 고른 것만** 로컬 장부(`ledger.sqlite`)에 남깁니다.
 
-## 2 · 해법 한 장
+## 🧭 작동 방식
+
+빙구팩은 **모든 대화를 긁어모으는 메모리 도구가 아닙니다.** 오래 써먹을 판단·선호·교훈만 후보로 만들고, **내가 승인한 것만** 활성 기억이 됩니다. 전체 흐름은 다섯 단계입니다.
+
+| 단계 | 무엇 | 이렇게 |
+|---|---|---|
+| **Candidate** · 후보 | 기억할 만한 말을 후보로 (자동 수집 가능 · 저장 아님) | *(자동)* · `binggu preview "<텍스트>"` |
+| **Review** · 검토 | 후보를 눈으로 확인 | `binggu inbox` |
+| **Commit** · 확정 | 고른 것만 로컬 장부에 (사람 승인 필요) | 채팅 중 `SAVE n` · `binggu save` |
+| **Recall** · 회상 | 다음 작업 때 관련 기억을 다시 | `binggu recall "질문"` |
+| **Explain** · 근거 | 왜 그 기억인지 · 이력 | `binggu explain <memory-id>` |
+| **Replace** · 교체 | 틀려진 기억을 교체·폐기 | `binggu replace` · `binggu forget <id>` |
 
 <p align="center"><img src="assets/flow.svg" width="880" alt="대화 → 미리보기 → SAVE 승인 → 내 PC 기억 장부 → 자동 회상 · 지식 그래프 → 전문가 팩"></p>
 
-1. **골라서 보여주기** — 대화 중 "기억할 만한" 말만 추려서 보여줘요 *(아직 저장 안 함)*
-2. **내가 승인** — 기억할 만한 말은 자동으로 임시 후보에 담기지만, 내 장부에 **확정**되는 건 내가 고른 것만이에요
-3. **다시 꺼내주기** — 다음에 일할 때 관련 기억과 지난 실수를 먼저 보여줘요
-
-<p align="center"><img src="assets/demo.gif" width="760" alt="binggu preview → SAVE 승인 → recall 데모"></p>
+**Core(pip) vs Bridge(원격 통로).** 로컬 CLI·stdio MCP·장부·회상·설명은 `pip install` 만으로 **오프라인** 동작합니다(=Core). 폰·웹·ChatGPT에서 승인한 걸 받아오는 원격 통로(hosted worker)는 별도이며(=Bridge), **데이터 정본은 언제나 로컬** — 원격은 잠깐 거쳐 가는 통로일 뿐입니다(장부 write 0). 자세히는 [안전 모델](#4--왜-믿을-만한가)·[6 · 어디서나 씁니다](#6--어디서나-씁니다).
 
 ## 3 · 무엇을 해주나
 

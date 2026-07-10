@@ -1328,12 +1328,269 @@ def cmd_export(a):
     return 0
 
 
+# ==================== 60초 데모 (binggu demo) ====================
+# 결정론 예제(오프라인·네트워크 0·API 키 0). 격리 임시 장부에서 후보→검토→승인→저장→회상→근거
+# 전 과정을 한 번에 보여준다. 운영 장부는 절대 건드리지 않는다.
+DEMO_CONVO = (
+    "저는 앞으로 답변을 한국어로 받는 걸 선호합니다. "
+    "매주 금요일 오후에는 주간 회고를 하기로 정했어요. "
+    "참고로 점심은 아무거나 괜찮아요."
+)
+DEMO_QUERY = "한국어로 답변"
+
+
+def _operating_home():
+    """데모 격리 가드용 — 운영 장부(DEFAULT_LEDGER)의 홈 디렉터리(오버라이드 전 기준)."""
+    return os.path.dirname(os.path.abspath(DEFAULT_LEDGER))
+
+
+def cmd_demo(a):
+    """60초 데모 — 격리 임시 장부에서 후보→검토→승인→저장→회상→근거 전 과정을 보여준다.
+
+    안전 불변식:
+      · 운영 장부 접근 0 — 격리 데모 홈(임시 폴더 또는 --home)만 사용. 운영 홈과 같으면 거부.
+      · 승인 전 활성 기억 0 · 승인한 후보만 저장 · 거절 후보는 저장 안 함.
+      · 비대화형(--non-interactive)은 CI/자동화용. 승인은 데모 격리 홈에서만 시뮬레이션하며
+        (source="demo" 앵커), 운영 승인 절차를 우회하는 범용 수단이 아니다(운영 홈 write 0).
+    """
+    import shutil
+    import subprocess
+    import tempfile
+
+    non_interactive = bool(getattr(a, "non_interactive", False))
+    keep = bool(getattr(a, "keep", False))
+    user_home = getattr(a, "home", None)
+
+    op_home = _operating_home()
+    created_tmp = False
+    if user_home:
+        demo_home = os.path.abspath(os.path.expanduser(user_home))
+        if os.path.normpath(demo_home) == os.path.normpath(op_home):
+            print("BLOCK: demo 는 운영 장부를 쓰지 않습니다 — --home 에 다른 경로를 지정하세요.")
+            print("       (운영 장부 홈: %s)" % op_home)
+            return 1
+    else:
+        demo_home = tempfile.mkdtemp(prefix="binggu-demo-")
+        created_tmp = True
+    os.makedirs(demo_home, exist_ok=True)
+
+    # 이 프로세스의 홈을 데모 홈으로 고정 → gate/snapshot/ledger 전부 격리 정렬(운영 홈 미접촉).
+    os.environ["BINGGU_HOME"] = demo_home
+    ledger = os.path.join(demo_home, "ledger.sqlite")
+    snap_dir = os.path.join(demo_home, "snapshots")
+    os.makedirs(snap_dir, exist_ok=True)
+
+    from openbinggu_deprecate_and_remind_g3 import open_g3
+    import binggu_save_gate as sgate
+    import binggu_recall as RC
+
+    print("=" * 60)
+    print("BingguPack 데모 — AI가 기억해도, 결정권은 나에게")
+    print("=" * 60)
+    print("격리 데모 장부: %s" % ledger)
+    print("(운영 장부 홈 %s 은(는) 건드리지 않습니다)\n" % op_home)
+
+    # 빈 격리 장부 생성 + 승인 전 활성 기억 수 확인.
+    db = open_g3(ledger)
+    active_before = db.con.execute("SELECT COUNT(*) FROM nodes WHERE state='active'").fetchone()[0]
+    db.close()
+
+    # 1) 후보 발견 (write 0)
+    pv = capture_preview(DEMO_CONVO)
+    cands = pv["candidates"]
+    print("[1] 대화에서 기억 후보를 발견했습니다 (아직 저장 안 함):")
+    print("    입력: \"%s\"\n" % DEMO_CONVO)
+    for j, c in enumerate(cands, 1):
+        print("    [%d] (%s) %s" % (j, c.get("label_kind"), c["sentence"]))
+    print("\n    현재 활성 기억: %d개 — 승인 전에는 아무것도 확정되지 않습니다.\n" % active_before)
+
+    # 2) 검토·승인
+    if non_interactive:
+        picks = [1]
+        print("[2] (비대화형) 후보 [1] 을 승인합니다 — 데모 격리 홈에서만 시뮬레이션.\n")
+    else:
+        try:
+            raw = input("[2] 저장할 후보 번호를 고르세요 (쉼표로 여러 개 · 기본 1): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            raw = ""
+            print()
+        raw = raw or "1"
+        try:
+            picks = [int(x) for x in raw.split(",") if x.strip()]
+        except ValueError:
+            picks = [1]
+        picks = [i for i in picks if 1 <= i <= len(cands)] or [1]
+        print()
+
+    sents = [cands[i - 1]["sentence"] for i in picks]
+    rejected = [c["sentence"] for j, c in enumerate(cands, 1) if j not in picks]
+
+    # 3) 승인 앵커(격리 홈·source="demo") → 저장. save_selected 가 앵커를 소비해 승격·저장.
+    #    운영 홈이 아니라 데모 홈의 save_gate_log 에만 기록된다(운영 승인 우회 아님).
+    sgate.gate_record(sents, source="demo")
+    confirm = "SAVE " + ",".join(str(i) for i in picks)
+    db = open_g3(ledger)
+    r = save_selected(db, DEMO_CONVO, picks, {"actor": "reader", "confirm": confirm}, snap_dir)
+    active_after = db.con.execute("SELECT COUNT(*) FROM nodes WHERE state='active'").fetchone()[0]
+    stored = [row[0] for row in db.con.execute("SELECT sentence FROM nodes WHERE state='active'")]
+    db.close()
+
+    if not r.get("applied"):
+        print("데모 저장 실패: %s" % r.get("reason"))
+        if created_tmp and not keep:
+            shutil.rmtree(demo_home, ignore_errors=True)
+        return 1
+
+    print("[3] 승인한 항목만 로컬 장부에 확정 기록했습니다.")
+    print("    ✓ 저장 %d개 — 활성 기억 %d → %d" % (r.get("saved"), active_before, active_after))
+    for s in stored:
+        print("      · %s" % s)
+    for s in rejected:
+        print("    ✗ 고르지 않은 후보는 저장되지 않음: %s" % s)
+    print()
+
+    # 4) 새 프로세스에서 회상 (cross-process 증명; 실패 시 디스크 재오픈 폴백)
+    print("[4] 새 프로세스에서 회상 — \"%s\"" % DEMO_QUERY)
+    recalled = False
+    try:
+        env = dict(os.environ)
+        env["BINGGU_HOME"] = demo_home
+        out = subprocess.run(
+            [sys.executable, "-m", "binggu", "--ledger", ledger, "recall", DEMO_QUERY],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            env=env, timeout=90)
+        if out.returncode == 0 and "관련 기억이 없습니다" not in out.stdout and "회상" in out.stdout:
+            print("    (새 프로세스: python -m binggu recall)")
+            for line in out.stdout.splitlines():
+                if line.strip() and not line.strip().startswith("→") and "mark-" not in line:
+                    print("    " + line)
+            recalled = True
+    except Exception:
+        recalled = False
+    if not recalled:
+        # 폴백: 디스크에서 새로 로드(실제 재오픈 — 새 객체 아님, 파일에서 재적재)
+        res = RC.why_search(ledger, DEMO_QUERY, home=demo_home)
+        if res["relevant_nodes"]:
+            print("    (디스크 재오픈 회상)")
+            for i, n in enumerate(res["relevant_nodes"], 1):
+                print("    %d. (%s) %s" % (i, n["node_type"], n["claim"]))
+            recalled = True
+    if not recalled:
+        print("    (회상 결과 없음)")
+    print()
+
+    # 5) 근거/이력 확인 (provenance)
+    node_id = (r.get("node_ids") or [None])[0]
+    if node_id:
+        print("[5] 이 기억이 무엇에 근거하는지 확인 (provenance):")
+        tr = RC.judgment_trace(ledger, node_id, home=demo_home)
+        if tr.get("found"):
+            print("    기억: %s" % tr["root"]["claim"])
+            print("    근거: 원문 발화에서 캡처(evidence_supports 연결) · memory-id = %s" % node_id)
+        print("    더 보기:  binggu explain %s\n" % node_id)
+
+    # 6) 정리 안내
+    print("-" * 60)
+    if created_tmp and not keep:
+        shutil.rmtree(demo_home, ignore_errors=True)
+        print("데모 데이터를 정리했습니다(임시 폴더 삭제).")
+    else:
+        print("데모 데이터 위치: %s  (직접 삭제 가능)" % demo_home)
+    print("실제 장부 시작:  binggu init")
+    print("=" * 60)
+    return 0
+
+
+def cmd_explain(a):
+    """explain <memory-id> — 그 기억의 근거 사슬·provenance(= trace show 별칭·read-only)."""
+    ledger, _ = _ledger_paths(a.ledger)
+    return _judgment_trace_show(ledger, a.memory_id)
+
+
+def cmd_forget(a):
+    """forget <memory-id> — 오래된 기억 폐기 안내. 확인 문구 게이트를 존중해 자동 삭제하지 않고,
+    바로 실행할 deprecate 명령을 만들어 보여준다(사람 confirm 유지)."""
+    ledger, _ = _ledger_paths(a.ledger)
+    if not os.path.exists(ledger):
+        print("장부가 없습니다: %s · 먼저 binggu init" % ledger)
+        return 2
+    db = open_accept(ledger)
+    try:
+        rows = list_candidates(db, "all", None)["rows"]
+    finally:
+        db.close()
+    mid = a.memory_id
+    match = None
+    for j, row in enumerate(rows, 1):
+        nid = row["node_id"]
+        if nid == mid or nid.endswith(mid) or _node_id8(nid) == mid:
+            match = (j, row)
+            break
+    if not match:
+        print("기억을 찾을 수 없습니다: %s" % mid)
+        print("  목록 확인:  binggu list")
+        return 1
+    n, row = match
+    id8 = _node_id8(row["node_id"])
+    print("# 폐기 대상 (아직 삭제 안 함):")
+    print("  %s" % row["sentence"])
+    print("\n다음 명령으로 확정 폐기하세요(확인 문구를 직접 입력해야 통과):")
+    print('  binggu deprecate %d %s --reason "<사유>" --confirm "DEPRECATE %d %s"' % (n, id8, n, id8))
+    return 0
+
+
+def cmd_inbox(a):
+    """inbox — 검토 대기 후보(hosted inbox 별칭). 회수만 하고 저장 0."""
+    a.hosted_cmd = "inbox"
+    return cmd_hosted(a)
+
+
+def _node_id8(node_id):
+    """node_id → 표시용 hash8(deprecate/replace confirm 의 id8 규약과 동일)."""
+    from openbinggu_candidate_list_view import node_id8 as _n8
+    return _n8(node_id)
+
+
+def _home_screen():
+    """인자 없이 `binggu` 실행 시 친절한 홈 화면 + 다음 행동 안내."""
+    print("BingguPack — AI가 기억해도, 결정권은 나에게\n")
+    ledger = DEFAULT_LEDGER
+    if os.path.exists(ledger):
+        try:
+            db = open_accept(ledger)
+            active = db.con.execute("SELECT COUNT(*) FROM nodes WHERE state='active'").fetchone()[0]
+            dep = db.con.execute("SELECT COUNT(*) FROM nodes WHERE state='deprecated'").fetchone()[0]
+            db.close()
+            print("  장부: %s" % ledger)
+            print("  활성 기억 %d개 · 폐기됨 %d개\n" % (active, dep))
+        except Exception:
+            print("  장부: %s\n" % ledger)
+    else:
+        print("  아직 장부가 없습니다. 먼저 60초 체험을 해보세요.\n")
+    print("무엇을 해볼까요?")
+    print("  binggu demo               60초 체험 (설치만으로 · 오프라인 · 격리)")
+    print("  binggu init               내 장부 만들기")
+    print("  binggu inbox              검토 대기 후보 보기")
+    print("  binggu recall \"질문\"       기억 회상")
+    print("  binggu explain <id>       그 기억의 근거·이력")
+    print("  binggu forget <id>        오래된 기억 폐기(확인 문구 필요)")
+    print("\n  전체 명령:  binggu -h")
+    return 0
+
+
 def main():
     if sys.argv[1:] == ["--selftest"]:
         sys.exit(selftest())
+    if not sys.argv[1:]:  # 인자 없이 실행 → 친절한 홈 화면(argparse 에러 대신)
+        sys.exit(_home_screen())
     p = argparse.ArgumentParser(prog="binggu", description="BingguPack 개인 장부 CLI")
     p.add_argument("--ledger", default=DEFAULT_LEDGER)
     sub = p.add_subparsers(dest="cmd", required=True)
+    # 60초 데모(설치 직후 체험) — 격리 임시 장부·오프라인·운영 장부 미접촉.
+    dmp = sub.add_parser("demo")
+    dmp.add_argument("--non-interactive", action="store_true", dest="non_interactive")
+    dmp.add_argument("--home", default=None)   # 데모 격리 홈(미지정=임시폴더·종료 시 자동정리)
+    dmp.add_argument("--keep", action="store_true")   # 데모 데이터 보존(정리 안 함)
     # 쉬운 별칭(UX): start=init · doctor=status · remember=preview · ask=recall.
     # 동작/안전 게이트는 본명령과 동일(별칭은 이름만 짧게). aliases= 와 dispatch dict 양쪽에 매핑.
     ip = sub.add_parser("init", aliases=["start"])
@@ -1363,6 +1620,15 @@ def main():
     wp_ = sub.add_parser("why"); wp_.add_argument("query")                  # recall 별칭
     wp_.add_argument("--limit", type=int, default=None)
     wp_.add_argument("--record", action="store_true", dest="record")  # use_count++ (기본 read-only)
+    # 기본 사용자 흐름 별칭(직관 명령) — 기존 명령 위임, 안전 게이트 동일.
+    exp = sub.add_parser("explain"); exp.add_argument("memory_id")   # = trace show <id>(근거·이력)
+    fgp = sub.add_parser("forget"); fgp.add_argument("memory_id")    # deprecate 안내(확인 문구 유지)
+    ibx = sub.add_parser("inbox")                                    # = hosted inbox(검토 대기·저장 0)
+    ibx.add_argument("--since", default=None)
+    ibx.add_argument("--no-fetch", dest="no_fetch", action="store_true")
+    ibx.add_argument("--wait", type=int, default=0)
+    ibx.add_argument("--variant", choices=["save_mcp", "save_v2"], default="save_mcp")
+    ibx.add_argument("--workers-port", dest="wp", default=None)
     # trace: 효용 trace(review/mark/enable/disable) + judgment_trace(show/<node_id> 하위호환)
     tp = sub.add_parser("trace")
     tp.add_argument("a1", nargs="?", default=None)   # review|mark|enable|disable|show|<node_id>
@@ -1479,7 +1745,8 @@ def main():
           "onboard": cmd_onboard,
           "confirm-edges": cmd_confirm_edges, "pair": cmd_pair, "trust": cmd_trust,
           "route": cmd_route, "backup": cmd_backup, "export": cmd_export,
-          "restore": cmd_restore}[a.cmd]
+          "restore": cmd_restore, "demo": cmd_demo, "explain": cmd_explain,
+          "forget": cmd_forget, "inbox": cmd_inbox}[a.cmd]
     sys.exit(fn(a))
 
 

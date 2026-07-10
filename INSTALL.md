@@ -1,7 +1,8 @@
-# Install BingguPack v1.18.0
+# Install BingguPack
 
-> 최신 릴리스: `v1.18.0` — **MCP 30도구 · HTTP 모드(웹/앱 커넥터) · ChatGPT 저장 채널 · 원클릭 온보딩(`binggu onboard`) · backup/export/restore** ([CHANGELOG](CHANGELOG.md) 참조).
+> 현재 버전은 [releases/latest](https://github.com/darkjokee-arch/binggupack/releases/latest)를 참고하세요 — **MCP 도구 · HTTP 모드(웹/앱 커넥터) · ChatGPT 저장 채널 · 원클릭 온보딩(`binggu onboard`) · backup/export/restore** ([CHANGELOG](CHANGELOG.md) 참조).
 > PyPI 반영이 늦으면 아래 `git clone`으로 최신을 사용하세요.
+> 설치 직후 60초 체험: `binggu demo`
 
 > `scripts/`·`docs/`의 `openbinggu_`/`OPENBINGGU_` 접두사는 레거시 내부 코드네임입니다(BingguPack과 동일 프로젝트).
 

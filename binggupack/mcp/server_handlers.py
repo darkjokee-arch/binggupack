@@ -391,12 +391,15 @@ def _u_reminders(params=None):
 
 # ==== Phase 2 배치 B: 쓰기(write-gated) 도구 — pair/deprecate/replace ====
 # save_candidate 와 동일 안전 패턴(자동저장 방지 불변):
-#   - MCP params 의 actor 는 무시. confirm 정확일치(사용자가 목록/preview 를 보고 재현한 증거)만 human 승격.
+#   - MCP params 의 actor 는 무시. ★confirm 정확일치는 "사람 승격 증거"가 아니다 — dry_run 응답이
+#     confirm_expected 를 그대로 노출하므로 같은 에이전트가 재현 가능(자율 preview→confirm 우회, P0 재현
+#     확증 2026-07-10). 따라서 actor 는 reader 로 하드 오버라이드하고 confirm 은 형식검증에만 쓴다.
 #   - dry_run 기본 True(비가역 write default-deny) → expected confirm 안내 + preview, write 0.
-#   - dry_run=False + confirm 정확일치 → 게이트(save_paired/deprecate_from_list/replace_from_list)가 재검증 후 write.
+#   - dry_run=False + confirm 정확일치여도 actor=reader → 게이트(save_paired/deprecate_from_list/
+#     replace_from_list)가 G4_no_auto 로 BLOCK. MCP 경유 write 는 fail-closed(사람 앵커 경로 부재).
 #   - 운영 ledger 는 서버 결정(BINGGU_HOME/~/.binggupack). MCP 경로 입력 무시(주입 차단).
-#   - 게이트 자체가 confirm≠expected → confirm_phrase_mismatch, actor≠human → G4_no_auto 로 이중 차단.
-#   - _resolve_human_ctx(CLI 의 TTY/trust 우회)는 MCP 에서 미사용 — confirm 정확일치만 사람증거로 인정.
+#   - owner 정당 write 는 CLI(cmd_pair/cmd_deprecate/cmd_replace·_resolve_human_ctx TTY 신뢰)로 수행.
+#     MCP 표면은 read/dry-run/미리보기 + (사람 앵커 있는) save_candidate 저장에 한정된다.
 def _u_pair(params=None):
     """owner 발화(+ai 요약) 화자축 페어 저장. dry_run 기본·PAIR confirm 정확일치·자동저장 차단.
     relation: accepts/refutes/revises · by: owner(사용자가 AI 발화에 반응)/ai. ai_text 생략=owner 단독."""
@@ -432,8 +435,11 @@ def _u_pair(params=None):
                 "relation": rel, "confirm_expected": expected,
                 "owner_preview": _pv(owner_text),
                 "ai_preview": _pv(ai_text) if ai_text else []}
-    # dry_run=False: confirm 정확일치만 human. 불일치/부재 → reader → save_paired G4 BLOCK(자동저장 방지).
-    actor = "human" if (confirm and confirm == expected) else "reader"
+    # 승인 경계(P0·save_candidate 봉인과 동일): confirm 문구는 dry_run 응답이 그대로 노출하므로 모델이
+    # 재현 가능 → "사람 승격 증거"가 되지 못한다(자율 에이전트 preview→confirm 우회 재현 확증, 2026-07-10).
+    # actor 를 reader 로 하드 오버라이드 → save_paired G4_no_auto(사람 앵커 없는 자동저장 차단). confirm 은
+    # 형식검증(정확일치)에만 쓴다. owner 정당 pair 저장은 CLI(cmd_pair·TTY 신뢰 경로)로 수행한다.
+    actor = "reader"
     ledger = _operating_ledger()
     if not os.path.exists(ledger):
         return {"action": "pair", "mode": "write-gated", "verdict": "REJECT",
@@ -479,7 +485,9 @@ def _u_deprecate(params=None):
                 "executed_write": False, "would_write_ledger": False,
                 "confirm_expected": expected,
                 "note": "list 도구로 index/id8 확인 후 dry_run=false + confirm 으로 실행(사유 reason 필수)"}
-    actor = "human" if (confirm and confirm == expected) else "reader"
+    # 승인 경계(P0): confirm 은 dry_run 이 노출 → 모델 재현 가능(사람 증거 아님). actor 하드 reader →
+    # deprecate_from_list G4_no_auto. owner 정당 기각은 CLI(cmd_deprecate·TTY). confirm=형식검증 전용.
+    actor = "reader"
     _ensure_scripts_path()
     from openbinggu_owner_accept_ux import open_accept
     from openbinggu_candidate_deprecate_ux import deprecate_from_list
@@ -519,7 +527,9 @@ def _u_replace(params=None):
                 "executed_write": False, "would_write_ledger": False,
                 "confirm_expected": expected,
                 "note": "list 도구로 index/id8 확인 후 dry_run=false + confirm 으로 실행(사유 reason 필수)"}
-    actor = "human" if (confirm and confirm == expected) else "reader"
+    # 승인 경계(P0): confirm 은 dry_run 이 노출 → 모델 재현 가능(사람 증거 아님). actor 하드 reader →
+    # replace_from_list G4_no_auto. owner 정당 교체는 CLI(cmd_replace·TTY). confirm=형식검증 전용.
+    actor = "reader"
     _ensure_scripts_path()
     from openbinggu_owner_accept_ux import open_accept
     from openbinggu_candidate_replace_ux import replace_from_list
@@ -966,9 +976,10 @@ def _mark_outcome_handler(params, outcome):
     params = params or {}
     recall_query = (params.get("recall_query") or "").strip()
     index = params.get("index")
-    confirm = params.get("confirm", "")
     domain = params.get("domain")
     dry_run = params.get("dry_run", True)
+    # actor 는 항상 reader(하드) — confirm 은 dry_run 의 confirm_expected 안내에만 반영되고 사람 승격 근거가
+    # 아니다(모델 재현 가능). 따라서 params['confirm'] 은 읽지 않는다(미사용 제거). owner 기록은 CLI.
     label = "MARK_HIT" if outcome == "hit" else "MARK_MISS"
     act = "mark_" + outcome
     if not recall_query:
@@ -988,8 +999,9 @@ def _mark_outcome_handler(params, outcome):
                 "executed_write": False, "would_write_ledger": False,
                 "confirm_expected": expected,
                 "note": "recall 로 순위(index) 확인 후 dry_run=false + confirm 으로 기록(node_id 입력 불필요·서버 재실행 확보)"}
-    # dry_run=False: confirm 정확일치만 human. 불일치/부재 → reader → mark_outcome G4_no_auto(자동기록 방지).
-    actor = "human" if (confirm and confirm == expected) else "reader"
+    # 승인 경계(P0): actor 하드 reader → mark_outcome G4_no_auto. MCP 로는 사람-확인 유용성 기록 불가
+    # (앵커 없음·confirm 은 모델 재현 가능) — owner 는 CLI(binggu mark-hit/mark-miss)로 기록한다.
+    actor = "reader"
     _ensure_scripts_path()
     from openbinggu_owner_accept_ux import open_accept
     db = open_accept(ledger)
@@ -1566,38 +1578,84 @@ def _selftest():
         mark_ok = mark_ok and m3
         mark_notes.append(("mark_actor_forge_reader_write0", m3))
 
-        # M4) confirm 정확일치 + dry_run=False → 실 기록(temp ledger). recorded True·outcome hit·decision_id.
+        # M4) ★P0 봉인: confirm 정확일치(모델이 dry_run 의 confirm_expected 를 재현)만으로는 기록 안 됨.
+        #     사람 앵커가 없어 actor=reader → mark_outcome G4_no_auto. MCP 로는 사람-확인 유용성 기록 불가.
         r = handle_tool("mark_hit", {"recall_query": _mq, "index": 1,
                                      "confirm": "MARK_HIT 1 " + _mq, "dry_run": False}, allow_root)
         tr = r.get("tool_result") or {}
-        m4 = (r.get("executed") is True and tr.get("executed_write") is True
-              and tr.get("recorded") is True and tr.get("outcome") == "hit"
-              and bool(tr.get("decision_id")))
+        m4 = (tr.get("executed_write") is False and tr.get("recorded") is False
+              and tr.get("reason") == "G4_no_auto")
         mark_ok = mark_ok and m4
-        mark_notes.append(("mark_confirm_exact_write", m4))
+        mark_notes.append(("mark_confirm_reproduced_BLOCKED(no_human_anchor)", m4))
 
-        # M5) node_id 미노출(D-1) — mark 응답에 node:/node_id 토큰 없음(위조 표면 0).
+        # M5) node_id 미노출(D-1) — mark 응답에 node:/node_id 토큰 없음(위조 표면 0). G4 응답에도 유지.
         _mblob = _json.dumps(tr, ensure_ascii=False)
         m5 = ("node:" not in _mblob and "node_id" not in _mblob)
         mark_ok = mark_ok and m5
         mark_notes.append(("mark_no_node_id_exposed", m5))
 
-        # M6) D-2 이중계상 차단 — 같은 회상·같은 index 재mark → dup_decision·write 0(안정 decision_id).
+        # M6) 재mark 도 여전히 fail-closed(actor=reader → G4_no_auto). 자율 반복 write 차단.
         r = handle_tool("mark_hit", {"recall_query": _mq, "index": 1,
                                      "confirm": "MARK_HIT 1 " + _mq, "dry_run": False}, allow_root)
         tr = r.get("tool_result") or {}
-        m6 = (tr.get("executed_write") is False and tr.get("reason") == "dup_decision")
+        m6 = (tr.get("executed_write") is False and tr.get("reason") == "G4_no_auto")
         mark_ok = mark_ok and m6
-        mark_notes.append(("mark_dup_decision_write0", m6))
+        mark_notes.append(("mark_reMark_still_BLOCKED", m6))
 
-        # M7) mark_miss 다른 index → 다른 node → 다른 decision_id → 정상 기록(outcome miss).
+        # M7) mark_miss confirm 재현도 동일 fail-closed(G4_no_auto). 형제 write 경로 정합.
         r = handle_tool("mark_miss", {"recall_query": _mq, "index": 2,
                                       "confirm": "MARK_MISS 2 " + _mq, "dry_run": False}, allow_root)
         tr = r.get("tool_result") or {}
-        m7 = (tr.get("executed_write") is True and tr.get("recorded") is True
-              and tr.get("outcome") == "miss")
+        m7 = (tr.get("executed_write") is False and tr.get("recorded") is False
+              and tr.get("reason") == "G4_no_auto")
         mark_ok = mark_ok and m7
-        mark_notes.append(("mark_miss_write", m7))
+        mark_notes.append(("mark_miss_confirm_reproduced_BLOCKED", m7))
+
+        # ===== autonomous_agent_preview_then_confirm 회귀 (P0 우회 봉인 검증) =====
+        # 시나리오: 동일 에이전트가 dry_run 으로 confirm_expected 를 읽고 그대로 재현해 dry_run=false 호출.
+        # 별도의 신뢰 가능한 사람 승인(save_gate 앵커) 없음. 기대: 전부 executed_write=False·G4_no_auto.
+        # (이전엔 mismatch/no-confirm 만 테스트했고 '정확 confirm 재현' 익스플로잇은 미검증이었다.)
+        from openbinggu_candidate_list_view import node_id8 as _n8
+        _id8 = _n8("mk1")
+
+        # PW1) pair 우회 재현 — dry_run 이 준 confirm 을 재현해도 신규 노드 주입 차단.
+        _pconf = (handle_tool("pair", {"owner_text": _SAVE_CONVO, "dry_run": True}, allow_root)
+                  .get("tool_result") or {}).get("confirm_expected")
+        tr = (handle_tool("pair", {"owner_text": _SAVE_CONVO, "dry_run": False,
+                                   "confirm": _pconf}, allow_root).get("tool_result") or {})
+        pw1 = (bool(_pconf) and tr.get("executed_write") is False and tr.get("reason") == "G4_no_auto")
+        mark_notes.append(("pair_preview_then_confirm_BLOCKED", pw1))
+
+        # PW2) deprecate 우회 재현 — 실제 index/id8 + 재현 confirm 이어도 active 노드 기각 차단.
+        _dconf = (handle_tool("deprecate", {"index": 1, "id8": _id8, "reason": "x",
+                                            "dry_run": True}, allow_root).get("tool_result") or {}
+                  ).get("confirm_expected")
+        tr = (handle_tool("deprecate", {"index": 1, "id8": _id8, "reason": "x",
+                                        "confirm": _dconf, "dry_run": False}, allow_root)
+              .get("tool_result") or {})
+        pw2 = (bool(_dconf) and tr.get("executed_write") is False and tr.get("reason") == "G4_no_auto")
+        mark_notes.append(("deprecate_preview_then_confirm_BLOCKED", pw2))
+
+        # PW3) replace 우회 재현 — 재현 confirm 이어도 active 노드 교체 차단.
+        _new = "교체된 새 문장이다"
+        _rconf = (handle_tool("replace", {"index": 1, "id8": _id8, "new_sentence": _new,
+                                          "reason": "x", "dry_run": True}, allow_root)
+                  .get("tool_result") or {}).get("confirm_expected")
+        tr = (handle_tool("replace", {"index": 1, "id8": _id8, "new_sentence": _new,
+                                      "reason": "x", "confirm": _rconf, "dry_run": False}, allow_root)
+              .get("tool_result") or {})
+        pw3 = (bool(_rconf) and tr.get("executed_write") is False and tr.get("reason") == "G4_no_auto")
+        mark_notes.append(("replace_preview_then_confirm_BLOCKED", pw3))
+
+        # PW4) 우회 시도 후 격리 ledger 불변 — 신규 노드 0(pair)·mk1 active 유지(deprecate/replace).
+        _vdb = _oa(_mledger)
+        _n_after = _vdb.con.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
+        _mk1 = _vdb.con.execute("SELECT state FROM nodes WHERE node_id='mk1'").fetchone()
+        _vdb.close()
+        pw4 = (_n_after == 3 and _mk1 is not None and _mk1[0] == "active")
+        mark_notes.append(("bypass_attempts_ledger_unchanged", pw4))
+
+        mark_ok = mark_ok and pw1 and pw2 and pw3 and pw4
     finally:
         if _saved_home is None:
             os.environ.pop("BINGGU_HOME", None)

@@ -21,19 +21,36 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: "22"
-      - name: Install (hosted/workers devDeps)
+      - name: Install (hosted/workers devDeps · lockfile 있으면 npm ci)
         working-directory: hosted/workers
-        run: npm install
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            echo "no package-lock.json — npm install fallback (lockfile 커밋 권장)"
+            npm install
+          fi
       - name: tsc --noEmit (strict)
         working-directory: hosted/workers
         run: npx tsc --noEmit
 
   selftest:
-    # cross-platform 정책(scripts/binggu_platform.py) 실기기 검증 — 실제 ubuntu/macos/windows 러너에서 GATE=GO
+    # cross-platform 정책(scripts/binggu_platform.py) 실기기 검증 — 실제 ubuntu/macos/windows 러너에서 GATE=GO.
+    # 선언 지원범위(requires-python>=3.10) 증명: Linux 에서 3.10/3.12/3.13 버전 매트릭스 + macOS/Windows 대표버전 smoke.
     strategy:
-      fail-fast: false  # 한 OS가 깨져도 나머지 OS 결과를 끝까지 본다
+      fail-fast: false  # 한 조합이 깨져도 나머지 결과를 끝까지 본다
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            python-version: "3.10"
+          - os: ubuntu-latest
+            python-version: "3.12"
+          - os: ubuntu-latest
+            python-version: "3.13"
+          - os: macos-latest
+            python-version: "3.12"
+          - os: windows-latest
+            python-version: "3.12"
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -42,7 +59,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
 
       - name: Version SSOT consistency selftest (3/3, GATE=GO — pyproject==__about__)
         run: python scripts/version_consistency_selftest.py
@@ -72,6 +89,11 @@ jobs:
 
       - name: End-to-end lifecycle (real CLI init->preview->save->list->deprecate, 10/10)
         run: python scripts/binggu_e2e_lifecycle_selftest.py
+
+      - name: Demo regression (60초 데모 · 격리·오프라인·승인분만 저장·운영 장부 미접촉)
+        run: |
+          pip install "pytest>=8"
+          python -m pytest tests/test_demo.py -q
 
       - name: Public tree secret/PII scan (verdict=CLEAN required)
         run: python scripts/openbinggu_public_tree_scan.py --tree . --public
