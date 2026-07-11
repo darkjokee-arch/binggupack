@@ -1695,10 +1695,19 @@ def cmd_forget(a):
     return 0
 
 
+def cmd_home(a):
+    """home — 데일리 콘솔(상태 + 다음 할 일). local-only · read-only · 저장 0.
+    인자 없는 `binggu` 와 동일 화면(이쪽은 --ledger/--json 존중)."""
+    from binggupack.cli import daily
+    return daily.print_home(a.ledger, as_json=getattr(a, "json", False))
+
+
 def cmd_inbox(a):
-    """inbox — 검토 대기 후보(hosted inbox 별칭). 회수만 하고 저장 0."""
-    a.hosted_cmd = "inbox"
-    return cmd_hosted(a)
+    """inbox — 로컬 통합 검토함(자동 수집 후보 · 원격 저장 의도 · 승인 요청 · 검토 예정).
+    read-only · 저장 0 · 네트워크 fetch 0(로컬 스냅샷만). 원격을 새로 가져오려면 `binggu hosted inbox`."""
+    from binggupack.cli import daily
+    sections = [s for s in ("capture", "hosted", "approvals", "due") if getattr(a, s, False)]
+    return daily.print_inbox(a.ledger, sections or None, as_json=getattr(a, "json", False))
 
 
 def _node_id8(node_id):
@@ -1708,30 +1717,10 @@ def _node_id8(node_id):
 
 
 def _home_screen():
-    """인자 없이 `binggu` 실행 시 친절한 홈 화면 + 다음 행동 안내."""
-    print("BingguPack — AI가 기억해도, 결정권은 나에게\n")
-    ledger = DEFAULT_LEDGER
-    if os.path.exists(ledger):
-        try:
-            db = open_accept(ledger)
-            active = db.con.execute("SELECT COUNT(*) FROM nodes WHERE state='active'").fetchone()[0]
-            dep = db.con.execute("SELECT COUNT(*) FROM nodes WHERE state='deprecated'").fetchone()[0]
-            db.close()
-            print("  장부: %s" % ledger)
-            print("  활성 기억 %d개 · 폐기됨 %d개\n" % (active, dep))
-        except Exception:
-            print("  장부: %s\n" % ledger)
-    else:
-        print("  아직 장부가 없습니다. 먼저 60초 체험을 해보세요.\n")
-    print("무엇을 해볼까요?")
-    print("  binggu demo               60초 체험 (설치만으로 · 오프라인 · 격리)")
-    print("  binggu init               내 장부 만들기")
-    print("  binggu inbox              검토 대기 후보 보기")
-    print("  binggu recall \"질문\"       기억 회상")
-    print("  binggu explain <id>       그 기억의 근거·이력")
-    print("  binggu forget <id>        오래된 기억 폐기(확인 문구 필요)")
-    print("\n  전체 명령:  binggu -h")
-    return 0
+    """인자 없이 `binggu` 실행 시 데일리 콘솔(상태 + 다음 할 일). local-only · read-only · 저장 0.
+    (mode=ro 조회만 — 기존 open_accept 경로의 snapshot 디렉토리 생성 등 write 부작용 제거.)"""
+    from binggupack.cli import daily
+    return daily.print_home(DEFAULT_LEDGER, as_json=False)
 
 
 def _approval_home(a):
@@ -1859,6 +1848,8 @@ def main():
     ip.add_argument("--no-capture", action="store_true", dest="no_capture")   # 장부만, capture profile 생략
     ip.add_argument("--force-capture", action="store_true", dest="force_capture")  # owner sticky OFF 해제하고 강제 ON
     sub.add_parser("status", aliases=["doctor"])
+    hmp = sub.add_parser("home")            # 데일리 콘솔(상태+다음 할 일 · read-only · 인자없는 binggu 와 동일)
+    hmp.add_argument("--json", action="store_true")
     sp = sub.add_parser("preview", aliases=["remember"]); sp.add_argument("text")
     rp = sub.add_parser("reflect")          # 회고·자가평가 → 지식 후보(반성이 지식으로 · 저장 0)
     rp.add_argument("text", nargs="?", default=None)
@@ -1883,12 +1874,13 @@ def main():
     # 기본 사용자 흐름 별칭(직관 명령) — 기존 명령 위임, 안전 게이트 동일.
     exp = sub.add_parser("explain"); exp.add_argument("memory_id")   # = trace show <id>(근거·이력)
     fgp = sub.add_parser("forget"); fgp.add_argument("memory_id")    # deprecate 안내(확인 문구 유지)
-    ibx = sub.add_parser("inbox")                                    # = hosted inbox(검토 대기·저장 0)
-    ibx.add_argument("--since", default=None)
-    ibx.add_argument("--no-fetch", dest="no_fetch", action="store_true")
-    ibx.add_argument("--wait", type=int, default=0)
-    ibx.add_argument("--variant", choices=["save_mcp", "save_v2"], default="save_mcp")
-    ibx.add_argument("--workers-port", dest="wp", default=None)
+    # 로컬 통합 검토함(read-only aggregator · 저장 0 · fetch 0). 원격 회수는 `hosted inbox` 가 담당.
+    ibx = sub.add_parser("inbox")
+    ibx.add_argument("--capture", action="store_true")      # 자동 수집 후보만
+    ibx.add_argument("--hosted", action="store_true")       # 원격 저장 의도(로컬 staging)만
+    ibx.add_argument("--approvals", action="store_true")    # 대기 승인 요청만
+    ibx.add_argument("--due", action="store_true")          # 검토 예정만
+    ibx.add_argument("--json", action="store_true")         # 안정 read model(automation/Studio)
     # trace: 효용 trace(review/mark/enable/disable) + judgment_trace(show/<node_id> 하위호환)
     tp = sub.add_parser("trace")
     tp.add_argument("a1", nargs="?", default=None)   # review|mark|enable|disable|show|<node_id>
@@ -2002,6 +1994,7 @@ def main():
     apv.add_argument("request_id")
     a = p.parse_args()
     fn = {"init": cmd_init, "start": cmd_init, "status": cmd_status, "doctor": cmd_status,
+          "home": cmd_home,
           "preview": cmd_preview, "remember": lambda a: cmd_preview(a, explicit=True),  # remember=명시 입력
           "reflect": cmd_reflect, "save": cmd_save,
           "list": cmd_list, "deprecate": cmd_deprecate, "replace": cmd_replace,
