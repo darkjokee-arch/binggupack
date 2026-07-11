@@ -4,6 +4,15 @@
 
 _다음 릴리스를 위한 항목이 여기 쌓입니다._
 
+## [1.19.0] - 2026-07-11 — Stable promotion of v1.19.0rc1
+
+v1.19.0rc1 을 검증 완료 후 stable 로 승격. **RC 이후 production code 변경 0**(version-only promotion:
+pyproject / `binggupack/__about__.py` version literal · CHANGELOG · release notes 만 변경). RC artifact 와
+production 모듈은 version literal 제외 byte-equivalent. 실경로 mobile/web→PC canary(hosted intent →
+owner 로컬 대화형 승인[cli_tty] → exact-bound one-time commit · direct_write_before_approval=0 · write 1 ·
+retry write 0 · original receipt · source 보존 · integrity INTACT) 통과. 상세 근거는 아래 [1.19.0rc1] 및
+P1-* 섹션 그대로.
+
 ## [1.19.0rc1] - 2026-07-11 — Consent-first, exact-bound AI memory (Release Candidate)
 
 P0~P1-B.1 누적을 첫 정식 릴리스 후보로 봉인. 아래는 릴리스 분류 요약이며, 이어지는 상세

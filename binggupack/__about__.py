@@ -45,4 +45,4 @@ actor 라벨은 권한 아님). 정직 경계: 로컬 TTY 는 L1 routing · shel
 root/admin compromise 방어 주장 없음. PEP440 pre-release("rc1"): 안정 설치는 이 RC 를 받지
 않는다(pip install --pre 필요). 향후 tag = v1.19.0rc1(하이픈 없음).
 """
-__version__ = "1.19.0rc1"
+__version__ = "1.19.0"
