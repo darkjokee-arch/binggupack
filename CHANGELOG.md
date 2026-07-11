@@ -8,6 +8,7 @@
 - **JSON 스냅샷** — `binggu home --json` / `binggu inbox --json` (schema_version=1). automation·향후 Binggu Studio 가 재사용할 안정적 read model.
 - **로컬 read-only Binggu Studio Preview** — `binggu studio` 로 브라우저 기반 로컬 UI 를 띄운다. 실행마다 loopback(127.0.0.1) 임시 포트 + ephemeral session URL(`/s/<token>/`)로만 열리고, 기본 브라우저를 자동으로 연다(`--no-open` 으로 생략, `--port` 로 고정). Home + 통합 Inbox 를 시각화하며 모든 화면은 읽기 전용이다.
 - **Studio = Daily Console schema v1 재사용** — `/api/home`·`/api/inbox` 는 `collect_home_snapshot`/`collect_inbox_snapshot` 을 그대로 호출한다(스냅샷 복제 0). ledger count·hosted index·approval request ID·due item·redacted preview 가 `binggu home/inbox --json` 과 동일하다. Python stdlib 만 사용(외부 의존성 0).
+- **Studio Memory Explorer** — Studio 에 Memories 화면 추가. 저장된 ledger 를 브라우저에서 탐색한다: active/deprecated·type·subtype 필터 + 문장 검색으로 **페이지네이션된 목록**(`GET /api/memories` · 기본 30 · 최대 100 · 무제한 전량 반환 없음), **exact full-node-ID 기반 상세**(`GET /api/memory/<id>` · id8/suffix fuzzy 없음 · deprecated 도 조회 · evidence 발췌·관계·owner 승인·explain 요약), **lexical-only 회상**(`GET /api/recall`). 상세/카드 버튼은 `binggu explain <id>`·`binggu recall "<질문>"` 을 클립보드 복사만 한다(mutation endpoint/action 0). read model 은 `binggupack/studio/read_model.py`(mode=ro · schema 미적용).
 - **Canonical MCP 진입점 `binggupack-mcp`** — 신규 사용자용. 기본 **core profile**(12 도구: status·recall·why·trace_show·preflight·list·reminders·capture_preview + 승인 기반 save_candidate·pair·deprecate·replace). `--profile advanced` 로 전체 도구. serverInfo.name=`binggupack`.
 - **MCP exposure profiles (core/advanced)** — profile 은 tools/list **및** tools/call 양쪽에서 강제(숨긴 도구는 handler 호출 전 차단·`tool_not_in_profile`·write/network 0). profile 은 서버 시작 시 1회 결정되고 이후 불변(요청/env 로 승격 불가). stdio·HTTP 동일 경로.
 
@@ -24,6 +25,10 @@
 - **loopback only** — 127.0.0.1 에만 bind(`--host` 미제공·0.0.0.0/LAN/외부 인터페이스 불가). Host 헤더는 127.0.0.1/localhost 만 허용(그 외 403).
 - **session-scoped URL** — 실행마다 새 ephemeral token(메모리에만·파일/config/로그 0). 잘못된/없는 token → 404. token 은 URL 이외 응답 본문에 미포함.
 - **external asset/network 0** — HTML/CSS/JS 는 self-hosted(CDN/외부 폰트/이미지 0). CSP `default-src 'self'`·CORS 헤더 0·`Cache-Control: no-store`.
+- **Memory Explorer: semantic cache/network 0** — Studio recall 은 LEXICAL_ONLY_SCORER 를 주입해 `why_search` 가 semantic scorer 초기화·`recall_embed_cache` open·Ollama/embed/network 를 하지 않고 term-frequency ranking 만 쓴다. use_count 증가·recall_trace 기록 0. mode=ro 조회만(schema apply/migration/makedirs 0).
+- **Memory Explorer: exact full-ID detail** — 상세 조회는 `WHERE node_id=?` 정확 일치만(id8/suffix fuzzy 없음 · 없으면 404 · 다른 node 로 자동 보정 0).
+- **Memory Explorer: mutation endpoint/action 0** — GET/HEAD 만. UI 에 forget/deprecate/replace/accept/delete 버튼 0(mutation handoff 는 이후 범위).
+- **Memory Explorer: sensitive provenance redaction** — source_pointer_id/source_hash/raw conversation/nonce/provider config 미노출. evidence·peer 는 `safe_excerpt`(≤160자) · id 는 sha256[:8] display_id. 입력 검증: state/limit/offset/node_id/query 범위·NUL·control/bidi(위반 400) · SQL 은 전부 parameter binding.
 
 ## [1.19.0] - 2026-07-11 — Stable promotion of v1.19.0rc1
 
