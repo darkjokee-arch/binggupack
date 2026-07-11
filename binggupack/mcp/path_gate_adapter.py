@@ -85,8 +85,10 @@ def _selftest():
         ("toy_internal_ok",      ["examples/toy_project/Makefile"],             True,  None),
         ("toy_multi_ok",         ["examples/toy_project/a.py", "examples/toy_project/b.py"], True, None),
         ("parent_escape_block",  ["../secret_outside.txt"],                     False, "parent_escape"),
-        ("npki_block",           ["C:/Users/PC/AppData/LocalLow/NPKI/yessign/cert.der"], False, "deny_cert_npki"),
-        ("bid_engine_block",     ["C:/Users/PC/safety-app/bid-engine/app/worker.py"],   False, "deny_bid_engine"),
+        ("npki_block",           ["C:/Users/fixture-user/AppData/LocalLow/NPKI/yessign/cert.der"], False, "deny_cert_npki"),
+        # generic deny(secret) — deny_private_project 는 런타임 owner deny 파일 필요(배포물 부재)이라
+        # 항상 발동하는 secret 키워드('credential')로 사설-프로젝트 경로 모양의 deny 커버리지를 유지한다.
+        ("private_project_block", ["C:/Users/fixture-user/example-org/example-project/credentials.json"], False, "deny_secret"),
         ("env_secret_block",     ["examples/toy_project/.env"],                 False, "deny_secret"),
         ("opencrab_store_block", ["data/localcrab_index.sqlite"],               False, "deny_opencrab_store"),
         ("mixed_one_bad_block",  ["examples/toy_project/ok.py", "../escape"],   False, "parent_escape"),

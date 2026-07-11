@@ -11,7 +11,8 @@ byte-identical 하다(기능 변경 0). 순수 판정(write 0)·binggupack 외�
 목적:
 - MCP/local 도구가 사용자의 명시 작업 디렉터리(allow_root) 밖을 읽지 못하게 한다.
 - symlink/junction/대소문자/8.3 단축명/ADS/UNC/상위경로 탈출을 차단한다.
-- bid-engine·인증서(NPKI)·.env/credential·OpenCrab operating store·다른 프로젝트 경로를 deny한다.
+- 인증서 저장소(cert store)·.env/credential·OpenCrab operating store·소유자 지정 사설
+  프로젝트(런타임 로드 · 배포물엔 실제 토큰 없음)·다른 프로젝트 경로를 deny한다.
 - raw 경로값은 출력하지 않는다 → verdict(ALLOW/BLOCK) + reason_code + path_id(hash) 만.
 
 범위: 경로 분석만. 실제 파일시스템 write 0. operating store/DB/production 미접근.
@@ -31,13 +32,37 @@ def _path_id(s):
 
 
 # denylist 키워드(정규화 소문자 기준). raw 경로는 출력하지 않고 카테고리만 reason_code로.
+# 소유자-특정 사설 프로젝트명은 배포 소스에 하드코딩하지 않고 repo 밖 owner-only 파일에서
+# 런타임 로드한다(deny_private_project). 배포물엔 실제 토큰이 없다 — 파일 부재 시 미적용.
 _DENY = [
-    ("deny_bid_engine", ["bid-engine", "bid_engine", "safety-app"]),
     ("deny_cert_npki", ["npki", "gpki", "yessign", "magicline", "secukit", "인증서", "certificate", "공동인증"]),
     ("deny_secret", [".env", "credential", "private_key", "id_rsa", ".pem", ".key", "secret", "_token", "password"]),
     ("deny_opencrab_store", ["localcrab_index", "_graph.yaml", "operating_store",
                              "localbinggu_production_graph", "user_graph.yaml", "_graph_merge.yaml"]),
 ]
+
+_OWNER_DENY_CACHE = {}
+
+
+def _owner_private_tokens():
+    """소유자-특정 사설 프로젝트/경로 토큰을 repo 밖 owner-only 파일에서 로드(런타임).
+    위치: $BINGGU_PRIVATE_DENY 또는 ~/.binggupack_private/deny_tokens.txt.
+    배포물엔 실제 토큰이 없다 — 파일 부재 시 빈 목록(=이 카테고리 미적용). 경로별 캐시."""
+    path = os.environ.get("BINGGU_PRIVATE_DENY") or os.path.join(
+        os.path.expanduser("~"), ".binggupack_private", "deny_tokens.txt")
+    if path in _OWNER_DENY_CACHE:
+        return _OWNER_DENY_CACHE[path]
+    toks = []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for ln in f:
+                t = ln.strip().lower()
+                if t and not t.startswith("#"):
+                    toks.append(t)
+    except OSError:
+        toks = []
+    _OWNER_DENY_CACHE[path] = toks
+    return toks
 
 # 8.3 단축명 의심: NAME~N 형태
 _RE_8_3 = re.compile(r"[^\\/]{1,8}~\d")
@@ -87,6 +112,10 @@ def classify_path(input_path, allow_root, *, symlink_detected=False):
         if any(k in norm_lower for k in kws):
             return block(rc)
 
+    # 5b) 소유자 사설 프로젝트(런타임 로드 · 배포물엔 토큰 없음)
+    if any(k in norm_lower for k in _owner_private_tokens()):
+        return block("deny_private_project")
+
     # 6) symlink/junction (호출부가 탐지해 주입)
     if symlink_detected:
         return block("symlink_junction")
@@ -125,8 +154,7 @@ def _selftest():
         ("parent_escape_bad",      "../secret_outside.txt",                  False, "BLOCK", "parent_escape"),
         ("deep_parent_escape_bad", "examples/../../etc/passwd",              False, "BLOCK", "parent_escape"),
         ("symlink_bad",            "examples/toy_project/linked_dir/x",      True,  "BLOCK", "symlink_junction"),
-        ("npki_cert_bad",          "C:/Users/PC/AppData/LocalLow/NPKI/yessign/USER/cert.der", False, "BLOCK", "deny_cert_npki"),
-        ("bid_engine_bad",         "C:/Users/PC/safety-app/bid-engine/app/worker.py",         False, "BLOCK", "deny_bid_engine"),
+        ("cert_store_bad",         "examples/toy_project/certs/NPKI/vendor/cert.der",         False, "BLOCK", "deny_cert_npki"),
         ("env_secret_bad",         "examples/toy_project/.env",              False, "BLOCK", "deny_secret"),
         ("private_key_bad",        "examples/toy_project/keys/id_rsa",       False, "BLOCK", "deny_secret"),
         ("opencrab_store_bad",     "data/localcrab_index.sqlite",            False, "BLOCK", "deny_opencrab_store"),
@@ -158,6 +186,35 @@ def _selftest():
         tag = "OK" if ok else "FAIL"
         print("  [%s] %-22s verdict=%-5s reason=%-20s path_id=%s"
               % (tag, name, r["verdict"], str(r["reason_code"]), r["path_id"]))
+
+    # 소유자 사설 프로젝트 deny: repo 밖 owner-only 파일에서 런타임 로드(배포물엔 토큰 없음).
+    # synthetic 토큰(example-private-proj)으로 검증 — owner 실제 값 미사용.
+    import shutil as _sh
+    import tempfile as _tf
+    _pp_dir = _tf.mkdtemp(prefix="pp_owner_deny_")
+    _pp_file = os.path.join(_pp_dir, "deny_tokens.txt")
+    with open(_pp_file, "w", encoding="utf-8") as _f:
+        _f.write("# synthetic owner deny (selftest)\nexample-private-proj\n")
+    _saved = os.environ.get("BINGGU_PRIVATE_DENY")
+    try:
+        os.environ["BINGGU_PRIVATE_DENY"] = os.path.join(_pp_dir, "absent.txt")
+        _OWNER_DENY_CACHE.clear()
+        r_absent = classify_path("examples/example-private-proj/app.py", allow_root)
+        ok_absent = (r_absent["reason_code"] != "deny_private_project")
+        os.environ["BINGGU_PRIVATE_DENY"] = _pp_file
+        _OWNER_DENY_CACHE.clear()
+        r_present = classify_path("examples/example-private-proj/app.py", allow_root)
+        ok_present = (r_present["verdict"] == "BLOCK" and r_present["reason_code"] == "deny_private_project")
+    finally:
+        if _saved is None:
+            os.environ.pop("BINGGU_PRIVATE_DENY", None)
+        else:
+            os.environ["BINGGU_PRIVATE_DENY"] = _saved
+        _OWNER_DENY_CACHE.clear()
+        _sh.rmtree(_pp_dir, ignore_errors=True)
+    all_ok = all_ok and ok_absent and ok_present
+    print("  [%s] %-22s (배포 기본=미적용)" % ("OK" if ok_absent else "FAIL", "private_project_absent"))
+    print("  [%s] %-22s (owner 파일=차단)" % ("OK" if ok_present else "FAIL", "private_project_present"))
 
     print("\n  --- 집계(raw 경로 미출력, reason_code/count 만) ---")
     for k in sorted(counts):

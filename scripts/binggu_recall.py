@@ -86,7 +86,7 @@ def _selftest():
         jt0 = judgment_trace(empty_ledger, "node:CONV:deadbeef")
         ck(jt0["found"] is False and jt0["chain"] == [],
            "빈 그래프 judgment_trace → found False·빈 사슬(에러 0)")
-        pf0 = preflight_context(empty_ledger, prompt="바로 배포한다", cwd="/x/bid-engine")
+        pf0 = preflight_context(empty_ledger, prompt="바로 배포한다", cwd="/x/example-project")
         ck(pf0["remember"] == [] and pf0["needs_question"] is False
            and pf0["risk_level"] == "낮음",
            "빈 그래프 preflight → 빈 기억·반문 없음(신규 사용자 graceful)")
@@ -152,7 +152,7 @@ def _selftest():
 
         # ── 반문: 위험패턴 닮으면 needs_question ──
         pf = preflight_context(ledger, prompt="검증 없이 바로 배포하려고 한다 endpoint",
-                               cwd="/work/bid-engine")
+                               cwd="/work/example-project")
         ck(pf["risk_level"] in ("중간", "높음") and len(pf["avoid_patterns"]) >= 1,
            "preflight 위험작업 → 위험도 중간↑ · avoid_patterns(버그패턴) 매칭")
         ck(pf["needs_question"] and pf["question"] and "배포" in pf["question"],

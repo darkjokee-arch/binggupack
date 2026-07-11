@@ -5,7 +5,7 @@
   - candidate-only: state 항상 'captured_candidate' (active/confirmed/ledger write 0)
   - 원문(대화 전문) 미저장: 발화 TEXT_CAP(문장 전체 보존 상한) 초과분 truncate
   - 기본 OFF: ~/.binggupack/capture_enabled 플래그 있을 때만 동작
-  - scope 게이트: repo/session 화이트리스트(fail-closed) + deny 우선 → bid-engine 등 타 세션 제외
+  - scope 게이트: repo/session 화이트리스트(fail-closed) + deny 우선 → example-project 등 타 세션 제외
   - TTL 자동 폐기: captured_at + ttl_days 경과분 lazy purge
   - rollback: capture_buffer.sqlite 단일 파일 삭제 1회로 완전 원복 (운영 ledger.sqlite 미접촉)
 
@@ -433,8 +433,8 @@ def _selftest():
         ledger.write_bytes(b"LEDGER-SENTINEL")
         ledger_mtime0 = ledger.stat().st_mtime_ns
 
-        repo_cwd = "C:/Users/PC/binggupack"
-        other_cwd = "C:/Users/PC/safety-app/bid-engine"
+        repo_cwd = "C:/Users/fixture-user/binggupack"
+        other_cwd = "C:/Users/fixture-user/example-org/example-project"
 
         scope = CaptureScope(home=home)
 
@@ -452,10 +452,10 @@ def _selftest():
         check(r["action"] == "skipped_scope" and buf.size == 0,
               "T2 플래그 ON + scope 화이트리스트 비어있음 → fail-closed 저장 0")
 
-        # scope 설정: binggu 허용, bid-engine/safety-app deny
+        # scope 설정: binggu 허용, example-project/example-org deny
         scope.scope_file.write_text(json.dumps({
-            "allowed_cwd_prefixes": ["C:/Users/PC/binggupack"],
-            "denied_cwd_substrings": ["bid-engine", "safety-app"],
+            "allowed_cwd_prefixes": ["C:/Users/fixture-user/binggupack"],
+            "denied_cwd_substrings": ["example-project", "example-org"],
         }, ensure_ascii=False), encoding="utf-8")
 
         # T3 플래그 ON + scope 일치 → captured 영속
@@ -463,13 +463,13 @@ def _selftest():
         check(r["action"] == "captured" and r["stored"] and buf.size == 1,
               "T3 플래그 ON + scope 일치 → captured 영속(size=1)")
 
-        # T4 타 repo(bid-engine) → 게이트 차단 (allow 미매치 + deny 매치)
+        # T4 타 repo(example-project) → 게이트 차단 (allow 미매치 + deny 매치)
         r = buf.feed("B안으로 결정", other_cwd)
         check(r["action"] == "skipped_scope" and buf.size == 1,
-              "T4 bid-engine 세션 발화 → 제외(size 불변=1)")
+              "T4 example-project 세션 발화 → 제외(size 불변=1)")
 
         # T5 deny 우선: 허용 prefix 안이라도 deny substring이면 차단
-        r = buf.feed("결정했다", "C:/Users/PC/binggupack/bid-engine-notes")
+        r = buf.feed("결정했다", "C:/Users/fixture-user/binggupack/example-project-notes")
         check(r["action"] == "skipped_scope" and buf.size == 1,
               "T5 deny substring 우선 → 허용 prefix 내부라도 차단")
 
@@ -540,10 +540,10 @@ def _selftest():
 
         # T15 global scope: 타 cwd 허용 · deny 는 여전히 우선 차단
         scope.scope_file.write_text(json.dumps({
-            "global": True, "allowed_cwd_prefixes": [], "denied_cwd_substrings": ["bid-engine"],
+            "global": True, "allowed_cwd_prefixes": [], "denied_cwd_substrings": ["example-project"],
         }, ensure_ascii=False), encoding="utf-8")
         check(scope.in_scope("D:/anywhere/else") and not scope.in_scope(other_cwd),
-              "T15 global scope → 타 cwd 허용 · deny(bid-engine) 차단 유지")
+              "T15 global scope → 타 cwd 허용 · deny(example-project) 차단 유지")
 
         # T16~T19 semantic shadow preview opt-in 실배선 (read-only 보조 라벨)
         import hashlib
@@ -655,11 +655,11 @@ def _selftest():
         scope3.flag.write_text("1", encoding="utf-8")
         scope3.scope_file.write_text(json.dumps({
             "global": False,
-            "allowed_cwd_prefixes": ["C:/Users/PC/binggupack"],
-            "denied_cwd_substrings": ["bid-engine"],
+            "allowed_cwd_prefixes": ["C:/Users/fixture-user/binggupack"],
+            "denied_cwd_substrings": ["example-project"],
         }, ensure_ascii=False), encoding="utf-8")
         neutral = "C:/WINDOWS/system32"    # allow 미스 · deny 미스(중립 시작 위치)
-        denied = "C:/Users/PC/bid-engine"  # deny 매치
+        denied = "C:/Users/fixture-user/example-project"  # deny 매치
         # T24 명시 preview 신호 "빙구팩 저장해" → 중립 cwd allow 우회(preview)
         r = buf4.feed("빙구팩 저장해", neutral)
         check(r["action"] == "preview", "T24 명시 preview 신호 → 중립 cwd allow 우회(preview)")
@@ -684,7 +684,7 @@ def _selftest():
 
         # ── T29~T34 대화 덩어리/붙여넣기/AI 응답문 veto (길이 + 줄바꿈 밀도) ──
         buf5 = PersistentCaptureBuffer(home=home)
-        buf5.rollback()  # 깨끗한 버퍼(scope3: binggupack allow · bid-engine deny · flag ON)
+        buf5.rollback()  # 깨끗한 버퍼(scope3: binggupack allow · example-project deny · flag ON)
         # T29 긴 붙여넣기(>300자 + 줄바꿈 3+) → bulk_veto 미저장
         long_paste = "이건 붙여넣기 " + ("가나다 결정한다 위험 항상\n" * 25)  # ~383자 · 줄바꿈 25
         r = buf5.feed(long_paste, repo_cwd)

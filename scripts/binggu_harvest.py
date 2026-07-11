@@ -780,7 +780,7 @@ def _selftest():
     PUB = "https://arxiv.org/abs/2601.00001"
     chk("T2a 공개 URL 등록 OK", add_source("arxiv", PUB, path=sp)["status"] == "OK")
     chk("T2b 로컬경로 소스 등록 거부",
-        add_source("url", "C:\\Users\\PC\\private\\notes.md", path=sp)["reason"] == "SOURCE_NOT_PUBLIC")
+        add_source("url", "C:\\Users\\fixture-user\\private\\notes.md", path=sp)["reason"] == "SOURCE_NOT_PUBLIC")
     chk("T2c 내부 IP 소스 등록 거부",
         add_source("url", "http://192.168.0.10/api", path=sp)["reason"] == "SOURCE_NOT_PUBLIC")
     chk("T2d 잘못된 kind 거부", add_source("ftp", PUB + "/x", path=sp)["reason"] == "BAD_KIND")

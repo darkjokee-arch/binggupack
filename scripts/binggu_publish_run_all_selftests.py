@@ -79,6 +79,8 @@ GATES = [
     ("p1b1 bundle atomicity","binggu_p1b1_bundle_atomicity_selftest.py", ["--selftest"], "GATE=GO"),
     ("setup-save onboard","binggu_setup_save.py",                      ["--selftest"], "GATE: GO"),
     ("archive backup/export", os.path.join("..", "binggupack", "workspace", "archive.py"), [], "GATE=GO"),
+    ("publish workflow",  "publish_workflow_selftest.py",              ["--selftest"], "GATE: GO"),
+    ("private path scan", "private_path_scan.py",                      ["--source"], "GATE: GO"),
     ("tree scan",         "openbinggu_public_tree_scan.py",            ["--tree", REPO, "--public"], "verdict=CLEAN"),
 ]
 
@@ -103,7 +105,8 @@ def run_one(label, script, extra, ok_marker):
     import re
     m = re.search(r"===\s*(\d+)/(\d+)\s*===", out)
     cnt = "%s/%s" % (m.group(1), m.group(2)) if m else "-"
-    return {"label": label, "ok": ok, "rc": p.returncode, "count": cnt}
+    tail = "" if ok else "\n".join(out.strip().splitlines()[-25:])
+    return {"label": label, "ok": ok, "rc": p.returncode, "count": cnt, "tail": tail}
 
 
 def main():
@@ -123,6 +126,11 @@ def main():
     print("REGRESSION=%s" % verdict)
     if verdict != "GO":
         print("FAILED:", ", ".join(r["label"] for r in results if not r["ok"]))
+        # 실패 gate 의 subprocess 출력 tail 을 노출(회귀 원인 규명 — CI 로그에서 바로 확인).
+        for r in results:
+            if not r["ok"] and r.get("tail"):
+                print("\n----- FAILED gate 출력 tail: %s (rc=%s) -----" % (r["label"], r.get("rc")))
+                print(r["tail"])
     return 0 if verdict == "GO" else 1
 
 

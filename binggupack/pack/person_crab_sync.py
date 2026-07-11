@@ -386,7 +386,7 @@ def _selftest():
         (xdir / "사용자_판단_보조문서.md").write_text(
             "# [출처: ai정리] 사용자 판단 보조\n"
             "사장님은 결론부터 짧게 듣는 방식을 선호하며 대안 제시를 중시한다.\n"
-            "작업 위치는 %s 에 있었다.\n" % r"C:\Users\tester\work", encoding="utf-8")
+            "작업 위치는 %s 에 있었다.\n" % r"C:\Users\fixture-user\work", encoding="utf-8")
         (xdir / "누출문서.md").write_text(
             "# 누출\n연락처는 %s 입니다.\n" % ("x" + "@" + "y" + ".com"), encoding="utf-8")
         s8 = sync(ledger=led, home=home, work_dir=work, dry_run=False, confirm=True, env=live_env,

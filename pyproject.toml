@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "binggupack"
-version = "1.18.3"   # v1.18.3 — 문서/문구 정밀화(Release 링크·SECURITY.md·README 2트랙)·적중률 학습 재설계(발화 앵커). version SSOT = binggupack/__about__.py.
+version = "1.19.0rc1"   # v1.19.0rc1 (PEP440 pre-release) — Consent-first, exact-bound AI memory RC. 향후 tag = v1.19.0rc1(하이픈 없음). version SSOT = binggupack/__about__.py.
 description = "BingguPack — local-first, evidence-backed memory/context pack framework with an installable Claude Code MCP server (stdio JSON-RPC). Python stdlib only."
 readme = "README.md"
 requires-python = ">=3.10"

@@ -122,7 +122,7 @@ def _secret_scan_stub():
     clean = ["build with make", "run tests with make test", "synthetic claim summary"]
     # 정적 소스에 scanner 트리거 리터럴이 남지 않게 런타임 조립(검출은 동일)
     dirty = ["api_" + "key=" + "AKIA" + "0000EXAMPLE0000", "to" + "ken: " + "ghp_" + "EXAMPLE0000000000",
-             "phone 010-" + "0000-0000", "C:/Users/x/.env"]
+             "phone 010-" + "0000-0000", "C:/Users/fixture-user/.env"]
     pats = [
         ("secret_kv", re.compile(r"(api_key|token|secret|password)\s*[:=]", re.I)),
         ("aws_key", re.compile(r"AKIA[0-9A-Z]{4,}")),
@@ -385,8 +385,8 @@ def _build_temp_ledger(path, *, break_evidence=False):
         "CREATE TABLE owner_acceptances(event_id INTEGER PRIMARY KEY, node_id TEXT, event TEXT);")
     # 정상 2노드: 도장 정합(node_type=judgment, 판단문) + 도장 거꾸로(node_type=concept, 판단문→발산)
     rows = [
-        ("node:CONV:aaaaaaaa", "judgment", "이 입찰은 마진이 낮아 보류한다.", 0, 0, "active"),
-        ("node:CONV:bbbbbbbb", "concept", "이 입찰은 마진이 낮아 보류한다.", 1, 0, "active"),  # 발산(저장=concept, 재분류=judgment) + staging
+        ("node:CONV:aaaaaaaa", "judgment", "이 변경은 위험이 커서 보류한다.", 0, 0, "active"),
+        ("node:CONV:bbbbbbbb", "concept", "이 변경은 위험이 커서 보류한다.", 1, 0, "active"),  # 발산(저장=concept, 재분류=judgment) + staging
     ]
     con.executemany("INSERT INTO nodes VALUES(?,?,?,?,?,?)", rows)
     if break_evidence:

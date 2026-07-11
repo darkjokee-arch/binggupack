@@ -12,7 +12,7 @@ hook/daemon 없음. temp/staging only. 운영 store/OpenCrab/DB write 0.
 강제: candidate=true / promotion_allowed=false / origin=watcher / node→node edge 0 / redaction_required=true.
 실패: 변환·접근 실패=per-source HOLD(skipped/failed, batch 계속) / secret·PII 잔존(FN)=전체 STOP.
 STOP: hook/daemon · raw session jsonl · 실/private 외부전송 · secret/PII raw 잔존 · temp 외 write ·
-  OpenCrab/store/DB write · v09/ARMED/apply · push · bid-engine · candidate→confirmed · redaction 복원 · node→node edge.
+  OpenCrab/store/DB write · v09/ARMED/apply · push · example-project · candidate→confirmed · redaction 복원 · node→node edge.
 
 CLI:
   python watcher_batch_m1.py --selftest

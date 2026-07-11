@@ -1840,6 +1840,11 @@ def main():
         sys.exit(_home_screen())
     p = argparse.ArgumentParser(prog="binggu", description="BingguPack 개인 장부 CLI")
     p.add_argument("--ledger", default=DEFAULT_LEDGER)
+    try:
+        from binggupack.__about__ import __version__ as _bgp_ver
+    except Exception:
+        _bgp_ver = "unknown"
+    p.add_argument("--version", action="version", version="binggupack %s" % _bgp_ver)
     sub = p.add_subparsers(dest="cmd", required=True)
     # 60초 데모(설치 직후 체험) — 격리 임시 장부·오프라인·운영 장부 미접촉.
     dmp = sub.add_parser("demo")

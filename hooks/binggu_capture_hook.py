@@ -10,7 +10,7 @@
 
 안전 불변 (전부 --selftest 로 증명):
   - 기본 OFF: ~/.binggupack/capture_enabled 플래그가 없으면 즉시 종료(타 세션 무부담, import 전 차단)
-  - scope 게이트: capture_scope.json 화이트리스트(fail-closed) + deny 우선 → bid-engine 등 타 repo 제외
+  - scope 게이트: capture_scope.json 화이트리스트(fail-closed) + deny 우선 → example-project 등 타 repo 제외
   - candidate-only: ledger / active / confirmed write 0, 원문 전문 미저장(발췌 cap)
   - stdout 침묵 + 모든 예외 흡수(항상 exit 0) → 어떤 경우에도 세션 방해 / 원문 출력 0
 """
@@ -109,8 +109,8 @@ def _selftest():
                 input=(raw if raw is not None else json.dumps(payload)),
                 capture_output=True, text=True, env=base_env)
 
-        repo_cwd = "C:/Users/PC/binggupack"
-        other_cwd = "C:/Users/PC/safety-app/bid-engine"
+        repo_cwd = "C:/Users/fixture-user/binggupack"
+        other_cwd = "C:/Users/fixture-user/example-org/example-project"
 
         sys.path.insert(0, scripts)
         from binggu_capture_persist import PersistentCaptureBuffer
@@ -124,8 +124,8 @@ def _selftest():
         # 활성화: 플래그 + scope
         (home / "capture_enabled").write_text("1", encoding="utf-8")
         (home / "capture_scope.json").write_text(json.dumps({
-            "allowed_cwd_prefixes": ["C:/Users/PC/binggupack"],
-            "denied_cwd_substrings": ["bid-engine", "safety-app"],
+            "allowed_cwd_prefixes": ["C:/Users/fixture-user/binggupack"],
+            "denied_cwd_substrings": ["example-project", "example-org"],
         }, ensure_ascii=False), encoding="utf-8")
 
         # T2 발화 단위 누적
@@ -133,9 +133,9 @@ def _selftest():
         call({"hook_event_name": "UserPromptSubmit", "prompt": "B안으로 결정한다", "cwd": repo_cwd})
         check(size() == 2, "T2 발화 단위 누적(size=2)")
 
-        # T3 bid-engine 세션 → 제외
+        # T3 example-project 세션 → 제외
         call({"hook_event_name": "UserPromptSubmit", "prompt": "결정했다", "cwd": other_cwd})
-        check(size() == 2, "T3 bid-engine 세션 발화 제외(size 불변=2)")
+        check(size() == 2, "T3 example-project 세션 발화 제외(size 불변=2)")
 
         # T4 ignored 발화 → 수집 0
         call({"hook_event_name": "UserPromptSubmit", "prompt": "ㅋㅋ 웃기네", "cwd": repo_cwd})

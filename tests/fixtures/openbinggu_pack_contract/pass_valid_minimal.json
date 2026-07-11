@@ -1,7 +1,7 @@
 {
   "pack_id": "pack_sess_20260603_001",
   "pack_type": "session",
-  "scope": "bid-engine tier2 운영 세션 박제",
+  "scope": "example-project tier2 운영 세션 박제",
   "depends_on": [],
   "evidence_policy": {"source": "traj", "min_evidence": 1},
   "merge_policy": {"mode": "manual", "target": "staging", "cross_pack": "isolated"},

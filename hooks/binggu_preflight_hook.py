@@ -413,7 +413,7 @@ def _selftest():
                 input=(raw if raw is not None else json.dumps(payload)),
                 capture_output=True, text=True, env=env)
 
-        repo_cwd = "C:/Users/PC/binggupack"
+        repo_cwd = "C:/Users/fixture-user/binggupack"
 
         # ---- temp ledger 구성 (운영 미접촉 · binggu_recall._load_graph 스키마와 동일) ----
         #   스키마/ node_type 값은 binggu_recall._selftest 와 정확히 일치해야 _load_graph 가 읽는다
@@ -608,12 +608,12 @@ def _selftest():
               and "양방향 신뢰도" not in r.stdout and "사용자 원칙" not in r.stdout,
               "T19 기본(content_only) → 조언블록 노출·trust/person 억제(전역 누출 차단)")
 
-        # T20(요구⑤) bid-engine 무관 세션 owner 일반질문 → stdout 완전 침묵(오매칭 0)
-        #   prompt 가 seeded 노드와 토큰 0중복 + cwd basename 'bid-engine' qtok 가산 안 됨(de-broadening)
+        # T20(요구⑤) example-project 무관 세션 owner 일반질문 → stdout 완전 침묵(오매칭 0)
+        #   prompt 가 seeded 노드와 토큰 0중복 + cwd basename 'example-project' qtok 가산 안 됨(de-broadening)
         r = call({"hook_event_name": "UserPromptSubmit",
-                  "prompt": "나라장터 투찰 낙찰가 계산해줘", "cwd": "C:/Users/PC/bid-engine"})
+                  "prompt": "이 프로젝트의 빌드 명령을 알려줘", "cwd": "C:/Users/fixture-user/example-project"})
         check(r.returncode == 0 and r.stdout.strip() == "",
-              "T20(요구⑤) bid-engine 무관 세션 일반질문 → stdout 침묵(content block 매칭 0)")
+              "T20(요구⑤) example-project 무관 세션 일반질문 → stdout 침묵(content block 매칭 0)")
 
         # T21 allowlist 닫힌 목록: domains=['binggupack'] → binggupack cwd 만 full, 밖은 off
         (home / "preflight_scope.json").write_text(
@@ -623,9 +623,9 @@ def _selftest():
               and "사용자 원칙" in r.stdout,
               "T21a allowlist 매칭(cwd basename=binggupack) → level=full(3블록)")
         r = call({"hook_event_name": "UserPromptSubmit", "prompt": MATCH,
-                  "cwd": "C:/Users/PC/bid-engine"})
+                  "cwd": "C:/Users/fixture-user/example-project"})
         check(r.stdout.strip() == "",
-              "T21b allowlist 미매칭(cwd basename=bid-engine) → level=off(침묵)")
+              "T21b allowlist 미매칭(cwd basename=example-project) → level=off(침묵)")
         (home / "preflight_scope.json").unlink()
 
         # T22 kill switch(preflight_disabled 파일) → BINGGU_SCOPE=all + 매칭 이어도 침묵(최우선)
@@ -644,8 +644,8 @@ def _selftest():
         mz0 = (ledger.stat().st_mtime_ns, ledger.stat().st_size)
         call({"hook_event_name": "UserPromptSubmit", "prompt": MATCH, "cwd": repo_cwd},
              extra_env={"BINGGU_SCOPE": "all"})
-        call({"hook_event_name": "UserPromptSubmit", "prompt": "나라장터 투찰",
-              "cwd": "C:/Users/PC/bid-engine"}, extra_env={"BINGGU_SCOPE": "off"})
+        call({"hook_event_name": "UserPromptSubmit", "prompt": "이 프로젝트의 빌드 명령을 알려줘",
+              "cwd": "C:/Users/fixture-user/example-project"}, extra_env={"BINGGU_SCOPE": "off"})
         mz1 = (ledger.stat().st_mtime_ns, ledger.stat().st_size)
         check(mz0 == mz1,
               "T23 scope 게이트 경로(full/off) 전후 ledger 불변(scope 파일·env read 만 · write 0)")

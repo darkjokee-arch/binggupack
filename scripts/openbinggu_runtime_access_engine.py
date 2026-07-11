@@ -212,8 +212,10 @@ def _selftest():
          "ALLOW", "review_governance_pass_preview_only"),
         ("MCP tool path escape BLOCK",
          {"actor": actor(), "action": "tool_call",
-          "target": {"path_inputs": ["C:/Users/PC/safety-app/bid-engine/app/worker.py"]}},
-         "BLOCK", "deny_bid_engine"),
+          # deny_private_project 는 런타임 owner deny 파일 필요(배포물 부재)이라 항상 발동하는
+          # secret 키워드('credential')로 사설-프로젝트 경로 모양의 deny 커버리지를 유지.
+          "target": {"path_inputs": ["C:/Users/fixture-user/example-org/example-project/credentials.json"]}},
+         "BLOCK", "deny_secret"),
         ("MCP tool clean path ALLOW",
          {"actor": actor(), "action": "tool_call",
           "target": {"path_inputs": ["users/user_a/packs/p1.json"], "allow_root": "users/user_a"}},

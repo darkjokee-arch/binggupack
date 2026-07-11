@@ -337,12 +337,12 @@ def _selftest():
             bakp.unlink()  # 이전 백업 정리(격리)
         custom = {"global": False,
                   "allowed_cwd_prefixes": [str(Path(cwd).resolve()), "C:/WINDOWS/system32"],
-                  "denied_cwd_substrings": ["bid-engine", "safety-app"]}
+                  "denied_cwd_substrings": ["example-project", "example-org"]}
         pscope.write_text(json.dumps(custom, ensure_ascii=False), encoding="utf-8")
         init_profile(home, cwd, hook_command=cmd, settings_path=settings)  # 재init
         merged = json.loads(pscope.read_text(encoding="utf-8"))
         check("C:/WINDOWS/system32" in merged["allowed_cwd_prefixes"]
-              and merged["denied_cwd_substrings"] == ["bid-engine", "safety-app"],
+              and merged["denied_cwd_substrings"] == ["example-project", "example-org"],
               "T12 재init 멱등 병합: 커스텀 allow(system32)·deny 보존(7/9 회귀 방지)")
         check(bakp.exists(), "T12b 병합 전 기존 scope .json.bak 백업 생성")
 

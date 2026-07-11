@@ -15,14 +15,24 @@ name: Publish to PyPI
 #     Workflow:     publish.yml
 #     Environment:  pypi   (아래 environment 와 일치, 선택)
 #   자세한 절차는 docs/TRUSTED_PUBLISHING_PLAN.md 참조.
+#
+# 🔒 fail-closed 계약 (P1-C 하드닝 · v1.19.0rc1):
+#   · publish 는 정확한 버전 태그 ref(vX.Y.Z[...]) 에서만 실행된다. branch/main ref
+#     (workflow_dispatch 포함) 는 업로드 전에 하드 차단(exit 1)된다.
+#   · tag 문자열 == pyproject [project].version == binggupack/__about__.__version__ (3중 일치).
+#     RC 태그는 하이픈 없이 v1.19.0rc1 (PEP440 canonical). 하이픈 태그(v1.19.0-rc1)는 fail-closed.
+#   · tag 가 가리키는 commit == checkout HEAD(GITHUB_SHA).
+#   · working tree 는 clean 이어야 한다(생성/미추적 산출물 유입 차단).
+#   · 사설 경로/소유자 메타데이터 스캔(private_path_scan)을 소스 + 빌드 산출물 양쪽에서 통과.
+#   · GitHub Release published 자동 트리거는 계속 비활성(아래 주석). 토큰 fallback 없음(OIDC 전용).
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
-  # 기본: 수동 트리거만. 의도치 않은 자동 publish 방지.
+  # 기본: 수동 트리거만. 반드시 '버전 태그' ref 를 선택해 실행한다(아래 Release gate 가 강제).
   workflow_dispatch:
 
   # (옵션) GitHub Release 가 published 될 때 자동 publish 하고 싶으면 아래 주석 해제.
-  #   Trusted Publisher 등록 + 1회 수동(workflow_dispatch) 검증을 마친 뒤에만 활성화 권장.
+  #   Trusted Publisher 등록 + 1회 수동(workflow_dispatch on tag) 검증을 마친 뒤에만 활성화 권장.
   # release:
   #   types: [published]
 
@@ -37,14 +47,16 @@ jobs:
 
     # (옵션) GitHub Environment. Trusted Publisher 등록 시 Environment=pypi 로 지정했다면
     # 아래 environment 도 같은 이름이어야 한다. Environment 보호 규칙(필수 리뷰어 등)으로
-    # publish 전 수동 승인 게이트를 둘 수 있다. 등록 시 Environment 를 비웠다면 이 블록은 제거.
+    # publish 전 수동 승인 게이트를 둘 수 있다(권장). 등록 시 Environment 를 비웠다면 이 블록 제거.
     environment:
       name: pypi
       url: https://pypi.org/p/binggupack
 
     steps:
-      - name: Checkout (tag/ref 체크아웃)
+      - name: Checkout (tag ref 체크아웃)
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0   # tag/commit 검증을 위해 전체 히스토리
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -54,24 +66,45 @@ jobs:
       - name: Install build tooling (build + twine, no project deps)
         run: python -m pip install --upgrade build twine
 
-      - name: Tag / version 정합 확인
-        # git tag 로 트리거된 경우 태그(vX.Y.Z) 와 pyproject version 이 일치하는지 검증.
-        # workflow_dispatch(태그 없음)면 검증을 건너뛴다.
+      - name: Release gate (tag-only · SSOT 3중 일치 · tag==HEAD · clean · 사설경로 0 — fail-closed)
         run: |
-          PYPROJECT_VERSION="$(python -c 'import tomllib,sys; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
-          echo "pyproject version: ${PYPROJECT_VERSION}"
-          REF="${GITHUB_REF}"
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            TAG_VERSION="${GITHUB_REF_NAME#v}"
-            echo "git tag version:  ${TAG_VERSION}"
-            if [ "${TAG_VERSION}" != "${PYPROJECT_VERSION}" ]; then
-              echo "::error::Tag(${TAG_VERSION}) != pyproject version(${PYPROJECT_VERSION}). 정합 불일치로 중단."
-              exit 1
-            fi
-            echo "OK: tag 와 pyproject version 일치."
-          else
-            echo "수동(workflow_dispatch) 실행 — 태그 정합 검증 생략. pyproject version=${PYPROJECT_VERSION} 으로 업로드됨."
+          set -eu
+          # (1) tag ref 강제 — branch/main dispatch 는 업로드 전 하드 차단
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then
+            echo "::error::publish 는 정확한 버전 태그(vX.Y.Z[...]) ref 에서만 실행된다. 현재 ref_type=${GITHUB_REF_TYPE} ref=${GITHUB_REF_NAME}. 중단."
+            exit 1
           fi
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          # (2) SSOT: pyproject == __about__
+          PYPROJECT_VERSION="$(python -c 'import tomllib,sys; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
+          ABOUT_VERSION="$(python -c 'import re; print(re.search(r"__version__\s*=\s*[\"\x27]([^\"\x27]+)", open("binggupack/__about__.py", encoding="utf-8").read()).group(1))')"
+          echo "tag=${TAG_VERSION}  pyproject=${PYPROJECT_VERSION}  about=${ABOUT_VERSION}  head=${GITHUB_SHA}"
+          if [ "${PYPROJECT_VERSION}" != "${ABOUT_VERSION}" ]; then
+            echo "::error::version SSOT 불일치: pyproject(${PYPROJECT_VERSION}) != __about__(${ABOUT_VERSION}). 중단."
+            exit 1
+          fi
+          # (3) tag == version (literal · RC 규칙: v1.19.0rc1, 하이픈 없음)
+          if [ "${TAG_VERSION}" != "${PYPROJECT_VERSION}" ]; then
+            echo "::error::tag(${TAG_VERSION}) != version(${PYPROJECT_VERSION}). tag 는 정확히 v<version> 이어야 한다(RC 예: v1.19.0rc1, 하이픈 없음). 중단."
+            exit 1
+          fi
+          # (4) tag 가 가리키는 commit == checkout HEAD
+          if [ "$(git rev-parse HEAD)" != "${GITHUB_SHA}" ]; then
+            echo "::error::checkout HEAD($(git rev-parse HEAD)) != trigger commit(${GITHUB_SHA}). 중단."
+            exit 1
+          fi
+          # (5) version_consistency selftest (fail-closed)
+          python scripts/version_consistency_selftest.py
+          # (6) dirty tree 금지 — 생성/미추적 산출물 유입 차단
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::working tree dirty — 생성/미추적 산출물이 있다. 중단."
+            git status --porcelain
+            exit 1
+          fi
+          # (7) publish workflow 계약 정적 검증 + 사설 경로/메타데이터 스캔(소스)
+          python scripts/publish_workflow_selftest.py --selftest
+          python scripts/private_path_scan.py --source
+          echo "OK: tag-only · SSOT 3중 일치 · tag==HEAD · clean · 사설경로 0."
 
       - name: Build sdist + wheel
         run: python -m build
@@ -79,11 +112,27 @@ jobs:
       - name: Twine check (메타데이터 검증)
         run: python -m twine check dist/*
 
+      - name: Private-artifact scan (빌드 산출물 wheel/sdist — 업로드 전 fail-closed)
+        run: |
+          set -eu
+          scan_dir="$(mktemp -d)"
+          for whl in dist/*.whl; do
+            d="${scan_dir}/$(basename "${whl}" .whl)_whl"; mkdir -p "${d}"
+            python -m zipfile -e "${whl}" "${d}"
+          done
+          for sd in dist/*.tar.gz; do
+            d="${scan_dir}/$(basename "${sd}" .tar.gz)_sdist"; mkdir -p "${d}"
+            tar -xzf "${sd}" -C "${d}"
+          done
+          python scripts/private_path_scan.py --tree "${scan_dir}"
+          echo "OK: 빌드 산출물 사설경로 0."
+
       - name: Publish to PyPI (Trusted Publishing / OIDC)
         # 토큰/시크릿 없음. id-token: write 권한으로 OIDC 교환만 사용.
         # Trusted Publisher 미등록 시 이 단계에서 인증 거부됨(정상 — owner 수동 선행 필요).
+        # skip-existing 미설정 → 이미 존재하는 버전 재업로드는 명확히 실패(중복 은폐 금지).
         uses: pypa/gh-action-pypi-publish@release/v1
         # with:
         #   # 기본값이 PyPI 이므로 별도 설정 불필요. TestPyPI 로 먼저 시험하려면 아래 주석 해제
         #   # (TestPyPI 에도 동일하게 Trusted Publisher 를 별도 등록해야 함).
-        #   repository-url: https://test.pypi.org/legacy/
+        #   # repository-url: https://test.pypi.org/legacy/
