@@ -22,9 +22,12 @@ Base: `docs/p1b1-protected-writer-rfc` worktree (main `39d8c74` 후속). 상위 
 
 > **P1-B 트랙 분리.** Track A(`BINGGUPACK_P1B_MUTATION_CLOSURE_DESIGN.md`)는 mutation surface
 > (accept/unaccept/due/resolve/confirm_edges·hosted 3파일·hag_sync_adapter)를 exact-bound approval
-> 로 봉인한다 — **"승인이 없으면 안 써진다"**. Track B(본 문서)는 그 **후에 남는 위협** — **"모델이
-> 승인 자체를 위조할 수 있다"** — 를 다룬다. 두 트랙은 직교하며 Track B 없이 Track A 는 FS/Shell
-> 병재 호스트에서 하드 통제가 아니다(그 사실을 Track A 도 §1 에서 정직히 인정한다).
+> 로 봉인한다 — **"승인이 없으면 안 써진다"**. **(2026-07-11 · Track A 구현 완료 — 5 operation
+> `binding_fields` 스키마 + CLI `--approval-id` 비대화형 owner 경로 · hosted `commit_bundle` atomic
+> 승인 · hag `import_edges` approval-only. 상세: 상위 RFC §19.1①②④·§23.)** Track B(본 문서)는 그
+> **후에 남는 위협** — **"모델이 승인 자체를 위조할 수 있다"**(상위 RFC §19.1 ③) — 를 다룬다. 두 트랙은
+> 직교하며 **Track B 없이 Track A 는 FS/Shell 병재 호스트에서 하드 통제가 아니다**(그 사실을 Track A 도
+> §1 에서 정직히 인정한다). **Track B 는 설계 RFC · 미구현 · production 코드 0.**
 
 ---
 
@@ -170,6 +173,23 @@ signer = 키를 다른 도메인으로 빼는 것. 서명 알고리즘 자체(HM
 한다. 즉 서명 대상 = `canonical(record without sig)` 전체. 그래야 서명 후 필드 한 개 변조 시 검증 실패.
 `payload_digest` 는 P1-A §9 canonical digest 를 그대로 재사용(렌더러=실행기 동일 explicit 원칙 계승).
 
+### 3.4 세 가지를 혼동하지 말 것 — user presence ≠ user verification ≠ trusted display
+
+detached signer/디바이스(§2.4·L4)를 "안전"으로 과신하는 흔한 오류는 아래 셋을 뭉뚱그리는 데서 온다.
+각각 **다른 것을 증명**하며, 셋이 다 있어야 owner-saw==committed 가 완결된다.
+
+| 개념 | 무엇을 증명 | 무엇을 증명 못 함 | 빙구팩에서 필요한 이유 |
+|---|---|---|---|
+| **User presence** (사용자 존재) | "사람이 **거기 있었다**"(버튼/탭/터치) — 자동화가 아닌 물리적 행위 1회. | *누구*인지(아무나 눌러도 통과) · *무엇을* 승인했는지(내용 무관). | 비대화형 자동 mint 차단(현행 isatty/typed-phrase 가 하는 **약한** presence — 셸 병재면 PTY 로 위조). |
+| **User verification** (사용자 인증) | "**그 owner** 다"(PIN·생체·디바이스 소유). presence + 신원. | *무엇을* 승인했는지(인증됐어도 다른 payload 서명 가능). | 다중 사용자·탈취 대비. L4 디바이스가 생체로 제공. software-key 만으론 **불가**(키=신원 아님 · §R-B2·부록B). |
+| **Trusted display** (신뢰 표시) | "owner 가 **실제 그 내용을** 봤다" — digest↔사람이 읽을 문장을 **위조 불가 경로**로 렌더. | presence/verification(내용을 봤다고 사람인지·owner인지 별개). | payload↔digest 렌더가 PC(모델 통제) 측이면 owner 는 A 를 승인하나 B 가 커밋됨(§R-B4). L4 도 **폰이 최종 문장까지 렌더**해야 완결. |
+
+**정직 함의.** (1) 현행 L1 의 isatty+typed-phrase 는 **약한 presence 만** — verification·trusted display
+0. (2) **software-key(같은 머신) 서명은 셋 중 아무것도 못 준다** — 키 보유≠presence≠verification, 그래서
+§6 "연극". (3) **L4 조차 trusted display 없이는 사회공학에 뚫린다**(owner 가 위조된 요약을 대충 승인). 그래서
+§2.4·§R-B4 가 "폰에서 **최종 저장 문장까지** 렌더"를 요구한다 — 서명(무결성)만으론 부족하고 **표시 무결성**이
+별도 축이다. 어떤 등급도 세 축을 자동으로 다 채우지 않는다(과장 0).
+
 ---
 
 ## 4. Assurance Levels L0~L4
@@ -300,6 +320,26 @@ print("이 가정이 깨지면(모델이 sk read) L2 는 연극으로 환원 = �
 **정직 권고 요지:** owner 의 실제 위협("모델이 내 승인을 위조")을 **진짜로** 막는 최소선은 **L3**,
 완전은 **L4**. L1/L2 는 owner dev 머신에선 보조 방어일 뿐이다. **"L2 넣었으니 안전"이라 말하지 않는다.**
 
+### 7.3 Track B 범위 경계 — 무엇이 이 RFC 이고 무엇이 P1-B2 인가
+
+**이 RFC(Track B)의 in-scope:** approval store/키를 모델 tool surface 밖으로 옮기는 **설계·위협모델·보증
+등급(L0~L4)·Provider Matrix·공격 프로토타입**. 상위 RFC §19.1 ③(store 직접 위조)을 겨냥. **코드 변경 0.**
+
+**out-of-scope(→ 후속 P1-B2 이연 · 이 RFC 는 착수하지 않음):**
+
+| 항목 | 왜 P1-B2 인가 |
+|---|---|
+| **`SigningProvider` 실구현**(keychain/detached_process/detached_device) | §5 는 인터페이스 스케치·상태 표기만. 실제 `mint_signed`/`verify_signed`/`public_key` + `verify_event` 서명 단계 배선은 코드 PR = P1-B2. |
+| **L3 helper 데몬 + IPC 프로토콜** | 별도 uid/서비스 계정·소켓·설치 UX·크로스플랫폼 = 독립 배송 단위(§R-B3). |
+| **L4 모바일 앱·페어링·전달 프로토콜·trusted display 렌더** | 앱 배포·키 관리·오프라인·표시 무결성(§3.4·§R-B4)은 그 자체로 다단계 프로젝트. |
+| **Trust-root 부트스트랩 배선**(§R-B6) | provider 발견을 서명된 매니페스트로 옮기는 구현. 아래 R-B6 참조. |
+| **batch/세션 승인 정책**(마찰↔보증 · §R-B7) | UX 정책 결정 필요 → 별도. |
+
+**root/admin 은 어느 P1-B 단계에도 in-scope 아님** — arbitrary local root 는 모든 로컬 도구 공통 한계
+(상위 SECURITY.md 위협모델 · §2.3). **shell/fs agent 는 in-scope**(§1·owner dev 머신이 정확히 이 표면).
+P1-B2 의 성공 기준 = "owner dev 머신(셸 병재)에서 §1.2 3-step 위조가 **실패**한다"를 실측 재현으로 증명 —
+이 RFC 는 그 목표를 **설계로만** 제시하고 달성을 주장하지 않는다.
+
 ---
 
 ## 8. Unresolved / 비용 / 이식성
@@ -317,9 +357,14 @@ print("이 가정이 깨지면(모델이 sk read) L2 는 연극으로 환원 = �
   폰에서 **최종 저장 문장까지** 렌더해야 owner-saw==committed 완결. 전달 프로토콜·오프라인·페어링 UX 미결.
 - **R-B5. 비대칭 vs 대칭.** detached signer 는 **Ed25519(비대칭)** 원칙(검증자에 키 불요). HMAC 대칭은
   L3 helper 가 sign+verify 둘 다 소유할 때만. 라이브러리 의존(PyNaCl vs stdlib `hashlib`+순수 Ed25519).
-- **R-B6. consume 검증 위치.** L3/L4 에서 verify 를 MCP consume 프로세스가 pk 로 하면 안전(sk 미노출).
-  단 consume 로직이 provider 를 신뢰하는 접점(`provider_for`)이 여전히 config 파일 신호 → **config 자체를
-  보호 도메인에 두거나** provider 발견을 서명된 매니페스트로 바꿔야 완결(config 위조로 provider 강등 방지).
+- **R-B6. consume 검증 위치 + trust root 보호.** L3/L4 에서 verify 를 MCP consume 프로세스가 pk 로 하면
+  안전(sk 미노출). **단 신뢰 사슬의 뿌리(trust root) = provider 를 발견하는 접점(`provider_for`←config
+  파일)이 여전히 모델이 write 가능한 평문 신호**다 → 모델이 config 를 위조해 강한 provider(L3/L4)를 약한
+  것(L1)으로 **강등**하거나, verify 에 쓸 **pk 를 자기 것으로 바꿔치기**하면 서명 계층 전체가 무의미해진다.
+  즉 **store/키를 보호 도메인에 두는 것만으로 부족하고, "어느 pk 로 검증할지"를 정하는 trust root(config·pk
+  핀)도 같은 보호 도메인(keychain/helper/디바이스)에 앵커**해야 완결. 후보: (a) config 를 store 와 함께
+  보호 도메인에, (b) provider 발견을 owner 서명된 매니페스트로 부트스트랩(pk 를 keychain/디바이스에 pin),
+  (c) 첫 페어링 시 TOFU(trust-on-first-use)로 pk 고정. **trust root 부트스트랩 배선은 P1-B2**(§7.3).
 - **R-B7. UX 마찰 대 보증.** L3/L4 는 매 저장에 out-of-band 확인 → owner 피로. 배치(batch) 승인·세션
   단위 승인 창은 보증을 낮춤 → 마찰↔보증 트레이드오프 정책 미결.
 - **R-B8. Track A 와의 결합.** Track A 가 mutation surface 를 exact-bound approval 로 봉인 → Track B 는
