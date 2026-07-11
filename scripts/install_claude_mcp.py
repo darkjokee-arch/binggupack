@@ -32,12 +32,14 @@ OPERATING_NAME = "openbinggu-local"  # 운영 엔트리 — installer 가 절대
 
 
 def build_cmd(name, home, scope):
+    # v1.20-B: 새 등록은 core profile(작고 명확한 표면)로 노출. 전체 도구는 `--profile advanced`.
+    # legacy SERVER 스크립트 경로(clone+pip 겸용) 유지 — 기존 등록은 건드리지 않는다(신규만).
     return [CLAUDE, "mcp", "add", name,
             "-s", scope,
             "-e", "BINGGU_HOME=%s" % home,
             "-e", "OPENCRAB_HOME=%s" % os.path.join(home, "opencrab"),
             "-e", "XDG_CACHE_HOME=%s" % os.path.join(home, "cache"),
-            "--", sys.executable, SERVER, "--serve", ROOT]
+            "--", sys.executable, SERVER, "--serve", ROOT, "--profile", "core"]
 
 
 def entry_exists(name):
