@@ -2,6 +2,48 @@
 
 ## [Unreleased]
 
+_다음 릴리스를 위한 항목이 여기 쌓입니다._
+
+## [1.19.0rc1] - 2026-07-11 — Consent-first, exact-bound AI memory (Release Candidate)
+
+P0~P1-B.1 누적을 첫 정식 릴리스 후보로 봉인. 아래는 릴리스 분류 요약이며, 이어지는 상세
+섹션(P1-B / P1-B.1 / P1-A / P1-A.1 / P0.1 / P0)에 전체 근거·회귀 테스트가 그대로 있다.
+
+#### Added
+- `binggu demo` — 60초 오프라인 체험(네트워크·API 키 0)
+- Trusted approval request/event — owner 로컬 승인으로 MCP mutation 정확히 1회
+- Local approval CLI (`binggu approvals` / `approval show|approve|reject|revoke`)
+- Exact-bound mutation — accept/unaccept/due/resolve/confirm_edges + hosted 3파일 + hag 를 exact binding or fail-closed
+- Hosted bundle flow — 폰/웹 intent → PC 로컬 승인 → exactly-once crash-atomic bundle commit
+
+#### Changed
+- Remote confirm 은 승인이 아니라 **intent** 다(저장하지 않음)
+- 폰/웹 저장은 PC 로컬 승인이 필요하다
+- 비대화형 mutation 은 `--approval-id` 가 필요하다
+- `actor` 라벨은 권한(authority)이 아니다
+
+#### Security
+- Autonomous preview→confirm 자동 저장 차단(fail-closed `G4_no_auto`)
+- Exact operation/payload/ledger/version binding + one-time consume
+- Crash-atomic hosted bundle(단일 COMMIT · 부분 bundle 0)
+- Source 자동 삭제 0 · direct hosted write 0
+- 사설 경로/소유자 메타데이터 스캐너(`private_path_scan`)를 CI 프리플라이트·publish 업로드 게이트에 등록(배포물에 owner 절대경로/사설 프로젝트 토큰 0)
+
+#### Known boundary (정직)
+- Local TTY 는 L1 routing 이다(암호학적 보증 아님 · UX 경계)
+- Shell/filesystem 병재 에이전트에는 **하드 승인 권한이 아니다**(fail-closed routing + 비대화형 owner 경로 + intent-routing)
+- Protected writer/verifier/trust root/detached signer 는 **RFC only**(미구현 · production 코드 0)
+- root/admin compromise 방어는 주장하지 않는다
+
+#### Breaking / behavior changes
+- confirm 문구만으로 비대화형 write 불가 · `actor=human` 으로 권한 승격 불가
+- 폰/웹 confirm 은 pending approval request 만 생성(commit 은 PC 승인 필요)
+- 기존 confirm-only 자동화는 `approval_id` 흐름으로 변경 필요 · direct hosted save 제거
+- `BINGGU_TRUSTED_CLI` 백도어 제거 · `BINGGU_STRICT_HUMAN_GATE` deprecated no-op
+- 1.19.0 미만으로 downgrade 시 trusted-approval-event 강제 계층이 사라진다(데이터는 보존되나 구 confirm-only 게이트만 남음 — 보안 회귀)
+
+---
+
 ### Security / Hardening (P1-B · Track A) — Mutation Surface Closure
 - **P1-A 가 "STILL-OPEN, P1-B" 로 미룬 mutation 표면을 exact-bound approval 로 봉인** — 승인이 필요한 write 경로에서 남아 있던 `{"actor":"human"}` transported/literal 승격을 전부 제거하고, 비대화형 owner 는 `--approval-id` exact-bound 승인으로만 통과. 설계 정본 `docs/BINGGUPACK_P1B_MUTATION_CLOSURE_DESIGN.md`. RFC §19.1①②④·§23·§26 R2/R5 상태노트 갱신.
   - **CLI 5개(accept/unaccept/due/resolve/confirm_edges) 봉인**: `trusted_approval.binding_fields` 에 5 operation 스키마 추가(evidence_refs 까지 바인딩). `binggu.py cmd_*` 에 `--approval-id` 비대화형 owner 경로(`_mutation_via_approval` → `approval_gate.authorize` verify + one-time consume). 미승인/바인딩 불일치 → `reader` → core fail-closed(G4). **코어 함수 시그니처·동작 불변**(게이트는 CLI 층에만 · owner_accept/g3/graph_confirm/hag 37+ 체크 무회귀). `binggu.py confirm-edges` 자체는 staging(sync_edges) write 만이라 TTY/앵커 게이트 유지, 운영 ledger edge write 는 hag import-edges 로 봉인(아래).

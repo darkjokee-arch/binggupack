@@ -34,5 +34,15 @@ v1.18.3 — 문서/문구 정밀화(pyproject Release 링크 stale[v1.16.0]→re
 mark_outcome_uttered 발화 앵커[utter:<sha16>] hit/miss 직접 기록[nodes 불필요·both_sides 는
 speaker 별 개수 집계], learn_consume 발화 앵커 소비 — hit_events n=1 영구 갭 해소, 위조차단은
 UserPromptSubmit hook[사람만·AI 위조 불가]+owner 승인[actor=human]).
+
+v1.19.0rc1 (Release Candidate · Consent-first, exact-bound AI memory) — P0~P1-B.1 누적을
+첫 정식 릴리스 후보로 봉인. 핵심: (1) binggu demo(60초 오프라인 체험), (2) trusted approval
+event(owner 로컬 승인으로 MCP mutation 정확히 1회 · exact operation/payload/ledger/version
+바인딩 · one-time consume), (3) hosted intent→local approval→exactly-once crash-atomic bundle
+commit(원문 자동삭제 0 · direct hosted write 0), (4) 승인 기원 계약(env·비대화형·confirm 문구·
+actor 라벨은 권한 아님). 정직 경계: 로컬 TTY 는 L1 routing · shell/filesystem 병재 에이전트에는
+하드 승인 권한 아님 · protected writer/verifier/trust root/detached signer 는 RFC only(미구현) ·
+root/admin compromise 방어 주장 없음. PEP440 pre-release("rc1"): 안정 설치는 이 RC 를 받지
+않는다(pip install --pre 필요). 향후 tag = v1.19.0rc1(하이픈 없음).
 """
-__version__ = "1.18.3"
+__version__ = "1.19.0rc1"
