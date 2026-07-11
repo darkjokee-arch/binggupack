@@ -40,11 +40,26 @@ binggu demo            # 설치만으로 · 네트워크 0 · 격리 임시 장�
 ```bash
 binggu                 # 홈 — 지금 상태와 다음 할 일을 한 화면에서 (로컬·읽기 전용)
 binggu inbox           # 통합 검토함 — 후보·원격 의도·승인 요청·검토 예정을 한 번에 (로컬·읽기 전용)
+binggu studio          # 같은 화면을 브라우저 로컬 UI 로 (loopback 전용·읽기 전용 preview)
 binggu recall "질문"    # 관련 기억 회상
 binggu explain <id>    # 그 기억의 근거·이력
 ```
 
 `binggu`·`binggu inbox` 는 **읽기 전용**입니다 — 상태만 보여줄 뿐 저장/승인/교체는 기존 명령과 owner 승인 경계를 그대로 씁니다. `binggu inbox` 는 기본적으로 네트워크를 건드리지 않고 로컬 스냅샷만 보여주며, 원격 저장 의도를 새로 가져오려면 `binggu hosted inbox` 를 씁니다.
+
+### `binggu studio` — 로컬 브라우저 UI
+
+Home + 통합 Inbox 를 브라우저에서 봅니다. Daily Console(`binggu home/inbox --json` schema v1)을 그대로 재사용하는 **읽기 전용 preview** 입니다.
+
+```bash
+binggu studio            # loopback 임시 포트에서 실행 + 기본 브라우저 자동 열기
+binggu studio --no-open  # 브라우저를 열지 않음(headless/원격)
+```
+
+- **local browser UI** — 127.0.0.1 loopback 에만 bind(외부 접속 불가). 실행마다 새 ephemeral session URL(`/s/<token>/`).
+- **read-only preview** — GET/HEAD 만. mutation endpoint 0·외부 asset/network 0·CORS/cache 비활성. Ctrl+C 로 종료합니다.
+- **Home + unified Inbox** — 활성 기억·자동 수집 후보·원격 저장 의도·승인 요청·검토 예정을 카드/탭으로. 각 항목의 버튼은 CLI 명령을 클립보드에 복사만 합니다.
+- 저장·승인 등 **mutation 은 기존 CLI 와 owner approval 경계를 그대로 사용**합니다 — Studio 자체는 승인을 실행하지 않습니다.
 
 ## 1 · 왜 만들었나
 
