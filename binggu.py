@@ -104,8 +104,12 @@ def _show(r):
     if r.get("applied"):
         print("OK:", {k: v for k, v in r.items() if k != "applied"} or "적용됨")
         return 0
-    # 실패 이유 전체 노출(사일런트 실패 금지) — BLOCK reason + 후보별 거부 코드/건수 + 기존재 skip.
+    # 실패 이유 전체 노출(사일런트 실패 금지) — BLOCK reason + approval 요청/안내 + 거부 코드 + 기존재 skip.
     print("BLOCK:", r.get("reason"))
+    if r.get("request_id"):                                   # 비대화형 owner approval 요청 ID(Fable5 R4-1)
+        print("  요청ID:", r["request_id"])
+    if r.get("guidance"):                                     # owner 승인 안내(binggu approval approve …)
+        print("  " + r["guidance"])
     rej = r.get("rejected")
     if rej:
         print("  거부:", ", ".join("%s=%d" % (k, v) for k, v in sorted(rej.items())))
@@ -285,36 +289,70 @@ def cmd_hosted(a):
         return 0
 
     if sub == "pull":
+        # ★A3(P1-B): hosted 저장의 유일 경로 = 로컬 exact-bound 승인 이벤트(commit_bundle).
+        #   ① --select 만 → PENDING 승인 요청 생성(직접 write 0·원문 보존)
+        #   ② owner 가 `binggu approval approve <요청ID>` 로 로컬 승인
+        #   ③ --select … --approval-id <요청ID> → 묶음 전체 exact-bound atomic 저장
         sel = getattr(a, "select", None)
         if not sel:
-            print("hosted pull = inbox 에서 본 번호만 골라 ledger 에 저장합니다(전량 자동 적용 없음).")
-            print("  먼저:  python binggu.py hosted inbox            (대기 intent 번호 확인)")
-            print('  저장:  python binggu.py hosted pull --select 1,3 --confirm "LIVE SAVE 1,3"')
+            print("hosted pull = inbox 에서 본 번호를 골라 owner 로컬 승인 후 ledger 에 저장합니다(전량 자동 없음).")
+            print("  먼저:  python binggu.py hosted inbox                 (대기 intent 번호 확인)")
+            print("  ① 승인 요청:  python binggu.py hosted pull --select 1,3")
+            print("  ② 로컬 승인:  binggu approval approve <요청ID>")
+            print("  ③ 저장 확정:  python binggu.py hosted pull --select 1,3 --approval-id <요청ID>")
             return 0
         idx = [int(x) for x in sel.split(",") if x.strip()]
-        if not getattr(a, "confirm", None):
-            print('confirm 필요:  --confirm "LIVE SAVE %s"' % ",".join(str(i) for i in idx))
-            return 1
+        approval_id = getattr(a, "approval_id", None)
         ledger, snap_dir = _ledger_paths(a.ledger)
         if not os.path.exists(ledger):
             print("장부 없음: %s (먼저 python binggu.py init)" % ledger)
             return 2
         db, _ = _open(ledger)
         before = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
-        res = commit_selected(db, staging, idx, a.confirm, snap_dir, int(_t.time()))
+        res = commit_selected(db, home, staging, idx, approval_id, snap_dir, int(_t.time()))
         after = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
         chain = db.verify_chain()
         db.close()
-        if not res["ok"] and res.get("reason"):
-            extra = (" (기대 confirm: %s)" % res["expected"]) if res.get("expected") else ""
-            extra += (" (없는 번호: %s)" % res["bad_idx"]) if res.get("bad_idx") else ""
+        # 선택 자체 오류(전량 자동 금지·없는 번호)
+        if res.get("reason") in ("select_required", "idx_out_of_range", "intent_id_missing"):
+            extra = (" (없는 번호: %s)" % res["bad_idx"]) if res.get("bad_idx") else ""
             print("BLOCK: %s%s" % (res["reason"], extra))
             return 1
-        print("hosted pull 결과: 선택 %d · applied=%s rejected=%s expired=%s"
-              % (res["selected"], res["applied"], res["rejected"], res["expired"]))
-        print("  candidate(active) %d -> %d (+%d) · audit chain %s"
-              % (before, after, after - before, "INTACT" if chain else "BROKEN"))
-        return 0 if res["applied"] > 0 else 1
+        rid = res.get("request_id")
+        if not approval_id:
+            # ① request-only — PENDING 승인 요청만(직접 write 0·원문 보존)
+            if res.get("reason") == "provider_not_configured":
+                from binggupack.safety import trusted_approval as _ta
+                print("BLOCK: 승인 provider 미구성 — 활성화: %s 에 {\"enabled\": true}"
+                      % _ta.config_path(home))
+                return 1
+            if not rid:
+                print("BLOCK: %s" % res.get("reason"))
+                return 1
+            print("승인 요청 생성: request_id=%s · 선택 %d건 · 직접 저장 0(원문 보존)"
+                  % (rid, res["selected"]))
+            print("  검토:  binggu approval show %s" % rid)
+            print("  승인:  binggu approval approve %s" % rid)
+            print("  저장:  python binggu.py hosted pull --select %s --approval-id %s"
+                  % (",".join(str(i) for i in idx), rid))
+            if res.get("quarantined"):
+                print("  ⚠quarantine %d건(모호/변조 — write 0·원문 보존)" % len(res["quarantined"]))
+            return 0
+        # ③ 승인 제시 — exact-bound atomic 저장 결과
+        if res.get("write"):
+            print("hosted pull 저장: 묶음 %d건 확정(atomic) · request_id=%s"
+                  % (res["applied"], rid))
+            print("  candidate(active) %d -> %d (+%d) · audit chain %s"
+                  % (before, after, after - before, "INTACT" if chain else "BROKEN"))
+            return 0
+        # 저장 실패(승인 불일치·만료·all-or-nothing 차단 등) — write 0·원문 보존
+        rc = res.get("reason") or "not_written"
+        print("BLOCK: %s · write 0(원문 보존)" % rc)
+        if res.get("fail"):
+            print("  실패 intent: %s (%s)" % (res["fail"].get("intent_id"), res["fail"].get("reason")))
+        if res.get("receipt"):
+            print("  기존 receipt 반환(재저장 0·계약 8)")
+        return 1
     return 1
 
 
@@ -712,10 +750,14 @@ def _mutation_via_approval(a, db, operation, bind, core_call):
     extra = auth.response_extra()
     if not r.get("applied"):
         r = dict(r)
-        if extra.get("reason") and not r.get("reason"):
-            r["reason"] = extra["reason"]      # provider_not_configured / approval_required / binding_mismatch…
+        # approval 게이트 사유(approval_required/provider_not_configured/binding_mismatch)를 core G4 보다
+        # 우선 표기(Fable5 R4-1: core 의 G4_no_auto 가 approval_required·owner 승인 여정을 가리던 문제).
+        if extra.get("reason"):
+            r["reason"] = extra["reason"]
+        if extra.get("request_id"):
+            r["request_id"] = extra["request_id"]   # owner 가 approve 할 요청 ID 노출
         if extra.get("guidance"):
-            r["guidance"] = extra["guidance"]  # owner 안내(binggu approval show/approve <rid>)
+            r["guidance"] = extra["guidance"]        # owner 안내(binggu approval show/approve <rid>)
     return r
 
 
@@ -1287,9 +1329,11 @@ def cmd_confirm_edges(a):
     if r["dangling"]:
         print("  dangling skip: %d건" % len(r["dangling"]))
     print("  %s" % r["caveat"])
-    print("\n운영 ledger 등재(영구·owner-only·운영 write):")
-    print('  python scripts/hybrid_agi/hag_sync_adapter.py --import-edges --actor human '
+    print("\n운영 ledger 등재(영구·owner-only·운영 write) — owner 로컬 승인 이벤트 경유:")
+    print("  ① 승인 요청:  python scripts/hybrid_agi/hag_sync_adapter.py --import-edges "
           '--ledger "%s" --sync-db "%s"' % (ledger, sync_db))
+    print("  ② 로컬 승인:  binggu approval approve <요청ID>")
+    print("  ③ 등재 확정:  위 명령에 --approval-id <요청ID> 추가(승인 이벤트 없이는 write 0)")
     return 0
 
 
@@ -1912,9 +1956,10 @@ def main():
     ibp.add_argument("--wait", type=int, default=0)
     ibp.add_argument("--variant", choices=["save_mcp", "save_v2"], default="save_mcp")
     ibp.add_argument("--workers-port", dest="wp", default=None)
-    pp = hsub.add_parser("pull")            # 선택 항목만 ledger commit (전량 자동 없음)
+    pp = hsub.add_parser("pull")            # 선택 묶음 → 승인 요청 / 승인 후 저장 (전량 자동 없음)
     pp.add_argument("--select", default=None)            # 'inbox' 에서 본 번호들 (예: 1,3)
-    pp.add_argument("--confirm", default=None)           # "LIVE SAVE <select>" 정확 일치
+    pp.add_argument("--confirm", default=None)           # (레거시·미사용) — 저장 게이트는 승인 이벤트
+    pp.add_argument("--approval-id", dest="approval_id", default=None)  # owner 로컬 승인 요청ID → atomic 저장
     hv = sub.add_parser("harvest")          # 외부 수확(P1 ③) — 등록 소스만·후보로만·영구는 사람 SAVE
     hvsub = hv.add_subparsers(dest="harvest_cmd", required=True)
     ha = hvsub.add_parser("add")            # 소스 화이트리스트 등록(사람 행위)

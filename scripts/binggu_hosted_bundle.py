@@ -138,6 +138,26 @@ def _archive(staging_dir, intent_id, meta, archive_dir):
     return dst
 
 
+def _existing_node_ids(it):
+    """idempotent(이미 저장) intent 의 node_id 재구성 — provenance 열화 방지(Fable5 사후 R3-5)."""
+    try:
+        return ta._derive_save_node_ids({"text": it.get("text", ""),
+                                         "indices": it.get("indices", []), "explicit": False})
+    except Exception:
+        return []
+
+
+def _fail_audit(db, rid, reason):
+    """실패한 bundle write 를 tamper-evident audit_log 에 1행 기록(Fable5 사후 R3-1 · 사일런트 실패 0).
+    rollback_to_snapshot 후 호출(재오픈된 con 에 append)."""
+    try:
+        ck = db.store_checksum()
+        db.audit_append("reader", "hosted_bundle_fail", str(rid or ""), "BLOCK",
+                        str(reason)[:80], ck, ck)
+    except Exception:
+        pass
+
+
 def commit_bundle(db, home, staging_dir, selected_intent_ids, approval_id, snap_dir, now_ts,
                   archive_dir=None):
     """묶음 exact-bound 저장. approval_id 없으면 PENDING(원문 보존). 있으면 verify→snapshot→
@@ -169,23 +189,34 @@ def commit_bundle(db, home, staging_dir, selected_intent_ids, approval_id, snap_
         # reserved(human) — snapshot(reserve 행 포함) 후 atomic 저장
         snap = db.snapshot(snap_dir, "bundle_%s" % (rid or now_ts))
         saved, node_map, fail = 0, {}, None
-        for it in items:
-            confirm = "SAVE " + ",".join(str(i) for i in it["indices"])
-            r = _convsave.save_selected(db, it["text"], it["indices"],
-                                        {"actor": "human", "confirm": confirm}, snap_dir,
-                                        speaker=it.get("speaker"), explicit=False)
-            if r.get("applied"):
-                saved += 1
-                node_map[it["intent_id"]] = r.get("node_ids", [])
-            elif r.get("reason") == "nothing_to_save" and r.get("skipped_existing", 0) > 0:
-                node_map[it["intent_id"]] = []   # 이미 저장됨(idempotent·계약 8) — all-or-nothing 유지
-            else:
-                fail = {"intent_id": it["intent_id"], "reason": r.get("reason")}
-                break
+        try:
+            for it in items:
+                confirm = "SAVE " + ",".join(str(i) for i in it["indices"])
+                r = _convsave.save_selected(db, it["text"], it["indices"],
+                                            {"actor": "human", "confirm": confirm}, snap_dir,
+                                            speaker=it.get("speaker"), explicit=False)
+                if r.get("applied"):
+                    saved += 1
+                    node_map[it["intent_id"]] = r.get("node_ids", [])
+                elif r.get("reason") == "nothing_to_save" and r.get("skipped_existing", 0) > 0:
+                    # 이미 저장됨(idempotent·계약 8) — provenance 열화 방지 위해 node_id 재구성(R3-5).
+                    node_map[it["intent_id"]] = _existing_node_ids(it)
+                else:
+                    fail = {"intent_id": it["intent_id"], "reason": r.get("reason")}
+                    break
+        except Exception as _e:
+            # ★R3-2(Fable5 사후): in-process 예외(디스크풀/sqlite 오류)도 rollback → 전체 write 0(계약 5).
+            # validation-fail 뿐 아니라 예외 경로도 부분 bundle 을 남기지 않는다(계약 5 완전 강제).
+            rollback_to_snapshot(db, snap)
+            auth.settle({"applied": False, "reason": "bundle_exception"})
+            _fail_audit(db, rid, "bundle_exception:%s" % type(_e).__name__)
+            return {"applied": 0, "write": 0, "reason": "bundle_exception",
+                    "request_id": rid, "bundle_id": bid, "quarantined": quarantined}
         if fail is not None:
             # 하나라도 hard-fail → rollback(이전 저장분 포함 전체 write 0·계약 5) + release(consume 0·계약 6)
             rollback_to_snapshot(db, snap)       # db.con 재오픈(nodes 원복·reserve 행 복구)
             auth.settle({"applied": False, "reason": "bundle_partial_fail:" + str(fail["reason"])})
+            _fail_audit(db, rid, "bundle_partial_fail:" + str(fail["reason"]))   # ★R3-1 실패 write audit
             return {"applied": 0, "write": 0, "reason": "bundle_partial_fail",
                     "fail": fail, "request_id": rid, "bundle_id": bid, "quarantined": quarantined}
         # 전부 applied/idempotent → finalize(consume·계약 7)
@@ -293,8 +324,11 @@ def _selftest():
     r5 = commit_bundle(db, home, staging, [i5a, i5b], rid5, snap, NOW)
     n_after5 = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
     both_preserved = all(os.path.isfile(os.path.join(staging, x + ".json")) for x in (i5a, i5b))
+    fail_audit5 = db.con.execute(
+        "SELECT count(*) FROM audit_log WHERE action='hosted_bundle_fail' AND result='BLOCK'").fetchone()[0]
     ck(r5["write"] == 0 and r5["reason"] == "bundle_partial_fail" and n_after5 == n_before5
-       and both_preserved, "5 all-or-nothing: 1건 PII → 전체 write 0 · rollback · 원문 보존")
+       and both_preserved and fail_audit5 >= 1,
+       "5 all-or-nothing: 1건 PII → 전체 write 0 · rollback · 원문 보존 · 실패 audit(R3-1)")
 
     # 6) rollback 후 approval 재사용 가능(consume 0) — PII intent 제외하고 재선택 → 저장
     r6 = commit_bundle(db, home, staging, [i5a], rid5, snap, NOW)
@@ -309,6 +343,32 @@ def _selftest():
     r7 = commit_bundle(db, home, staging, [i7], None, snap, NOW)
     ck(r7["write"] == 0 and any(q["reason"] == "intent_id_mismatch" for q in r7["quarantined"])
        and os.path.isfile(p7), "7 변조 intent → quarantine · write 0 · 원문 보존")
+
+    # 7b) R3-2(Fable5 사후) — in-process 예외(save_selected raise)도 rollback → 전체 write 0 · 원문 보존 · bundle_exception audit
+    i8a = mk(staging, "이 방침은 다음 분기에 재검토하기로 결정했다.", [1])
+    i8b = mk(staging, "예산은 보수적으로 확정한다.", [1])
+    r8p = commit_bundle(db, home, staging, [i8a, i8b], None, snap, NOW)
+    rid8 = r8p["request_id"]
+    approve(db, home, rid8)
+    n_b8 = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
+    _orig_ss, _calls = _convsave.save_selected, {"n": 0}
+
+    def _boom(*a, **k):
+        _calls["n"] += 1
+        if _calls["n"] >= 2:
+            raise RuntimeError("injected disk/sqlite error")
+        return _orig_ss(*a, **k)
+    try:
+        _convsave.save_selected = _boom
+        r8 = commit_bundle(db, home, staging, [i8a, i8b], rid8, snap, NOW)
+    finally:
+        _convsave.save_selected = _orig_ss
+    n_a8 = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
+    exc_audit = db.con.execute(
+        "SELECT count(*) FROM audit_log WHERE reason_code LIKE 'bundle_exception%'").fetchone()[0]
+    both8 = all(os.path.isfile(os.path.join(staging, x + ".json")) for x in (i8a, i8b))
+    ck(r8["write"] == 0 and r8["reason"] == "bundle_exception" and n_a8 == n_b8 and both8 and exc_audit >= 1,
+       "7b R3-2 in-process 예외 → rollback · 전체 write 0 · 원문 보존 · bundle_exception audit")
 
     ck(db.verify_chain(), "8 audit chain INTACT")
     bad = (db.con.execute("SELECT count(*) FROM nodes WHERE candidate!=1 OR promotion_allowed!=0").fetchone()[0]

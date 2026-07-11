@@ -10,7 +10,10 @@
   - pull --select 는 staging(이미 PC 에 회수된 것) 에서 고른 항목만 ledger 로 commit.
     전량 자동 적용 금지 — select 필수, confirm = "LIVE SAVE <selected>" 정확 일치.
 
-저장 게이트는 process_outbox(=save_selected) 그대로 위임 — candidate-only, A0·PII·confirm·rollback 불변.
+★A3(P1-B): 저장의 유일 경로 = binggu_hosted_bundle.commit_bundle(로컬 exact-bound 승인 이벤트).
+commit_selected 는 선택 번호를 intent_id 로 매핑해 commit_bundle 에 위임한다 — 옛 direct
+process_outbox(actor=human) 경로는 폐지(transported actor/confirm 신뢰 0). approval_id 없으면
+request-only(PENDING·원문 보존), 있으면 exact-bound atomic 저장. candidate-only·A0·PII·rollback 불변.
 요약 단계 ledger write 0. 원문 전문 출력 0(80자 발췌·sha8·count·PII/secret flag 만)."""
 import hashlib
 import json
@@ -23,7 +26,6 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 import sys
 sys.path.insert(0, HERE)
-from openbinggu_save_intent_outbox_runner import process_outbox  # noqa: E402
 from openbinggu_conversation_capture_preview import capture_preview  # noqa: E402
 
 EXCERPT = 80
@@ -134,49 +136,44 @@ def render_summary_md(summ):
                      % (it["idx"], it["excerpt"], it["text_sha"], age,
                         it["n_candidates"], flag))
     lines.append("")
-    lines.append("저장은 고른 번호만:  python binggu.py hosted pull "
-                 "--select <번호들> --confirm \"LIVE SAVE <번호들>\"")
-    lines.append("(전량 자동 적용 없음 · 고른 항목만 사람 confirm 게이트로 ledger 에 들어갑니다.)")
+    lines.append("① 승인 요청 생성:  python binggu.py hosted pull --select <번호들>")
+    lines.append("② owner 로컬 승인:  binggu approval approve <요청ID>")
+    lines.append("③ 저장(묶음 확정):  python binggu.py hosted pull --select <번호들> "
+                 "--approval-id <요청ID>")
+    lines.append("(전량 자동 적용 없음 · 고른 묶음 전체를 owner 로컬 승인 이벤트로 한 번에 ledger 에 확정합니다.)")
     return "\n".join(lines)
 
 
-# ---------------- 3) 선택 commit: staging 의 고른 항목만 ledger (전량 금지) ----------------
-def commit_selected(db, staging_dir, selected_idx, confirm, snap_dir, now_ts):
-    """staging 에서 selected_idx(1-base) intent 만 process_outbox 로 ledger commit.
-    confirm = 'LIVE SAVE ' + ','.join(selected) 정확 일치 의무. 미선택 intent 는 staging 잔류(commit narrow).
-    적용된 intent 만 staging 원본 제거 · rejected/expired 는 staging 보존(사람 재검토)."""
+# ---------------- 3) 선택 commit: staging 의 고른 항목만 commit_bundle 경유 (전량 금지) ----------------
+def commit_selected(db, home, staging_dir, selected_idx, approval_id, snap_dir, now_ts):
+    """★A3(P1-B): staging 의 selected_idx(1-base) → intent_id 매핑 후 commit_bundle 경유(유일 저장 경로).
+      - approval_id 없음 → request-only(PENDING approval request 생성·직접 write 0·원문 보존·계약 11).
+      - approval_id 있음 → exact-bound atomic 저장(전체 성공/전체 실패·미선택은 staging 잔류·계약 1·4·9).
+    옛 direct process_outbox(actor=human) 경로 제거 — transported actor/confirm 신뢰 0(계약 7).
+    승인 단위 = PC 명시 선택 묶음 전체(계약 1) — membership 변화 시 request_id 변화로 기존 승인 무효(계약 2·3)."""
+    from binggu_hosted_bundle import commit_bundle  # noqa: E402  (지연 import — cycle 회피)
     if not selected_idx:
-        return {"ok": False, "reason": "select_required", "applied": 0}
-    expected = "LIVE SAVE " + ",".join(str(i) for i in selected_idx)
-    if confirm != expected:
-        return {"ok": False, "reason": "confirm_mismatch", "expected": expected, "applied": 0}
+        return {"ok": False, "reason": "select_required", "applied": 0, "write": 0,
+                "selected": 0}
     summ = summarize(staging_dir, now_ts)
     by_idx = {it["idx"]: it for it in summ["items"]}
-    chosen = []
+    intent_ids = []
     for i in selected_idx:
         if i not in by_idx:
-            return {"ok": False, "reason": "idx_out_of_range", "bad_idx": i, "applied": 0}
-        chosen.append(by_idx[i])
-    temp = tempfile.mkdtemp(prefix="bgp_commit_")
-    copied = {}  # basename -> staging path
-    try:
-        for it in chosen:
-            sp = it["_path"]
-            base = os.path.basename(sp)
-            shutil.copy2(sp, os.path.join(temp, base))
-            copied[base] = sp
-        res = process_outbox(db, temp, {"actor": "human"}, snap_dir, now_ts)
-        applied_files = [d["file"] for d in res.get("details", []) if d.get("status") == "applied"]
-        for af in applied_files:
-            sp = copied.get(af)
-            if sp and os.path.exists(sp):
-                os.remove(sp)
-    finally:
-        shutil.rmtree(temp, ignore_errors=True)
-    return {"ok": res.get("applied", 0) > 0,
-            "applied": res.get("applied", 0), "rejected": res.get("rejected", 0),
-            "expired": res.get("expired", 0), "selected": len(selected_idx),
-            "details": res.get("details", [])}
+            return {"ok": False, "reason": "idx_out_of_range", "bad_idx": i, "applied": 0,
+                    "write": 0, "selected": len(selected_idx)}
+        iid = by_idx[i].get("intent_id")
+        if not iid:
+            return {"ok": False, "reason": "intent_id_missing", "bad_idx": i, "applied": 0,
+                    "write": 0, "selected": len(selected_idx)}
+        intent_ids.append(iid)
+    res = commit_bundle(db, home, staging_dir, intent_ids, approval_id, snap_dir, now_ts)
+    res["ok"] = bool(res.get("write"))
+    res["selected"] = len(selected_idx)
+    res.setdefault("applied", 0)
+    res.setdefault("rejected", 0)
+    res.setdefault("expired", 0)
+    return res
 
 
 # ---------------- selftest (temp 전용 · 라이브/실 ledger 미접촉 · mock) ----------------
@@ -253,54 +250,92 @@ def _selftest():
     s_all = summarize(staging, NOW)
     ck(s_all["count"] == 4 and s_recent["count"] == 3, "T3 --since 1d: 오래된 1건 제외")
 
-    # commit 대상 ledger
+    # commit 대상 ledger + trusted approval provider (owner-only 로컬 승인 채널)
+    from binggupack.safety import trusted_approval as ta
     ledger = os.path.join(home, "ledger.sqlite")
     snap = os.path.join(home, "snapshots"); os.makedirs(snap, exist_ok=True)
     db = open_g3(ledger)
+    os.makedirs(home, exist_ok=True)
+    with open(ta.config_path(home), "w", encoding="utf-8") as f:
+        json.dump({"enabled": True}, f)
 
-    # T4 confirm 불일치 → applied 0
-    r4 = commit_selected(db, staging, [1], "LIVE SAVE 9", snap, NOW)
-    ck((not r4["ok"]) and r4["reason"] == "confirm_mismatch" and r4["applied"] == 0,
-       "T4 confirm 불일치 → applied 0")
-
-    # T5 select 없음 → BLOCK(전량 자동 금지)
-    r5 = commit_selected(db, staging, [], "LIVE SAVE ", snap, NOW)
-    ck((not r5["ok"]) and r5["reason"] == "select_required", "T5 select 필수(전량 자동 금지)")
+    def approve(rid):
+        """owner 로컬 승인 시뮬 — CLI TTY 검증은 selftest 밖. authorize 는 실제 time.time() 을 쓰므로
+        mint 도 실제 시간으로(NOW=미래면 approval_time_invalid). mint_approval 기본 채널(ship-guard 회피)."""
+        import time as _t
+        req = ta.get_request(db.con, rid)
+        ta.mint_approval(home, req, 900, _t.time())
 
     # T3b idx 안정성 — since 필터해도 번호는 전체 기준 유지(inbox --since 번호 == pull 번호)
     ck(s_recent["total"] == 4 and [it["idx"] for it in s_recent["items"]]
        == [it["idx"] for it in s_all["items"] if it["age_days"] is None or it["age_days"] <= 1],
        "T3b idx 안정성: since 필터가 번호를 바꾸지 않음")
 
-    # T6 정상(non-PII·non-expired) 1건만 commit → 1건 ledger · 나머지 staging 잔류(commit narrow)
+    # T4 select 없음 → BLOCK(전량 자동 금지 · 계약 1)
+    r4 = commit_selected(db, home, staging, [], None, snap, NOW)
+    ck((not r4["ok"]) and r4["reason"] == "select_required" and r4["write"] == 0,
+       "T4 select 필수(전량 자동 금지) · write 0")
+
+    # T5 존재하지 않는 번호 → idx_out_of_range · write 0
+    r5 = commit_selected(db, home, staging, [999], None, snap, NOW)
+    ck((not r5["ok"]) and r5["reason"] == "idx_out_of_range" and r5["write"] == 0,
+       "T5 없는 번호 → idx_out_of_range · write 0")
+
+    # T6 request-only(approval_id 없음) — PENDING 승인 요청만 생성 · 직접 write 0 · 원문 보존(계약 11)
     s_t6 = summarize(staging, NOW)
-    good_idx = next(it["idx"] for it in s_t6["items"]
-                    if not it["pii_secret"] and not it["expired"])
-    n_before = len([f for f in os.listdir(staging) if f.endswith(".json")])  # 4
-    r6 = commit_selected(db, staging, [good_idx], "LIVE SAVE %d" % good_idx, snap, NOW)
-    n_active = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
-    n_after = len([f for f in os.listdir(staging) if f.endswith(".json")])
-    ck(r6["ok"] and r6["applied"] == 1 and n_active >= 1, "T6 select 1(non-PII) → ledger commit 1건")
-    ck(n_after == n_before - 1, "T6b commit narrow: 선택 1건만 staging 제거, 나머지 잔류")
+    good = next(it for it in s_t6["items"] if not it["pii_secret"] and not it["expired"])
+    good_idx, good_iid = good["idx"], good["intent_id"]
+    n_files_before = len([f for f in os.listdir(staging) if f.endswith(".json")])
+    r6 = commit_selected(db, home, staging, [good_idx], None, snap, NOW)
+    n_active6 = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
+    src_kept = os.path.isfile(os.path.join(staging, good_iid + ".json"))
+    ck((not r6["ok"]) and r6["write"] == 0 and r6["reason"] == "approval_required"
+       and r6.get("request_id") and n_active6 == 0 and src_kept,
+       "T6 request-only(승인 미제시) → PENDING 요청·write 0·원문 보존")
 
-    # T7 PII intent 선택 commit → save 게이트 reject(applied 0) · staging 보존
-    summ2 = summarize(staging, NOW)
-    pii_idx = next(it["idx"] for it in summ2["items"] if it["pii_secret"])
-    r7 = commit_selected(db, staging, [pii_idx], "LIVE SAVE %d" % pii_idx, snap, NOW)
-    ck(r7["applied"] == 0 and r7["rejected"] >= 1, "T7 PII 선택 → save 게이트 reject(applied 0)")
+    # T7 승인 후 atomic 저장 — 선택 묶음 전체 확정(계약 1·4) · 미선택은 staging 잔류(commit narrow·계약 9)
+    rid = r6["request_id"]
+    approve(rid)
+    r7 = commit_selected(db, home, staging, [good_idx], rid, snap, NOW)
+    n_active7 = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
+    n_files_after = len([f for f in os.listdir(staging) if f.endswith(".json")])
+    src_archived = (not os.path.isfile(os.path.join(staging, good_iid + ".json"))
+                    and os.path.isfile(os.path.join(staging, "_archive", good_iid + ".processed.json")))
+    ck(r7["ok"] and r7["write"] == 1 and r7["applied"] == 1 and n_active7 >= 1
+       and src_archived and n_files_after == n_files_before - 1,
+       "T7 승인 후 atomic 저장 1건 · 미선택 잔류(commit narrow) · 원문 archive(삭제 아님)")
 
-    # T8 candidate-only · 원문 전문 DB 미저장 · chain
+    # T7b 재시도(같은 approval_id) → 재write 0 (원문 archive 이동 → 재저장 0 · 계약 8)
+    r7b = commit_selected(db, home, staging, [good_idx], rid, snap, NOW)
+    n_active7b = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
+    ck(r7b["write"] == 0 and n_active7b == n_active7, "T7b 재시도 → 재write 0(계약 8)")
+
+    # T8 PII intent 승인 후 commit → save 게이트가 all-or-nothing 차단(write 0) · 원문 보존(계약 4·5)
+    s_t8 = summarize(staging, NOW)
+    pii = next(it for it in s_t8["items"] if it["pii_secret"])
+    pii_idx, pii_iid = pii["idx"], pii["intent_id"]
+    r8p = commit_selected(db, home, staging, [pii_idx], None, snap, NOW)   # request-only
+    rid8 = r8p["request_id"]
+    approve(rid8)
+    n_active_b8 = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
+    r8 = commit_selected(db, home, staging, [pii_idx], rid8, snap, NOW)
+    n_active_a8 = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
+    pii_src_kept = os.path.isfile(os.path.join(staging, pii_iid + ".json"))
+    ck(r8["write"] == 0 and n_active_a8 == n_active_b8 and pii_src_kept,
+       "T8 PII 승인 후 commit → save 게이트 all-or-nothing 차단(write 0) · 원문 보존")
+
+    # T9 candidate-only · 원문 전문/PII DB 미저장 · chain
     bad = db.con.execute("SELECT count(*) FROM nodes WHERE candidate!=1 OR promotion_allowed!=0").fetchone()[0]
     chain = db.verify_chain()
     blob = "\n".join(str(x) for t in ("nodes", "audit_log") for x in db.con.execute("SELECT * FROM " + t))
     ck(bad == 0 and chain and PII not in blob and "1234-5678" not in blob,
-       "T8 candidate-only · chain INTACT · 원문/PII DB 미저장")
+       "T9 candidate-only · chain INTACT · 원문/PII DB 미저장")
     db.close()
 
     op_after = {p: (os.path.getmtime(p) if os.path.exists(p) else None) for p in OPERATING_PATHS}
-    ck(op_before == op_after, "T9 운영 store 불변")
+    ck(op_before == op_after, "T10 운영 store 불변")
     shutil.rmtree(tmp, ignore_errors=True)
-    ck(not os.path.exists(tmp), "T10 temp 정리")
+    ck(not os.path.exists(tmp), "T11 temp 정리")
 
     print("\nGATE=%s" % ("GO" if ok else "NO-GO"))
     return 0 if ok else 1
