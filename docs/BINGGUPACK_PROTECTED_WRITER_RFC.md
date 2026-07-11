@@ -22,8 +22,8 @@ Base: `docs/p1b1-protected-writer-rfc` worktree (main `39d8c74` 후속). 상위 
 
 > **P1-B 트랙 분리.** Track A(`BINGGUPACK_P1B_MUTATION_CLOSURE_DESIGN.md`)는 mutation surface
 > (accept/unaccept/due/resolve/confirm_edges·hosted 3파일·hag_sync_adapter)를 exact-bound approval
-> 로 봉인한다 — **"승인이 없으면 안 써진다"**. **(2026-07-11 · Track A 는 PR #4 에서 구현됐으며
-> main 병합 전 — 5 operation `binding_fields` 스키마 + CLI `--approval-id` 비대화형 owner 경로 ·
+> 로 봉인한다 — **"승인이 없으면 안 써진다"**. **(2026-07-11 · Track A 는 PR #4 로 구현되어
+> main 에 병합됨(merge commit `68b7768`) — 5 operation `binding_fields` 스키마 + CLI `--approval-id` 비대화형 owner 경로 ·
 > hosted `commit_bundle` exact-membership + crash-atomic 단일 COMMIT 승인(P1-B.1) · hag `import_edges`
 > approval-only. 상세: 상위 RFC §19.1①②④·§23.)** Track B(본 문서)는 그
 > **후에 남는 위협** — **"모델이 승인 자체를 위조할 수 있다"**(상위 RFC §19.1 ③) — 를 다룬다. 두 트랙은
