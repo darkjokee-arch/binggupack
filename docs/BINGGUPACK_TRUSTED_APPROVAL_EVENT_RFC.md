@@ -389,17 +389,43 @@ binggu approval reject <req-id> / revoke <req-id>   # tombstone
   ship-guard(test_double 채널·env 승인 read 0) · AST 인벤토리. 대화형 성공경로는 PTY(Unix)로 검증
   (`tests/test_trusted_approval_e2e.py::test_interactive_approve_pty`).
 
-**여전히 P1-B(비대화형 owner 승인 스키마 필요 — 이 계약의 범위 밖):** ① `accept/unaccept/due/resolve/
-confirm_edges` 는 approval-event `binding_fields` 스키마가 없어 현재 **대화형 TTY/앵커로만** 승인(비대화형
-owner 경로 부재). ② hosted save-intent 커밋 경로 — transported confirm(`LIVE SAVE n`)으로 literal
-`{"actor":"human"}` 을 찍는 3파일: `scripts/binggu_hosted_inbox.py:168`(CLI `hosted pull` write) ·
-`scripts/openbinggu_save_intent_live_runner.py:145` · `scripts/openbinggu_save_intent_outbox_runner.py:271`
-(binding_fields 프레임에 미편입 · CLI-only · MCP 표면 미노출). ③ FS/Bash 도구 병재 호스트의 직접 import
-mint 및 대화형 TTY PTY 위조(대화형 leg 은 UX 경계 · 암호학적 사람증명 아님 · §4/§5 배포 경계). ④
-`scripts/hybrid_agi/hag_sync_adapter.py` 는 `--actor human` **CLI arg** 를 운영 edges write 의 사람 근거로
-받는다(owner 셸 전용 도구 · 정식 wheel 패키지 아님이나 source-clone 존재) — `binggu.py` 가이드 출력에서
-참조. 이들은 §23 STILL-OPEN 라벨 유지. (`scripts/binggu_approval_origin_selftest.py` 인벤토리가 ②를 매
-실행 명시 출력 · binggu.py CLI 진입점 자체는 리터럴 0.)
+**P1-B 봉인 상태(2026-07-11 · Track A mutation surface closure · 이 P1-B 라운드에서 ①②④ 봉인):**
+
+- **① `accept/unaccept/due/resolve/confirm_edges` — ✅ 봉인(P1-B).** `trusted_approval.binding_fields` 에
+  5 operation 스키마 추가(accept/unaccept:`{index,id8,reason}` · due:`{node_id,due_date}` ·
+  resolve:`{node_id,outcome,reason}` · confirm_edges/import_edges:`{edges:sorted[{src,dst,rel,evidence:sorted}]}`
+  — evidence_refs 까지 바인딩). CLI 진입점(`binggu.py cmd_accept/cmd_unaccept/cmd_due/cmd_resolve`)에
+  `--approval-id` 비대화형 owner 경로 신설(`_mutation_via_approval` → `approval_gate.authorize` verify+
+  one-time consume). 미제시/미승인/바인딩 불일치 → `reader` → core 게이트 fail-closed(G4). 코어 함수
+  시그니처·동작은 불변(게이트는 CLI 층에만 · owner_accept/g3/graph_confirm/hag 37+ 체크 무회귀).
+  confirm_edges 의 **운영 ledger edge write**(= `hag_sync_adapter --import-edges`)는 ④에서 approval-only
+  로 봉인됨. `binggu.py confirm-edges` 자체는 **staging(sync_edges) write 만**(운영 ledger read-only) 이라
+  대화형 TTY/앵커 게이트 유지(비대화형 fail-closed).
+- **② hosted save-intent 커밋 경로 — ✅ 봉인(P1-B).** transported confirm 으로 literal `{"actor":"human"}`
+  을 찍던 3파일(`binggu_hosted_inbox.py` · `openbinggu_save_intent_live_runner.py` ·
+  `openbinggu_save_intent_outbox_runner.py`)의 direct `save_selected(actor=human)` 경로를 **전부 제거·
+  도달불가**로 만들고, 유일 저장 경로를 로컬 exact-bound **`hosted_bundle`** 승인(`commit_bundle`)으로
+  통일. 폰/웹은 저장 **의도만** 전달 → outbox 정상 intent 는 `.pending_approval`(원문 보존 · 삭제/스트립
+  0) → PC 가 선택 묶음 전체를 `--approval-id` 로 **atomic all-or-nothing** 커밋(membership 변경→request_id
+  변화→기존 승인 무효). live_runner 는 1회용 tempdir 소실 방지로 승인 대기 intent 를 영속 staging 으로
+  비파괴 이전. **데이터 손실 0**.
+- **④ `scripts/hybrid_agi/hag_sync_adapter.py` — ✅ 봉인(P1-B).** `import_confirmed_edges` 재작성:
+  positional `actor` 제거 → **actor 는 keyword-only 감사 메타**(consume receipt 기록 · 권한 효과 0).
+  운영 ledger edges INSERT 는 exact-bound `import_edges` 승인(payload=post-filter 정규화 edge set,
+  evidence 바인딩) + one-time reserve/finalize 필수. `--actor human` **CLI arg 단독의 사람 근거 효과 제거**
+  (approval 미제시 → fail-closed `approval_required`+request_id · replay→0 second write). `binggu.py`
+  가이드 출력도 `--actor human`→`--approval-id` 경유로 정합.
+- **③ FS/Bash 도구 병재 호스트의 store 직접 위조 — ⛔ STILL-OPEN(Track B · 별도 위협축).** 위 ①②④ 는
+  "**승인이 없으면 안 써진다**"(mutation 표면)를 봉인하지만, **셸/파일 도구를 가진 같은 에이전트가 승인 store
+  (`~/.binggupack/{approvals.jsonl,trusted_approval.json}`)를 직접 write 해 승인 자체를 위조**하는 축은 남는다
+  (직접 import mint · 대화형 TTY PTY 위조 — 대화형 leg 은 UX 경계 · 암호학적 사람증명 아님 · §4/§5 배포
+  경계). 이 out-of-scope 를 in-scope 로 끌어오는 **승인 store 격리**(OS keychain·별도 프로세스·별도 디바이스)
+  설계는 `docs/BINGGUPACK_PROTECTED_WRITER_RFC.md`(Track B · 보증 등급 L0~L4) — **설계 RFC · 미구현**.
+  두 트랙은 직교하며, Track B 없이 Track A 는 FS/Shell 병재 호스트에서 하드 통제가 아니다(§4·§5·§26 R2).
+
+(회귀: `scripts/binggu_approval_origin_selftest.py` AST 인벤토리 — binggu.py CLI 진입점 리터럴 human write 0 ·
+hag `--selftest` 37/37[12 필수 HAG 체크] · hosted inbox/runner `--selftest` · `binggu.py --selftest` hosted
+13~16 승인 흐름.)
 
 ## 20. Migration (additive · idempotent · Wave2 R3 SOUND)
 
@@ -437,11 +463,14 @@ mint 및 대화형 TTY PTY 위조(대화형 leg 은 UX 경계 · 암호학적 �
   `SAVE n=승인` · **README hero/Commit 행 "채팅 중 SAVE n"**(키보드/hook 앵커 vs MCP/chat confirm
   구분 — TAE R3-04) · V2 flow 말미 confirm.
 - **NOT_A_TRUSTED_APPROVAL_CHANNEL**: confirm-phrase equality gate.
-- **STILL-OPEN → P1-B (신규·정직 라벨, TAE R3-03)**: **hosted save-intent runner**
-  (`openbinggu_save_intent_outbox_runner.py:211` 이 `actor='human'`+confirm 으로 save_selected 호출
-  = P0 패턴). §18/§25 는 MCP 핸들러만 재배선 → **runner 는 P1-A 가 봉인하지 않는다.** §23 라벨을
-  "SUPERSEDED by P1-A" 로 오도하지 않고 "STILL-OPEN, P1-B" 로 명시. (runner 는 MCP 표면 미노출·owner
-  CLI `hosted pull` 경유 — 신규 노출 아님.)
+- **SUPERSEDED_IN_PART by P1-B (2026-07-11 · 이전엔 STILL-OPEN, TAE R3-03)**: **hosted save-intent runner**
+  는 P1-A 가 아니라 **P1-B(Track A)**가 봉인했다. 옛 `openbinggu_save_intent_outbox_runner.py` 가
+  `actor='human'`+transported confirm 으로 `save_selected` 를 직접 호출하던 P0 패턴(3파일: outbox/inbox/
+  live_runner)을 **전부 제거·도달불가**로 만들고, 유일 저장 경로를 로컬 exact-bound **`hosted_bundle`**
+  승인(`commit_bundle` · atomic all-or-nothing)으로 재배선. 폰/웹은 저장 **의도만** 전달하고 정상 intent 는
+  `.pending_approval`(원문 보존)로 대기 → owner 가 PC 에서 묶음 전체를 `--approval-id` 로 승인해야 확정.
+  §18/§25 는 MCP 핸들러만 재배선했었으나, P1-B 가 runner(CLI `hosted pull` 경유)까지 봉인함. **단, FS/Shell
+  병재 호스트의 store 위조 축(§26 R2·Track B)은 여전히 열려 있으므로 이 봉인도 배포 형태 조건부다.**
 - **KEEP**: V2A §0 "적재 강도≠저장 안전" · HOSTED §0 transport≠authority · intent_id rehash
   (integrity, authorization 과 직교·병합 금지) · V2 HMAC/inbox/fail-closed flag/injection 격리 ·
   SPEAKER_AXIS §4 G4_no_auto 불변 · **SECURITY.md 위협모델(이미 trusted approval event 를 P1
@@ -501,13 +530,21 @@ symlink/case cross-ledger·clock_rollback 의 **명시 subprocess-crash e2e**(�
 
 - **R1.** reserve→mutate→finalize 는 단일 SQL tx 아님(replace 제약). 안전성은 reason 분할(§14) +
   lease(§7) + replace journal-recovery 에 의존 — 신규 op 추가 시 reason 분할 회귀 필수.
-- **R2 (핵심·정직).** FS/shell 병재 호스트(Claude Code/Codex 기본)에서 P1-A 는 하드 통제가 아니라
-  fail-closed 보존 intent-routing(§4·§5). 하드닝(store 를 FS-root 밖/OS keychain 비밀) = P1-B 옵션.
-  이 PR 은 이를 **과장 없이 문서화**하고 보증하지 않는 것을 회귀로 고정한다.
+- **R2 (핵심·정직 · 여전히 OPEN — Track B).** FS/shell 병재 호스트(Claude Code/Codex 기본)에서 P1-A/P1-B
+  는 하드 통제가 아니라 fail-closed 보존 intent-routing(§4·§5). **P1-B(Track A)가 mutation 표면**(accept/
+  unaccept/due/resolve/confirm_edges·hosted 묶음·edges import)**을 exact-bound approval 로 봉인**했으나, 이는
+  "승인이 없으면 안 써진다"까지다. 남는 축 = **모델이 승인 store 를 직접 위조**(§19.1 ③). 하드닝(store 를
+  FS-root 밖/OS keychain/별도 프로세스/별도 디바이스) 설계 = **Track B RFC**(`docs/BINGGUPACK_PROTECTED_
+  WRITER_RFC.md` · 보증 등급 L0~L4 · **설계만 · 미구현**). owner dev 머신에서 실질 하드의 최소선은 L3(별도
+  프로세스/사용자), 완전은 L4(별도 디바이스). 이 RFC 는 보증하지 않는 것을 회귀로 고정한다(과장 0).
 - **R3.** `approval_review` 는 payload 를 잠깐 상주(cap/TTL/PII 게이트·purge). owner 검토 필수와
   raw-0 의 최소 타협 — 게이트 우회 시 개인사 상주 위험(테스트로 방어).
 - **R4.** clock 로컬 시계 의존(monotonic receipt 로 rollback 완화·신뢰 앵커 아님).
-- **R5.** hosted/web provider + hosted runner 봉인 = P1-B(§23 STILL-OPEN).
+- **R5 (부분 해소 · 2026-07-11 P1-B).** hosted **runner 봉인**은 완료 — runner 3파일 direct write 제거,
+  유일 저장 경로 = 로컬 exact-bound `hosted_bundle` 승인(§23 SUPERSEDED_IN_PART · 폰/웹=의도 전달만). 남은
+  것 = hosted/web **provider**(원격 발행) = detached_device 결합 시 L4 — Track B RFC §5 Provider Matrix 의
+  `hosted`(transport)·`detached_device`(발행) 구분 참조(**설계만 · 미구현**). hosted 단독은 §23 대로
+  untrusted intent.
 - **R6.** replace 원자성이 구현 중 과도하면 replace 만 fail-closed 유지·P1-B 이연(§14·§25-5).
 
 ## 27. Wave 2 사전 적대검증 해소 추적 (finding → 조치)

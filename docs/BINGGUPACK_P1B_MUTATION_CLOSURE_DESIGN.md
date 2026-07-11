@@ -125,4 +125,12 @@ def _resolve_human_ctx(ledger, sents, confirm=None, *, operation=None, bind=None
 
 ## 8. 미결 → 구현 시 확정
 - Q1: hosted approval_id 부여 기전 = 러너가 mint 후 intent 파일에 자동 기입(owner는 approve만). "approval_id 존재 ≠ verify_event 대체"(공격 M3) 못박기.
+
+### 8-A. 구현 확정 노트 (Fable5 사후 반영 — 아래가 정본, §3/§4 초안 서술 supersede)
+- **A2 approval 분기 = 별도 `_mutation_via_approval`(cmd_* 층)**, `_resolve_human_ctx` 내부 확장 아님. 대화형 TTY/앵커는 `_resolve_human_ctx` 유지, 비대화형 owner 는 `--approval-id` 제시 시 authorize 경유(§3 초안의 "_resolve_human_ctx 내부 분기" supersede · R4-4).
+- **hosted approval_id = CLI `--approval-id` 인자**(intent 파일 기입 없음). owner 흐름: `hosted pull --select` → PENDING+request_id 출력 → `approval approve <rid>` → `hosted pull --select --approval-id <rid>` → atomic 저장(§4 초안의 "intent 파일 approval_id 기입" supersede · R4-4).
+- **4-op 비대화형 요청 생성**: `accept/unaccept/due/resolve` 를 `--approval-id ""`(빈값)으로 실행 → PENDING + request_id + guidance 출력(`_show`). (정확하지만 아직 승인 안 된 rid 를 제시하면 authorize 가 verify 로 직행 → `approval_not_found` + request_id · PENDING 미생성 · guidance 없음 — 요청 생성은 빈값 경로다.) owner approve 후 `--approval-id <rid>` 로 정확 1회(R4-1: core G4_no_auto 가 approval 사유를 가리던 문제는 `_mutation_via_approval` 이 approval 사유·request_id·guidance 를 우선 표기해 해소).
+- **hosted 원문 보존 = 파일 suffix 마커 없이 원문 `.json` 무변경 보존**(보고 status 문자열만). commit_bundle 의 PENDING/실패/예외/거부/quarantine 전 경로가 원문 유지(문서의 `.pending_approval` 는 파일 마커가 아니라 보고 상태 · R4-3).
+- **실패/예외 write audit**: commit_bundle 실패·예외 경로는 rollback 후 `hosted_bundle_fail` BLOCK 1행 audit(R3-1·R3-2). hag import consume 감사 = `approval_consumptions.receipt`(hag 는 B1 설계상 audit_log 체인 미사용·운영 edges 무결성=content_hash · R3-7).
+- **(미구현·이연·low·본 P1-B 범위 밖)**: resolve fan-out receipt/render 표기(§8 M1)·contract-8 archived-retry 시 원본 receipt 반환·crash-before-archive staging divergence 는 전부 fail-closed 방향 low 로 별도 hardening 이연. 정본 = 코드 동작(위 확정 사항만 구현됨 · 이 목록은 declared 아님).
 - resolve의 record_resolution(hit_events pair-ai fan-out·바인딩 M1): resolve receipt에 fan-out node_id 집합 포함하거나 render에 표기.
