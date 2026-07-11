@@ -283,11 +283,12 @@ def selftest():
     ck("10b_show_실패이유_노출(BLOCK+skip)",
        _rc == 1 and "BLOCK" in _out and "skip" in _out)
 
-    # ---- hosted: collect broad, commit narrow (worker 미접촉 · 별도 temp · staging 직접) ----
+    # ---- hosted: collect broad, commit narrow — ★A3 로컬 승인 이벤트 경유(worker 미접촉·별도 temp) ----
     import time as _time
     import json as _json
     from binggu_hosted_inbox import staging_dir_for as _sdir
     from openbinggu_save_intent_outbox_runner import intent_hash as _ih, SCHEMA_VER as _SV
+    from binggupack.safety import trusted_approval as _ta
     h_tmp = tempfile.mkdtemp(prefix="bgp_cli_hosted_")
     h_home = os.path.join(h_tmp, ".binggupack")
     h_staging = _sdir(h_home)
@@ -295,6 +296,8 @@ def selftest():
     h_ledger = os.path.join(h_home, "ledger.sqlite")
     os.makedirs(os.path.join(h_home, "snapshots"))
     open_accept(h_ledger).close()
+    with open(_ta.config_path(h_home), "w", encoding="utf-8") as f:
+        _json.dump({"enabled": True}, f)   # owner 로컬 승인 provider 활성
 
     def _mk(text, idxs):
         c = "SAVE " + ",".join(str(i) for i in idxs)
@@ -309,17 +312,52 @@ def selftest():
     ck("13_hosted_inbox_요약(저장0·worker미접촉)",
        cmd_hosted(args(ledger=h_ledger, hosted_cmd="inbox", no_fetch=True, since=None)) == 0)
     ck("14_hosted_pull_select없음_안내(실행0)",
-       cmd_hosted(args(ledger=h_ledger, hosted_cmd="pull", select=None, confirm=None)) == 0)
+       cmd_hosted(args(ledger=h_ledger, hosted_cmd="pull", select=None, confirm=None,
+                       approval_id=None)) == 0)
+    # ① 승인 요청(request-only) — 직접 write 0 · 원문 보존
     n_stg_before = len([f for f in os.listdir(h_staging) if f.endswith(".json")])
-    rc15 = cmd_hosted(args(ledger=h_ledger, hosted_cmd="pull", select="1", confirm="LIVE SAVE 1"))
+    rc_req = cmd_hosted(args(ledger=h_ledger, hosted_cmd="pull", select="1", confirm=None,
+                            approval_id=None))
     db_h = open_accept(h_ledger)
-    n_act_h = db_h.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
+    n_act_req = db_h.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
+    reqs = _ta.list_requests(db_h.con)
     db_h.close()
+    n_stg_req = len([f for f in os.listdir(h_staging) if f.endswith(".json")])
+    ck("15_hosted_pull_request_only(직접write 0·원문 보존·PENDING 요청)",
+       rc_req == 0 and n_act_req == 0 and n_stg_req == n_stg_before and len(reqs) >= 1)
+    # ② owner 로컬 승인 → ③ 저장 확정(atomic·commit narrow)
+    rid_h = reqs[0]["request_id"]
+    dbx = open_accept(h_ledger)
+    try:
+        _ta.mint_approval(h_home, _ta.get_request(dbx.con, rid_h), 900, _time.time())
+    finally:
+        dbx.close()
+    rc_commit = cmd_hosted(args(ledger=h_ledger, hosted_cmd="pull", select="1", confirm=None,
+                                approval_id=rid_h))
+    db_h2 = open_accept(h_ledger)
+    n_act_h = db_h2.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
+    db_h2.close()
     n_stg_after = len([f for f in os.listdir(h_staging) if f.endswith(".json")])
-    ck("15_hosted_pull_commit_narrow(선택1건만·나머지잔류)",
-       rc15 == 0 and n_act_h == 1 and n_stg_after == n_stg_before - 1)
-    ck("16_hosted_pull_confirm불일치_BLOCK(전량자동 차단)",
-       cmd_hosted(args(ledger=h_ledger, hosted_cmd="pull", select="1", confirm="LIVE SAVE 9")) == 1)
+    ck("15b_hosted_pull_승인후_atomic저장(선택1건·commit narrow·나머지잔류)",
+       rc_commit == 0 and n_act_h == 1 and n_stg_after == n_stg_before - 1)
+    # 잘못된 approval-id → binding mismatch BLOCK · write 0 (남은 intent 는 idx 1 로 재번호)
+    n_act_pre16 = n_act_h
+    rc16 = cmd_hosted(args(ledger=h_ledger, hosted_cmd="pull", select="1", confirm=None,
+                           approval_id="deadbeefbadapprovalid"))
+    db_h3 = open_accept(h_ledger)
+    n_act_16 = db_h3.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
+    db_h3.close()
+    ck("16_hosted_pull_승인불일치_BLOCK(write 0)",
+       rc16 == 1 and n_act_16 == n_act_pre16)
+    # 16b. 재시도 second write 0 — 이미 소비된(15b) rid_h 를 재선택 집합에 다시 제시해도
+    #      재계산 request_id 불일치 → binding_mismatch → 2차 write 0(소비 승인 재사용 불가·계약 8).
+    rc16b = cmd_hosted(args(ledger=h_ledger, hosted_cmd="pull", select="1", confirm=None,
+                            approval_id=rid_h))
+    db_h4 = open_accept(h_ledger)
+    n_act_16b = db_h4.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
+    db_h4.close()
+    ck("16b_hosted_pull_소비승인_재시도_second_write_0",
+       rc16b == 1 and n_act_16b == n_act_pre16)
     shutil.rmtree(h_tmp, ignore_errors=True)
 
     op_after = {p: (os.path.getmtime(p) if os.path.exists(p) else None) for p in OPERATING_PATHS}

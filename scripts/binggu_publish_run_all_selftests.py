@@ -69,6 +69,13 @@ GATES = [
     ("trusted approval",  "openbinggu_trusted_approval_boundary_selftest.py", ["--selftest"], "GATE=GO"),
     ("trusted appr bind",  "binggu_trusted_approval_binding_characterization_selftest.py", ["--selftest"], "GATE=GO"),
     ("approval origin",   "binggu_approval_origin_selftest.py",        ["--selftest"], "GATE=GO"),
+    # ── P1-B mutation surface closure (hosted 저장 · HAG import = exact-bound approval only) ──
+    ("hosted inbox P1-B", "binggu_hosted_inbox.py",                    ["--selftest"], "GATE=GO"),
+    ("hosted bundle P1-B","binggu_hosted_bundle.py",                   ["--selftest"], "GATE=GO"),
+    ("save_intent outbox","openbinggu_save_intent_outbox_runner.py",   ["--selftest"], "GATE: GO"),
+    ("save_intent live",  "openbinggu_save_intent_live_runner.py",     ["--selftest"], "GATE=GO"),
+    ("hag sync adapter",  os.path.join("hybrid_agi", "hag_sync_adapter.py"), ["--selftest"], "GATE: GO"),
+    ("p1b mutation closure","binggu_p1b_mutation_closure_selftest.py", ["--selftest"], "GATE=GO"),
     ("setup-save onboard","binggu_setup_save.py",                      ["--selftest"], "GATE: GO"),
     ("archive backup/export", os.path.join("..", "binggupack", "workspace", "archive.py"), [], "GATE=GO"),
     ("tree scan",         "openbinggu_public_tree_scan.py",            ["--tree", REPO, "--public"], "verdict=CLEAN"),

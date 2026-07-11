@@ -245,9 +245,11 @@ def _inventory_binggu_py():
     패키지 전체에 ~200개의 {"actor":"human"} 리터럴이 있으나 대부분 이 두 부류다. 이 함수는 그 노이즈를
     스캔하지 않고, 사용자 입력이 들어오는 CLI 진입점만 강제한다.)
 
-    **CLI-도달 예외(P1-B STILL-OPEN · 명시 제외 · RFC §19.1②/§23):** hosted save-intent 커밋 경로는
-    transported confirm(`LIVE SAVE n`)으로 literal human 을 찍는다 — 아래 파일들. 이들은 대화형 owner
-    승인 스키마가 정해지면 봉인된다(P1-B). 여기서는 '숨기지 않고 명시'가 정직성 계약이다.
+    **CLI-도달 hosted 커밋 경로(P1-B 봉인 완료 · RFC §19.1②/§23):** hosted save-intent 커밋 3파일은
+    P1-B 에서 commit_bundle exact-bound 승인 경유로 봉인됐다 — transported confirm(`LIVE SAVE n`)으로
+    literal human 을 찍던 direct save_selected 경로가 제거됐다. 아래 출력은 파일 정적 존재 확인일 뿐이며
+    (숨김 0 · 내용 재스캔 아님), direct write 회귀는 각 러너의 behavioral selftest(write 0 단언)가 잡는다.
+    여기서는 '숨기지 않고 명시'가 정직성 계약이다.
     """
     import ast
     KNOWN_P1B_HOSTED = (   # CLI-도달하지만 P1-B 로 이연된 literal-human write(문서화된 예외)
@@ -280,10 +282,11 @@ def _inventory_binggu_py():
     if offenders:
         for i, s in offenders:
             print("      [inventory] binggu.py 잔존 human write 리터럴 L%d: %s" % (i, s))
-    # 투명성: CLI-도달 P1-B 이연 파일을 매 실행 명시(숨김 0). 존재/미존재 모두 정보만(실패 아님).
+    # 투명성: hosted 3파일은 P1-B 에서 commit_bundle exact-bound 경유로 봉인됨(direct human write 제거).
+    # 매 실행 봉인 상태를 명시(숨김 0). 존재/미존재 모두 정보만(실패 아님).
     for p in KNOWN_P1B_HOSTED:
-        state = "literal-human 잔존(P1-B 예정)" if os.path.exists(p) else "부재"
-        print("      [inventory · P1-B STILL-OPEN] %s — %s" % (os.path.relpath(p, REPO), state))
+        state = "P1-B 봉인(commit_bundle 경유·direct human write 제거)" if os.path.exists(p) else "부재"
+        print("      [inventory · P1-B SEALED] %s — %s" % (os.path.relpath(p, REPO), state))
     return not offenders
 
 
