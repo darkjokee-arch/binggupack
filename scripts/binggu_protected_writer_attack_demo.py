@@ -21,7 +21,8 @@ defensive security · attack-model demonstration · P1-B Track B · 운영 store
     검증(sk 미노출). HMAC 은 여기선 stdlib-only 대칭 stand-in일 뿐(RFC §3.2).
   · ★가정: 공격자(모델 도구)가 vault sk 를 **read 불가**. 이 가정이 깨지면(모델이 셸로 vault 를 읽으면)
     L2 는 §6 "같은 머신 키 = 보안 연극"으로 환원된다 — owner dev 머신(셸 병재)에서 실질 하드의 최소선은
-    L3(별도 사용자/프로세스), 완전은 L4(별도 디바이스). 이 데모는 "L2 시뮬이 하드"라고 주장하지 않는다.
+    L3(별도 사용자/프로세스), 명시 가정 하 최강은 L4(별도 디바이스 + protected writer/verifier/trust-root
+    동반). root/admin out-of-scope 이므로 "완전"은 아니다. 이 데모는 "L2 시뮬이 하드"라고 주장하지 않는다.
 
 CLI: python scripts/binggu_protected_writer_attack_demo.py --selftest
 """
@@ -212,7 +213,8 @@ def run():
         print("  · L1(현행)은 FS/Shell 병재 호스트에서 하드 통제 아님 — 위 [1]이 위조 성립을 실증.")
         print("  · [2] DEFENSE 는 vault sk 가 모델 도구로 read 불가라는 가정 위에서만 성립.")
         print("    가정 붕괴(모델이 셸로 vault read) → L2 는 '같은 머신 키=보안 연극'으로 환원(§6).")
-        print("  · owner dev 머신(셸 병재) 실질 하드 최소선 = L3(별도 프로세스/사용자), 완전 = L4(별도 디바이스).")
+        print("  · owner dev 머신(셸 병재) 실질 하드 최소선 = L3(별도 프로세스/사용자),")
+        print("    명시 가정 하 최강 = L4(별도 디바이스 + protected writer/verifier/trust-root) — root/admin out-of-scope 이므로 '완전' 아님.")
         print("  · 이 데모는 '이제 안전하다'를 주장하지 않는다 — 각 등급의 미차단 공격은 RFC §4 참조.")
 
     finally:

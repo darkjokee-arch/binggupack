@@ -22,9 +22,10 @@ Base: `docs/p1b1-protected-writer-rfc` worktree (main `39d8c74` 후속). 상위 
 
 > **P1-B 트랙 분리.** Track A(`BINGGUPACK_P1B_MUTATION_CLOSURE_DESIGN.md`)는 mutation surface
 > (accept/unaccept/due/resolve/confirm_edges·hosted 3파일·hag_sync_adapter)를 exact-bound approval
-> 로 봉인한다 — **"승인이 없으면 안 써진다"**. **(2026-07-11 · Track A 구현 완료 — 5 operation
-> `binding_fields` 스키마 + CLI `--approval-id` 비대화형 owner 경로 · hosted `commit_bundle` atomic
-> 승인 · hag `import_edges` approval-only. 상세: 상위 RFC §19.1①②④·§23.)** Track B(본 문서)는 그
+> 로 봉인한다 — **"승인이 없으면 안 써진다"**. **(2026-07-11 · Track A 는 PR #4 에서 구현됐으며
+> main 병합 전 — 5 operation `binding_fields` 스키마 + CLI `--approval-id` 비대화형 owner 경로 ·
+> hosted `commit_bundle` exact-membership + crash-atomic 단일 COMMIT 승인(P1-B.1) · hag `import_edges`
+> approval-only. 상세: 상위 RFC §19.1①②④·§23.)** Track B(본 문서)는 그
 > **후에 남는 위협** — **"모델이 승인 자체를 위조할 수 있다"**(상위 RFC §19.1 ③) — 를 다룬다. 두 트랙은
 > 직교하며 **Track B 없이 Track A 는 FS/Shell 병재 호스트에서 하드 통제가 아니다**(그 사실을 Track A 도
 > §1 에서 정직히 인정한다). **Track B 는 설계 RFC · 미구현 · production 코드 0.**
@@ -131,7 +132,7 @@ P1-A §6 은 서명 토큰을 **의도적으로 거부**했다: 서명키를 같
 | 항목 | 내용 |
 |---|---|
 | 배치 | 승인이 **완전히 다른 신뢰 도메인**에서 발행된다: owner 폰 앱이 request digest 를 보고 **폰 안의 키**로 서명 → 서명된 승인이 PC 로 전달 → consume 은 폰 공개키로 검증. 또는 하드웨어 토큰(FIDO2/YubiKey·시크릿 폰) challenge-response. |
-| 막는 것 | PC 의 모델이 FS·셸·심지어 **root** 를 가져도 **폰의 개인키가 PC 에 없으므로** 유효 서명 위조 불가. request digest 를 owner 가 폰에서 **눈으로 확인** 후 승인 → owner-saw==committed 가 다른 도메인에서 성립. **PC 전권 접근자조차 못 뚫는 유일한 등급.** |
+| 막는 것 | PC 의 모델이 FS·셸을 가져도 **폰의 개인키가 PC 에 없으므로 유효 서명(디바이스 키) 위조 불가**. request digest 를 owner 가 폰에서 **눈으로 확인** 후 승인 → owner-saw==committed 가 다른 도메인에서 성립. **단 이 보증의 범위는 '디바이스 개인키 위조 방지'까지다.** end-to-end ledger write 통제는 detached signer + **protected writer** + **protected verifier** + **protected trust-root / pk-pin** + **trusted display** + **downgrade 방지**가 **모두** 갖춰져야 성립한다(§3.4·§R-B4·§R-B6). PC 의 root/admin 이 verifier·writer·ledger·trust-root 중 **하나라도 통제**하면 디바이스 키를 훔치지 않고도 로컬 enforcement 를 우회할 수 있다 → 그래서 **root/admin compromise 는 out-of-scope 유지**(§7). 즉 L4 는 **"명시 가정 하 최강(strongest detached-signing assurance under stated assumptions)"**이지 **"완전"이 아니다.** |
 | **못 막는 것(정직)** | ① 폰-PC **전달 채널 변조**(모델이 다른 request digest 를 폰에 보내 owner 를 속임) → 폰 화면에 **사람이 읽을 요약**을 띄워 완화하나 owner 가 대충 승인하면 무력(사회공학). ② 폰 자체 탈취·멀웨어. ③ 서명은 "이 digest 를 승인"만 증명 — payload↔digest 렌더가 PC 측이면 렌더 위조 여지(폰에서 최종 문장까지 렌더해야 완결). ④ owner UX 마찰(매 저장마다 폰). |
 | 전제 | 폰/토큰이 PC 와 **독립 신뢰 도메인**(같은 멀웨어에 동시 감염 안 됨). 전달 채널은 신뢰 불요(서명이 무결성 보장)하나 **표시 무결성**은 폰이 책임. |
 | 비용 | 최고. 폰 앱(iOS/Android)·페어링·키 관리·전달 프로토콜·오프라인 대비. hosted provider(§4 R5)와 결합 가능. |
@@ -149,7 +150,7 @@ P1-A §6 은 서명 토큰을 **의도적으로 거부**했다: 서명키를 같
 sk 가 모델 tool surface 안(같은 home 평문)      → 모델이 sk read → 유효 sig 위조 → 연극 (P1-A §6 이 거부한 것)
 sk 가 OS keychain(사용자 보호)                  → FS 도구는 못 읽음 · 셸/코드실행은 읽음 → L2 (부분)
 sk 가 별도 프로세스/사용자 소유                  → 같은 uid 모델은 못 읽음 · 권한상승은 읽음 → L3
-sk 가 별도 디바이스(폰/토큰)                     → PC 전권자도 못 읽음 → L4 (연극 아님 · 완전)
+sk 가 별도 디바이스(폰/토큰)                     → PC 전권자도 sk 못 읽음 → L4 (연극 아님 · 명시 가정 하 최강)
 ```
 
 즉 **P1-A §6 의 "같은 머신 키 = 연극"은 참이지만 조건부**다("같은 **신뢰 도메인**"일 때). Detached
@@ -199,18 +200,20 @@ detached signer/디바이스(§2.4·L4)를 "안전"으로 과신하는 흔한 �
 | Lv | store/키 위치 | 막는 공격 | **못 막는 공격(정직)** | 전제 | 비용 |
 |---|---|---|---|---|---|
 | **L0** | provider 미구성 | **모든 write**(fail-closed). 최악="안 써짐". | (없음 — 기능도 0) | 없음 | 0 (현행) |
-| **L1** | 평문 `~/.binggupack`(현행 P1-A) | 자동저장 · dry-run 재현 · env/actor/confirm spoof · replay · payload/ledger/protocol 변조 · 만료/거절. **MCP-only 표면**(웹/앱 커넥터·잠긴 에이전트)에선 **하드**. | **FS/Shell 병재 호스트의 store 직접 위조**(§1.2 3-step). owner dev 머신 = 여기서 뚫림. | 모델 도구에 approval store write 수단 없음(경로-제한 or FS 없음) | 0 (구현됨) |
+| **L1** | 평문 `~/.binggupack`(현행 P1-A) | 자동저장 · dry-run 재현 · env/actor/confirm spoof · replay · payload/ledger/protocol 변조 · 만료/거절. **MCP-only 이고 모델에게 approval store·provider config·ledger·대체 writer 에 대한 write 경로가 없는 배포**(웹/앱 커넥터·잠긴 에이전트)에선 **해당 threat model 안에서 hard boundary 로 작동할 수 있다.** | **FS/Shell 병재 호스트의 store 직접 위조**(§1.2 3-step). owner dev 머신 = 여기서 뚫림. | 모델 도구에 approval store write 수단 없음(경로-제한 or FS 없음) | 0 (구현됨) |
 | **L2** | OS keychain(사용자 보호) | L1 전부 + **FS-only 위조**(모델이 파일 뒤져도 keychain 못 읽음·평문 append 불가). | **셸/네이티브 코드 실행 공격**(같은 사용자로 keychain API 호출) · 권한상승. | 모델 도구=FS만·셸 없음 · keychain API 가용 | 중(플랫폼 3분기+fallback) |
 | **L3** | 별도 프로세스/사용자 소유 + IPC + 비대칭 서명 | L2 전부 + **같은 uid 셸/코드실행 위조**(다른 uid store·키 미접근). helper 가 out-of-band owner 확인 강제. | **권한상승(sudo/취약점)** = arbitrary local root(§44 공통 한계) · helper 의 owner 확인이 같은 화면이면 자동응답 · IPC injection. | OS 사용자 분리 가능 · 모델이 권한상승 못 함 · owner 확인이 별도 경로면 강 | 고(데몬·IPC·설치·서비스 계정) |
-| **L4** | 별도 디바이스(폰/하드웨어 토큰)·비대칭 sk 는 디바이스 안 | L3 전부 + **PC 전권(root 포함) 위조**(개인키가 PC 에 없음). owner 가 폰에서 digest 확인 → 다른 도메인 owner-saw==committed. | **전달 채널 표시 위조 사회공학**(owner 가 대충 승인) · 디바이스 탈취/멀웨어 · payload↔digest 렌더 무결성(폰이 최종 렌더해야). | 폰/토큰=독립 신뢰 도메인 · 표시 무결성은 디바이스 책임 | 최고(모바일 앱·페어링·키관리·hosted 결합) |
+| **L4** | 별도 디바이스(폰/하드웨어 토큰)·비대칭 sk 는 디바이스 안 | L3 전부 + **PC 전권(root 포함)의 디바이스 개인키 위조**(개인키가 PC 에 없음). owner 가 폰에서 digest 확인 → 다른 도메인 owner-saw==committed. | **전달 채널 표시 위조 사회공학**(owner 가 대충 승인) · 디바이스 탈취/멀웨어 · payload↔digest 렌더 무결성(폰이 최종 렌더해야) · **★ PC root/admin 이 verifier·writer·ledger·trust-root(pk-pin) 중 하나라도 통제하면 디바이스 키를 훔치지 않고도 로컬 enforcement 우회**(§R-B6·downgrade) — 그래서 **root/admin = out-of-scope 유지**(§7). | 폰/토큰=독립 신뢰 도메인 · 표시 무결성은 디바이스 책임 · **protected writer/verifier/trust-root 동반**(§7.3 P1-B2) | 최고(모바일 앱·페어링·키관리·hosted 결합) |
 
 **등급 간 단조성.** L(n) 은 L(n-1) 이 막는 것을 전부 막고 **새 공격 계층 하나**를 추가로 막는다.
 어떤 등급도 "완전 안전"이 아니다 — 각 행의 "못 막는 공격"이 그 증거다. **owner 는 자기 위협모델에서
 어느 계층까지 막을지 선택**한다(§7 권고).
 
 **핵심 경계선(owner dev 머신).** owner 실환경은 **셸 병재** → **L2 도 코드실행으로 뚫린다**. owner
-환경에서 실질 하드의 **최소선은 L3**(별도 사용자/프로세스), 완전은 **L4**(별도 디바이스). L1/L2 는 owner
-dev 머신에선 "자동저장 방지 + 공격 비용 상승"이지 하드 통제가 아니다 — 이 문장을 SECURITY.md 에 유지.
+환경에서 실질 하드의 **최소선은 L3**(별도 사용자/프로세스), **명시 가정 하 최강은 L4**(별도 디바이스 +
+protected writer/verifier/trust-root 동반). **어떤 등급도 "완전"이 아니다** — root/admin compromise 는
+어느 단계에서도 out-of-scope 다(§7). L1/L2 는 owner dev 머신에선 "자동저장 방지 + 공격 비용 상승"이지
+하드 통제가 아니다 — 이 문장을 SECURITY.md 에 유지.
 
 ---
 
@@ -304,8 +307,8 @@ print("이 가정이 깨지면(모델이 sk read) L2 는 연극으로 환원 = �
 
 | 배포 | 현재 하드니스 | 권고 |
 |---|---|---|
-| **웹/앱 커넥터**(MCP-only·경로제한·셸 없음) | **L1 이 이미 하드** | 추가 불요. L1 유지 + provider 미구성 fail-closed. hosted+device 결합 시 L4. |
-| **owner dev 머신**(binggupack MCP + FS/Bash MCP) | **하드 아님**(L1 뚫림) | **최소 L3**(별도 프로세스/사용자 소유 store) 목표. 중간 단계로 L2(keychain)는 "FS-only 공격은 막되 셸은 못 막음"을 **정직 라벨**과 함께. **L4 가 유일한 완전**. |
+| **웹/앱 커넥터**(MCP-only·경로제한·셸 없음) | 모델에게 approval store·provider config·ledger·대체 writer write 경로가 없으면 **L1 이 해당 threat model 안에서 hard boundary 로 작동** | 추가 불요. L1 유지 + provider 미구성 fail-closed. hosted+device 결합 시 L4 목표(§7.3 동반 조건). |
+| **owner dev 머신**(binggupack MCP + FS/Bash MCP) | **하드 아님**(L1 뚫림) | **최소 L3**(별도 프로세스/사용자 소유 store) 목표. 중간 단계로 L2(keychain)는 "FS-only 공격은 막되 셸은 못 막음"을 **정직 라벨**과 함께. **L4 가 유일하게 §7.3 동반 조건 하 최강** — 단 root/admin out-of-scope 이므로 "완전"은 아니다. |
 
 ### 7.2 단계적 채택 순서 (비용 대비 이득)
 
@@ -315,10 +318,12 @@ print("이 가정이 깨지면(모델이 sk read) L2 는 연극으로 환원 = �
    owner 환경에선 하드 아님**을 라벨. 웹/앱 배포엔 이득 적음(이미 L1 하드).
 3. **L3(별도 프로세스) — owner 환경 첫 실질 하드(비용 고).** owner 가 진짜로 FS/Shell 병재에서
    승인 위조를 막고 싶으면 여기부터. helper 데몬 + 별도 uid.
-4. **L4(별도 디바이스) — 완전(비용 최고).** 고보증 요구 시. hosted provider(R5)와 결합.
+4. **L4(별도 디바이스) — 명시 가정 하 최강(비용 최고).** 고보증 요구 시. hosted provider(R5)와 결합.
+   단 protected writer/verifier/trust-root 동반이 전제이고 root/admin 은 out-of-scope → **"완전"은 아니다.**
 
 **정직 권고 요지:** owner 의 실제 위협("모델이 내 승인을 위조")을 **진짜로** 막는 최소선은 **L3**,
-완전은 **L4**. L1/L2 는 owner dev 머신에선 보조 방어일 뿐이다. **"L2 넣었으니 안전"이라 말하지 않는다.**
+명시 가정 하 최강은 **L4**(동반 조건 §7.3). **어떤 등급도 "완전"이 아니다**(root/admin out-of-scope).
+L1/L2 는 owner dev 머신에선 보조 방어일 뿐이다. **"L2 넣었으니 안전"이라 말하지 않는다.**
 
 ### 7.3 Track B 범위 경계 — 무엇이 이 RFC 이고 무엇이 P1-B2 인가
 
