@@ -27,7 +27,7 @@ from openbinggu_staging_write_selftest import OPERATING_PATHS  # noqa: E402  (op
 # denylist (allowlist보다 우선). 경로/이름 패턴.
 DENY_PATTERNS = [
     r"(^|[\\/])\.env($|[\\/.])", r"\.env$", r"credentials", r"private_key", r"\.pem$", r"\.key$",
-    r"id_rsa", r"bid-engine", r"safety-app", r"NPKI", r"[\\/](User Data|Default|browser)[\\/]",
+    r"id_rsa", r"example-project", r"example-org", r"NPKI", r"[\\/](User Data|Default|browser)[\\/]",
     r"\.sqlite($|3)", r"\.db$", r"_graph\.yaml$", r"localcrab_index",
 ]
 # 내용 secret/PII needle (block-only: 검출 시 차단, 치환 0).
@@ -140,12 +140,12 @@ def _selftest():
         with open(p, "w", encoding="utf-8") as f:
             f.write(body)
         return p
-    allow_md = mk("work/notes.md", "# 핵심 문장\n마진 확보되면 참여한다. 근거: 견적 12% 마진.")
+    allow_md = mk("work/notes.md", "# 핵심 문장\n이 프로젝트의 빌드 명령을 정리한다. 근거: 빌드 절차 문서.")
     # fixture body 의 secret-유사 문자열도 조각 조합(소스 scan false-positive 방지, 런타임 동일)
     env_f = mk("work/.env", "API_" + "KEY" + _EQ + "secret123")
     key_f = mk("work/id_rsa", "-----" + "BEGIN OPENSSH PRIVATE KEY" + "-----")
     sqlite_f = mk("work/data.sqlite", "SQLITE")
-    bideng_f = mk("safety-app/bid-engine/notes.md", "운영")
+    bideng_f = mk("example-org/example-project/notes.md", "운영")
     unknown_f = mk("other/random.md", "지정 안 한 경로")  # allowlist 밖
 
     results = []
@@ -166,9 +166,9 @@ def _selftest():
     # Q3 credentials/private key BLOCK
     r = S.capture_one(key_f); leak_blobs.append(r)
     rec("Q3", "private key BLOCK", r["verdict"] == "BLOCK" and r["reason"] == "denylist")
-    # Q4 bid-engine/NPKI/browser/sqlite BLOCK
+    # Q4 example-project/NPKI/browser/sqlite BLOCK
     r_sql = S.capture_one(sqlite_f); r_be = S.capture_one(bideng_f); leak_blobs += [r_sql, r_be]
-    rec("Q4", "bid-engine/sqlite 경로 BLOCK",
+    rec("Q4", "example-project/sqlite 경로 BLOCK",
         r_sql["reason"] == "denylist" and r_be["reason"] == "denylist")
     # Q6 rate limit 초과 BLOCK (rate_max=5, 이미 5회 소비 → 다음 BLOCK)
     r = S.capture_one(allow_md); leak_blobs.append(r)
@@ -190,7 +190,7 @@ def _selftest():
     blob = json.dumps([leak_blobs, S.audit, S.candidates, S2.audit, Sk.audit],
                       ensure_ascii=False, default=str)
     needles = [tmp, work, real_home, BASE, "API_" + "KEY" + _EQ + "secret123", "BEGIN" + " OPENSSH",
-               "C:\\Users", "/Users/", "/home/", ".env", "id_rsa", "data.sqlite", "bid-engine"]
+               "C:\\Users", "/Users/", "/home/", ".env", "id_rsa", "data.sqlite", "example-project"]
     leak = sum(1 for nd in needles if nd and nd in blob)
     rec("Q5", "raw_leak=0 (경로/원문/secret 미출력)", leak == 0)
 

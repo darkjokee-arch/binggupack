@@ -46,29 +46,29 @@ def main():
        P.detect_os(platform_name="linux", wsl_distro="", osrelease="5.15.0-generic") == "linux")
 
     # ---- 2. OS별 기본 홈 (synthetic env 주입) ----
-    win_env = {"USERPROFILE": r"C:\Users\PC"}
-    wsl_env = {"HOME": "/home/pc"}
-    mac_env = {"HOME": "/Users/pc"}
-    ck("5_windows_home", P.binggu_home(env=win_env, os_name="windows") == r"C:\Users\PC\.binggupack")
-    ck("6_wsl_home", P.binggu_home(env=wsl_env, os_name="wsl") == "/home/pc/.binggupack")
-    ck("7_macos_home", P.binggu_home(env=mac_env, os_name="macos") == "/Users/pc/.binggupack")
+    win_env = {"USERPROFILE": r"C:\Users\fixture-user"}
+    wsl_env = {"HOME": "/home/fixture-user"}
+    mac_env = {"HOME": "/Users/fixture-user"}
+    ck("5_windows_home", P.binggu_home(env=win_env, os_name="windows") == r"C:\Users\fixture-user\.binggupack")
+    ck("6_wsl_home", P.binggu_home(env=wsl_env, os_name="wsl") == "/home/fixture-user/.binggupack")
+    ck("7_macos_home", P.binggu_home(env=mac_env, os_name="macos") == "/Users/fixture-user/.binggupack")
     ck("8_windows_ledger",
-       P.default_ledger(env=win_env, os_name="windows") == r"C:\Users\PC\.binggupack\ledger.sqlite")
+       P.default_ledger(env=win_env, os_name="windows") == r"C:\Users\fixture-user\.binggupack\ledger.sqlite")
     ck("8b_wsl_ledger",
-       P.default_ledger(env=wsl_env, os_name="wsl") == "/home/pc/.binggupack/ledger.sqlite")
+       P.default_ledger(env=wsl_env, os_name="wsl") == "/home/fixture-user/.binggupack/ledger.sqlite")
     ck("8c_macos_ledger",
-       P.default_ledger(env=mac_env, os_name="macos") == "/Users/pc/.binggupack/ledger.sqlite")
+       P.default_ledger(env=mac_env, os_name="macos") == "/Users/fixture-user/.binggupack/ledger.sqlite")
     ck("9_windows_settings",
-       P.default_settings(env=win_env, os_name="windows") == r"C:\Users\PC\.claude\settings.json")
+       P.default_settings(env=win_env, os_name="windows") == r"C:\Users\fixture-user\.claude\settings.json")
     ck("9b_wsl_settings",
-       P.default_settings(env=wsl_env, os_name="wsl") == "/home/pc/.claude/settings.json")
+       P.default_settings(env=wsl_env, os_name="wsl") == "/home/fixture-user/.claude/settings.json")
 
     # ---- 3. BINGGU_HOME override (opt-in, OS 무관 그대로) ----
-    sh = {"BINGGU_HOME": "/mnt/d/shared/.binggupack", "HOME": "/home/pc"}
+    sh = {"BINGGU_HOME": "/mnt/d/shared/.binggupack", "HOME": "/home/fixture-user"}
     ck("10_override_home_wsl", P.binggu_home(env=sh, os_name="wsl") == "/mnt/d/shared/.binggupack")
     ck("10b_override_ledger_wsl",
        P.default_ledger(env=sh, os_name="wsl") == "/mnt/d/shared/.binggupack/ledger.sqlite")
-    shw = {"BINGGU_HOME": r"D:\shared\.binggupack", "USERPROFILE": r"C:\Users\PC"}
+    shw = {"BINGGU_HOME": r"D:\shared\.binggupack", "USERPROFILE": r"C:\Users\fixture-user"}
     ck("10c_override_home_windows", P.binggu_home(env=shw, os_name="windows") == r"D:\shared\.binggupack")
     ck("11_shared_opt_in_true", P.shared_opt_in(env=sh) is True)
     ck("11b_shared_opt_in_false", P.shared_opt_in(env=win_env) is False)
@@ -93,15 +93,15 @@ def main():
         _sh.which = _orig_which
 
     # ---- 5. 경로 표시 변환 (표시용만 — 파일 미접촉) ----
-    ck("13_to_wsl", P.to_wsl_path(r"C:\Users\PC\.binggupack") == "/mnt/c/Users/PC/.binggupack")
-    ck("13b_from_wsl", P.from_wsl_path("/mnt/c/Users/PC/.binggupack") == r"C:\Users\PC\.binggupack")
+    ck("13_to_wsl", P.to_wsl_path(r"C:\Users\fixture-user\.binggupack") == "/mnt/c/Users/fixture-user/.binggupack")
+    ck("13b_from_wsl", P.from_wsl_path("/mnt/c/Users/fixture-user/.binggupack") == r"C:\Users\fixture-user\.binggupack")
     ck("13c_roundtrip", P.from_wsl_path(P.to_wsl_path(r"D:\a\b")) == r"D:\a\b")
     ck("14_display_to_wsl",
-       P.display_path(r"C:\Users\PC\.binggupack", target_os="wsl") == "/mnt/c/Users/PC/.binggupack")
+       P.display_path(r"C:\Users\fixture-user\.binggupack", target_os="wsl") == "/mnt/c/Users/fixture-user/.binggupack")
     ck("14b_display_to_windows",
-       P.display_path("/mnt/c/Users/PC/.binggupack", target_os="windows") == r"C:\Users\PC\.binggupack")
+       P.display_path("/mnt/c/Users/fixture-user/.binggupack", target_os="windows") == r"C:\Users\fixture-user\.binggupack")
     ck("14c_display_noop_posix",
-       P.display_path("/home/pc/.binggupack", target_os="wsl") == "/home/pc/.binggupack")
+       P.display_path("/home/fixture-user/.binggupack", target_os="wsl") == "/home/fixture-user/.binggupack")
 
     # ---- 6. 기존 Windows 동작 보존 (BINGGU_HOME 미설정·현재 OS = 기존 expanduser 와 동일) ----
     real_win_env = {"USERPROFILE": os.path.expanduser("~")}

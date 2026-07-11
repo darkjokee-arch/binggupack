@@ -1304,7 +1304,7 @@ def handle_tool(tool_name, params, allow_root):
 # ---------------- selftest ----------------
 
 # save selftest 입력(문서·판단 섞임). dry-run preview 는 사용자 선택용으로 sentence 노출이 의도 동작.
-_SAVE_CONVO = ("이 문서는 배포 절차를 정의한다. 이 입찰은 마진이 낮아 보류한다.")
+_SAVE_CONVO = ("이 문서는 배포 절차를 정의한다. 이 방식은 비용이 높아 보류한다.")
 
 
 def _selftest():
@@ -1334,9 +1334,11 @@ def _selftest():
         ("build_toy_ok",         "pack_build",           {"input_dir": "examples/toy_project"},        True,  "ALLOW"),
         ("selftest_no_path_ok",  "selftest",             {},                                           True,  "no-path read"),
         ("build_parent_block",   "pack_build",           {"input_dir": "../outside"},                  False, "parent_escape"),
-        ("consumer_npki_block",  "consumer_smoke",       {"pack_path": "C:/Users/PC/AppData/NPKI/c.der"}, False, "deny_cert_npki"),
+        ("consumer_npki_block",  "consumer_smoke",       {"pack_path": "C:/Users/fixture-user/AppData/NPKI/c.der"}, False, "deny_cert_npki"),
         ("guard_env_block",      "publish_guard_dryrun", {"pack_path": "examples/toy_project/.env"},    False, "deny_secret"),
-        ("validate_bidengine_block", "pack_validate",    {"pack_path": "C:/Users/PC/safety-app/bid-engine/x"}, False, "deny_bid_engine"),
+        # generic deny(secret) — deny_private_project 는 런타임 owner deny 파일 필요(배포물 부재)라
+        # 항상 발동하는 'credential' 키워드로 사설-프로젝트 경로 모양의 deny 커버리지를 유지한다.
+        ("validate_private_project_block", "pack_validate", {"pack_path": "C:/Users/fixture-user/example-org/example-project/credentials.json"}, False, "deny_secret"),
         ("forbidden_write",      "opencrab_write",       {"pack_path": "examples/toy_project/p.json"}, False, "tool_not_exposed:forbidden"),
         ("forbidden_push",       "github_push",          {},                                           False, "tool_not_exposed:forbidden"),
         ("unknown_tool",         "do_something",         {},                                           False, "tool_not_exposed:unknown"),
@@ -1346,7 +1348,7 @@ def _selftest():
         ("save_dryrun_default",  "save_candidate",       {"text": _SAVE_CONVO, "indices": [1]},        True,  "dry-run preview"),
         # Phase 2 배치 A 조회(read) — ledger 없어도 graceful(executed=True). BINGGU_HOME=temp 라 운영 미접촉.
         ("recall_read_ok",       "recall",               {"query": "배포 절차"},                        True,  "read no-path"),
-        ("preflight_read_ok",    "preflight",            {"prompt": "이 입찰 검토"},                     True,  "read no-path"),
+        ("preflight_read_ok",    "preflight",            {"prompt": "이 프로젝트의 빌드 명령을 알려줘"}, True,  "read no-path"),
         ("trace_review_read_ok", "trace_review",         {},                                           True,  "read no-path"),
         ("trace_show_read_ok",   "trace_show",           {"node_id": "node:CONV:none"},                True,  "read no-path"),
         ("status_read_ok",       "status",               {},                                           True,  "read no-path"),
@@ -1375,7 +1377,7 @@ def _selftest():
         ("cloud_workflow_forbidden",    "opencrab_workflow_manage", {},                               False, "tool_not_exposed:forbidden"),
         # 작업3: why/contrast read(temp 홈 graceful empty) + 기록계열 write 함수 forbidden.
         ("why_read_ok",      "why",      {"query": "배포 절차"},                                       True,  "read no-path"),
-        ("contrast_read_ok", "contrast", {"prompt": "이 입찰 검토", "mandates": [
+        ("contrast_read_ok", "contrast", {"prompt": "이 프로젝트의 빌드 명령을 알려줘", "mandates": [
             {"clause_text": "대량 삭제는 승인 필수", "stance": "require",
              "source": "CLAUDE.md", "domain": "style"}]},                                             True,  "read no-path"),
         ("record_contrast_forbidden",   "record_contrast",   {}, False, "tool_not_exposed:forbidden"),
@@ -1582,7 +1584,7 @@ def _selftest():
     save_notes.append(("why_read_no_node_id_write0", s11))
 
     # S12) contrast — read·기록계열 미호출(recorded=False)·node_id 미노출.
-    r = handle_tool("contrast", {"prompt": "이 입찰 검토", "mandates": [
+    r = handle_tool("contrast", {"prompt": "이 프로젝트의 빌드 명령을 알려줘", "mandates": [
         {"clause_text": "대량 삭제는 승인 필수", "stance": "require",
          "source": "CLAUDE.md", "domain": "style"}]}, allow_root)
     tr = r.get("tool_result") or {}

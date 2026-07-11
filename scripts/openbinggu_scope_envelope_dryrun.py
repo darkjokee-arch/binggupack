@@ -16,7 +16,7 @@ BASE/reports/tmp/fixture 경로·m0/m1 sibling)을 잔류시킨 backward-compati
 재사용(무수정): watcher_op_m0._store_snapshot (운영 store mtime 불변 검증) ·
   watcher_batch_m1.scan_residual_pii (독립 PII 형태 scanner).
 실자료/private pack 0 · 외부전송 0 · OpenCrab/store/DB write 0 · apply/ingest/merge/production 0 ·
-hook/daemon 0 · v09/ARMED/push/bid-engine 0. 산출은 temp/synthetic only.
+hook/daemon 0 · v09/ARMED/push/example-project 0. 산출은 temp/synthetic only.
 
 CLI: python openbinggu_scope_envelope_dryrun.py --selftest
 """
@@ -229,16 +229,16 @@ def run_source_pointer_checks():
     # (name, pointers, expected_labels) — pointers 는 synthetic. dirty 케이스도 합성 형태.
     cases = [
         ("srcptr_synthetic_clean_ok", ["EVC-abc12345", "examples/toy/readme.md", "synthetic://node/n1"], ["clean", "clean", "clean"]),
-        ("srcptr_win_abspath_dirty", ["C:\\Users\\PC\\private\\notes.md"], ["dirty"]),
-        ("srcptr_file_uri_dirty", ["file:///C:/Users/PC/x.md"], ["dirty"]),
+        ("srcptr_win_abspath_dirty", ["C:\\Users\\fixture-user\\private\\notes.md"], ["dirty"]),
+        ("srcptr_file_uri_dirty", ["file:///C:/Users/fixture-user/x.md"], ["dirty"]),
         ("srcptr_unc_dirty", ["\\\\fileserver\\share\\doc.md"], ["dirty"]),
-        ("srcptr_unix_private_dirty", ["/home/pc/secret/key.md"], ["dirty"]),
+        ("srcptr_unix_private_dirty", ["/home/fixture-user/secret/key.md"], ["dirty"]),
         ("srcptr_localhost_dirty", ["http://localhost:8080/internal"], ["dirty"]),
         ("srcptr_internal_ip_dirty", ["http://192.168.0.10/api"], ["dirty"]),
         ("srcptr_internal_domain_dirty", ["https://wiki.internal/page"], ["dirty"]),
         ("srcptr_token_unknown", ["MASK_UNDECIDED_TOKEN"], ["unknown"]),
         ("srcptr_empty_unknown", [""], ["unknown"]),
-        ("srcptr_mixed_dirty", ["EVC-ok1", "C:\\Users\\PC\\leak.md"], ["clean", "dirty"]),
+        ("srcptr_mixed_dirty", ["EVC-ok1", "C:\\Users\\fixture-user\\leak.md"], ["clean", "dirty"]),
     ]
     results, ok = [], True
     for name, pointers, exp_labels in cases:

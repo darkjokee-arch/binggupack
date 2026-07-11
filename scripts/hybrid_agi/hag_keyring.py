@@ -9,7 +9,7 @@
 
 저장 경로 (★ git repo 밖)
   기본: ~/.binggupack/hybrid_agi/vault_secret
-  - binggupack git repo(C:/Users/PC/binggupack) **밖**의 사용자 홈 하위라
+  - binggupack git repo(C:/Users/fixture-user/binggupack) **밖**의 사용자 홈 하위라
     git 에 절대 올라가지 않는다(gitignore 불필요). 공개 소스엔 키가 없다.
   - secret 파일은 ledger.sqlite·capture_buffer.sqlite 와 **별도 경로**
     (hybrid_agi/ 하위)이며, 이 모듈은 그 운영 ledger 들을 절대 미접촉한다

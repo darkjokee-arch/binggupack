@@ -7,7 +7,7 @@
   "merge_policy": {"mode": "review", "target": "review", "cross_pack": "fuzzy"},
   "promotion_allowed_default": false,
   "status": "review_required",
-  "cross_pack_tags": ["bid-engine", "claude-hooks"],
+  "cross_pack_tags": ["example-project", "claude-hooks"],
   "risk_level": "medium",
   "created_from": "synthetic"
 }

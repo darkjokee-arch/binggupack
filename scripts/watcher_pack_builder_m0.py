@@ -210,7 +210,7 @@ def build_pack(diff_text, run, with_rationale=False, with_graph_preview=False,
         # write 위치 명시 (temp only)
         "write_locations": [str(pack_dir), str(REPORTS_DIR / ("watcher_pack_" + run + ".json"))],
         "production_write": 0, "store_write": 0, "apply": 0, "merge": 0, "push": 0,
-        "db_write": 0, "opencrab_call": 0, "opencrab_ingest": 0, "bid_engine_touch": 0,
+        "db_write": 0, "opencrab_call": 0, "opencrab_ingest": 0, "example_project_touch": 0,
         "edges_generated": 0, "review_queue_appended": 0,
         "reingest_pack_draft_modified": 0, "v09_or_armed_changed": 0,
     }
@@ -265,7 +265,7 @@ def run_source_pointer_link_check():
     clean only=ALLOW / dirty·unknown 1↑=BLOCK. raw 경로값 미출력(라벨·count·reason 만). 반환 (ok, results)."""
     samples = [
         ("clean", ["EVC-hash1", "examples/toy/a.md", "https://github.com/u/r"]),
-        ("dirty", ["C:\\Users\\PC\\private\\x.md"]),
+        ("dirty", ["C:\\Users\\fixture-user\\private\\x.md"]),
         ("dirty", ["file:///C:/p/x.md"]),
         ("dirty", ["http://localhost:9000/api"]),
         ("dirty", ["http://192.168.1.2/internal"]),

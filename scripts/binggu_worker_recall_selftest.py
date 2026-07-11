@@ -94,7 +94,7 @@ async function call(name, args) {
   ck("judgment_trace dangling→found false", d.found===false);
 }
 {
-  const r = await call("preflight_context", { prompt:"검증 없이 바로 배포하려고 한다 endpoint selftest", cwd:"/w/bid-engine" });
+  const r = await call("preflight_context", { prompt:"검증 없이 바로 배포하려고 한다 endpoint selftest", cwd:"/w/example-project" });
   ck("preflight 위험→중간↑+avoid(버그패턴)", (r.risk_level==="중간"||r.risk_level==="높음") && r.avoid_patterns.length>=1);
   ck("preflight 높음→needs_question+question", r.needs_question===true && r.question && r.question.includes("배포"));
   ck("preflight 선호 회수", r.preferences.some(p=>p.node_id==="node:t:n5"));

@@ -11,7 +11,7 @@
     → resolver.resolve(preview_items, 합성 decisions) → audit/buckets (production_write=False)
 
 무수정 재사용: openbinggu_review_queue_bridge / localbinggu_review_resolver / watcher_pack_builder_m0.
-금지(BLOCKED_BY_V09): apply/store/production write / OpenCrab / DB / github push / v09·ARMED / bid-engine /
+금지(BLOCKED_BY_V09): apply/store/production write / OpenCrab / DB / github push / v09·ARMED / example-project /
   resolver.write_reports(파일 reports write) 미호출 — resolve() 순수함수만.
 
 CLI:
@@ -221,7 +221,7 @@ def run_selftest():
         "tool": "openbinggu_pack_review_e2e.py", "phase": "pack→review queue→resolver e2e",
         "mode": "dry-run / selftest", "blocked_by_v09": True,
         "production_write": 0, "store_write": 0, "apply": 0, "opencrab_call": 0,
-        "db_write": 0, "github_push": 0, "bid_engine_touch": 0,
+        "db_write": 0, "github_push": 0, "example_project_touch": 0,
         "checks": checks, "gate": gate,
         "cases": [{"run": c["run"], "n_nodes": c["n_nodes"], "n_edges": c["n_edges"],
                    "review_queue_total": c["review_queue_total"],

@@ -12,7 +12,7 @@ contract 안전 규칙(전건 강제):
   - manifest visibility 없으면 기본 private/staging 처리.
   - 타 사용자 scope 접근 금지(현재 단일 사용자, scope 일치만 소비).
 
-금지(BLOCKED_BY_V09): pack write / 외부 모델 호출 / OpenCrab·store·DB·v09·ARMED·apply·push·bid-engine.
+금지(BLOCKED_BY_V09): pack write / 외부 모델 호출 / OpenCrab·store·DB·v09·ARMED·apply·push·example-project.
   유일한 write = reports/openbinggu_pack_consumer_smoke_selftest.json.
 
 CLI:
@@ -215,7 +215,7 @@ def run_selftest():
         "tool": "openbinggu_pack_consumer_smoke.py", "phase": "PoC P1 단일 로컬 consumer smoke",
         "mode": "dry-run / selftest", "blocked_by_v09": True, "external_model_call": 0,
         "pack_write": 0, "production_write": 0, "store_write": 0, "opencrab_call": 0,
-        "db_write": 0, "github_push": 0, "bid_engine_touch": 0,
+        "db_write": 0, "github_push": 0, "example_project_touch": 0,
         "checks": summary, "gate": gate, "cases": cases,
     }
     SELFTEST_REPORT.parent.mkdir(parents=True, exist_ok=True)

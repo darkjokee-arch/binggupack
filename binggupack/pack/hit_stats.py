@@ -325,10 +325,10 @@ def _selftest():
     mk_owner(db, "o3")
     cands = [{"id": "o3", "sentence_excerpt": "근거 A"}, {"id": "x9", "sentence_excerpt": "근거 B"}]
     r3 = record_stage1_selection(db, "o3", "o3", cands, {"o3": 0.9, "x9": 0.3}, ["EV1"],
-                                 {"actor": "human"}, "bid-engine", True, True, ts="2026-06-20T00:00:00Z")
+                                 {"actor": "human"}, "example-project", True, True, ts="2026-06-20T00:00:00Z")
     he3 = db.con.execute("SELECT domain,context_hash,decision_id FROM hit_events WHERE node_id='o3'").fetchone()
     rec(3, "record_stage1_selection: context_hash·domain·decision_id 봉인",
-        r3["recorded"] and he3[0] == "bid-engine" and he3[1] and he3[2])
+        r3["recorded"] and he3[0] == "example-project" and he3[1] and he3[2])
 
     # T4 실패 정의: resolved=False / abandoned=True → recorded False·이벤트 0
     mk_owner(db, "o4")

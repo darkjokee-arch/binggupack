@@ -347,9 +347,9 @@ def _selftest():
     # 4~7) BLOCK 경로들
     block_cases = [
         ("call_parent_block", "pack_build", {"input_dir": "../outside"}),
-        ("call_npki_block", "consumer_smoke", {"pack_path": "C:/Users/PC/AppData/NPKI/c.der"}),
+        ("call_npki_block", "consumer_smoke", {"pack_path": "C:/Users/fixture-user/AppData/NPKI/c.der"}),
         ("call_env_block", "publish_guard_dryrun", {"pack_path": "examples/toy_project/.env"}),
-        ("call_bidengine_block", "pack_validate", {"pack_path": "C:/Users/PC/safety-app/bid-engine/x"}),
+        ("call_private_project_block", "pack_validate", {"pack_path": "C:/Users/fixture-user/example-org/example-project/x"}),
     ]
     for nm, tool, args in block_cases:
         r = call({"jsonrpc": "2.0", "id": 9, "method": "tools/call",
@@ -437,7 +437,7 @@ def _selftest():
     _orig_handle_tool = handle_tool
 
     def _boom(name, targs, allow_root):
-        raise RuntimeError("BOOM C:/Users/PC/AppData/NPKI/secret.der must_not_leak")
+        raise RuntimeError("BOOM C:/Users/fixture-user/AppData/NPKI/secret.der must_not_leak")
 
     handle_tool = _boom
     try:
@@ -461,13 +461,13 @@ def _selftest():
     # 위 모든 call 결과를 한 번 더 모아 검사
     sample_calls = [
         call({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-              "params": {"name": "consumer_smoke", "arguments": {"pack_path": "C:/Users/PC/AppData/NPKI/secret.der"}}}),
+              "params": {"name": "consumer_smoke", "arguments": {"pack_path": "C:/Users/fixture-user/AppData/NPKI/secret.der"}}}),
         call({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
               "params": {"name": "pack_build", "arguments": {"input_dir": "../private_outside"}}}),
     ]
     for r in sample_calls:
         blob = json.dumps(r, ensure_ascii=False)
-        for tok in ["NPKI", "secret.der", "private_outside", "safety-app", "C:/Users"]:
+        for tok in ["NPKI", "secret.der", "private_outside", "example-org", "C:/Users"]:
             if tok in blob:
                 raw_leak = True
 

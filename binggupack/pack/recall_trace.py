@@ -426,7 +426,7 @@ def _selftest():
         CFG.save_user_config({"recall_config": {"trace_enabled": True}}, home=home)
         QUERY = "검증없이 바로 배포 " + SECRET_CLAIM
         res_pf = {"remember": recalled, "risk_level": "높음", "needs_question": True}
-        r_on = trace_from_preflight(QUERY, res_pf, TS, domain="bid-engine", home=home)
+        r_on = trace_from_preflight(QUERY, res_pf, TS, domain="example-project", home=home)
         ck(r_on["status"] == "ok" and r_on["recorded"] and r_on["n_nodes"] == 2,
            "opt-in ON → trace 기록(n_nodes=2)")
         tid = r_on["trace_id"]
@@ -448,7 +448,7 @@ def _selftest():
            "저장 메타 = node_id/category/rank/relevance 만(원문 키 0)")
 
         # ── 멱등: 같은 입력 재기록 → trace_id 동일·중복 INSERT 0 ──
-        r_dup = trace_from_preflight(QUERY, res_pf, TS, domain="bid-engine", home=home)
+        r_dup = trace_from_preflight(QUERY, res_pf, TS, domain="example-project", home=home)
         con = _open_store(home)
         n_tr = con.execute("SELECT COUNT(*) FROM recall_traces").fetchone()[0]
         con.close()

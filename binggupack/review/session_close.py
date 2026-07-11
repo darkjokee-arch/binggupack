@@ -488,13 +488,13 @@ def _selftest():
         try:
             (home / "capture_enabled").write_text("1", encoding="utf-8")
             (home / "capture_scope.json").write_text(json.dumps({
-                "allowed_cwd_prefixes": ["C:/Users/PC/binggupack"],
-                "denied_cwd_substrings": ["bid-engine"],
+                "allowed_cwd_prefixes": ["C:/Users/fixture-user/binggupack"],
+                "denied_cwd_substrings": ["example-project"],
             }, ensure_ascii=False), encoding="utf-8")
             from binggu_capture_persist import PersistentCaptureBuffer
             b = PersistentCaptureBuffer(home=home)
-            b.feed("B안으로 결정한다", "C:/Users/PC/binggupack")
-            b.feed("이 패턴은 항상 버그를 유발한다는 교훈", "C:/Users/PC/binggupack")
+            b.feed("B안으로 결정한다", "C:/Users/fixture-user/binggupack")
+            b.feed("이 패턴은 항상 버그를 유발한다는 교훈", "C:/Users/fixture-user/binggupack")
             pv = _build_preview(home=home)
             buf_ok = pv["available"] and pv["count"] >= 1
             # candidate-only: ledger 미생성(저장 0)
@@ -530,7 +530,7 @@ def _selftest():
 
         # T11 process 통합: 비-close → summary None / close → summary+rendered
         p_no = process({"model_detected_close": False, "utterance": "고쳐줘"}, home=home)
-        p_yes = process({"model_detected_close": True}, home=home, cwd="C:/Users/PC/binggupack")
+        p_yes = process({"model_detected_close": True}, home=home, cwd="C:/Users/fixture-user/binggupack")
         check(p_no["summary"] is None and p_yes["summary"] is not None
               and isinstance(p_yes["rendered"], str),
               "T11 process: 비-close→summary None · close→summary+rendered")

@@ -36,14 +36,14 @@ def run():
        "BINGGU_HOME posix")
 
     # ---- 우선순위 2: 미설정 → OS별 홈/.binggupack ----
-    ck("default_linux", P.binggu_home(env={"HOME": "/home/u"}, os_name="linux") == "/home/u/.binggupack",
+    ck("default_linux", P.binggu_home(env={"HOME": "/home/fixture-user"}, os_name="linux") == "/home/fixture-user/.binggupack",
        "linux 글로벌 fallback")
-    ck("default_macos", P.binggu_home(env={"HOME": "/Users/u"}, os_name="macos") == "/Users/u/.binggupack",
+    ck("default_macos", P.binggu_home(env={"HOME": "/Users/fixture-user"}, os_name="macos") == "/Users/fixture-user/.binggupack",
        "macos 글로벌 fallback")
     ck("default_windows",
-       P.binggu_home(env={"USERPROFILE": "C:\\Users\\PC"}, os_name="windows") == "C:\\Users\\PC\\.binggupack",
+       P.binggu_home(env={"USERPROFILE": "C:\\Users\\fixture-user"}, os_name="windows") == "C:\\Users\\fixture-user\\.binggupack",
        "windows %USERPROFILE%")
-    ck("default_wsl", P.binggu_home(env={"HOME": "/home/w"}, os_name="wsl") == "/home/w/.binggupack",
+    ck("default_wsl", P.binggu_home(env={"HOME": "/home/fixture-user"}, os_name="wsl") == "/home/fixture-user/.binggupack",
        "wsl 글로벌 fallback")
 
     # ---- default_ledger = home/ledger.sqlite ----
@@ -64,14 +64,14 @@ def run():
 
     # ---- 현행 미지원 고정 (정직): BINGGUPACK_LEDGER 미반영 ----
     # env에 BINGGUPACK_LEDGER 넣어도 binggu_home은 BINGGU_HOME/글로벌만 본다(현행).
-    hb = P.binggu_home(env={"BINGGUPACK_LEDGER": "/other/led.sqlite", "HOME": "/home/u"}, os_name="linux")
-    ck("BINGGUPACK_LEDGER_not_supported", hb == "/home/u/.binggupack",
+    hb = P.binggu_home(env={"BINGGUPACK_LEDGER": "/other/led.sqlite", "HOME": "/home/fixture-user"}, os_name="linux")
+    ck("BINGGUPACK_LEDGER_not_supported", hb == "/home/fixture-user/.binggupack",
        "BINGGUPACK_LEDGER 미반영(현행 — 글로벌 fallback)")
 
     # ---- 현행 미지원 고정: project .binggupack 자동탐색 없음 (CWD 무관) ----
     # binggu_home은 CWD를 보지 않는다(자동 추측 금지 = 안전). env만으로 결정.
-    h_cwd1 = P.binggu_home(env={"HOME": "/home/u"}, os_name="linux")
-    ck("no_project_autodiscover", h_cwd1 == "/home/u/.binggupack",
+    h_cwd1 = P.binggu_home(env={"HOME": "/home/fixture-user"}, os_name="linux")
+    ck("no_project_autodiscover", h_cwd1 == "/home/fixture-user/.binggupack",
        "project .binggupack 자동탐색 없음(CWD 무관·자동추측 금지)")
 
     # ---- shared_opt_in: BINGGU_HOME 유무 ----

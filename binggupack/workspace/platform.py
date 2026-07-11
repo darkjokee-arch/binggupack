@@ -133,7 +133,7 @@ def shared_opt_in(env=None):
 # ---------------- 경로 표시/안내 변환 (자동 마이그레이션 절대 금지 — 문자열만) ----------------
 
 def to_wsl_path(win_path):
-    r"""C:\\Users\\PC\\.binggupack → /mnt/c/Users/PC/.binggupack (표시/안내용만)."""
+    r"""C:\\Users\\<user>\\.binggupack → /mnt/c/Users/<user>/.binggupack (표시/안내용만)."""
     p = ntpath.splitdrive(win_path)
     drive, rest = p[0], p[1]
     if drive and drive.endswith(":"):
@@ -144,7 +144,7 @@ def to_wsl_path(win_path):
 
 
 def from_wsl_path(wsl_path):
-    r"""/mnt/c/Users/PC/.binggupack → C:\\Users\\PC\\.binggupack (표시/안내용만)."""
+    r"""/mnt/c/Users/<user>/.binggupack → C:\\Users\\<user>\\.binggupack (표시/안내용만)."""
     parts = [p for p in wsl_path.split("/") if p != ""]
     if len(parts) >= 2 and parts[0] == "mnt" and len(parts[1]) == 1:
         drive = parts[1].upper() + ":"

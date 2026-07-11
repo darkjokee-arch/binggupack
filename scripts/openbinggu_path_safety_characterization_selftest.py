@@ -50,8 +50,38 @@ def run():
     ck("short_8_3", block_is("examples/PROGRA~1/app.py", "short_8_3"), "8.3 단축명")
     ck("deny_secret_env", block_is("examples/toy_project/.env", "deny_secret"), ".env")
     ck("deny_secret_key", block_is("examples/keys/id_rsa", "deny_secret"), "private key")
-    ck("deny_bid_engine", block_is("C:/Users/PC/safety-app/bid-engine/x.py", "deny_bid_engine"), "bid-engine")
-    ck("deny_cert_npki", block_is("C:/Users/PC/NPKI/yessign/cert.der", "deny_cert_npki"), "NPKI 인증서")
+    # 소유자 사설 프로젝트 deny(deny_private_project): repo 밖 owner-only 파일에서 런타임 로드
+    #   (배포물엔 실제 토큰 없음). synthetic 토큰(example-project)으로 판정 고정 — owner 실제 값 미사용.
+    #   고유 temp 경로 env 라 gate 내부 경로별 캐시와 무관(fresh load). 검증 후 원복.
+    import shutil as _sh
+    import tempfile as _tf
+    _pp_dir = _tf.mkdtemp(prefix="s2char_pp_")
+    _pp_file = os.path.join(_pp_dir, "deny_tokens.txt")
+    with open(_pp_file, "w", encoding="utf-8") as _f:
+        _f.write("# synthetic owner deny (characterization)\nexample-project\n")
+    _saved_pd = os.environ.get("BINGGU_PRIVATE_DENY")
+    try:
+        os.environ["BINGGU_PRIVATE_DENY"] = _pp_file
+        try:                                          # gate 내부 캐시 무효화(있으면·없어도 무관)
+            from binggupack.safety.path_safety import _OWNER_DENY_CACHE as _odc
+            _odc.clear()
+        except Exception:
+            pass
+        ck("deny_private_project",
+           block_is("examples/example-project/x.py", "deny_private_project"),
+           "소유자 사설 프로젝트(런타임 deny 토큰)")
+    finally:
+        if _saved_pd is None:
+            os.environ.pop("BINGGU_PRIVATE_DENY", None)
+        else:
+            os.environ["BINGGU_PRIVATE_DENY"] = _saved_pd
+        try:
+            from binggupack.safety.path_safety import _OWNER_DENY_CACHE as _odc2
+            _odc2.clear()
+        except Exception:
+            pass
+        _sh.rmtree(_pp_dir, ignore_errors=True)
+    ck("deny_cert_npki", block_is("C:/Users/fixture-user/NPKI/yessign/cert.der", "deny_cert_npki"), "NPKI 인증서")
     ck("deny_opencrab", block_is("data/localcrab_index.sqlite", "deny_opencrab_store"), "opencrab store")
     ck("symlink_junction", block_is("examples/toy_project/linked/x", "symlink_junction", slink=True), "symlink 주입")
     ck("empty_unknown", block_is("   ", "empty_unknown"), "빈 입력 fail-closed")
@@ -78,7 +108,7 @@ def run():
 
     # ---- raw 경로 미노출 (path_id 에 원본 substring 없음) ----
     leak = False
-    for inp in ["examples/toy_project/.env", "C:/Users/PC/safety-app/bid-engine/x.py", "../secret.txt"]:
+    for inp in ["examples/toy_project/.env", "C:/Users/fixture-user/example-org/example-project/x.py", "../secret.txt"]:
         r = verdict(inp)
         if any(isinstance(v, str) and inp.strip() in v for v in r.values()):
             leak = True; break
