@@ -133,7 +133,10 @@ class StagingDB:
                 h.update(_canon(json.dumps(row, ensure_ascii=False)))
         return h.hexdigest()[:16]
 
-    def audit_append(self, actor, action, pack_id, result, reason, before, after, ts=None):
+    def audit_append(self, actor, action, pack_id, result, reason, before, after, ts=None, commit=True):
+        """audit chain 1행 append. commit=False → con.commit() 생략(단일 외부 트랜잭션 안에서
+        여러 audit 를 누적할 때 · P1-B.1 crash-atomic bundle). 같은 con 이므로 후속 append 의
+        prev_audit_hash 는 uncommitted 최신 행을 그대로 읽어 체인 연속성 유지."""
         ts = _now_iso(ts)
         prev = self.con.execute("SELECT entry_hash FROM audit_log ORDER BY seq DESC LIMIT 1").fetchone()
         prev = prev[0] if prev else "GENESIS"
@@ -146,7 +149,8 @@ class StagingDB:
         n = self.con.execute("SELECT count(*) FROM audit_log").fetchone()[0]
         self.con.execute("INSERT OR REPLACE INTO audit_meta(key,value) VALUES('entry_count',?)", (str(n),))
         self.con.execute("INSERT OR REPLACE INTO audit_meta(key,value) VALUES('head_entry_hash',?)", (eh,))
-        self.con.commit()
+        if commit:
+            self.con.commit()
 
     def verify_chain(self):
         prev = "GENESIS"
@@ -205,6 +209,26 @@ def c2_check(db, pack, ctx):
     return None
 
 
+def apply_pack_in_txn(db, pack, now_iso):
+    """★P1-B.1: 단일 열린 트랜잭션 안에서 pack INSERT(nodes/edges/evidence/applied_registry).
+    BEGIN/COMMIT/snapshot/audit 없음 — 호출자가 단일 트랜잭션 경계·audit 를 관리한다.
+    staging_apply(단건)와 commit_bundle(묶음 crash-atomic)의 유일한 INSERT SQL 원천(schema drift 방지).
+    반환 content_hash."""
+    ch = _hash(pack["content"])
+    for n in pack["nodes"]:
+        # speaker(owner/ai/None)는 pack node dict 에서 일원화해 적재(ctx 아님). 미지정=None(NULL).
+        db.con.execute("INSERT INTO nodes(node_id,node_type,sentence,candidate,promotion_allowed,state,pack_id,content_hash,created_at,semantic_subtype,speaker) VALUES(?,?,?,1,0,'active',?,?,?,?,?)",
+                       (n["id"], n["type"], n["sentence"], pack["pack_id"], ch, now_iso, n.get("semantic_subtype"), n.get("speaker")))
+    for e in pack["edges"]:
+        db.con.execute("INSERT INTO edges(edge_id,relation,source,target,candidate,state,evidence_refs,pack_id,content_hash,created_at) VALUES(?,?,?,?,1,'active',?,?,?,?)",
+                       (e["id"], e["relation"], e["source"], e["target"], json.dumps(e["evidence_refs"]), pack["pack_id"], ch, now_iso))
+    for ev in pack["evidence"]:
+        db.con.execute("INSERT INTO evidence(evidence_id,sentence,source_pointer_id,source_hash,redaction_policy,pack_id,created_at) VALUES(?,?,?,?,?,?,?)",
+                       (ev["id"], ev["sentence"], ev.get("source_pointer_id","sp"), ev.get("source_hash"), ev.get("redaction_policy"), pack["pack_id"], now_iso))
+    db.con.execute("INSERT INTO applied_registry VALUES(?,?,?)", (pack["pack_id"], ch, now_iso))
+    return ch
+
+
 def staging_apply(db, pack, ctx, snap_dir, ts=None):
     """C-2 통과 후 transaction insert. checksum/WAL 중단 시 rollback."""
     before = db.store_checksum()
@@ -215,21 +239,11 @@ def staging_apply(db, pack, ctx, snap_dir, ts=None):
     with db.write_lock():
         # backup (commit 직전) — checkpoint 포함 표준 스냅샷
         snap = db.snapshot(snap_dir, "snap_" + _hash(before))
-        ch = _hash(pack["content"])
         now = _now_iso(ts)
         try:
             db.con.execute("BEGIN")
-            for n in pack["nodes"]:
-                # speaker(owner/ai/None)는 pack node dict 에서 일원화해 적재(ctx 아님). 미지정=None(NULL).
-                db.con.execute("INSERT INTO nodes(node_id,node_type,sentence,candidate,promotion_allowed,state,pack_id,content_hash,created_at,semantic_subtype,speaker) VALUES(?,?,?,1,0,'active',?,?,?,?,?)",
-                               (n["id"], n["type"], n["sentence"], pack["pack_id"], ch, now, n.get("semantic_subtype"), n.get("speaker")))
-            for e in pack["edges"]:
-                db.con.execute("INSERT INTO edges(edge_id,relation,source,target,candidate,state,evidence_refs,pack_id,content_hash,created_at) VALUES(?,?,?,?,1,'active',?,?,?,?)",
-                               (e["id"], e["relation"], e["source"], e["target"], json.dumps(e["evidence_refs"]), pack["pack_id"], ch, now))
-            for ev in pack["evidence"]:
-                db.con.execute("INSERT INTO evidence(evidence_id,sentence,source_pointer_id,source_hash,redaction_policy,pack_id,created_at) VALUES(?,?,?,?,?,?,?)",
-                               (ev["id"], ev["sentence"], ev.get("source_pointer_id","sp"), ev.get("source_hash"), ev.get("redaction_policy"), pack["pack_id"], now))
-            # WAL/transaction 중단 주입
+            apply_pack_in_txn(db, pack, now)  # nodes/edges/evidence/applied_registry (단일 SQL 원천)
+            # WAL/transaction 중단 주입 (ROLLBACK 이 applied_registry 포함 전체 원복 — 최종 상태 동일)
             if ctx.get("wal_abort"):
                 db.con.execute("ROLLBACK")
                 db.audit_append(ctx.get("actor","human"), "insert", pack["pack_id"], "ROLLBACK", "sqlite_wal_incomplete", before, db.store_checksum(), ts=ts)
@@ -239,7 +253,6 @@ def staging_apply(db, pack, ctx, snap_dir, ts=None):
                 db.con.execute("ROLLBACK")
                 db.audit_append(ctx.get("actor","human"), "insert", pack["pack_id"], "ROLLBACK", "sqlite_checksum_mismatch", before, db.store_checksum(), ts=ts)
                 return {"applied": False, "reason": "sqlite_checksum_mismatch", "button": "disabled"}
-            db.con.execute("INSERT INTO applied_registry VALUES(?,?,?)", (pack["pack_id"], ch, now))
             db.con.execute("COMMIT")
         except Exception as ex:
             db.con.execute("ROLLBACK")
