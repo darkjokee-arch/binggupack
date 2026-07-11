@@ -25,6 +25,44 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) 
 # 트랙 C(C4): 핸들러 정본은 binggupack.mcp facade 경유. scripts 직접 import 도 호환(facade 재노출).
 from binggupack.mcp import handle_tool, TOOLS, _FORBIDDEN  # noqa: E402
 
+# ── MCP exposure profiles (v1.20-B MCP Front Door) ─────────────────────────────────
+# core = 신규 사용자 기본(작고 명확한 표면). advanced = 기존 전체 노출(현행 동작 불변).
+# profile 은 서버 프로세스 시작 시 한 번 결정되고 이후 불변 — 요청/env 로 승격 불가(ambient override 0).
+# 노출 판단은 오직 이 정적 집합으로만 — 새 tool/alias/handler 를 만들지 않는다.
+CORE_TOOLS = frozenset({
+    # Read
+    "status", "recall", "why", "trace_show", "preflight", "list", "reminders", "capture_preview",
+    # Consent-gated mutation (write-gated · dry-run 기본 · owner 승인 이벤트)
+    "save_candidate", "pair", "deprecate", "replace",
+})
+_PROFILES = ("core", "advanced")
+_EXPOSED_MODES = ("read", "dry-run", "write-gated")
+
+
+def _advanced_tools():
+    """advanced 노출 집합 = 현행 필터(read/dry-run/write-gated)와 동일 소스(하드코딩 개수 0)."""
+    return frozenset(n for n, s in TOOLS.items() if s["mode"] in _EXPOSED_MODES)
+
+
+def exposed_tools(profile):
+    """profile 이 노출하는 도구 집합. core=CORE_TOOLS(전부 advanced 부분집합·아래 검증) / advanced=전체."""
+    if profile == "core":
+        return frozenset(CORE_TOOLS)
+    return _advanced_tools()
+
+
+def tool_in_profile(profile, name):
+    """name 이 profile 노출 집합에 포함되는지."""
+    return name in exposed_tools(profile)
+
+
+def core_profile_invalid():
+    """core 목록 중 레지스트리에 없거나 노출 불가 mode 인 도구(비면 유효). 새 tool 을 만들지 않고
+    불일치를 CORE_PROFILE_INVALID 로 드러내기 위한 검증 훅(startup/selftest/test 에서 확인)."""
+    adv = _advanced_tools()
+    return frozenset(n for n in CORE_TOOLS if n not in adv)
+
+
 _TOOL_DESC = {
     "pack_build": "로컬 자료로 candidate pack 빌드(dry-run, temp)",
     "pack_validate": "pack 검증(read)",
@@ -67,12 +105,16 @@ def _err(rid, code, message):
     return {"jsonrpc": "2.0", "id": rid, "error": {"code": code, "message": message}}
 
 
-def _list_tools():
-    # read/dry-run 도구만. 위험 도구는 TOOLS 부재로 자연 제외. description 에 경로/secret 없음.
+def _list_tools(profile="advanced"):
+    # read/dry-run/write-gated 도구 중 profile 노출 집합만. 위험 도구는 TOOLS 부재로 자연 제외.
+    # profile 은 schema/description 을 바꾸지 않고 '노출 여부'만 결정 — 동일 tool 은 두 profile 에서 byte-equal.
+    exp = exposed_tools(profile)
     out = []
     for name, spec in TOOLS.items():
-        if spec["mode"] not in ("read", "dry-run", "write-gated"):
+        if spec["mode"] not in _EXPOSED_MODES:
             continue  # 방어: read/dry-run/write-gated 외 노출 금지(write-gated=confirm+actor 게이트 단건)
+        if name not in exp:
+            continue  # profile 미노출(core 에서 advanced 전용 도구 숨김)
         props = {p: {"type": "string", "description": f"{p} (작업 폴더 내 경로)"}
                  for p in spec["path_params"]}
         req = list(spec["path_params"])
@@ -117,8 +159,12 @@ def _sanitize(r):
     return out
 
 
-def handle_jsonrpc(req, allow_root):
-    """JSON-RPC 1건 처리. raw 미출력. malformed 안전 처리."""
+def handle_jsonrpc(req, allow_root, profile="advanced", server_name="openbinggu"):
+    """JSON-RPC 1건 처리. raw 미출력. malformed 안전 처리.
+
+    profile: 노출 도구 집합(core|advanced). server_name: initialize serverInfo.name.
+    기본값(advanced/openbinggu)은 현행 legacy 동작과 정확히 동일 — stdio/HTTP 공용 경로.
+    """
     if not isinstance(req, dict):
         return _err(None, -32600, "invalid request (not an object)")
     rid = req.get("id")
@@ -137,11 +183,11 @@ def handle_jsonrpc(req, allow_root):
         #   30s timeout) 하는 것을 방지. 미지정 시 기본 2024-11-05.
         client_ver = params.get("protocolVersion") if isinstance(params, dict) else None
         return _ok(rid, {"protocolVersion": client_ver or "2024-11-05",
-                         "serverInfo": {"name": "openbinggu", "version": "0.1-candidate"},
+                         "serverInfo": {"name": server_name, "version": "0.1-candidate"},
                          "capabilities": {"tools": {"listChanged": False}}})
 
     if method in ("tools/list", "list_tools"):
-        return _ok(rid, {"tools": _list_tools()})
+        return _ok(rid, {"tools": _list_tools(profile)})
 
     if method in ("tools/call", "call_tool"):
         name = params.get("name")
@@ -152,6 +198,17 @@ def handle_jsonrpc(req, allow_root):
             targs = {}
         if not isinstance(targs, dict):
             return _err(rid, -32602, "invalid arguments")
+        # profile enforcement (tools/list 뿐 아니라 tools/call 도 차단) — 등록된 도구인데 현 profile 에
+        # 미노출이면 handle_tool 호출 전에 차단(executed_write 0·ledger 0·network 0·raw 0). 미등록
+        # (forbidden/unknown)은 기존 handle_tool 경로 유지(tool_not_exposed REJECT) — advanced 동작 불변.
+        if name in TOOLS and not tool_in_profile(profile, name):
+            blocked = {"tool": name, "verdict": "REJECT", "executed": False,
+                       "reason_code": "tool_not_in_profile"}
+            result = {"content": [{"type": "text",
+                                   "text": json.dumps(blocked, ensure_ascii=False)}],
+                      "structuredContent": blocked, "isError": True}
+            result.update(blocked)
+            return _ok(rid, result)
         try:
             r = handle_tool(name, targs, allow_root)
             sanitized = _sanitize(r)
@@ -171,7 +228,7 @@ def handle_jsonrpc(req, allow_root):
     return _err(rid, -32601, "method not found: " + method)
 
 
-def serve_stdio(allow_root):
+def serve_stdio(allow_root, profile="advanced", server_name="openbinggu"):
     """실 stdio JSON-RPC 루프 (initialize/tools/list/tools/call → handle_jsonrpc → handle_tool).
 
     정식 구현. .mcp.json/.claude.json 에 `python openbinggu_mcp_server.py --serve <ROOT>` 엔트리 추가는
@@ -219,7 +276,7 @@ def serve_stdio(allow_root):
             sys.stdout.flush()
             continue
         try:
-            resp = handle_jsonrpc(req, allow_root)
+            resp = handle_jsonrpc(req, allow_root, profile=profile, server_name=server_name)
         except Exception as e:
             _wire("handle EXC=%s" % type(e).__name__)
             rid = req.get("id") if isinstance(req, dict) else None
@@ -240,7 +297,7 @@ def serve_stdio(allow_root):
     _wire("=== END ===")
 
 
-def serve_http(allow_root, port, path_token):
+def serve_http(allow_root, port, path_token, profile="advanced", server_name="openbinggu"):
     """로컬 HTTP JSON-RPC 서버 (Cloudflare Tunnel 뒤에서 웹/앱 커넥터에 로컬 MCP 그대로 노출).
 
     - 127.0.0.1 바인드: 인바운드 포트를 직접 열지 않는다(외부 노출은 터널이 담당).
@@ -278,7 +335,7 @@ def serve_http(allow_root, port, path_token):
                 self._send(400, json.dumps(_err(None, -32700, "parse error")))
                 return
             try:
-                resp = handle_jsonrpc(req, allow_root)
+                resp = handle_jsonrpc(req, allow_root, profile=profile, server_name=server_name)
             except Exception as e:
                 rid = req.get("id") if isinstance(req, dict) else None
                 resp = _err(rid, -32603, "internal error: " + type(e).__name__)
@@ -299,7 +356,7 @@ def serve_http(allow_root, port, path_token):
 
 # ---------------- selftest ----------------
 
-def _selftest():
+def _selftest(profile="advanced", server_name="openbinggu"):
     allow_root = os.path.normpath(os.path.join(os.environ.get("TEMP", "/tmp"),
                                                "openbinggu_path_safety_allow_root"))
     # 조회(read) 도구가 운영 ledger 미접촉·결정성 갖도록 BINGGU_HOME 을 존재하지 않는 temp 로 강제.
@@ -312,32 +369,60 @@ def _selftest():
     # server_handlers selftest 와 동일 가드 — 7/9 cloud_recall 자동스코프 fallback 이 이 격리를 우회하던 것 봉합.
     os.environ["BINGGU_CLOUD_MCP_NO_FALLBACK"] = "1"
     print("=" * 72)
-    print("OpenBinggu MCP server (stdio JSON-RPC) wrapper (synthetic / selftest)")
+    print("BingguPack MCP server (stdio JSON-RPC) wrapper (synthetic / selftest)")
+    print("  profile=%s  serverInfo.name=%s" % (profile, server_name))
     print("=" * 72)
 
     all_ok = True
     raw_leak = False
 
     def call(req):
-        return handle_jsonrpc(req, allow_root)
+        return handle_jsonrpc(req, allow_root, profile=profile, server_name=server_name)
 
     checks = []
 
-    # 1) initialize
-    r = call({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
-    checks.append(("initialize", "result" in r and r["result"]["serverInfo"]["name"] == "openbinggu"))
+    # 0) core profile 유효성(존재하지 않는 tool 을 core 에 넣지 않았는지) — 비면 유효.
+    checks.append(("core_profile_valid", not core_profile_invalid()))
 
-    # 2) tools/list — read/dry-run/write-gated 만, forbidden 없음, save_candidate 노출
+    # 1) initialize — serverInfo.name 은 entrypoint(server_name) 에 따른다(legacy=openbinggu·canonical=binggupack)
+    r = call({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
+    checks.append(("initialize_server_name", "result" in r
+                   and r["result"]["serverInfo"]["name"] == server_name))
+
+    # 2) tools/list — 선택 profile 노출 집합과 정확히 일치, forbidden 없음, 노출 mode 만
     r = call({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
     tools = r.get("result", {}).get("tools", [])
     names = {t["name"] for t in tools}
-    # mode 는 tools/list 응답 최상위에 더 이상 없음(MCP 표준 필드만) → TOOLS 소스에서 검증.
-    list_ok = (all(TOOLS[t["name"]]["mode"] in ("read", "dry-run", "write-gated") for t in tools)
-               and names == set(TOOLS.keys())
+    # mode 는 tools/list 응답 최상위에 없음(MCP 표준 필드만) → TOOLS 소스에서 검증.
+    list_ok = (all(TOOLS[t["name"]]["mode"] in _EXPOSED_MODES for t in tools)
+               and names == exposed_tools(profile)
                and "save_candidate" in names
                and not (names & _FORBIDDEN))
-    checks.append(("tools_list_read_dryrun_writegated_only", list_ok))
+    checks.append(("tools_list_matches_profile", list_ok))
 
+    # 3+) profile 별 심화 검사. advanced=현행 전체(불변) / core=허용 도구 동작 + 숨긴 도구 차단.
+    if profile == "core":
+        raw_leak = _core_deep_checks(call, checks) or raw_leak
+    else:
+        raw_leak = _advanced_deep_checks(call, checks) or raw_leak
+
+    for nm, ok in checks:
+        all_ok = all_ok and ok
+        print("  [%s] %s" % ("OK" if ok else "FAIL", nm))
+
+    print("\n  raw_path_not_leaked:", (not raw_leak))
+    print("  serve_stdio: IMPLEMENTED (initialize/tools/list/tools/call). 실 설정 등록은 owner")
+    print("  save_default_dry_run: True  real_ledger_write: 0 (selftest=handle_jsonrpc, temp/mock only)")
+    print("  operating_store_unchanged: True (wrapper + mock, 운영 ledger write 0)")
+
+    gate = "GO" if (all_ok and not raw_leak) else "NO-GO"
+    print("\n  GATE:", gate)
+    sys.exit(0 if gate == "GO" else 1)
+
+
+def _advanced_deep_checks(call, checks):
+    """advanced profile 심화 검사(현행 legacy selftest 그대로). raw_leak 여부 반환."""
+    raw_leak = False
     # 3) call pack_validate toy → ALLOW executed
     r = call({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
               "params": {"name": "pack_validate", "arguments": {"pack_path": "examples/toy_project/p.json"}}})
@@ -470,38 +555,111 @@ def _selftest():
         for tok in ["NPKI", "secret.der", "private_outside", "example-org", "C:/Users"]:
             if tok in blob:
                 raw_leak = True
-
-    for nm, ok in checks:
-        all_ok = all_ok and ok
-        print("  [%s] %s" % ("OK" if ok else "FAIL", nm))
-
-    print("\n  raw_path_not_leaked:", (not raw_leak))
-    print("  serve_stdio: IMPLEMENTED (initialize/tools/list/tools/call). 실 설정 등록은 owner")
-    print("  save_default_dry_run: True  real_ledger_write: 0 (selftest=handle_jsonrpc, temp/mock only)")
-    print("  operating_store_unchanged: True (wrapper + mock, 운영 ledger write 0)")
-
-    gate = "GO" if (all_ok and not raw_leak) else "NO-GO"
-    print("\n  GATE:", gate)
-    sys.exit(0 if gate == "GO" else 1)
+    return raw_leak
 
 
-def main():
+def _core_deep_checks(call, checks):
+    """core profile 심화 검사 — 허용 도구는 advanced 와 동일 동작, 숨긴(advanced 전용) 도구는
+    handler 전 차단(tool_not_in_profile·executed 0·write 0·network 0). raw_leak 여부 반환."""
+    raw_leak = False
+
+    # C1) 허용 read 도구(status) — advanced 와 동일하게 ALLOW·executed.
+    r = call({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+              "params": {"name": "status", "arguments": {}}})
+    res = r.get("result", {})
+    checks.append(("core_status_read_ok",
+                   res.get("executed") is True and res.get("verdict") == "ALLOW"))
+
+    # C2) 허용 read 도구(recall) — query 필수·empty graceful.
+    r = call({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+              "params": {"name": "recall", "arguments": {"query": "배포 절차"}}})
+    res = r.get("result", {})
+    checks.append(("core_recall_read_ok",
+                   res.get("executed") is True and res.get("verdict") == "ALLOW"))
+
+    # C3) 허용 write-gated(save_candidate) — dry-run 기본 write 0(PREVIEW).
+    r = call({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+              "params": {"name": "save_candidate",
+                         "arguments": {"text": "이 문서는 배포 절차를 정의한다.", "indices": [1]}}})
+    res = r.get("result", {})
+    tr = res.get("tool_result") or {}
+    checks.append(("core_save_dryrun_write0",
+                   res.get("executed") is True and tr.get("executed_write") is False
+                   and tr.get("verdict") == "PREVIEW"))
+
+    # C4) 허용 write-gated(pair) — dry-run 기본 write 0(PREVIEW).
+    r = call({"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+              "params": {"name": "pair", "arguments": {"owner_text": "이 방향으로 가자"}}})
+    res = r.get("result", {})
+    tr = res.get("tool_result") or {}
+    checks.append(("core_pair_dryrun_write0",
+                   res.get("executed") is True and tr.get("executed_write") is False
+                   and tr.get("verdict") == "PREVIEW"))
+
+    # C5) 숨긴(advanced 전용) 도구 tools/call 직접 호출 → handler 전 차단(tool_not_in_profile).
+    #     pack_validate=파일 도구·cloud_recall=네트워크 도구 → 차단 시 write 0·network 0.
+    for nm, hidden in (("core_hidden_pack_validate_blocked", "pack_validate"),
+                       ("core_hidden_cloud_recall_blocked", "cloud_recall")):
+        r = call({"jsonrpc": "2.0", "id": 5, "method": "tools/call",
+                  "params": {"name": hidden, "arguments": {"pack_path": "examples/toy_project/p.json",
+                                                           "query": "x"}}})
+        res = r.get("result", {})
+        checks.append((nm, res.get("executed") is False
+                       and res.get("reason_code") == "tool_not_in_profile"
+                       and (res.get("tool_result") in (None, {}))))
+
+    # C6) malformed 안전 처리(공용).
+    r = call({"jsonrpc": "2.0", "id": 6})
+    checks.append(("core_malformed_missing_method", "error" in r and r["error"]["code"] == -32600))
+    return raw_leak
+
+
+def _extract_profile(args, default):
+    """argv 에서 `--profile core|advanced` 를 additive 로 추출(위치 무관). 나머지 인자는 그대로 반환.
+    잘못된/누락 값은 write 없이 exit 2. --profile 미지정 시 default(entrypoint 별 기본)."""
+    if "--profile" not in args:
+        return default, args
+    i = args.index("--profile")
+    val = args[i + 1] if i + 1 < len(args) else None
+    if val not in _PROFILES:
+        print("invalid --profile (core|advanced)")
+        sys.exit(2)
+    return val, args[:i] + args[i + 2:]
+
+
+def _main(default_profile, server_name, prog):
+    """공통 진입. --profile 만 additive — root/port/path-token 처리·기존 --selftest/--serve/--http 무변."""
     args = sys.argv[1:]
+    profile, args = _extract_profile(args, default_profile)
     if not args or args[0] == "--selftest":
-        _selftest()
+        _selftest(profile=profile, server_name=server_name)
     elif args[0] == "--serve" and len(args) >= 2:
         # 실 stdio 서버: 등록/공개는 별도 GO. 의도치 않은 가동 방지로 명시 인자 요구.
-        serve_stdio(os.path.abspath(args[1]))
+        serve_stdio(os.path.abspath(args[1]), profile=profile, server_name=server_name)
     elif args[0] == "--http" and len(args) >= 3:
         # 로컬 HTTP 서버(터널 뒤 웹/앱 커넥터용). 경로키는 env BINGGU_MCP_PATH_TOKEN 주입(코드 평문 0).
         tok = os.environ.get("BINGGU_MCP_PATH_TOKEN", "").strip()
         if not tok:
             print("BINGGU_MCP_PATH_TOKEN env 필요(경로키)")
             sys.exit(2)
-        serve_http(os.path.abspath(args[2]), args[1], tok)
+        serve_http(os.path.abspath(args[2]), args[1], tok,
+                   profile=profile, server_name=server_name)
     else:
-        print("usage: openbinggu_mcp_server.py [--selftest | --serve <ROOT> | --http <PORT> <ROOT>]")
+        print("usage: %s [--profile core|advanced] "
+              "[--selftest | --serve <ROOT> | --http <PORT> <ROOT>]" % prog)
         sys.exit(2)
+
+
+def main():
+    """legacy entrypoint (openbinggu-mcp-server). 기본 profile=advanced·serverInfo.name=openbinggu —
+    현행 동작과 정확히 동일. `--profile core` 로 명시 core 도 가능(additive)."""
+    _main("advanced", "openbinggu", "openbinggu-mcp-server")
+
+
+def main_binggupack():
+    """canonical entrypoint (binggupack-mcp). 기본 profile=core·serverInfo.name=binggupack.
+    `--profile advanced` 로 전체 도구 노출도 가능."""
+    _main("core", "binggupack", "binggupack-mcp")
 
 
 if __name__ == "__main__":

@@ -81,13 +81,21 @@ python scripts/install_claude_mcp.py --sandbox --home ./_binggu_test_home --appl
 
 ### pip 설치 사용자 — 진입점으로 등록
 
-`pip install binggupack` 후에는 `openbinggu-mcp-server` 진입점이 생겨 clone 없이도 등록할 수 있습니다. `<작업폴더>`는 MCP가 파일 접근을 허용할 루트(경로 게이트 allow_root)입니다:
+`pip install binggupack` 후에는 **canonical 진입점 `binggupack-mcp`** 로 clone 없이 등록할 수 있습니다. 기본은 **core profile**(작고 명확한 표면: 상태·회상·근거·목록·검토·미리보기 + 승인 기반 저장/페어/폐기/교체). `<작업폴더>`는 MCP가 파일 접근을 허용할 루트(경로 게이트 allow_root)입니다:
 
 ```bash
-claude mcp add openbinggu-local -s user \
+claude mcp add binggupack -s user \
   -e BINGGU_HOME="$HOME/.binggupack" \
-  -- openbinggu-mcp-server --serve "$HOME/binggu-workspace"
+  -- binggupack-mcp --serve "$HOME/binggu-workspace"
 ```
+
+전체 도구(현재 advanced 표면)가 필요하면 `--profile advanced` 를 붙입니다:
+
+```bash
+  -- binggupack-mcp --serve "$HOME/binggu-workspace" --profile advanced
+```
+
+기존 진입점 `openbinggu-mcp-server` 도 그대로 동작하며 **기본이 전체(advanced) 도구**입니다(하위호환). Legacy-compatible entry point. No removal date is currently scheduled.
 
 ### Codex 등록 — `~/.codex/config.toml`
 

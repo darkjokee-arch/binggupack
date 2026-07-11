@@ -34,7 +34,10 @@ Changelog = "https://github.com/darkjokee-arch/binggupack/blob/main/CHANGELOG.md
 binggu = "binggu:main"
 binggupack = "binggu:main"
 binggu-interactive-save = "binggupack.cli.interactive_save:main"
-# stdio MCP 서버 진입점(pip 설치 후 Claude Code/Codex 등록에 사용): openbinggu-mcp-server --serve <ROOT>
+# stdio MCP 서버 진입점(pip 설치 후 Claude Code/Codex 등록에 사용).
+#   canonical: binggupack-mcp --serve <ROOT>  (기본 profile=core · 작고 명확한 표면)
+#   legacy   : openbinggu-mcp-server --serve <ROOT>  (기본 profile=advanced · 기존 전체 도구 · 제거 예정일 없음)
+binggupack-mcp = "scripts.openbinggu_mcp_server:main_binggupack"
 openbinggu-mcp-server = "scripts.openbinggu_mcp_server:main"
 
 [tool.setuptools]

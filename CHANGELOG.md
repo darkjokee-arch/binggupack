@@ -6,8 +6,13 @@
 - **읽기 전용 `binggu` 데일리 홈** — 인자 없이 `binggu`(또는 `binggu home`)를 치면 지금 상태(활성 기억·자동 수집 후보·원격 저장 의도·대기 승인·검토 예정·장부 무결성·capture/provider 상태)와 다음 할 일을 한 화면에서 본다. 장부가 없으면 오류 대신 온보딩 안내(생성 0).
 - **통합 로컬 `binggu inbox`** — 자동 수집 후보·원격 저장 의도·대기 승인 요청·검토 예정을 한 화면에 모으는 read-only aggregator. `--capture/--hosted/--approvals/--due` 섹션 필터. 기존 큐 명령(`capture preview`·`hosted inbox`·`approval`·`reminders`)은 그대로 유지된다.
 - **JSON 스냅샷** — `binggu home --json` / `binggu inbox --json` (schema_version=1). automation·향후 Binggu Studio 가 재사용할 안정적 read model.
+- **Canonical MCP 진입점 `binggupack-mcp`** — 신규 사용자용. 기본 **core profile**(12 도구: status·recall·why·trace_show·preflight·list·reminders·capture_preview + 승인 기반 save_candidate·pair·deprecate·replace). `--profile advanced` 로 전체 도구. serverInfo.name=`binggupack`.
+- **MCP exposure profiles (core/advanced)** — profile 은 tools/list **및** tools/call 양쪽에서 강제(숨긴 도구는 handler 호출 전 차단·`tool_not_in_profile`·write/network 0). profile 은 서버 시작 시 1회 결정되고 이후 불변(요청/env 로 승격 불가). stdio·HTTP 동일 경로.
 
 정직한 문구:
+- 기존 진입점 `openbinggu-mcp-server` 는 그대로 동작하며 **기본이 전체(advanced) 도구**다(하위호환·serverInfo.name=`openbinggu` 불변). Legacy-compatible entry point. No removal date is currently scheduled.
+- 새 `install_claude_mcp.py` 등록은 core profile 로 노출한다. 기존 등록은 자동 교체·삭제하지 않는다(신규만).
+- MCP handler 로직·approval/mutation 경계·schema 변경 0 — 이번 변경은 진입점·startup profile·노출 필터뿐이다.
 - `binggu inbox` 는 기본적으로 네트워크 fetch 를 하지 않는다(로컬 스냅샷만). 원격을 새로 가져오려면 `binggu hosted inbox`.
 - mutation(저장·승인·교체·폐기·동기화)은 기존 명령과 owner approval 경계를 그대로 사용한다 — daily console 은 표현 계층일 뿐이다.
 - `binggu home`/`binggu inbox` 실행만으로 저장되는 데이터 0(ledger·capture·staging·config·provider 상태·use_count 불변). SQLite 조회는 mode=ro URI 로만 한다.
