@@ -5,12 +5,15 @@
 outbox = 로컬 디렉토리(파일 1건 = intent 1건, 파일명 <intent_id>.json).
 D3에서 worker 적재로 전송 계층만 교체 — 게이트는 본 러너 그대로 불변.
 
+★A3(P1-B) 재배선: hosted 저장의 유일 경로 = binggu_hosted_bundle.commit_bundle(로컬 exact-bound
+승인 이벤트). 본 러너의 옛 direct save_selected(actor=human) 경로는 폐지됐다 — transported
+actor/confirm 은 신뢰하지 않는다(untrusted). process_outbox 는 이제 검증·보고만 하고 절대 write 0.
+정상(게이트 1~4 통과) intent 는 원문 그대로 보존(삭제/스트립 0) + pending_approval 보고(계약 5·9·11·14).
+
 게이트 순서 (고정 — 우회 0):
   1 schema_ver 검증(schema_mismatch) → 2 TTL 만료 폐기(.expired 마킹만, 미적용)
   → 3 intent_id 재해시 일치(intent_id_mismatch) → 4 confirm 형식("SAVE i,j" 정확 일치)
-  → (duplicate: audit_log 조회 — 별도 테이블 0) → 5 save_selected 전체 게이트 위임
-  (A0·PII·duplicate registry·confirm·rollback 그대로, G4_no_auto 유지)
-  → 6 적용 시 intent 파일 소거 + audit(hosted_intent, 원문 해시만)
+  → 5 정상 intent = pending_approval 보고(원문 보존·write 0). 실제 저장은 commit_bundle 승인 후에만.
   → 7 실패 = .rejected 보존(사유 포함) — 재시도는 사람 재승인만(자동 재시도 0)
 
 불변/금지: real staging DB 0 · live/wrangler/deploy/외부 네트워크 0 · OpenCrab 0 ·
@@ -35,7 +38,6 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import openbinggu_conversation_candidate_save as _convsave  # save_selected 정본 (게이트 우회 0)
 from openbinggu_staging_write_selftest import OPERATING_PATHS
 from openbinggu_deprecate_and_remind_g3 import open_g3
 
@@ -82,7 +84,7 @@ def _text_sha(text):
 def process_outbox(db, outbox_dir, ctx, snap_dir, now_ts):
     """outbox *.json 정렬 순회 — 게이트 순서 고정. 반환 {applied,rejected,expired,purged,details}.
     입구 가드: 경로(UNC/링크) 위반 = 전체 미처리. 시작 시 마킹 파일 TTL 청소(이중 TTL)."""
-    counts = {"applied": 0, "rejected": 0, "expired": 0, "purged": 0}
+    counts = {"applied": 0, "rejected": 0, "expired": 0, "purged": 0, "pending_approval": 0}
     details = []
     actor = ctx.get("actor", "human")
 
@@ -198,33 +200,17 @@ def process_outbox(db, outbox_dir, ctx, snap_dir, now_ts):
             reject("confirm_phrase_mismatch")
             continue
 
-        # duplicate — 이미 적용(ALLOW) 기록된 intent_id 재유입 차단 (audit_log 조회만)
-        if db.con.execute("SELECT 1 FROM audit_log WHERE action='hosted_intent' "
-                          "AND result='ALLOW' AND pack_id=?", (it["intent_id"],)).fetchone():
-            reject("duplicate_intent")
-            continue
-
-        # 게이트 5 — save_selected 전체 게이트 위임 (A0·PII·duplicate·confirm·rollback 그대로)
-        # 화자 축: hosted intent 의 speaker(owner/ai/None) 를 save_selected 에 전달.
-        # 채팅(hosted) 사용자가 명시 저장한 것은 owner 발화 → speaker=owner 로 적재돼야 팩(WHERE speaker='owner')에 반영.
-        # save_selected 는 speaker 정식 지원(선처리 selftest 통과)·owner 단독이라 페어 엣지 불필요(flat-save 가드 취지 무관).
-        r = _convsave.save_selected(db, text, indices,
-                                    {"actor": actor, "confirm": confirm}, snap_dir,
-                                    speaker=it.get("speaker"))
-        if not r.get("applied"):
-            reject("save:" + str(r.get("reason")), {"save_rejected": r.get("rejected", {})})
-            continue
-
-        # 게이트 6 — 적용: audit(hosted_intent, 원문 해시만) + intent 파일 소거
-        after = db.store_checksum()
-        db.audit_append(actor, "hosted_intent", it["intent_id"], "ALLOW",
-                        "text_sha=%s saved=%d skipped=%d" % (_text_sha(text), r["saved"],
-                                                             r["skipped_existing"]),
-                        after, after)
-        os.remove(path)
-        counts["applied"] += 1
-        details.append({"file": fn, "status": "applied", "saved": r["saved"],
-                        "pack_id": r.get("pack_id")})
+        # 게이트 5 — ★A3(P1-B): direct hosted write 폐지. transported actor/confirm 은 신뢰하지 않는다.
+        # 저장의 유일 경로 = binggu_hosted_bundle.commit_bundle(로컬 exact-bound 승인 이벤트). 본 러너는
+        # 절대 write 0. 게이트 1~4 를 통과한 정상 intent 는 원문 그대로 보존(삭제/스트립 0·계약 5·9·14) +
+        # pending_approval 보고. 실제 저장은 owner 가 승인한 뒤 commit_bundle 이 한다(계약 11).
+        before = db.store_checksum()
+        db.audit_append(actor, "hosted_intent", it["intent_id"], "BLOCK",
+                        "direct_write_disabled:approval_required", before, before)
+        counts["pending_approval"] = counts.get("pending_approval", 0) + 1
+        details.append({"file": fn, "status": "pending_approval",
+                        "reason": "approval_required", "intent_id": it["intent_id"]})
+        # 원문 파일은 그대로 둔다(계약 5·9·14) — commit_bundle 승인 후에만 archive(processed).
 
     counts["details"] = details
     return counts
@@ -270,13 +256,14 @@ def run():
     db = open_g3(os.path.join(tmp, "s.sqlite"))
     ctx = {"actor": "human"}
 
-    # 1. 정상 intent 적용 — 노드 생성(발췌만)·파일 소거
+    # 1. ★A3: 정상 intent = direct write 폐지 → pending_approval + 원문 보존(파일 유지·노드 0).
+    #    저장은 commit_bundle(로컬 승인 이벤트) 경유만 — process_outbox 는 절대 write 0.
     it1, p1 = _mk_intent(outbox, CONVO, [1, 5])
     r1 = process_outbox(db, outbox, ctx, snap_dir, NOW)
     n1 = db.con.execute("SELECT count(*) FROM nodes").fetchone()[0]
-    rec(1, "정상 intent 적용(노드 2·intent 파일 소거)",
-        r1["applied"] == 1 and r1["rejected"] == 0 and r1["expired"] == 0
-        and n1 == 2 and not os.path.exists(p1))
+    rec(1, "정상 intent → pending_approval(write 0·원문 보존·노드 0)",
+        r1["applied"] == 0 and r1["pending_approval"] == 1 and r1["rejected"] == 0
+        and r1["expired"] == 0 and n1 == 0 and os.path.exists(p1))
 
     # 2. schema_ver 불일치 거부
     it2, p2 = _mk_intent(outbox, "이 검토안은 schema 게이트 확인을 위해 보류한다.", [1], schema_ver=2)
@@ -318,32 +305,24 @@ def run():
         r5["rejected"] == 1 and os.path.exists(m5)
         and load(m5)["reject_reason"] == "confirm_phrase_mismatch")
 
-    # 6. save 게이트 위임 — PII 후보가 save 경로에 도달해도 save 재스캔이 거부
-    #    (preview 단계 제외를 우회한 위협 시나리오를 capture_preview 패치로 재현 — 러너 자체 PII 로직 0)
+    # 6. ★A3: PII 를 담은 well-formed intent 도 여기서는 write 0 · 원문 보존(pending_approval).
+    #    PII/A0 차단은 다운스트림 commit_bundle 의 save_selected 게이트가 담당(inbox/bundle selftest 검증).
+    #    핵심: 러너는 어떤 경우에도 직접 write/저장 0 · 원문 파일 미삭제.
     pii_sent = "이 입찰은 010-" + "1234-5678 통화 결과 마진이 낮아 보류한다."
     it6, p6 = _mk_intent(outbox, pii_sent, [1])
-    orig_preview = _convsave.capture_preview
-    try:
-        _convsave.capture_preview = lambda t, **_kw: {"candidates": [
-            {"sentence": pii_sent, "label_kind": "판단"}]}
-        r6 = process_outbox(db, outbox, ctx, snap_dir, NOW)
-    finally:
-        _convsave.capture_preview = orig_preview
-    m6 = p6 + ".rejected"
-    body6 = load(m6) if os.path.exists(m6) else {}
-    rec(6, "save 게이트 위임(PII intent → .rejected pii_or_secret)",
-        r6["rejected"] == 1 and r6["applied"] == 0 and os.path.exists(m6)
-        and body6.get("save_rejected", {}).get("pii_or_secret") == 1
-        and body6.get("reject_reason", "").startswith("save:"))
+    r6 = process_outbox(db, outbox, ctx, snap_dir, NOW)
+    n6 = db.con.execute("SELECT count(*) FROM nodes").fetchone()[0]
+    rec(6, "PII well-formed intent → write 0 · 원문 보존(pending_approval)",
+        r6["applied"] == 0 and r6["pending_approval"] >= 1 and os.path.exists(p6)
+        and n6 == 0)
 
-    # 7. duplicate intent 거부 — 동일 intent_id 재유입 (audit_log 조회, 별도 테이블 0)
-    with open(p1, "w", encoding="utf-8") as f:
-        json.dump(it1, f, ensure_ascii=False)
+    # 7. ★A3: 동일 intent 재유입도 write 0 · 원문 보존(멱등 no-op) — direct write 경로 자체가 없어
+    #    duplicate 여부와 무관하게 저장 0. (idempotent/멱등 계약은 commit_bundle 이 receipt 로 담당.)
     r7 = process_outbox(db, outbox, ctx, snap_dir, NOW)
-    m7 = p1 + ".rejected"
-    rec(7, "duplicate intent 거부(audit_log 조회)",
-        r7["rejected"] == 1 and r7["applied"] == 0 and os.path.exists(m7)
-        and load(m7)["reject_reason"] == "duplicate_intent")
+    n7 = db.con.execute("SELECT count(*) FROM nodes").fetchone()[0]
+    rec(7, "재유입 intent → write 0 · 원문 보존(no direct write)",
+        r7["applied"] == 0 and r7["pending_approval"] >= 1 and os.path.exists(p1)
+        and os.path.exists(p6) and n7 == 0)
 
     # 8. raw 원문 DB 미저장 — 전문 비재현(intent 파일에는 있어도 DB blob 에 없음)
     blob = "\n".join(str(row) for t in ("nodes", "edges", "evidence", "audit_log")
@@ -359,32 +338,35 @@ def run():
     # 10. audit chain INTACT
     rec(10, "audit chain INTACT", db.verify_chain())
 
-    # 11. hosted_intent audit 존재 + 원문 무누설(해시만)
-    h_allow = db.con.execute("SELECT pack_id, reason_code FROM audit_log "
-                             "WHERE action='hosted_intent' AND result='ALLOW'").fetchall()
+    # 11. ★A3: hosted_intent audit 에 ALLOW(직접 저장) 는 0 — 전부 BLOCK(direct_write_disabled).
+    #     원문/PII 무누설(해시만). 실제 저장 ALLOW 는 commit_bundle 의 approval_consume audit 이 담당.
+    h_allow = db.con.execute("SELECT count(*) FROM audit_log "
+                             "WHERE action='hosted_intent' AND result='ALLOW'").fetchone()[0]
+    h_block = db.con.execute("SELECT count(*) FROM audit_log WHERE action='hosted_intent' "
+                             "AND result='BLOCK' AND reason_code LIKE 'direct_write_disabled%'").fetchone()[0]
     h_blob = "\n".join(str(r) for r in db.con.execute(
         "SELECT * FROM audit_log WHERE action='hosted_intent'"))
-    rec(11, "hosted_intent audit 존재(ALLOW 1·해시만) + 원문 무누설",
-        len(h_allow) == 1 and h_allow[0][0] == it1["intent_id"]
-        and "text_sha=" in h_allow[0][1]
+    rec(11, "hosted_intent audit: ALLOW 0 · direct_write_disabled BLOCK 존재 · 원문 무누설",
+        h_allow == 0 and h_block >= 1
         and CONVO[:20] not in h_blob and "1234-5678" not in h_blob)
 
     # 14. 마킹 파일 원문 미보관 — text 필드 제거 + text_sha/text_len 대체 (12지시 §3)
-    b2, b6 = load(m2), load(m6)
+    #     (거부 마킹 .rejected 은 gate 2~4 에서만 생성 — m2/m4/m5. 정상 intent 는 원문 보존이라 마킹 없음.)
+    b2, b4 = load(m2), load(m4)
     rec(14, "마킹 파일 원문 미보관(text 제거+sha 대체)",
-        "text" not in b2 and "text" not in b6
-        and b2.get("text_sha") and b6.get("text_sha")
-        and "변조" not in json.dumps(b2, ensure_ascii=False))
+        "text" not in b2 and "text" not in b4
+        and b2.get("text_sha") and b4.get("text_sha")
+        and "변조" not in json.dumps(b4, ensure_ascii=False))
 
     # 15. 마킹 파일 TTL 청소 — 만료 마킹 삭제·신선 마킹 보존 (이중 TTL 2/2, 12지시 §4)
     old_m = os.path.join(outbox, "oldcase.json.rejected")
     with open(old_m, "w", encoding="utf-8") as f:
         json.dump({"reject_reason": "x", "marked_ts": NOW - MARKER_TTL_S - 1}, f)
-    fresh_keep = os.path.exists(m6)
+    fresh_keep = os.path.exists(m2)
     r15 = process_outbox(db, outbox, ctx, snap_dir, NOW)
     rec(15, "마킹 TTL 청소(만료 삭제·신선 보존)",
         r15["purged"] >= 1 and not os.path.exists(old_m)
-        and fresh_keep and os.path.exists(m6))
+        and fresh_keep and os.path.exists(m2))
 
     # 16. outbox 경로 가드 — UNC 거부 + junction(reparse) 거부(생성 가능 환경에서만)
     rg_unc = process_outbox(db, "\\\\localhost\\c$\\nope", ctx, snap_dir, NOW)

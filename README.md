@@ -62,7 +62,7 @@ AI와 오래 일하다 보면 이런 일이 반복됩니다.
 
 <p align="center"><img src="assets/flow.svg" width="880" alt="대화 → 미리보기 → SAVE 승인 → 내 PC 기억 장부 → 자동 회상 · 지식 그래프 → 전문가 팩"></p>
 
-**Core(pip) vs Bridge(원격 통로).** 로컬 CLI·stdio MCP·장부·회상·설명은 `pip install` 만으로 **오프라인** 동작합니다(=Core). 폰·웹·ChatGPT에서 승인한 걸 받아오는 원격 통로(hosted worker)는 별도이며(=Bridge), **데이터 정본은 언제나 로컬** — 원격은 잠깐 거쳐 가는 통로일 뿐입니다(장부 write 0). 자세히는 [안전 모델](#4--왜-믿을-만한가)·[6 · 어디서나 씁니다](#6--어디서나-씁니다).
+**Core(pip) vs Bridge(원격 통로).** 로컬 CLI·stdio MCP·장부·회상·설명은 `pip install` 만으로 **오프라인** 동작합니다(=Core). 폰·웹·ChatGPT에서 표시한 저장 **의도**를 받아오는 원격 통로(hosted worker)는 별도이며(=Bridge), **데이터 정본은 언제나 로컬** — 원격은 의도만 전달하고, 장부 확정은 PC의 묶음 승인 뒤에만 일어납니다(원격의 장부 write 0). 자세히는 [안전 모델](#4--왜-믿을-만한가)·[6 · 어디서나 씁니다](#6--어디서나-씁니다).
 
 ## 3 · 무엇을 해주나
 
@@ -166,7 +166,7 @@ AI와 오래 일하다 보면 이런 일이 반복됩니다.
 <p align="center"><img src="assets/channels.svg" width="880" alt="Claude Code·ChatGPT·웹 커넥터 → 내 PC 장부 → 오픈크랩 전문가 팩"></p>
 
 - 🌐 **웹/앱 커넥터(HTTP 모드)** — 로컬 MCP 서버를 HTTP 모드(`--http`)로 열고 Cloudflare Tunnel 뒤에 두면, Claude 웹/앱 커넥터에서도 같은 MCP 도구를 그대로 씁니다. 접근은 경로 토큰으로 보호돼요. *(quick tunnel은 재시작마다 주소가 바뀌므로, 고정 주소가 필요하면 named tunnel — [INSTALL](INSTALL.md#webapp-connector--http-모드-optional) 참조.)*
-- 💬 **ChatGPT 저장 채널** — 채팅 중 `SAVE n`으로 승인한 것만 클라우드 inbox에 잠깐 담기고, 내 PC가 서명키로 가져와(pull) 로컬 장부에 반영해요. 여기서도 자동 저장은 없어요.
+- 💬 **ChatGPT/폰 저장 채널** — 폰·웹에서 `SAVE n`으로 표시한 건 **저장 승인이 아니라 저장 "의도"**예요. 그 의도만 클라우드 inbox에 잠깐 담기고, 내 PC가 서명키로 가져와(pull) 화면에 묶음으로 보여줘요. **실제 로컬 장부 확정은 PC에서 그 묶음을 통째로 한 번 승인(exact-bound)해야** 일어나고, 전부 저장되거나 전부 안 되거나(all-or-nothing)예요. 폰이 직접 내 장부에 쓰는 경로는 없어요.
 - ☁️ **클라우드 읽기 도구** — `cloud_recall`/`cloud_packs`로 오픈크랩의 지식·팩을 조회만 해요 *(읽기 전용 · 민감정보 마스킹)*.
 
 ## 7 · 시작하기
@@ -227,7 +227,7 @@ python binggu.py doctor
 - **그래프·팩(graph/pack)**: 기억을 근거로 연결해 그래프·팩으로 묶어 내보냅니다(근거 2층·3층·5층).
 - **클라우드 팩**: 묶은 그래프·팩을 오픈크랩(ExpertPlan)에 전문가 지식 팩으로 자동 생성합니다.
 - **Claude Code 연결(hook·MCP)**: 캡처/회상 hook과 MCP 도구(stdio + HTTP 모드)로 붙습니다.
-- **폰·웹·ChatGPT 동기화(hosted)**: 다른 기기에서 승인해 받아둔 메모를 로컬 장부로 가져옵니다.
+- **폰·웹·ChatGPT 동기화(hosted)**: 다른 기기에서 표시한 저장 **의도**를 받아와, PC에서 묶음 단위 exact-bound 승인으로만 로컬 장부에 확정합니다(폰 직접 write 없음 · all-or-nothing).
 - **안전장치(governance/selftest)**: PII·secret 차단, 사람 승인 경계, 자체 검증.
 
 | 영역 | 들어 있는 기능 |

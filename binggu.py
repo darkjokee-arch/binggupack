@@ -104,8 +104,12 @@ def _show(r):
     if r.get("applied"):
         print("OK:", {k: v for k, v in r.items() if k != "applied"} or "적용됨")
         return 0
-    # 실패 이유 전체 노출(사일런트 실패 금지) — BLOCK reason + 후보별 거부 코드/건수 + 기존재 skip.
+    # 실패 이유 전체 노출(사일런트 실패 금지) — BLOCK reason + approval 요청/안내 + 거부 코드 + 기존재 skip.
     print("BLOCK:", r.get("reason"))
+    if r.get("request_id"):                                   # 비대화형 owner approval 요청 ID(Fable5 R4-1)
+        print("  요청ID:", r["request_id"])
+    if r.get("guidance"):                                     # owner 승인 안내(binggu approval approve …)
+        print("  " + r["guidance"])
     rej = r.get("rejected")
     if rej:
         print("  거부:", ", ".join("%s=%d" % (k, v) for k, v in sorted(rej.items())))
@@ -285,36 +289,70 @@ def cmd_hosted(a):
         return 0
 
     if sub == "pull":
+        # ★A3(P1-B): hosted 저장의 유일 경로 = 로컬 exact-bound 승인 이벤트(commit_bundle).
+        #   ① --select 만 → PENDING 승인 요청 생성(직접 write 0·원문 보존)
+        #   ② owner 가 `binggu approval approve <요청ID>` 로 로컬 승인
+        #   ③ --select … --approval-id <요청ID> → 묶음 전체 exact-bound atomic 저장
         sel = getattr(a, "select", None)
         if not sel:
-            print("hosted pull = inbox 에서 본 번호만 골라 ledger 에 저장합니다(전량 자동 적용 없음).")
-            print("  먼저:  python binggu.py hosted inbox            (대기 intent 번호 확인)")
-            print('  저장:  python binggu.py hosted pull --select 1,3 --confirm "LIVE SAVE 1,3"')
+            print("hosted pull = inbox 에서 본 번호를 골라 owner 로컬 승인 후 ledger 에 저장합니다(전량 자동 없음).")
+            print("  먼저:  python binggu.py hosted inbox                 (대기 intent 번호 확인)")
+            print("  ① 승인 요청:  python binggu.py hosted pull --select 1,3")
+            print("  ② 로컬 승인:  binggu approval approve <요청ID>")
+            print("  ③ 저장 확정:  python binggu.py hosted pull --select 1,3 --approval-id <요청ID>")
             return 0
         idx = [int(x) for x in sel.split(",") if x.strip()]
-        if not getattr(a, "confirm", None):
-            print('confirm 필요:  --confirm "LIVE SAVE %s"' % ",".join(str(i) for i in idx))
-            return 1
+        approval_id = getattr(a, "approval_id", None)
         ledger, snap_dir = _ledger_paths(a.ledger)
         if not os.path.exists(ledger):
             print("장부 없음: %s (먼저 python binggu.py init)" % ledger)
             return 2
         db, _ = _open(ledger)
         before = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
-        res = commit_selected(db, staging, idx, a.confirm, snap_dir, int(_t.time()))
+        res = commit_selected(db, home, staging, idx, approval_id, snap_dir, int(_t.time()))
         after = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
         chain = db.verify_chain()
         db.close()
-        if not res["ok"] and res.get("reason"):
-            extra = (" (기대 confirm: %s)" % res["expected"]) if res.get("expected") else ""
-            extra += (" (없는 번호: %s)" % res["bad_idx"]) if res.get("bad_idx") else ""
+        # 선택 자체 오류(전량 자동 금지·없는 번호)
+        if res.get("reason") in ("select_required", "idx_out_of_range", "intent_id_missing"):
+            extra = (" (없는 번호: %s)" % res["bad_idx"]) if res.get("bad_idx") else ""
             print("BLOCK: %s%s" % (res["reason"], extra))
             return 1
-        print("hosted pull 결과: 선택 %d · applied=%s rejected=%s expired=%s"
-              % (res["selected"], res["applied"], res["rejected"], res["expired"]))
-        print("  candidate(active) %d -> %d (+%d) · audit chain %s"
-              % (before, after, after - before, "INTACT" if chain else "BROKEN"))
-        return 0 if res["applied"] > 0 else 1
+        rid = res.get("request_id")
+        if not approval_id:
+            # ① request-only — PENDING 승인 요청만(직접 write 0·원문 보존)
+            if res.get("reason") == "provider_not_configured":
+                from binggupack.safety import trusted_approval as _ta
+                print("BLOCK: 승인 provider 미구성 — 활성화: %s 에 {\"enabled\": true}"
+                      % _ta.config_path(home))
+                return 1
+            if not rid:
+                print("BLOCK: %s" % res.get("reason"))
+                return 1
+            print("승인 요청 생성: request_id=%s · 선택 %d건 · 직접 저장 0(원문 보존)"
+                  % (rid, res["selected"]))
+            print("  검토:  binggu approval show %s" % rid)
+            print("  승인:  binggu approval approve %s" % rid)
+            print("  저장:  python binggu.py hosted pull --select %s --approval-id %s"
+                  % (",".join(str(i) for i in idx), rid))
+            if res.get("quarantined"):
+                print("  ⚠quarantine %d건(모호/변조 — write 0·원문 보존)" % len(res["quarantined"]))
+            return 0
+        # ③ 승인 제시 — exact-bound atomic 저장 결과
+        if res.get("write"):
+            print("hosted pull 저장: 묶음 %d건 확정(atomic) · request_id=%s"
+                  % (res["applied"], rid))
+            print("  candidate(active) %d -> %d (+%d) · audit chain %s"
+                  % (before, after, after - before, "INTACT" if chain else "BROKEN"))
+            return 0
+        # 저장 실패(승인 불일치·만료·all-or-nothing 차단 등) — write 0·원문 보존
+        rc = res.get("reason") or "not_written"
+        print("BLOCK: %s · write 0(원문 보존)" % rc)
+        if res.get("fail"):
+            print("  실패 intent: %s (%s)" % (res["fail"].get("intent_id"), res["fail"].get("reason")))
+        if res.get("receipt"):
+            print("  기존 receipt 반환(재저장 0·계약 8)")
+        return 1
     return 1
 
 
@@ -661,6 +699,11 @@ def _resolve_human_ctx(ledger, sents, confirm=None):
          암호학적 사람증명이 아니다(셸/파일 도구가 붙은 호스트에선 하드 통제 아님 · SECURITY.md).
     그 외(비대화형·앵커없음) → actor='reader' → 모든 core 게이트가 BLOCK(fail-closed). 환경변수로 우회
     불가. BINGGU_STRICT_HUMAN_GATE 는 **deprecated no-op**(strict 가 기본 · 0/false 로 fail-open 안 됨).
+
+    (비대화형 owner 의 제3 경로 = exact-bound approval event(P1-B A2): `binggu approval approve <rid>` 로
+     대화형 TTY 에서 mint 한 뒤 mutation 에 `--approval-id <rid>` 제시 → approval_gate.authorize 가
+     (protocol,operation,payload digest,ledger) 정확 바인딩 검증 + one-time consume. 이 함수는 대화형/앵커
+     전용이고, approval event 경로는 cmd_* 가 approval_id 제시 시 _mutation_via_approval 로 분기한다.)
     """
     ctx = {"actor": "reader"}                    # 기본 fail-closed (reader 는 denylist·allowlist 게이트 모두 BLOCK)
     if confirm is not None:
@@ -688,6 +731,34 @@ def _resolve_human_ctx(ledger, sents, confirm=None):
     # 3) 비대화형 + 앵커없음 = 사람 미검증 → fail-closed(reader). 환경변수 우회 없음.
     ctx["actor_source"] = "unverified_noninteractive"
     return ctx
+
+
+def _mutation_via_approval(a, db, operation, bind, core_call):
+    """비대화형 owner 의 exact-bound approval 경로(P1-B A2). approval_id 제시 시에만 이 경로.
+
+    approval_gate.authorize 컨텍스트로 (protocol,operation,payload digest,ledger) 바인딩 검증 +
+    one-time consume(reserve/finalize). provider 미구성/미승인/바인딩 불일치 → auth.actor='reader'
+    → core 게이트 fail-closed(G4). 대화형 TTY/앵커 경로(_resolve_human_ctx)와 배타.
+    core_call(ctx) 은 ctx={"actor","confirm"} 를 받아 core mutation 을 실행하고 결과 dict 를 반환한다.
+    """
+    from binggupack.mcp import approval_gate
+    home = _approval_home(a)
+    os.makedirs(home, exist_ok=True)
+    with approval_gate.authorize(operation, bind, home, db) as auth:
+        r = core_call({"actor": auth.actor, "confirm": getattr(a, "confirm", None)})
+        auth.settle(r)
+    extra = auth.response_extra()
+    if not r.get("applied"):
+        r = dict(r)
+        # approval 게이트 사유(approval_required/provider_not_configured/binding_mismatch)를 core G4 보다
+        # 우선 표기(Fable5 R4-1: core 의 G4_no_auto 가 approval_required·owner 승인 여정을 가리던 문제).
+        if extra.get("reason"):
+            r["reason"] = extra["reason"]
+        if extra.get("request_id"):
+            r["request_id"] = extra["request_id"]   # owner 가 approve 할 요청 ID 노출
+        if extra.get("guidance"):
+            r["guidance"] = extra["guidance"]        # owner 안내(binggu approval show/approve <rid>)
+    return r
 
 
 def cmd_save(a):
@@ -859,14 +930,28 @@ def cmd_replace(a):
 
 def cmd_accept(a):
     db, _ = _open(a.ledger)
-    r = accept_from_list(db, a.n, a.id8, a.reason, _resolve_human_ctx(a.ledger, None, a.confirm))
+    _aid = getattr(a, "approval_id", None)
+    if _aid is not None:  # 비대화형 owner exact-bound approval 경로
+        r = _mutation_via_approval(
+            a, db, "accept",
+            {"index": a.n, "id8": a.id8, "reason": a.reason, "approval_id": _aid},
+            lambda ctx: accept_from_list(db, a.n, a.id8, a.reason, ctx))
+    else:                 # 대화형 TTY / save_gate 앵커 (기존)
+        r = accept_from_list(db, a.n, a.id8, a.reason, _resolve_human_ctx(a.ledger, None, a.confirm))
     db.close()
     return _show(r)
 
 
 def cmd_unaccept(a):
     db, _ = _open(a.ledger)
-    r = unaccept_from_list(db, a.n, a.id8, a.reason, _resolve_human_ctx(a.ledger, None, a.confirm))
+    _aid = getattr(a, "approval_id", None)
+    if _aid is not None:
+        r = _mutation_via_approval(
+            a, db, "unaccept",
+            {"index": a.n, "id8": a.id8, "reason": a.reason, "approval_id": _aid},
+            lambda ctx: unaccept_from_list(db, a.n, a.id8, a.reason, ctx))
+    else:
+        r = unaccept_from_list(db, a.n, a.id8, a.reason, _resolve_human_ctx(a.ledger, None, a.confirm))
     db.close()
     return _show(r)
 
@@ -879,7 +964,14 @@ def cmd_due(a):
         db.close()
         print("BLOCK: node_hash_mismatch (목록을 다시 확인하세요: binggu.py list)")
         return 1
-    r = set_review_due(db, nid, a.date, _resolve_human_ctx(a.ledger, None))   # P1-A.1 fail-closed
+    _aid = getattr(a, "approval_id", None)
+    if _aid is not None:  # 비대화형 owner exact-bound approval 경로
+        r = _mutation_via_approval(
+            a, db, "due",
+            {"node_id": nid, "due_date": a.date, "approval_id": _aid},
+            lambda ctx: set_review_due(db, nid, a.date, ctx))
+    else:
+        r = set_review_due(db, nid, a.date, _resolve_human_ctx(a.ledger, None))   # P1-A.1 fail-closed
     db.close()
     return _show(r)
 
@@ -892,12 +984,24 @@ def cmd_resolve(a):
         db.close()
         print("BLOCK: node_hash_mismatch (목록을 다시 확인하세요: binggu.py list)")
         return 1
-    _ctx = _resolve_human_ctx(a.ledger, None)                # P1-A.1: 비대화형/env → reader → fail-closed
-    r = resolve_review(db, nid, a.outcome, a.reason, _ctx)
-    # 양방향 신뢰도 연동 — 성공/실패만 hit_events 기록(불확실/판정불가 skip). 사람 resolve 한정(불변식6).
-    if r.get("applied") and a.outcome in ("성공", "실패"):
-        import binggu_hit_stats as _HS
-        _HS.record_resolution(db, nid, a.outcome == "성공", _ctx)
+
+    def _resolve_core(ctx):
+        rr = resolve_review(db, nid, a.outcome, a.reason, ctx)
+        # 양방향 신뢰도 연동 — 성공/실패만 hit_events(불확실/판정불가 skip). 사람 resolve 한정(불변식6).
+        # M1(사전검증): record_resolution 은 pair-ai fan-out 을 포함 — ctx.actor 재사용(human 위조 없음).
+        if rr.get("applied") and a.outcome in ("성공", "실패"):
+            import binggu_hit_stats as _HS
+            _HS.record_resolution(db, nid, a.outcome == "성공", ctx)
+        return rr
+
+    _aid = getattr(a, "approval_id", None)
+    if _aid is not None:  # 비대화형 owner exact-bound approval 경로
+        r = _mutation_via_approval(
+            a, db, "resolve",
+            {"node_id": nid, "outcome": a.outcome, "reason": a.reason, "approval_id": _aid},
+            _resolve_core)
+    else:
+        r = _resolve_core(_resolve_human_ctx(a.ledger, None))   # P1-A.1: 비대화형/env → reader → fail-closed
     db.close()
     return _show(r)
 
@@ -1225,9 +1329,11 @@ def cmd_confirm_edges(a):
     if r["dangling"]:
         print("  dangling skip: %d건" % len(r["dangling"]))
     print("  %s" % r["caveat"])
-    print("\n운영 ledger 등재(영구·owner-only·운영 write):")
-    print('  python scripts/hybrid_agi/hag_sync_adapter.py --import-edges --actor human '
+    print("\n운영 ledger 등재(영구·owner-only·운영 write) — owner 로컬 승인 이벤트 경유:")
+    print("  ① 승인 요청:  python scripts/hybrid_agi/hag_sync_adapter.py --import-edges "
           '--ledger "%s" --sync-db "%s"' % (ledger, sync_db))
+    print("  ② 로컬 승인:  binggu approval approve <요청ID>")
+    print("  ③ 등재 확정:  위 명령에 --approval-id <요청ID> 추가(승인 이벤트 없이는 write 0)")
     return 0
 
 
@@ -1799,14 +1905,18 @@ def main():
     for name in ("deprecate", "accept", "unaccept"):
         sp = sub.add_parser(name); sp.add_argument("n", type=int); sp.add_argument("id8")
         sp.add_argument("--reason", required=True); sp.add_argument("--confirm", required=True)
+        if name in ("accept", "unaccept"):   # P1-B A2 — 비대화형 owner exact-bound approval 경로
+            sp.add_argument("--approval-id", dest="approval_id", default=None)
     sp = sub.add_parser("replace"); sp.add_argument("n", type=int); sp.add_argument("id8")
     sp.add_argument("--with", required=True, dest="with")
     sp.add_argument("--reason", required=True); sp.add_argument("--confirm", required=True)
     sp = sub.add_parser("due"); sp.add_argument("n", type=int); sp.add_argument("id8")
     sp.add_argument("--date", required=True)
+    sp.add_argument("--approval-id", dest="approval_id", default=None)   # P1-B A2 비대화형 owner 경로
     sp = sub.add_parser("resolve"); sp.add_argument("n", type=int); sp.add_argument("id8")
     sp.add_argument("--outcome", required=True, choices=OUTCOMES)
     sp.add_argument("--reason", required=True)
+    sp.add_argument("--approval-id", dest="approval_id", default=None)   # P1-B A2 비대화형 owner 경로
     # 회상 조언 적중 기록(작업A) — mark-hit / mark-miss (query+index, node_id 미노출·nonce 방어)
     for _mk in ("mark-hit", "mark-miss"):
         mkp = sub.add_parser(_mk); mkp.add_argument("query")
@@ -1846,9 +1956,10 @@ def main():
     ibp.add_argument("--wait", type=int, default=0)
     ibp.add_argument("--variant", choices=["save_mcp", "save_v2"], default="save_mcp")
     ibp.add_argument("--workers-port", dest="wp", default=None)
-    pp = hsub.add_parser("pull")            # 선택 항목만 ledger commit (전량 자동 없음)
+    pp = hsub.add_parser("pull")            # 선택 묶음 → 승인 요청 / 승인 후 저장 (전량 자동 없음)
     pp.add_argument("--select", default=None)            # 'inbox' 에서 본 번호들 (예: 1,3)
-    pp.add_argument("--confirm", default=None)           # "LIVE SAVE <select>" 정확 일치
+    pp.add_argument("--confirm", default=None)           # (레거시·미사용) — 저장 게이트는 승인 이벤트
+    pp.add_argument("--approval-id", dest="approval_id", default=None)  # owner 로컬 승인 요청ID → atomic 저장
     hv = sub.add_parser("harvest")          # 외부 수확(P1 ③) — 등록 소스만·후보로만·영구는 사람 SAVE
     hvsub = hv.add_subparsers(dest="harvest_cmd", required=True)
     ha = hvsub.add_parser("add")            # 소스 화이트리스트 등록(사람 행위)

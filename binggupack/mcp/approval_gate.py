@@ -158,7 +158,8 @@ def authorize(operation, params, home, db):
                 review_payload = dict(params)
                 # deprecate/replace: 대상 노드의 실제 문장을 review 에 담아 owner 가 무엇을 기각/교체하는지
                 # 직접 보게 한다(R3-01). digest 는 params 기준이라 불변(binding_fields 는 _target_sentence 무시).
-                if operation in ("deprecate", "replace"):
+                if operation in ("deprecate", "replace", "accept", "unaccept"):
+                    # index 기반 대상 문장 주입 — owner 가 무엇을 기각/교체/수용하는지 직접 보게(R3-01).
                     try:
                         import os as _os
                         import sys as _sys
@@ -171,6 +172,17 @@ def authorize(operation, params, home, db):
                         _i = params.get("index")
                         if isinstance(_i, int) and 1 <= _i <= len(_rows):
                             review_payload["_target_sentence"] = _rows[_i - 1].get("sentence")
+                    except Exception:
+                        pass
+                elif operation in ("due", "resolve"):
+                    # node_id 기반(index 아님 · P1-B M2) — nodes.sentence 조회. digest 불변(_target_sentence 무시).
+                    try:
+                        _nid = params.get("node_id")
+                        if _nid:
+                            _row = db.con.execute("SELECT sentence FROM nodes WHERE node_id=?",
+                                                  (_nid,)).fetchone()
+                            if _row:
+                                review_payload["_target_sentence"] = _row[0]
                     except Exception:
                         pass
                 ta.write_review(home, rid, operation, review_payload, digest)
