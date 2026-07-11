@@ -570,10 +570,32 @@ def reserve(con, nonce, now):
     return {"status": "in_progress"}
 
 
-def finalize_consumed(con, nonce, request_id, receipt, now):
+def finalize_consumed(con, nonce, request_id, receipt, now, commit=True):
+    """예약(consuming)을 consumed 로 확정 + receipt 기록. commit=False → con.commit() 생략
+    (P1-B.1 crash-atomic bundle: mutation·finalize·audit 를 단일 COMMIT 경계 안에서 확정)."""
     con.execute("UPDATE approval_consumptions SET state='consumed', request_id=?, receipt=?, consumed_at=?"
                 " WHERE approval_nonce=?", (request_id, json.dumps(receipt, ensure_ascii=False), str(now), nonce))
-    con.commit()
+    if commit:
+        con.commit()
+
+
+def get_consumption(con, request_id):
+    """★P1-B.1 Contract-8: request_id 로 consumed receipt 조회(source load 전 재시도 판정용).
+    consumed 행이 있으면 {"receipt": <dict>} (nonce 미포함), 없으면 None. cross-ledger/unknown id 는
+    이 ledger 의 approval_consumptions 에 없으므로 None → 호출자는 기존 fail-closed 경로 유지."""
+    if not request_id:
+        return None
+    row = con.execute("SELECT receipt FROM approval_consumptions"
+                      " WHERE request_id=? AND state='consumed'", (request_id,)).fetchone()
+    if row is None:
+        return None
+    try:
+        rc = json.loads(row[0]) if row[0] else {}
+    except Exception:
+        rc = {}
+    if isinstance(rc, dict):
+        rc.pop("nonce", None)
+    return {"receipt": rc}
 
 
 def release(con, nonce):

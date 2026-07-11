@@ -76,6 +76,7 @@ GATES = [
     ("save_intent live",  "openbinggu_save_intent_live_runner.py",     ["--selftest"], "GATE=GO"),
     ("hag sync adapter",  os.path.join("hybrid_agi", "hag_sync_adapter.py"), ["--selftest"], "GATE: GO"),
     ("p1b mutation closure","binggu_p1b_mutation_closure_selftest.py", ["--selftest"], "GATE=GO"),
+    ("p1b1 bundle atomicity","binggu_p1b1_bundle_atomicity_selftest.py", ["--selftest"], "GATE=GO"),
     ("setup-save onboard","binggu_setup_save.py",                      ["--selftest"], "GATE: GO"),
     ("archive backup/export", os.path.join("..", "binggupack", "workspace", "archive.py"), [], "GATE=GO"),
     ("tree scan",         "openbinggu_public_tree_scan.py",            ["--tree", REPO, "--public"], "verdict=CLEAN"),

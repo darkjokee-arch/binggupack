@@ -51,38 +51,24 @@ def _maybe_promote_actor_by_gate(text, indices, ctx, explicit=False):
     return ctx
 
 
-def save_selected(db, text, indices, ctx, snap_dir, due_date=None, speaker=None, explicit=False):
-    """선택 후보만 staging 저장. 반환 {applied, saved, skipped_existing, rejected, reason, pack_id}.
-    진입 시 사람-발화 게이트로 actor 승격 후 기존 게이트(actor/confirm/A0/PII) 그대로 적용.
-    speaker: 화자 축(owner=사용자 발화/ai=AI 요약). None=미지정(기존 호출 후방호환·NULL 적재).
-    owner 직감도 conv-self 자기증빙 evidence 가 붙으므로 A0 REVIEW 거부 없이 저장된다(evidence_refs 보유)."""
-    ctx = _maybe_promote_actor_by_gate(text, indices, ctx, explicit)
-    before = db.store_checksum()
+def prepare_selected(db, text, indices, speaker=None, explicit=False, allow_review=False):
+    """★P1-B.1: 저장 컨텐츠 준비만(DB persistent write 0). save_selected(단건)과
+    commit_bundle(묶음 crash-atomic)이 공유하는 순수 준비 단계 = Phase 1.
 
-    def block(reason):
-        db.audit_append(ctx.get("actor", "human"), "conv_save", "conv_pending", "BLOCK",
-                        reason, before, before)
-        return {"applied": False, "saved": 0, "skipped_existing": 0, "rejected": {}, "reason": reason}
-
-    # 1) actor + confirm 문구 (사람 발화 유래 증거 — 정확 일치 의무)
-    # allowlist: 'human'만 허용. denylist(auto/reader만 차단)는 'agent'/'system'/누락/대문자
-    # 우회로 자동저장 가능(영구금지 25 우회) → human 정확매칭+정규화로 default-deny.
-    if ctx.get("actor", "").strip().lower() != "human":
-        return block("G4_no_auto")
-    expected = "SAVE " + ",".join(str(i) for i in indices)
-    if ctx.get("confirm") != expected:
-        return block("confirm_phrase_mismatch")
-    if not indices:
-        return block("empty_selection")
-
-    # 2) 원본 text 재실행 (변조 불가 — preview 결과 객체 불신). explicit 은 preview 와 동일해야
-    #    후보 index 가 정합한다(명시 저장은 explicit=True 로 본 그 후보를 그대로 저장).
+    원본 text 재실행(capture_preview) + index/A0/PII/기존재 검사 + mini-pack 조립.
+    actor/confirm 게이트는 호출자(save_selected 게이트 · bundle 은 authorize)가 담당한다.
+    반환:
+      ok               : 신규 삽입할 pack 존재(saved_items>0)
+      pack             : 신규 삽입 pack(없으면 None)
+      node_ids         : 선택 유효 전체 node_id(기존재 포함) = membership/receipt 용
+      new_node_ids     : 이번에 신규 저장될 node_id
+      skipped_existing : 이미 저장돼 skip 된 수
+      rejected         : {코드: n} — index/a0/pii 등 hard 거부(비면 idempotent 판정 가능)
+      reason           : ok 이면 None, 아니면 'nothing_to_save'(caller 가 rejected/skipped 로 idempotent 판정)
+      saved_items      : 신규 항목 원자료(due 처리용)"""
     pv = capture_preview(text, explicit=explicit)
     cands = pv["candidates"]
-
-    saved_items = []
-    skipped = 0
-    rejected = {}
+    saved_items, skipped, rejected, valid_node_ids = [], 0, {}, []
 
     def rej(code):
         rejected[code] = rejected.get(code, 0) + 1
@@ -94,28 +80,28 @@ def save_selected(db, text, indices, ctx, snap_dir, due_date=None, speaker=None,
         c = cands[i - 1]
         sent = c["sentence"]  # 사용자가 고른 문장 전체 = 저장될 문자열 (발췌 cut 폐기 — 개인 온톨로지 정체성)
         kind = c["label_kind"]
-        # 3a) 저장될 문자열(=문장 전체) 그대로 A0 재판정
+        # 저장될 문자열(=문장 전체) 그대로 A0 재판정
         verdict = a0.classify_node(
             {"id": "pre:" + _sent_hash(sent), "sentence": sent,
              "node_type": lkmap.KO2EN[kind], "evidence_refs": ["pre"]}, status="candidate")
         if verdict["verdict"] == "FAIL":
-            # 명시 저장(explicit: remember 등 사용자가 직접 친 입력)은 a0 형식 게이트
-            # (node_1_word/meaning = 비종결·짧음 구어체)를 면제 — pair owner 면제와 동일 원칙.
-            # PII/secret(아래 3b)·G4_no_auto·confirm·중복·actor 안전 게이트는 그대로 강제된다.
+            # 명시 저장(explicit)은 a0 형식 게이트(node_1_word/meaning=비종결·짧음 구어체) 면제.
+            # PII/secret(아래)·G4_no_auto·confirm·중복·actor 안전 게이트는 그대로 강제된다.
             _form_exempt = {"node_1_word", "node_1_meaning"}
             if not (explicit and verdict.get("guard") in _form_exempt):
                 rej("a0_fail")
                 continue
-        if verdict["verdict"] == "REVIEW" and not ctx.get("allow_review"):
+        if verdict["verdict"] == "REVIEW" and not allow_review:
             rej("a0_review_needs_explicit_allow")
             continue
-        # 3b) PII/secret/bizno 재스캔 (재실행 경로 무결성 방어)
+        # PII/secret/bizno 재스캔 (재실행 경로 무결성 방어)
         pii = scan_residual_pii(sent) + [k for k, rx in _PREVIEW_PII_EXTRA if rx.search(sent)]
         if pii or any(p.search(sent) for p in v011.SECRET_PATTERNS):
             rej("pii_or_secret")
             continue
-        # 3c) 기존재 노드 skip (부분 재선택 시 배치 전멸 방지)
         nid = "node:CONV:" + _sent_hash(sent)
+        valid_node_ids.append(nid)
+        # 기존재 노드 skip (부분 재선택 시 배치 전멸 방지)
         if db.con.execute("SELECT 1 FROM nodes WHERE node_id=?", (nid,)).fetchone():
             skipped += 1
             continue
@@ -123,18 +109,16 @@ def save_selected(db, text, indices, ctx, snap_dir, due_date=None, speaker=None,
                             "subtype": c.get("semantic_subtype")})
 
     if not saved_items:
-        db.audit_append(ctx.get("actor", "human"), "conv_save", "conv_noop", "BLOCK",
-                        "nothing_to_save", before, before)
-        return {"applied": False, "saved": 0, "skipped_existing": skipped,
-                "rejected": rejected, "reason": "nothing_to_save"}
+        return {"ok": False, "pack": None, "node_ids": valid_node_ids, "new_node_ids": [],
+                "skipped_existing": skipped, "rejected": rejected,
+                "reason": "nothing_to_save", "saved_items": []}
 
-    # 4) mini-pack 조립 — 어휘 매핑 경유 + 자기증빙 prefix + ephemeral freshness 동결
+    # mini-pack 조립 — 어휘 매핑 경유 + 자기증빙 prefix + ephemeral freshness 동결
     pack_content = "\n".join(sorted(it["sent"] for it in saved_items))
     pack_id = "conv_" + _hash(pack_content)[:8]
     nodes, edges, evidence = [], [], []
     for it in saved_items:
         # 도장 단일 원천: node_type = 분류 결과 5종 EN 라벨(doc/evidence/concept/state/judgment).
-        # KIND_TO_SPACE_NTYPE(space ntype: 상태·판단 둘 다 Claim 으로 붕괴)는 적재 node_type 에 쓰지 않는다.
         # A0(LABEL_KINDS=5종 EN)가 이미 이 값으로 검증했으므로 저장값=검증값=표시값 3자 일치.
         ntype = lkmap.KO2EN[it["kind"]]
         eid = "EVC-CONV-" + _sent_hash(it["sent"])
@@ -150,33 +134,71 @@ def save_selected(db, text, indices, ctx, snap_dir, due_date=None, speaker=None,
                       "source": eid, "target": it["nid"], "evidence_refs": [eid]})
     pack = {"pack_id": pack_id, "content": pack_content,
             "nodes": nodes, "edges": edges, "evidence": evidence}
+    return {"ok": True, "pack": pack, "node_ids": valid_node_ids,
+            "new_node_ids": [it["nid"] for it in saved_items],
+            "skipped_existing": skipped, "rejected": rejected, "reason": None,
+            "saved_items": saved_items}
 
-    # 5) staging_apply 경유 (duplicate·backup·transaction·checksum·audit 재사용)
+
+def save_selected(db, text, indices, ctx, snap_dir, due_date=None, speaker=None, explicit=False):
+    """선택 후보만 staging 저장(단건). 반환 {applied, saved, skipped_existing, rejected, reason, pack_id}.
+    진입 시 사람-발화 게이트로 actor 승격 후 기존 게이트(actor/confirm) → prepare_selected(컨텐츠 준비)
+    → staging_apply(단건 트랜잭션·duplicate/backup/checksum/audit) 순. bundle 경로는 prepare_selected 를
+    재사용하되 단일 트랜잭션 adapter(commit_bundle)를 쓴다 — 본 함수 동작은 불변.
+    speaker: 화자 축(owner=사용자 발화/ai=AI 요약). None=미지정(기존 호출 후방호환·NULL 적재)."""
+    ctx = _maybe_promote_actor_by_gate(text, indices, ctx, explicit)
+    before = db.store_checksum()
+
+    def block(reason):
+        db.audit_append(ctx.get("actor", "human"), "conv_save", "conv_pending", "BLOCK",
+                        reason, before, before)
+        return {"applied": False, "saved": 0, "skipped_existing": 0, "rejected": {}, "reason": reason}
+
+    # 1) actor + confirm 문구 (사람 발화 유래 증거 — 정확 일치 의무·allowlist human 만)
+    if ctx.get("actor", "").strip().lower() != "human":
+        return block("G4_no_auto")
+    expected = "SAVE " + ",".join(str(i) for i in indices)
+    if ctx.get("confirm") != expected:
+        return block("confirm_phrase_mismatch")
+    if not indices:
+        return block("empty_selection")
+
+    # 2) 컨텐츠 준비(DB write 0) — capture_preview 재실행·A0/PII/기존재 검사·pack 조립
+    pr = prepare_selected(db, text, indices, speaker=speaker, explicit=explicit,
+                          allow_review=bool(ctx.get("allow_review")))
+    if not pr["ok"]:
+        db.audit_append(ctx.get("actor", "human"), "conv_save", "conv_noop", "BLOCK",
+                        "nothing_to_save", before, before)
+        return {"applied": False, "saved": 0, "skipped_existing": pr["skipped_existing"],
+                "rejected": pr["rejected"], "reason": "nothing_to_save"}
+
+    pack = pr["pack"]
+    # 3) staging_apply 경유 (duplicate·backup·transaction·checksum·audit 재사용)
     r = staging_apply(db, pack, {"actor": ctx.get("actor", "human"),
                                  **{k: v for k, v in ctx.items() if k in ("backup_fail", "wal_abort", "checksum_mismatch")}},
                       snap_dir)
     if not r.get("applied"):
-        db.audit_append(ctx.get("actor", "human"), "conv_save", pack_id, "BLOCK",
+        db.audit_append(ctx.get("actor", "human"), "conv_save", pack["pack_id"], "BLOCK",
                         "staging_apply:" + str(r.get("reason")), before, db.store_checksum())
-        return {"applied": False, "saved": 0, "skipped_existing": skipped,
-                "rejected": rejected, "reason": r.get("reason"), "pack_id": pack_id}
-    db.audit_append(ctx.get("actor", "human"), "conv_save", pack_id, "ALLOW",
-                    "ephemeral_conv saved=%d skipped=%d" % (len(saved_items), skipped),
+        return {"applied": False, "saved": 0, "skipped_existing": pr["skipped_existing"],
+                "rejected": pr["rejected"], "reason": r.get("reason"), "pack_id": pack["pack_id"]}
+    db.audit_append(ctx.get("actor", "human"), "conv_save", pack["pack_id"], "ALLOW",
+                    "ephemeral_conv saved=%d skipped=%d" % (len(pr["saved_items"]), pr["skipped_existing"]),
                     before, db.store_checksum())
 
-    # 6) 판단 노드 + due_date → G3 리마인드 등록 (옵션)
+    # 4) 판단 노드 + due_date → G3 리마인드 등록 (옵션)
     due_set = 0
     if due_date:
-        for it in saved_items:
+        for it in pr["saved_items"]:
             if it["kind"] == "판단":
                 rr = set_review_due(db, it["nid"], due_date, {"actor": ctx.get("actor", "human")})
                 if rr.get("applied"):
                     due_set += 1
 
-    return {"applied": True, "saved": len(saved_items), "skipped_existing": skipped,
-            "rejected": rejected, "reason": None, "pack_id": pack_id,
+    return {"applied": True, "saved": len(pr["saved_items"]), "skipped_existing": pr["skipped_existing"],
+            "rejected": pr["rejected"], "reason": None, "pack_id": pack["pack_id"],
             "snapshot": r.get("snapshot"), "due_set": due_set,
-            "node_ids": [it["nid"] for it in saved_items]}  # save --accept 통합용(저장 노드 id)
+            "node_ids": pr["new_node_ids"]}  # save --accept 통합용(저장 노드 id)
 
 
 # ===== 페어 저장 (owner 발화 ↔ ai 요약 독립 노드 + 연결 엣지) =====

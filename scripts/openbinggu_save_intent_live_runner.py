@@ -265,12 +265,14 @@ def _selftest():
     ck(not r1["backup"], "T2 real 아님 → backup/실ledger 접근 0")
     shutil.rmtree(tmp, ignore_errors=True)
 
-    # T3 malformed(schema_ver=9) → quarantine · write 0 · 노드 0
+    # T3 malformed(schema_ver=9) → exact membership BLOCK · write 0 · 노드 0
+    #   ★P1-B.1: 선택 intent 중 하나라도 prevalidation 실패 → bundle_prevalidation_failed(H1 봉인).
     tmp, ob, snap, ledger, calls, admin, pf = fresh(pull="bad")
     r3 = run(ledger_path=ledger, outbox_dir=ob, snap_dir=snap, pull_fn=pf, admin_fn=admin, now=NOW)
     db = open_g3(ledger); n = db.con.execute("select count(*) from nodes").fetchone()[0]; db.close()
-    ck(r3["write"] == 0 and r3["applied"] == 0 and n == 0 and r3["reason"] == "no_valid_intent",
-       "T3 malformed pull → quarantine · write 0 · 노드 0")
+    ck(r3["write"] == 0 and r3["applied"] == 0 and n == 0
+       and r3["reason"] == "bundle_prevalidation_failed",
+       "T3 malformed pull → bundle_prevalidation_failed · write 0 · 노드 0")
     shutil.rmtree(tmp, ignore_errors=True)
 
     # T4 pull 예외 → disable 보장
