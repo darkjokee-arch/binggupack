@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Binggu Studio Preview</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+  <a class="skip" href="#main">본문으로 건너뛰기</a>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">◆</span>
+      <span class="title">BingguPack</span>
+      <span class="badge badge-ro" title="이 화면은 읽기 전용입니다">Read-only</span>
+    </div>
+    <div class="status" id="status-strip" aria-live="polite">
+      <span class="chip" id="chip-integrity">장부 —</span>
+      <span class="chip" id="chip-capture">capture —</span>
+      <span class="chip" id="chip-provider">provider —</span>
+      <span class="chip chip-time" id="chip-updated">갱신 —</span>
+    </div>
+    <div class="controls">
+      <button type="button" id="btn-refresh" class="btn">새로고침</button>
+      <button type="button" id="btn-auto" class="btn btn-ghost" aria-pressed="true">자동 갱신: 켬</button>
+    </div>
+  </header>
+
+  <main id="main" tabindex="-1">
+    <p class="notice" id="global-error" role="alert" hidden></p>
+
+    <section class="panel" aria-labelledby="home-h">
+      <h2 id="home-h">Home</h2>
+      <div class="cards" id="home-cards">
+        <p class="loading">불러오는 중…</p>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="inbox-h">
+      <h2 id="inbox-h">검토함 (Inbox)</h2>
+      <nav class="tabs" id="inbox-tabs" role="tablist" aria-label="검토함 탭"></nav>
+      <div id="inbox-body">
+        <p class="loading">불러오는 중…</p>
+      </div>
+    </section>
+
+    <footer class="foot">
+      <span id="foot-mode">read-only preview</span>
+      <span class="dot">·</span>
+      <span>모든 저장·승인은 기존 CLI 와 owner 승인 경계를 사용합니다</span>
+    </footer>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="static/app.js"></script>
+</body>
+</html>
