@@ -1710,6 +1710,13 @@ def cmd_inbox(a):
     return daily.print_inbox(a.ledger, sections or None, as_json=getattr(a, "json", False))
 
 
+def cmd_studio(a):
+    """studio — 로컬 read-only 웹 UI(loopback only · 실행마다 새 ephemeral session · Daily Console
+    snapshot 재사용). 브라우저 자동 열기(--no-open 으로 생략) · Ctrl+C 종료. mutation/approve/fetch 0."""
+    from binggupack.studio import server
+    return server.serve(a.ledger, port=getattr(a, "port", 0), open_browser=not getattr(a, "no_open", False))
+
+
 def _node_id8(node_id):
     """node_id → 표시용 hash8(deprecate/replace confirm 의 id8 규약과 동일)."""
     from openbinggu_candidate_list_view import node_id8 as _n8
@@ -1850,6 +1857,9 @@ def main():
     sub.add_parser("status", aliases=["doctor"])
     hmp = sub.add_parser("home")            # 데일리 콘솔(상태+다음 할 일 · read-only · 인자없는 binggu 와 동일)
     hmp.add_argument("--json", action="store_true")
+    stp = sub.add_parser("studio")          # 로컬 read-only 웹 UI(loopback · ephemeral session · 저장 0)
+    stp.add_argument("--no-open", action="store_true", dest="no_open")   # 브라우저 자동 열기 생략(headless/CI)
+    stp.add_argument("--port", type=int, default=0)                       # 0=OS 임시 포트(권장) · 고정 필요 시 지정
     sp = sub.add_parser("preview", aliases=["remember"]); sp.add_argument("text")
     rp = sub.add_parser("reflect")          # 회고·자가평가 → 지식 후보(반성이 지식으로 · 저장 0)
     rp.add_argument("text", nargs="?", default=None)
@@ -1994,7 +2004,7 @@ def main():
     apv.add_argument("request_id")
     a = p.parse_args()
     fn = {"init": cmd_init, "start": cmd_init, "status": cmd_status, "doctor": cmd_status,
-          "home": cmd_home,
+          "home": cmd_home, "studio": cmd_studio,
           "preview": cmd_preview, "remember": lambda a: cmd_preview(a, explicit=True),  # remember=명시 입력
           "reflect": cmd_reflect, "save": cmd_save,
           "list": cmd_list, "deprecate": cmd_deprecate, "replace": cmd_replace,
