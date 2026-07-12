@@ -110,11 +110,15 @@ def _enable_provider(home):
         json.dump({"enabled": True, "ttl_seconds": 900, "pending_cap": 16}, f)
 
 
-def _approve(con, home, rid):
-    """owner 승인 시뮬 — CLI TTY 검증은 selftest 밖. mint 기본 채널(ship-guard 리터럴 회피).
-    ★ authorize/verify_event 는 실제 time.time() 으로 검증하므로 mint 도 실제 시간(-5 여유)."""
+def _approve(con, home, rid, approved_at):
+    """owner 승인 시뮬 — CLI TTY 검증은 selftest 밖. mint 기본 채널(ship-guard 'test_double' 리터럴 회피).
+    ★ mint 는 명시 논리 시각(approved_at)으로만 발행한다 — wall clock 을 내부에서 다시 읽지 않는다.
+    verify_event 는 now 파라미터로만 `now < approved_at`(clock 역행/future)·`now > expires_at`(만료)를
+    판정하고 내부 time.time() 을 쓰지 않으므로(production 불변), 호출측이 request_now <= approved_at <=
+    verify_now < expires_at 관계를 논리 시계로 결정적으로 보장한다 — wall runtime(CI 부하) 과 무관.
+    channel 은 verify_event 가 검증하지 않는 감사 메타라 기본값이 결정성에 영향 없다."""
     req = ta.get_request(con, rid)
-    ta.mint_approval(home, req, 900, time.time() - 5)
+    ta.mint_approval(home, req, 900, approved_at)
 
 
 def _mk_intent(staging, text, idxs, now):
@@ -159,16 +163,18 @@ def _edge_count(ledp):
         o.close()
 
 
-def _hag_request_rid(scc, ledp, home):
-    """1차 import(승인 미제시)로 PENDING 생성 → rid 회수 → owner mint."""
+def _hag_request_rid(scc, ledp, home, request_now, approved_at):
+    """1차 import(승인 미제시)로 PENDING 생성 → rid 회수 → owner mint(명시 approved_at).
+    request_now = PENDING 생성(upsert_request) 논리 시각 · approved_at = 승인 mint 논리 시각.
+    두 시각 모두 호출측이 명시 전달 — wall clock 재읽기 0(request_now <= approved_at 보장)."""
     rid = None
     try:
-        import_confirmed_edges(scc, ledp, now=int(time.time()), home=home)
+        import_confirmed_edges(scc, ledp, now=request_now, home=home)
     except SyncError as e:
         rid = getattr(e, "request_id", None)
     o = sqlite3.connect(ledp)
     try:
-        _approve(o, home, rid)
+        _approve(o, home, rid, approved_at)
     finally:
         o.close()
     return rid
@@ -176,7 +182,9 @@ def _hag_request_rid(scc, ledp, home):
 
 # ── B. env/문자열 우회의 표면 간 균일성 ─────────────────────────────────────────────
 def _run_uniform_bypass(ck, root):
-    now = time.time()
+    # 승인 미제시 경로(provider 미구성 · 승인 없음 · confirm 문자열=binding_mismatch)만 검증하므로
+    # verify_event 는 approved_at 비교 전에 차단된다 → 단일 논리 시각으로 충분(wall clock 재읽기 0).
+    now = int(time.time())
     # env 로 truthy 를 잔뜩 세팅해도 provider 는 파일 신호로만 발견(양 표면 공통).
     keep = {k: os.environ.get(k) for k in
             ("BINGGU_TRUSTED_APPROVAL", "BINGGU_APPROVAL_TOKEN", "BINGGU_TRUSTED_CLI",
@@ -270,7 +278,18 @@ def _run_uniform_bypass(ck, root):
 
 # ── C. 표면 간 end-to-end 계약 균일성(request-only→승인→atomic→replay 0) ──────────
 def _run_cross_surface_lifecycle(ck, root):
-    now = time.time()
+    # 명시 논리 시계(단일 base 1회 캡처 · 이후 오프셋 고정) — request <= approval <= verify < replay < expiry.
+    # ★ bundle 표면(commit_bundle → approval_gate.authorize)은 verify 에 **실제 time.time()** 을 쓰므로
+    #   approved_at 은 반드시 wall now 보다 **과거**여야 한다(미래면 time.time() < approved_at →
+    #   approval_time_invalid · 환경 속도에 따라 비결정). import 표면은 verify 에 now 파라미터를 쓴다.
+    #   양 표면을 approved_at=base-5(과거) 로 통일하면 bundle wall-verify(time.time() >= base-5)와
+    #   import param-verify(verify_now >= approved_at) 가 시나리오 경과·CI 부하와 무관하게 결정적 통과한다.
+    #   (clock 역행/만료 방어는 E 시나리오가 별도로 검증 — 여기서 완화 아님.)
+    base = int(time.time())
+    approved_at = base - 5
+    request_now = base - 6
+    verify_now = base
+    replay_now = base + 1
     home = os.path.join(root, "c_home")
     _enable_provider(home)
 
@@ -281,32 +300,32 @@ def _run_cross_surface_lifecycle(ck, root):
     os.makedirs(staging, exist_ok=True)
     os.makedirs(snap, exist_ok=True)
     db = open_g3(os.path.join(bh, "ledger.sqlite"))
-    i1 = _mk_intent(staging, "이 입찰은 마진이 낮아 보류하기로 결정했다.", [1], now)
-    r_req = commit_bundle(db, home, staging, [i1], None, snap, now)
+    i1 = _mk_intent(staging, "이 입찰은 마진이 낮아 보류하기로 결정했다.", [1], request_now)
+    r_req = commit_bundle(db, home, staging, [i1], None, snap, request_now)
     rid = r_req["request_id"]
     n0 = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
     ck("C_bundle_request_only_write0_returns_request_id",
        r_req["write"] == 0 and rid and n0 == 0
        and os.path.isfile(os.path.join(staging, i1 + ".json")))
-    _approve(db.con, home, rid)
-    r_commit = commit_bundle(db, home, staging, [i1], rid, snap, now)
+    _approve(db.con, home, rid, approved_at)
+    r_commit = commit_bundle(db, home, staging, [i1], rid, snap, verify_now)
     n1 = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
     ck("C_bundle_approved_atomic_exactly_one_write", r_commit["write"] == 1 and n1 == 1)
     # 재시도(같은 rid) → second write 0(계약 8)
-    r_replay = commit_bundle(db, home, staging, [i1], rid, snap, now)
+    r_replay = commit_bundle(db, home, staging, [i1], rid, snap, replay_now)
     n2 = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
     ck("C_bundle_replay_second_write_0", r_replay["write"] == 0 and n2 == n1)
     db.close()
 
     # import 표면 — 동일 생명주기
     ledp, scc, ek = _fresh_hag(root, "c_hag")
-    rid_h = _hag_request_rid(scc, ledp, home)
+    rid_h = _hag_request_rid(scc, ledp, home, request_now, approved_at)
     ck("C_import_request_only_write0_returns_request_id",
        bool(rid_h) and _edge_count(ledp) == 0)
-    res = import_confirmed_edges(scc, ledp, now=int(now), home=home, approval_id=rid_h)
+    res = import_confirmed_edges(scc, ledp, now=verify_now, home=home, approval_id=rid_h)
     ck("C_import_approved_exactly_one_write",
        res.get("imported") == 1 and _edge_count(ledp) == 1)
-    res2 = import_confirmed_edges(scc, ledp, now=int(now), home=home, approval_id=rid_h)
+    res2 = import_confirmed_edges(scc, ledp, now=replay_now, home=home, approval_id=rid_h)
     # 재시도: 첫 import 로 sync_edges.status='imported' → effective=∅ → 멱등 no_op(2차 write 0).
     # (동시성 already_consumed 경로는 hag 개별 selftest 가 커버 — 여기선 표면 관통 "second write 0"만.)
     ck("C_import_replay_second_write_0",
@@ -317,20 +336,24 @@ def _run_cross_surface_lifecycle(ck, root):
 
 # ── D. anti-forge 2종 (evidence 위조 · membership 팽창) ─────────────────────────────
 def _run_anti_forge(ck, root):
-    now = time.time()
+    # bundle 표면(D2)은 wall-clock authorize 이므로 approved_at 은 과거(base-5)로 통일(C 와 동일 근거).
+    base = int(time.time())
+    approved_at = base - 5
+    request_now = base - 6
+    verify_now = base
     home = os.path.join(root, "d_home")
     _enable_provider(home)
 
     # D1: import evidence 위조 — evidence=[n_ev] 로 승인 발행 후 sync_edges evidence 를 팽창시키면
     #     effective payload digest 변화 → 재계산 rid≠승인 rid → binding_mismatch · write 0(C1).
     ledp, scc, ek = _fresh_hag(root, "d_forge", evidence=("n_ev",))
-    rid = _hag_request_rid(scc, ledp, home)   # evidence=[n_ev] 기준 승인
+    rid = _hag_request_rid(scc, ledp, home, request_now, approved_at)   # evidence=[n_ev] 기준 승인
     scc.execute("UPDATE sync_edges SET evidence_refs=? WHERE edge_key=?",
                 (json.dumps(["n_ev", "n_forged"]), ek))
     scc.commit()
     blk, reason = False, None
     try:
-        import_confirmed_edges(scc, ledp, now=int(now), home=home, approval_id=rid)
+        import_confirmed_edges(scc, ledp, now=verify_now, home=home, approval_id=rid)
     except SyncError as e:
         reason = getattr(e, "reason", None)
         blk = reason == "binding_mismatch:request_id"
@@ -345,13 +368,13 @@ def _run_anti_forge(ck, root):
     os.makedirs(staging, exist_ok=True)
     os.makedirs(snap, exist_ok=True)
     db = open_g3(os.path.join(bh, "ledger.sqlite"))
-    i1 = _mk_intent(staging, "이 방식을 채택한다.", [1], now)
-    i2 = _mk_intent(staging, "이 계약은 조건이 불리해 포기한다.", [1], now)
-    r_req = commit_bundle(db, home, staging, [i1], None, snap, now)   # {i1} 만 승인 요청
+    i1 = _mk_intent(staging, "이 방식을 채택한다.", [1], request_now)
+    i2 = _mk_intent(staging, "이 계약은 조건이 불리해 포기한다.", [1], request_now)
+    r_req = commit_bundle(db, home, staging, [i1], None, snap, request_now)   # {i1} 만 승인 요청
     rid_a = r_req["request_id"]
-    _approve(db.con, home, rid_a)
+    _approve(db.con, home, rid_a, approved_at)
     n_before = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
-    r_expand = commit_bundle(db, home, staging, [i1, i2], rid_a, snap, now)  # 집합 팽창
+    r_expand = commit_bundle(db, home, staging, [i1, i2], rid_a, snap, verify_now)  # 집합 팽창
     n_after = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
     both_preserved = all(os.path.isfile(os.path.join(staging, x + ".json")) for x in (i1, i2))
     ck("D_bundle_membership_expansion_invalidates_approval_write0",
@@ -359,6 +382,60 @@ def _run_anti_forge(ck, root):
        and r_expand["reason"] in ("binding_mismatch:request_id", "approval_required")
        and n_after == n_before and both_preserved)
     db.close()
+
+
+# ── E. deterministic approval clock (wall-runtime 무관 · stale/expiry 거부) ────────────
+def _run_deterministic_clock(ck, root):
+    """승인 lifecycle 이 wall runtime 과 무관함을 논리 시계로 증명(실제 sleep 0). 고정 미래 논리값을
+    쓰므로 wall clock time.time() 과 완전 무관하다(production verify_event/mint 은 now 파라미터만 사용).
+    stale/expiry negative case 로 production clock 역행·만료 방어가 그대로 유지됨도 함께 증명한다."""
+    home = os.path.join(root, "clk_home")
+    _enable_provider(home)
+    REQ = 2_000_000_000   # 고정 미래 논리 시각(wall clock 무관)
+
+    # E1: request↔approval 사이 120초(논리)가 걸려도 verify_now>=approved_at 이면 정확 1회 import.
+    #     "request 와 approval 사이 120초 경과"를 실제 sleep 없이 논리 시계로 시뮬레이션한다.
+    approved_at = REQ + 120
+    verify_now = approved_at + 1
+    ledp, scc, ek = _fresh_hag(root, "clk_delay")
+    rid = _hag_request_rid(scc, ledp, home, REQ, approved_at)
+    res = import_confirmed_edges(scc, ledp, now=verify_now, home=home, approval_id=rid)
+    ck("p1b_approval_clock_does_not_depend_on_wall_runtime",
+       res.get("imported") == 1 and _edge_count(ledp) == 1)
+    # 정확 승인 import write 1 이후 재시도(같은 rid) → second write 0
+    res2 = import_confirmed_edges(scc, ledp, now=verify_now + 1, home=home, approval_id=rid)
+    ck("p1b_clock_delayed_replay_second_write_0",
+       res2.get("imported") == 0 and _edge_count(ledp) == 1)
+    scc.close()
+
+    # E2: verify_now < approved_at(stale/clock rollback) → approval_time_invalid · write 0.
+    #     production clock 역행 방어가 그대로 유지됨을 증명(reason 완화 아님).
+    ledp2, scc2, ek2 = _fresh_hag(root, "clk_stale")
+    approved_at2 = REQ + 10
+    stale_verify_now = REQ   # < approved_at2
+    rid2 = _hag_request_rid(scc2, ledp2, home, REQ, approved_at2)
+    blk, reason = False, None
+    try:
+        import_confirmed_edges(scc2, ledp2, now=stale_verify_now, home=home, approval_id=rid2)
+    except SyncError as e:
+        reason = getattr(e, "reason", None)
+        blk = reason == "approval_time_invalid"
+    scc2.close()
+    ck("p1b_stale_verify_time_is_rejected", blk and _edge_count(ledp2) == 0)
+
+    # E3: verify_now > expires_at(approved_at + ttl) → approval_expired · write 0(만료 방어 유지).
+    ledp3, scc3, ek3 = _fresh_hag(root, "clk_expired")
+    approved_at3 = REQ
+    expired_verify_now = approved_at3 + 900 + 1   # mint ttl=900 → expires_at=approved_at+900
+    rid3 = _hag_request_rid(scc3, ledp3, home, REQ, approved_at3)
+    blk3, reason3 = False, None
+    try:
+        import_confirmed_edges(scc3, ledp3, now=expired_verify_now, home=home, approval_id=rid3)
+    except SyncError as e:
+        reason3 = getattr(e, "reason", None)
+        blk3 = reason3 == "approval_expired"
+    scc3.close()
+    ck("p1b_expiry_blocks_stale_approval", blk3 and _edge_count(ledp3) == 0)
 
 
 def selftest():
@@ -382,6 +459,8 @@ def selftest():
         _run_cross_surface_lifecycle(ck, root)
         print("\n-- D. anti-forge (evidence 위조 · membership 팽창) --")
         _run_anti_forge(ck, root)
+        print("\n-- E. deterministic approval clock (wall-runtime 무관 · stale/expiry 거부) --")
+        _run_deterministic_clock(ck, root)
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
