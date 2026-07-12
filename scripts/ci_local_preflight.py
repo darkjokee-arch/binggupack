@@ -31,6 +31,7 @@ TMP_HOME = tempfile.mkdtemp(prefix="bgp_preflight_home_")
 STEPS = [
     ("version SSOT",      [PY, "scripts/version_consistency_selftest.py"], "rc0"),
     ("ruff F-gate",       [PY, "-m", "ruff", "check", "binggupack/", "scripts/", "--select", "F"], "rc0"),
+    ("anywhere vendor sync", [PY, "scripts/sync_anywhere_vendor.py", "--check"], "rc0"),
     ("platform policy",   [PY, "scripts/binggu_platform_selftest.py"], "rc0"),
     ("binggu --selftest", [PY, "binggu.py", "--selftest"], "rc0"),
     ("doctor",            [PY, "scripts/openbinggu_doctor.py", "--selftest"], "rc0"),
