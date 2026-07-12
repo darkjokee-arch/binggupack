@@ -1,0 +1,17 @@
+# Binggu Anywhere — PUBLIC HTTPS MCP gateway.
+# Public entrypoint (owner sets a custom domain / route at deploy time). Auth + tenant
+# isolation happen here; the 5 read tools run in the private core via the Service Binding.
+name = "binggu-anywhere-gateway"
+main = "anywhere/gateway.ts"
+compatibility_date = "2025-06-01"
+
+# Private core (v1.21-A read tools) — no public route of its own.
+[[services]]
+binding = "CORE"
+service = "binggu-anywhere-core"
+
+# Owner-provisioned credential metadata (bearer-hash -> {subject, tenant_id, scopes}).
+# No pack data / revision pointer / publication truth lives in KV (owner §3).
+[[kv_namespaces]]
+binding = "AUTH"
+id = "REPLACE_WITH_KV_ID"
