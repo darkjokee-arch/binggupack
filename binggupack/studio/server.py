@@ -20,6 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from binggupack.cli import daily
 from binggupack.studio import read_model
+from binggupack.studio import approval_view
 
 try:
     from importlib.resources import files as _res_files
@@ -135,6 +136,8 @@ def _make_handler(ledger, session):
                 self._serve_static(rest[1], head_only)
             elif rest[0] == "api" and len(rest) == 3 and rest[1] == "memory":
                 self._serve_memory_detail(rest[2], head_only)
+            elif rest[0] == "api" and len(rest) == 3 and rest[1] == "approval":
+                self._serve_approval_detail(rest[2], head_only)
             elif rest[0] == "api" and len(rest) == 2:
                 self._serve_api(rest[1], _query(raw), head_only)
             else:
@@ -162,8 +165,36 @@ def _make_handler(ledger, session):
                 self._serve_memories(query, head_only)
             elif name == "recall":
                 self._serve_recall(query, head_only)
+            elif name == "approvals":
+                self._serve_approvals(query, head_only)
             else:
                 self._json({"error": "not_found"}, code=404, head_only=head_only)
+
+        def _serve_approvals(self, query, head_only):
+            state = _qget(query, "state", "all")
+            operation = _qget(query, "operation", None)
+            try:
+                limit = read_model.parse_int(_qget(query, "limit", str(approval_view.LIST_LIMIT_DEFAULT)), "limit")
+                offset = read_model.parse_int(_qget(query, "offset", "0"), "offset")
+                approval_view.validate_list_params(state, limit, offset)
+            except read_model.ValidationError as e:
+                self._json({"error": "invalid_request", "field": e.field}, code=400, head_only=head_only)
+                return
+            snap = approval_view.collect_approval_list_snapshot(
+                ledger, state=state, operation=operation, limit=limit, offset=offset)
+            self._json(snap, head_only=head_only)
+
+        def _serve_approval_detail(self, raw_id, head_only):
+            try:
+                request_id = approval_view.validate_request_id(urllib.parse.unquote(raw_id))
+            except read_model.ValidationError as e:
+                self._json({"error": "invalid_request", "field": e.field}, code=400, head_only=head_only)
+                return
+            snap = approval_view.collect_approval_detail_snapshot(ledger, request_id)
+            if snap is None:
+                self._json({"error": "not_found"}, code=404, head_only=head_only)
+                return
+            self._json(snap, head_only=head_only)
 
         def _serve_memories(self, query, head_only):
             state = _qget(query, "state", "active")
