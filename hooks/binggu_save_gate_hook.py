@@ -132,6 +132,25 @@ def _selftest():
         lp = (home / "last_preview_candidates.json").read_text(encoding="utf-8")
         check((SA not in lp) and (SB not in lp), "T7 preview 영속 원문 미포함(hash만)")
 
+        # T8 save-n 참조 바인딩 — 'SAVE 1' 발화가 ref 레코드(pref+idx)도 병기 append
+        pref = sgate.preview_ref_for_candidates([{"sentence": SA}, {"sentence": SB}])
+        check(sgate.gate_human_for_ref(pref, [1], path=str(gate_log)) is True
+              and sgate.gate_human_for_ref(pref, [1, 2], path=str(gate_log)) is True
+              and sgate.gate_human_for_ref("0" * 16, [1], path=str(gate_log)) is False,
+              "T8 ref 레코드 병기 → gate_human_for_ref 통과(타 pref 차단)")
+
+        # T9 구형 preview(pref 없음) → 레거시 sh 행만 기록(ref 불변·무해)
+        SL = "구형 전용 문장 아자차"
+        (home / "last_preview_candidates.json").write_text(json.dumps(
+            {"ts": 0, "items": [{"idx": 1, "sh": sgate.sent_hash(SL)}]},
+            ensure_ascii=False), encoding="utf-8")
+        before_refs = dict(sgate._load_refs(path=str(gate_log)))
+        r = call({"hook_event_name": "UserPromptSubmit", "prompt": "SAVE 1", "cwd": "x"})
+        check(r.returncode == 0 and r.stdout.strip() == ""
+              and sgate._load_refs(path=str(gate_log)) == before_refs
+              and sgate.gate_human_for([SL], path=str(gate_log)) is True,
+              "T9 구형 preview 무해(레거시만 기록·ref 불변)")
+
         print(f"\nGATE={'GO' if ok else 'NO-GO'}")
         return 0 if ok else 1
     finally:
