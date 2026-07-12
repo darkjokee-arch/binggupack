@@ -279,12 +279,17 @@ def _run_uniform_bypass(ck, root):
 # ── C. 표면 간 end-to-end 계약 균일성(request-only→승인→atomic→replay 0) ──────────
 def _run_cross_surface_lifecycle(ck, root):
     # 명시 논리 시계(단일 base 1회 캡처 · 이후 오프셋 고정) — request <= approval <= verify < replay < expiry.
-    # wall runtime(시나리오 경과·CI 부하)과 무관하게 verify_now >= approved_at 을 결정적으로 보장한다.
+    # ★ bundle 표면(commit_bundle → approval_gate.authorize)은 verify 에 **실제 time.time()** 을 쓰므로
+    #   approved_at 은 반드시 wall now 보다 **과거**여야 한다(미래면 time.time() < approved_at →
+    #   approval_time_invalid · 환경 속도에 따라 비결정). import 표면은 verify 에 now 파라미터를 쓴다.
+    #   양 표면을 approved_at=base-5(과거) 로 통일하면 bundle wall-verify(time.time() >= base-5)와
+    #   import param-verify(verify_now >= approved_at) 가 시나리오 경과·CI 부하와 무관하게 결정적 통과한다.
+    #   (clock 역행/만료 방어는 E 시나리오가 별도로 검증 — 여기서 완화 아님.)
     base = int(time.time())
-    request_now = base
-    approved_at = base + 1
-    verify_now = base + 2
-    replay_now = base + 3
+    approved_at = base - 5
+    request_now = base - 6
+    verify_now = base
+    replay_now = base + 1
     home = os.path.join(root, "c_home")
     _enable_provider(home)
 
@@ -331,10 +336,11 @@ def _run_cross_surface_lifecycle(ck, root):
 
 # ── D. anti-forge 2종 (evidence 위조 · membership 팽창) ─────────────────────────────
 def _run_anti_forge(ck, root):
+    # bundle 표면(D2)은 wall-clock authorize 이므로 approved_at 은 과거(base-5)로 통일(C 와 동일 근거).
     base = int(time.time())
-    request_now = base
-    approved_at = base + 1
-    verify_now = base + 2
+    approved_at = base - 5
+    request_now = base - 6
+    verify_now = base
     home = os.path.join(root, "d_home")
     _enable_provider(home)
 
