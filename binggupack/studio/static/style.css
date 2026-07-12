@@ -324,3 +324,12 @@ main {
 .provrow { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: baseline; padding: 0.3rem 0; border-top: 1px solid var(--border); font-size: 0.83rem; }
 .prov-ex { flex: 1 1 8rem; color: var(--muted); word-break: break-word; }
 .mempager { margin-top: 0.8rem; text-align: center; }
+
+/* ── approval state badges ── */
+.badge-state.st-appr-pending { color: var(--muted); }
+.badge-state.st-appr-approved { color: var(--accent); border-color: var(--accent); }
+.badge-state.st-appr-consuming { color: var(--warn); border-color: var(--warn); }
+.badge-state.st-appr-consumed { color: var(--accent); border-color: var(--accent); font-weight: 600; }
+.badge-state.st-appr-rejected { color: var(--danger); border-color: var(--danger); }
+.badge-state.st-appr-revoked { color: var(--danger); }
+.badge-state.st-appr-expired { color: var(--warn); border-color: var(--warn); }

@@ -20,6 +20,7 @@
       <button type="button" class="navbtn" data-view="home" aria-current="page">Home</button>
       <button type="button" class="navbtn" data-view="inbox">Inbox</button>
       <button type="button" class="navbtn" data-view="memories">Memories</button>
+      <button type="button" class="navbtn" data-view="approvals">Approvals</button>
     </nav>
     <div class="status" id="status-strip" aria-live="polite">
       <span class="chip" id="chip-integrity">장부 —</span>
@@ -79,6 +80,35 @@
       </div>
       <div class="mempager" id="mem-pager" hidden>
         <button type="button" class="btn btn-ghost" id="mem-more">더 보기</button>
+      </div>
+    </section>
+
+    <!-- APPROVALS -->
+    <section class="view panel" id="view-approvals" aria-labelledby="appr-h" hidden>
+      <h2 id="appr-h">승인 (Approvals)</h2>
+      <p class="lexnote">Studio 는 승인을 실행하지 않습니다. 아래 명령을 복사해 owner 가 별도 로컬 터미널에서 직접 실행하세요.</p>
+      <div class="cards" id="appr-cards"></div>
+      <form class="memtools" id="appr-form" role="search">
+        <select id="appr-state" aria-label="상태 필터">
+          <option value="all">전체</option>
+          <option value="pending">대기(pending)</option>
+          <option value="approved">승인됨(approved)</option>
+          <option value="consuming">소비중(consuming)</option>
+          <option value="consumed">완료(consumed)</option>
+          <option value="rejected">거절(rejected)</option>
+          <option value="revoked">취소(revoked)</option>
+          <option value="expired">만료(expired)</option>
+        </select>
+        <input type="text" id="appr-op" placeholder="operation" autocomplete="off" aria-label="operation 필터">
+        <button type="submit" class="btn" id="appr-search">조회</button>
+      </form>
+      <div class="memcount" id="appr-count" aria-live="polite"></div>
+      <div class="memlayout">
+        <div class="memlist" id="appr-list"><p class="empty">조회를 누르세요.</p></div>
+        <aside class="memdetail" id="appr-detail" aria-live="polite" hidden></aside>
+      </div>
+      <div class="mempager" id="appr-pager" hidden>
+        <button type="button" class="btn btn-ghost" id="appr-more">더 보기</button>
       </div>
     </section>
 
