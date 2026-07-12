@@ -142,11 +142,22 @@ def _default_harvest_sources(home=None):
     return {"sources": []}
 
 
+def _default_fresh_index(home=None):
+    # Local Fresh Index(LFI) 설정. hot_weights=Hot 랭킹 가중, semantic_timeout=조회 embed
+    # 짧은 timeout(초), allowed_paths=2단계 로컬 파일 인덱싱 허용목록(기본 빈=owner 옵트인).
+    return {
+        "hot_weights": {"freshness": 1.0, "trust": 1.2, "utility": 0.8, "pin_boost": 5.0},
+        "semantic_timeout": 1.0,
+        "allowed_paths": [],  # phase2: owner 가 명시한 로컬 md/traj 경로만
+    }
+
+
 # binggu_config 는 위임 전용 — default_factory 는 delegate 실패시 폴백용 빈 dict(정상경로 미사용).
 register("binggu_config", lambda home=None: {}, delegate=_load_user_config_delegate)
 register("capture_scope", _default_capture_scope)
 register("close_phrases", _default_close_phrases)
 register("harvest_sources", _default_harvest_sources)
+register("fresh_index", _default_fresh_index)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

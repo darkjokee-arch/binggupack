@@ -47,10 +47,14 @@ jobs:
             python-version: "3.12"
           - os: ubuntu-latest
             python-version: "3.13"
+          - os: ubuntu-latest
+            python-version: "3.14"
           - os: macos-latest
             python-version: "3.12"
           - os: windows-latest
             python-version: "3.12"
+          - os: windows-latest
+            python-version: "3.14"
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -74,6 +78,12 @@ jobs:
 
       - name: binggu core selftest (27/27, GATE=GO)
         run: python binggu.py --selftest
+
+      - name: Local Fresh Index — selftest + full pytest (신규 기능 · 3.14 포함)
+        run: |
+          pip install "pytest>=8"
+          python -m binggupack.pack.fresh_index --selftest
+          python -m pytest tests/test_fresh_index.py -q
 
       - name: Doctor selftest (12/12, GATE=GO required)
         run: python scripts/openbinggu_doctor.py --selftest

@@ -356,22 +356,29 @@ def cmd_hosted(a):
     return 1
 
 
-def cmd_recall(a):
-    """recall/why — query 관련 기억 회상(기본 read-only). P1 rank_score 정렬 + why-edge.
-    use_count++ 는 --record 명시 시에만(헌법 '자동 저장 0' — 회상만으론 ledger write 0).
-    --record 는 '이 기억이 유용했다'는 사람의 명시 신호(유용성 랭킹용·도장/문장 불변)."""
+def _reindex_after_write(ledger_arg):
+    """저장/교체/폐기 후 Local Fresh Index 증분 갱신(best-effort · 실패해도 명령 안 깨짐).
+
+    색인은 순수 파생(ledger mode=ro read 만) — write 는 색인 sqlite 만. 실패는 침묵(회상은
+    stale 색인도 graceful, 다음 `binggu index update`/자동 빌드로 자기치유)."""
+    try:
+        from binggupack.pack import fresh_index as FI
+        ledger, _ = _ledger_paths(ledger_arg)
+        FI.index_update(ledger, home=os.path.dirname(ledger))
+    except Exception:
+        pass
+
+
+def _recall_deep(a):
+    """Deep 회상(명시 --deep) — 원본 전체 탐색(기존 why_search full scan). read-only."""
     import binggu_recall as RC
-    import binggu_p1_ranking as RANK
     ledger, _ = _ledger_paths(a.ledger)
-    if not os.path.exists(ledger):
-        print("장부가 없습니다(회상할 기억 없음): %s · 먼저 python binggu.py init" % ledger)
-        return 0  # 빈 그래프 graceful
     res = RC.why_search(ledger, a.query, limit=getattr(a, "limit", None),
                         home=os.path.dirname(ledger))
     if not res["relevant_nodes"]:
-        print("관련 기억이 없습니다: \"%s\"" % a.query)
-        return 0
-    print("# 회상 — \"%s\" 관련 기억 %d건 (랭킹순 · candidate · read-only)"
+        print("관련 기억이 없습니다(Deep 전체 탐색): \"%s\"" % a.query)
+        return 0, []
+    print("# 회상(Deep · 원본 전체 탐색) — \"%s\" 관련 기억 %d건 (랭킹순 · candidate · read-only)"
           % (a.query, len(res["relevant_nodes"])))
     for i, n in enumerate(res["relevant_nodes"], 1):
         sub = (" [%s]" % n["semantic_subtype"]) if n["semantic_subtype"] else ""
@@ -382,21 +389,110 @@ def cmd_recall(a):
         for e in res["relevant_edges"]:
             print("  %s -%s-> %s" % (e["source"], e["relation"], e["target"]))
     print("\n%s" % res["summary"])
-    # 회상 조언 적중 기록 안내(작업A) — nonce 로 위조(D-1)·이중계상(D-2) 방어. 사람 확정만 기록.
-    from binggupack.pack import hit_recording as _HR
-    _nonce = _HR.recall_nonce(a.query, [n["node_id"] for n in res["relevant_nodes"]])
-    print("  → 맞았으면:  python binggu.py mark-hit \"%s\" --index N --nonce %s" % (a.query, _nonce))
-    print("     틀렸으면 mark-miss (N=위 번호). 자동 기록 0 · 사람 확정만.")
+    return 0, [n["node_id"] for n in res["relevant_nodes"]]
+
+
+def cmd_recall(a):
+    """recall/why — query 관련 기억 회상(기본 Hot 색인 · read-only). --deep 시 원본 전체 탐색.
+
+    Hot(기본): Local Fresh Index 색인만 읽어 상위 5개 반환(전체 ledger 스캔 0 · provider hang 0).
+    Deep(--deep): 원본 전체 why_search(느리지만 넓음). Hot 이 부족해도 자동 Deep 승격 0 — 안내만.
+    use_count++ 는 --record 명시 시에만(헌법 '자동 저장 0'). --record='유용했다' 사람 신호."""
+    import binggu_p1_ranking as RANK
+    ledger, _ = _ledger_paths(a.ledger)
+    if not os.path.exists(ledger):
+        print("장부가 없습니다(회상할 기억 없음): %s · 먼저 python binggu.py init" % ledger)
+        return 0  # 빈 그래프 graceful
+    home = os.path.dirname(ledger)
+
+    if getattr(a, "deep", False):
+        rc, node_ids = _recall_deep(a)
+    else:
+        from binggupack.pack import fresh_index as FI
+        # 최초(색인 없음) 또는 ledger 전환(--ledger 로 다른 장부) 시에만 빌드 →
+        # 이후 같은 ledger recall 은 색인만 read(원본 스캔 0). 신선도는 save/replace/폐기 hook 담당.
+        if FI.indexed_ledger_path(home) != os.path.abspath(ledger):
+            FI.index_update(ledger, home=home)
+        limit = getattr(a, "limit", None) or 5
+        hr = FI.hot_recall(a.query, home=home, limit=limit,
+                           project=getattr(a, "project", None))
+        nodes = hr["relevant_nodes"]
+        if not nodes:
+            print("Hot 색인에 관련 기억이 없습니다: \"%s\"" % a.query)
+            print("  → 더 넓게 찾기(원본 전체): python binggu.py recall \"%s\" --deep" % a.query)
+            return 0  # 자동 Deep 승격 금지 — 사람이 선택
+        print("# 회상(Hot 색인 · 상위 %d) — \"%s\" (랭킹순 · candidate · read-only · 원본 스캔 0)"
+              % (len(nodes), a.query))
+        for i, n in enumerate(nodes, 1):
+            sub = (" [%s]" % n["semantic_subtype"]) if n.get("semantic_subtype") else ""
+            flags = ("📌" if n.get("pinned") else "") + ("✓" if n.get("owner_approved") else "")
+            print("  %d. (%s rank=%.3f rel=%.2f trust=%.1f%s) %s"
+                  % (i, (n.get("node_type") or "judgment") + sub, n["rank_score"],
+                     n["relevance"], n.get("trust", 0.0), (" " + flags) if flags else "", n["claim"]))
+        print("\n%s" % hr["summary"])
+        node_ids = [n["node_id"] for n in nodes]
+
+    # 회상 조언 적중 기록 안내(작업A) — nonce 로 위조(D-1)·이중계상(D-2) 방어. 사람 확정만.
+    if node_ids:
+        from binggupack.pack import hit_recording as _HR
+        _nonce = _HR.recall_nonce(a.query, node_ids)
+        print("  → 맞았으면:  python binggu.py mark-hit \"%s\" --index N --nonce %s" % (a.query, _nonce))
+        print("     틀렸으면 mark-miss (N=위 번호). 자동 기록 0 · 사람 확정만.")
     # P1-② use_count++ — --record 명시 시에만(사람의 '유용했다' 신호). 기본 회상은 read-only.
-    # 작업B: use_key(회상 스냅샷) 로 채택 멱등 — 같은 회상 반복 --record 는 정렬에 재기여 0.
-    if getattr(a, "record", False):
+    if getattr(a, "record", False) and node_ids:
         db, _ = _open(ledger)
         use_key = RANK.adoption_key(a.query, getattr(a, "domain", None))
-        for n in res["relevant_nodes"]:
-            RANK.record_use(db, n["node_id"], use_key=use_key)
+        for nid in node_ids:
+            RANK.record_use(db, nid, use_key=use_key)
         db.close()
         print("\n(use_count 기록됨 · 유용성 신호 · 채택멱등[같은 회상 재기여 0] · 도장/문장 불변)")
     return 0
+
+
+def cmd_index(a):
+    """Local Fresh Index 관리 — status(상태) / update(증분) / rebuild(전체 재생성) / pin·unpin.
+
+    색인은 원본(ledger)에서 파생된 read-only 캐시. 삭제해도 rebuild 로 복원. ledger write 0."""
+    from binggupack.pack import fresh_index as FI
+    ledger, _ = _ledger_paths(a.ledger)
+    home = os.path.dirname(ledger)
+    cmd = a.index_cmd
+    if cmd == "status":
+        st = FI.index_status(ledger, home=home)
+        if getattr(a, "json", False):
+            import json as _j
+            print(_j.dumps(st, ensure_ascii=False))
+            return 0
+        if st["status"] == "MISSING":
+            print("# Local Fresh Index — 없음. 생성: python binggu.py index update")
+            return 0
+        stale = st["status"] == "STALE"
+        print("# Local Fresh Index — %s" % ("갱신 필요(STALE)" if stale else "최신(OK)"))
+        print("  경로: %s" % st["index_path"])
+        print("  마지막 갱신: %s" % (st.get("last_update_ts") or "-"))
+        print("  색인 항목: active %d · deprecated %d · pinned %d"
+              % (st["active"], st["deprecated"], st["pinned"]))
+        print("  ledger 노드: %d · 변경 대기: %d · 제거 대기: %d (확인 %sms)"
+              % (st["ledger_nodes"], st["pending_changes"], st["pending_removals"], st["ms"]))
+        if stale:
+            print("  → 반영: python binggu.py index update")
+        return 0
+    if cmd == "update":
+        r = FI.index_update(ledger, home=home)
+        print("OK: 색인 증분 갱신 — 신규 %d · 수정 %d · 유지 %d · 제거 %d · 폐기 %d (%sms · ledger write 0)"
+              % (r["added"], r["updated"], r["unchanged"], r["removed"], r["deprecated"], r["ms"]))
+        return 0
+    if cmd == "rebuild":
+        r = FI.index_rebuild(ledger, home=home)
+        print("OK: 색인 전체 재생성 — 항목 %d (%sms · 핀 보존 · 원본 불변)" % (r["scanned"], r["ms"]))
+        return 0
+    if cmd in ("pin", "unpin"):
+        r = FI.set_pin(a.node_id, home=home, pinned=(cmd == "pin"))
+        print("OK: %s %s (영구 규칙 %s · 색인 레벨 · ledger 불변)"
+              % (cmd, r["node_id"], "고정" if cmd == "pin" else "해제"))
+        return 0
+    print("BLOCK: unknown index subcommand: %s" % cmd)
+    return 1
 
 
 def _reason_hint(verdict):
@@ -812,6 +908,7 @@ def cmd_save(a):
                 accepted += 1
         r["accepted"] = accepted
     db.close()
+    _reindex_after_write(a.ledger)   # LFI 증분 갱신(best-effort · ledger write 0)
     return _show(r)
 
 
@@ -843,6 +940,7 @@ def cmd_pair(a):
                                "pair --accept 통합 확정(PAIR confirm 편승)", {"actor": ctx["actor"]})   # P1-A.1: 검증된 actor 재사용
         acc_note = " · 확정 OK" if ar.get("applied") else (" · 확정 실패(%s)" % ar.get("reason"))
     db.close()
+    _reindex_after_write(a.ledger)   # LFI 증분 갱신(best-effort · ledger write 0)
     if r.get("applied"):
         tail = (" (%s 연결)" % r["relation"]) if r.get("paired") else " (owner 단독)"
         print("OK: 저장 %d건%s · pack=%s%s" % (r["saved"], tail, r.get("pack_id"), acc_note))
@@ -917,6 +1015,7 @@ def cmd_deprecate(a):
     ctx = _resolve_human_ctx(a.ledger, None, a.confirm)
     r = deprecate_from_list(db, a.n, a.id8, a.reason, ctx, snap_dir)
     db.close()
+    _reindex_after_write(a.ledger)   # LFI 증분 갱신(폐기 반영 · ledger write 0)
     return _show(r)
 
 
@@ -925,6 +1024,7 @@ def cmd_replace(a):
     ctx = _resolve_human_ctx(a.ledger, None, a.confirm)   # P1-A.1 fail-closed
     r = replace_from_list(db, a.n, a.id8, getattr(a, "with"), a.reason, ctx, snap_dir)
     db.close()
+    _reindex_after_write(a.ledger)   # LFI 증분 갱신(교체 반영 · ledger write 0)
     return _show(r)
 
 
@@ -1878,9 +1978,21 @@ def main():
     rcp = sub.add_parser("recall", aliases=["ask"]); rcp.add_argument("query")
     rcp.add_argument("--limit", type=int, default=None)
     rcp.add_argument("--record", action="store_true", dest="record")  # use_count++ (기본 read-only)
+    rcp.add_argument("--deep", action="store_true")   # 원본 전체 탐색(기본=Hot 색인)
+    rcp.add_argument("--project", default=None)        # 프로젝트 스코프(Warm)
     wp_ = sub.add_parser("why"); wp_.add_argument("query")                  # recall 별칭
     wp_.add_argument("--limit", type=int, default=None)
     wp_.add_argument("--record", action="store_true", dest="record")  # use_count++ (기본 read-only)
+    wp_.add_argument("--deep", action="store_true")
+    wp_.add_argument("--project", default=None)
+    # Local Fresh Index 관리(파생 색인 · read-only · ledger write 0)
+    ixp = sub.add_parser("index")
+    ixsub = ixp.add_subparsers(dest="index_cmd", required=True)
+    ixsub.add_parser("status").add_argument("--json", action="store_true")
+    ixsub.add_parser("update")
+    ixsub.add_parser("rebuild")
+    ixsub.add_parser("pin").add_argument("node_id")
+    ixsub.add_parser("unpin").add_argument("node_id")
     # 기본 사용자 흐름 별칭(직관 명령) — 기존 명령 위임, 안전 게이트 동일.
     exp = sub.add_parser("explain"); exp.add_argument("memory_id")   # = trace show <id>(근거·이력)
     fgp = sub.add_parser("forget"); fgp.add_argument("memory_id")    # deprecate 안내(확인 문구 유지)
@@ -2019,7 +2131,7 @@ def main():
           "confirm-edges": cmd_confirm_edges, "pair": cmd_pair, "trust": cmd_trust,
           "route": cmd_route, "backup": cmd_backup, "export": cmd_export,
           "restore": cmd_restore, "demo": cmd_demo, "explain": cmd_explain,
-          "forget": cmd_forget, "inbox": cmd_inbox,
+          "forget": cmd_forget, "inbox": cmd_inbox, "index": cmd_index,
           "approvals": cmd_approvals, "approval": cmd_approval}[a.cmd]
     sys.exit(fn(a))
 
