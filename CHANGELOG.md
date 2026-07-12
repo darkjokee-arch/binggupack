@@ -2,8 +2,15 @@
 
 ## [Unreleased]
 
+## [1.20.0] - 2026-07-12 — Your AI memory, visible and understandable
+
+v1.20 은 consent-first memory 엔진을 CLI·MCP·로컬 Studio 에서 들여다볼 수 있는 일상 제품으로 만든다.
+**schema migration 0 · dependency 추가 0 · 기존 mutation/approval semantics 변경 0 · production
+approval verifier 변경 0.** 아래는 v1.20-A~E 누적 요약이며, 각 기능의 전체 근거·회귀 테스트는 이어지는
+항목 그대로다.
+
 ### Added
-- **읽기 전용 `binggu` 데일리 홈** — 인자 없이 `binggu`(또는 `binggu home`)를 치면 지금 상태(활성 기억·자동 수집 후보·원격 저장 의도·대기 승인·검토 예정·장부 무결성·capture/provider 상태)와 다음 할 일을 한 화면에서 본다. 장부가 없으면 오류 대신 온보딩 안내(생성 0).
+- **읽기 전용 `binggu` 데일리 홈** — 인자 없이 `binggu`(또는 `binggu home`)를 치면 지금 상태(활성 기억·자동 수집 의도·원격 저장 의도·대기 승인·검토 예정·장부 무결성·capture/provider 상태)와 다음 할 일을 한 화면에서 본다. 장부가 없으면 오류 대신 온보딩 안내(생성 0).
 - **통합 로컬 `binggu inbox`** — 자동 수집 후보·원격 저장 의도·대기 승인 요청·검토 예정을 한 화면에 모으는 read-only aggregator. `--capture/--hosted/--approvals/--due` 섹션 필터. 기존 큐 명령(`capture preview`·`hosted inbox`·`approval`·`reminders`)은 그대로 유지된다.
 - **JSON 스냅샷** — `binggu home --json` / `binggu inbox --json` (schema_version=1). automation·향후 Binggu Studio 가 재사용할 안정적 read model.
 - **로컬 read-only Binggu Studio Preview** — `binggu studio` 로 브라우저 기반 로컬 UI 를 띄운다. 실행마다 loopback(127.0.0.1) 임시 포트 + ephemeral session URL(`/s/<token>/`)로만 열리고, 기본 브라우저를 자동으로 연다(`--no-open` 으로 생략, `--port` 로 고정). Home + 통합 Inbox 를 시각화하며 모든 화면은 읽기 전용이다.
@@ -34,6 +41,12 @@
 - **Approval Center: exact full request ID lookup** — 상세는 `approval_requests.request_id=?` 정확 일치만(id8/prefix/suffix/fuzzy 없음 · 없으면 404). review 파일은 DB canonical request_id 로만 접근(URL id 직접 path 결합 0).
 - **Approval Center: review integrity + symlink/oversize 거부** — review 파일은 request_id/operation/payload_digest == DB 무결성 검증(불일치 → integrity=mismatch·items 미반환) · symlink/비정규 파일/256KB 초과 거부 · 경로 순회 방어(정규식 + realpath). 결정 후 purge 되면 integrity=unavailable_after_decision(재생성 0).
 - **Approval Center: mutation endpoint/call 0** — GET/HEAD 만. UI 는 `binggu approval` CLI 명령 클립보드 복사만(승인/거절/취소 실행 버튼·POST fetch·terminal launch·approval phrase 자동생성·mutation 추측 0). append_event/mint_approval/tombstone/purge_review/reserve/finalize_consumed/release 호출 0.
+
+### Honest boundary
+- Studio 는 **read-only handoff UI** 다 — Studio 에서 owner approval 을 실행하지 않는다(복사한 명령을 owner 가 별도 로컬 터미널에서 직접 실행).
+- Local TTY 는 **L1 owner-routing** 이다(암호학적 보증 아님 · UX 경계).
+- 같은 shell/filesystem 을 이미 제어하는 에이전트에 대한 **hard approval authority 가 아니다**(fail-closed routing + 비대화형 owner 경로 + intent-routing).
+- Protected writer/verifier/trust root/detached signer 는 **RFC only**(미구현 · production 코드 0).
 
 ## [1.19.0] - 2026-07-11 — Stable promotion of v1.19.0rc1
 
