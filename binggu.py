@@ -250,6 +250,24 @@ def _parse_days(s):
     return float(str(s).strip().lower().rstrip("d"))
 
 
+def cmd_app(a):
+    """app — Binggu Anywhere owner tooling (admin plane client).
+      upload: validate + public-scan + snapshot a canonical pack directory, preview (dry-run
+              default), then owner-TTY-confirmed upload to the Anywhere admin endpoint.
+    Read-only MCP data plane never exposes upload — this is a separate owner action."""
+    from binggupack.app import upload as _U
+    sub = getattr(a, "app_cmd", None)
+    if sub == "upload":
+        try:
+            _U.run(a.pack, a.endpoint, dry_run=not a.confirm)
+            return 0
+        except _U.UploadError as e:
+            print("[app upload] BLOCK: %s" % str(e))
+            return 2
+    print("usage: binggu app upload --pack <dir> [--endpoint <url>] [--confirm]")
+    return 2
+
+
 def cmd_hosted(a):
     """hosted — collect broad, commit narrow. mobile/web 가 모으고 PC 가 검토·확정한다.
       inbox: worker 1회 회수(저장0) + 대기 intent read-only 요약(80자 발췌·sha8·count·PII/secret flag).
@@ -2114,6 +2132,13 @@ def main():
     apv = sub.add_parser("approval")
     apv.add_argument("action", choices=["show", "approve", "reject", "revoke"])
     apv.add_argument("request_id")
+    # Binggu Anywhere — owner-only pack upload (admin plane client; MCP data plane never uploads).
+    appp = sub.add_parser("app")
+    appsub = appp.add_subparsers(dest="app_cmd", required=True)
+    appup = appsub.add_parser("upload")
+    appup.add_argument("--pack", required=True)          # explicit canonical pack directory only
+    appup.add_argument("--endpoint", default=None)        # https gateway base url
+    appup.add_argument("--confirm", action="store_true")  # perform upload (default: dry-run preview)
     a = p.parse_args()
     fn = {"init": cmd_init, "start": cmd_init, "status": cmd_status, "doctor": cmd_status,
           "home": cmd_home, "studio": cmd_studio,
@@ -2132,7 +2157,7 @@ def main():
           "route": cmd_route, "backup": cmd_backup, "export": cmd_export,
           "restore": cmd_restore, "demo": cmd_demo, "explain": cmd_explain,
           "forget": cmd_forget, "inbox": cmd_inbox, "index": cmd_index,
-          "approvals": cmd_approvals, "approval": cmd_approval}[a.cmd]
+          "approvals": cmd_approvals, "approval": cmd_approval, "app": cmd_app}[a.cmd]
     sys.exit(fn(a))
 
 

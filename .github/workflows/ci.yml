@@ -73,6 +73,14 @@ jobs:
           pip install "ruff==0.15.20"
           python -m ruff check binggupack/ scripts/ --select F
 
+      - name: Anywhere vendor sync drift gate (vendored read core == source)
+        run: python scripts/sync_anywhere_vendor.py --check
+
+      - name: Anywhere targeted tests (snapshot/service/upload · synthetic)
+        run: |
+          pip install "pytest>=8"
+          python -m pytest tests/test_anywhere_snapshot.py tests/test_anywhere_service.py tests/test_anywhere_upload.py -q
+
       - name: Cross-platform policy selftest (40/40, GATE=GO)
         run: python scripts/binggu_platform_selftest.py
 
