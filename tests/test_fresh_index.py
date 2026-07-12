@@ -303,3 +303,118 @@ def test_empty_and_missing_graceful(env):
     # 존재하지 않는 ledger update
     r = FI.index_update(ledger, home=home)
     assert r["status"] == "OK" and r["scanned"] == 0
+
+
+# ══════════════ 2단계: 로컬 md/traj 파일 포인터 인덱싱 ══════════════
+
+def _docs_dir(home):
+    d = os.path.join(os.path.dirname(home), "docs")
+    os.makedirs(os.path.join(d, "traj"), exist_ok=True)
+    return d
+
+
+def _write(path, text):
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+
+
+def test_file_allowlist_default_empty(env):
+    """기본 빈 허용목록 → 파일 인덱싱 0(owner 옵트인)."""
+    home, ledger = env
+    _mk_ledger(ledger, [_row("n1", "노드")])
+    d = _docs_dir(home)
+    _write(os.path.join(d, "a.md"), "# 문서\n허용 안 된 경로 내용")
+    r = FI.index_update(ledger, home=home)
+    assert r["files"]["scanned"] == 0 and r["files"]["added"] == 0
+    assert FI.allowed_paths(home) == []
+
+
+def test_file_add_modify_delete(env):
+    home, ledger = env
+    _mk_ledger(ledger, [_row("n1", "노드 릴리스")])
+    d = _docs_dir(home)
+    _write(os.path.join(d, "guide.md"), "# 배포 가이드\n나라장터 투찰 자동화 절차")
+    _write(os.path.join(d, "traj", "t1.md"), "# traj 교훈\nMySQL 연결 종료 근본원인 env 누락")
+    FI.add_allowed_path(d, home=home)
+    # 추가
+    r = FI.index_update(ledger, home=home)
+    assert r["files"]["added"] == 2 and r["files"]["scanned"] == 2
+    ids = [x for x in FI.hot_recall("나라장터 투찰", home=home)["relevant_nodes"] if x.get("kind") == "file"]
+    assert ids and any("guide" in (x.get("rel_path") or "") for x in ids)
+    # traj file_kind
+    tj = [x for x in FI.hot_recall("MySQL 연결 종료", home=home)["relevant_nodes"] if x.get("kind") == "file"]
+    assert tj and tj[0]["semantic_subtype"] == "traj"
+    # 변경 없음
+    r2 = FI.index_update(ledger, home=home)
+    assert r2["files"]["added"] == 0 and r2["files"]["unchanged"] == 2
+    # 수정
+    import time as _t
+    _t.sleep(0.02)
+    _write(os.path.join(d, "guide.md"), "# 배포 가이드\n한전 KEPCO SRM 투찰 절차")
+    r3 = FI.index_update(ledger, home=home)
+    assert r3["files"]["updated"] == 1
+    assert any("KEPCO" in x.get("title", "") for x in FI.hot_recall("KEPCO SRM", home=home)["relevant_nodes"])
+    # 삭제
+    os.remove(os.path.join(d, "traj", "t1.md"))
+    r4 = FI.index_update(ledger, home=home)
+    assert r4["files"]["removed"] == 1
+    assert not [x for x in FI.hot_recall("MySQL 연결 종료", home=home)["relevant_nodes"] if x.get("kind") == "file"]
+
+
+def test_file_path_safety_outside_not_indexed(env):
+    """허용 경로 밖 파일은 인덱싱 0(traversal/격리)."""
+    home, ledger = env
+    _mk_ledger(ledger, [_row("n1", "노드")])
+    d = _docs_dir(home)
+    outside = os.path.join(os.path.dirname(home), "outside")
+    os.makedirs(outside, exist_ok=True)
+    _write(os.path.join(d, "inside.md"), "# 안\n허용된 경로 문서 자동화")
+    _write(os.path.join(outside, "secret.md"), "# 밖\n허용 안된 경로 비밀 자동화")
+    FI.add_allowed_path(d, home=home)
+    FI.index_update(ledger, home=home)
+    res = FI.hot_recall("자동화", home=home, limit=10)
+    files = [x for x in res["relevant_nodes"] if x.get("kind") == "file"]
+    assert any("inside" in (x.get("rel_path") or "") for x in files)
+    assert not any("secret" in (x.get("rel_path") or "") for x in files)
+
+
+def test_file_pii_redacted(env):
+    home, ledger = env
+    _mk_ledger(ledger, [_row("n1", "노드")])
+    d = _docs_dir(home)
+    _write(os.path.join(d, "contact.md"), "# 연락처 자동화\n담당자 전화 %s 참고" % _PHONE)
+    FI.add_allowed_path(d, home=home)
+    FI.index_update(ledger, home=home)
+    con = FI._connect(home)
+    titles = " ".join(r[0] or "" for r in con.execute("SELECT title FROM hot_items WHERE kind='file'"))
+    con.close()
+    assert _PHONE not in titles and "[REDACTED" in titles
+    assert _PHONE not in str(FI.hot_recall("연락처 자동화", home=home))
+
+
+def test_file_and_node_coexist_ledger_unchanged(env):
+    home, ledger = env
+    _mk_ledger(ledger, [_row("n1", "릴리스 승인 노드")])
+    h0 = hashlib.sha256(open(ledger, "rb").read()).hexdigest()
+    d = _docs_dir(home)
+    _write(os.path.join(d, "rel.md"), "# 릴리스 승인 문서\n릴리스 승인 절차 문서")
+    FI.add_allowed_path(d, home=home)
+    FI.index_update(ledger, home=home)
+    res = FI.hot_recall("릴리스 승인", home=home, limit=10)
+    kinds = {x.get("kind") for x in res["relevant_nodes"]}
+    assert "node" in kinds and "file" in kinds
+    assert h0 == hashlib.sha256(open(ledger, "rb").read()).hexdigest()  # ledger 불변
+
+
+def test_remove_path_drops_file_items(env):
+    home, ledger = env
+    _mk_ledger(ledger, [_row("n1", "노드")])
+    d = _docs_dir(home)
+    _write(os.path.join(d, "x.md"), "# 제거대상\n제거 테스트 문서 자동화")
+    FI.add_allowed_path(d, home=home)
+    FI.index_update(ledger, home=home)
+    assert [x for x in FI.hot_recall("제거 자동화", home=home)["relevant_nodes"] if x.get("kind") == "file"]
+    FI.remove_allowed_path(d, home=home)
+    r = FI.index_update(ledger, home=home)
+    assert r["files"]["removed"] >= 1
+    assert not [x for x in FI.hot_recall("제거 자동화", home=home)["relevant_nodes"] if x.get("kind") == "file"]

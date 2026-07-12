@@ -280,10 +280,192 @@ def _load_weights(home):
         return dict(DEFAULT_HOT_WEIGHTS)
 
 
-def index_update(ledger_path, home=None, now_iso=None):
-    """ledger → 색인 증분 반영. 신규/변경 노드만 upsert, 사라진 노드 deleted. write=색인만.
+# ─────────────────────────── 2단계: 로컬 파일(md/traj) 포인터 인덱싱 ───────────────────────────
+_FILE_SIZE_CAP = 1_000_000       # 1MB 초과 skip(포인터 인덱스는 소형 문서만)
+_FILE_MAX = 20_000               # 허용 경로 전체 파일 수 상한(폭주 방어)
+_FILE_EXTS = (".md",)            # markdown/traj(.md)
 
-    반환 {status, scanned, added, updated, unchanged, removed, deprecated, ms}.
+
+def allowed_paths(home=None):
+    """색인 대상 로컬 경로(명시 허용목록·기본 빈). config fresh_index.allowed_paths(owner 옵트인)."""
+    try:
+        from binggupack import config as C
+        cfg = C.load_config("fresh_index", home, use_cache=False)
+        raw = cfg.get("allowed_paths") if isinstance(cfg, dict) else None
+        return [str(p) for p in raw] if isinstance(raw, list) else []
+    except Exception:
+        return []
+
+
+def _write_allowed_paths(paths, home=None):
+    import json
+
+    from binggupack import config as C
+    p = str(C.config_path("fresh_index", home))
+    data = {}
+    if os.path.exists(p):
+        try:
+            data = json.loads(open(p, encoding="utf-8").read())
+        except Exception:
+            data = {}
+    if not isinstance(data, dict):
+        data = {}
+    data["allowed_paths"] = paths
+    d = os.path.dirname(p)
+    if d:
+        os.makedirs(d, exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(json.dumps(data, ensure_ascii=False, indent=2))
+    C.invalidate("fresh_index", home)
+
+
+def add_allowed_path(path, home=None):
+    """허용 경로 추가(owner 옵트인). 반환 갱신된 목록. ledger/색인 불변(config 만 write)."""
+    cur = allowed_paths(home)
+    ap = os.path.abspath(path)
+    if ap not in cur:
+        cur.append(ap)
+        _write_allowed_paths(cur, home)
+    return cur
+
+
+def remove_allowed_path(path, home=None):
+    cur = allowed_paths(home)
+    ap = os.path.abspath(path)
+    if ap in cur:
+        cur = [p for p in cur if p != ap]
+        _write_allowed_paths(cur, home)
+    return cur
+
+
+def _safe_scan_dir(base):
+    """허용 dir 하위 *.md 나열 — realpath commonpath 격리·symlink 거부·size cap·상한.
+
+    반환 [(realpath, rel_path, size, mtime)]. 부재/비-dir → []. traversal/symlink escape 차단.
+    """
+    out = []
+    try:
+        base_real = os.path.realpath(base)
+    except OSError:
+        return out
+    if not os.path.isdir(base_real):
+        return out
+    for root, dirs, files in os.walk(base_real):
+        dirs[:] = [d for d in dirs
+                   if not d.startswith(".") and not os.path.islink(os.path.join(root, d))]
+        for fn in files:
+            if not fn.lower().endswith(_FILE_EXTS):
+                continue
+            full = os.path.join(root, fn)
+            if os.path.islink(full):
+                continue  # symlink 거부(격리)
+            try:
+                real = os.path.realpath(full)
+                if os.path.commonpath([base_real, real]) != base_real:
+                    continue  # base 밖(traversal/symlink escape) 차단
+                st = os.stat(real)
+            except (OSError, ValueError):
+                continue
+            if st.st_size > _FILE_SIZE_CAP:
+                continue
+            out.append((real, os.path.relpath(real, base_real), int(st.st_size), float(st.st_mtime)))
+            if len(out) >= _FILE_MAX:
+                return out
+    return out
+
+
+def _file_pointer_text(path):
+    """파일 → (title, summary, content_hash). 원문 전체 미저장 — 제목+앞부분 요약만(redact).
+
+    title = 첫 '# 헤딩' 또는 basename. summary = 앞 비어있지 않은 줄(≤160). content_hash = 파일 sha256.
+    """
+    base = os.path.basename(path)
+    try:
+        raw = open(path, "rb").read()
+    except OSError:
+        return base, "", ""
+    chash = hashlib.sha256(raw).hexdigest()
+    text = raw.decode("utf-8", "replace")
+    lines = [ln.strip() for ln in text.splitlines()]
+    title = base
+    for ln in lines:
+        if ln.startswith("#"):
+            title = ln.lstrip("#").strip() or base
+            break
+    body = " ".join(ln for ln in lines if ln)[:600]
+    safe, _ok = _leak_safe(("%s %s" % (title, body))[:1000])  # 검색용 = 제목+요약 redact(원문 미저장)
+    return (safe or base), (safe or base)[:160], chash
+
+
+def _file_rank(mtime, weights):
+    """파일 포인터 랭킹 — mtime freshness + 중립 trust(참조·미검증·pinned 없음)."""
+    import datetime as _dt
+    try:
+        iso = _dt.datetime.fromtimestamp(mtime, _dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except (OSError, OverflowError, ValueError):
+        iso = None
+    fresh = RANK.freshness(iso)
+    trust = 0.5  # 파일 = 참조 포인터(owner 승인/candidate 개념 없음) — 중립 신뢰
+    return round(weights["freshness"] * fresh + weights["trust"] * trust, 6), iso
+
+
+def _sync_files(con, home, now_iso, weights):
+    """허용 경로 md/traj → 색인(kind='file'). mtime/size 우선 비교, 변경 시만 hash·요약·재색인.
+
+    반환 {added, updated, unchanged, removed, scanned}. 허용목록 빈 경우 전부 0(파일 인덱싱 off).
+    """
+    scanned = []
+    for base in allowed_paths(home):
+        scanned.extend(_safe_scan_dir(base))
+    existing = {r[0]: (r[1], r[2], r[3], r[4]) for r in con.execute(
+        "SELECT item_id, content_hash, state, mtime, size FROM hot_items WHERE kind='file'")}
+    seen = set()
+    added = updated = unchanged = 0
+    for real, rel, size, mtime in scanned:
+        iid = "file:" + _sha(real)
+        seen.add(iid)
+        prev = existing.get(iid)
+        # mtime+size 동일 + active → 미변경(hash·읽기 skip). 파일 stat 만으로 판정(싼 경로).
+        if prev and prev[1] == "active" and prev[3] == mtime and prev[2] == size:
+            con.execute("UPDATE hot_items SET last_seen_at=? WHERE item_id=?", (now_iso, iid))
+            unchanged += 1
+            continue
+        title, summary, chash = _file_pointer_text(real)
+        if prev and prev[0] == chash and prev[1] == "active":
+            con.execute("UPDATE hot_items SET mtime=?, size=?, last_seen_at=? WHERE item_id=?",
+                        (mtime, size, now_iso, iid))  # touch 만(내용 동일) — 재색인 skip
+            unchanged += 1
+            continue
+        fkind = "traj" if "traj" in (rel + os.path.basename(real)).lower() else "md"
+        rank, iso = _file_rank(mtime, weights)
+        con.execute(
+            "INSERT OR REPLACE INTO hot_items(item_id,kind,source_id,project_id,node_type,rel_path,"
+            "file_kind,size,mtime,content_hash,title,summary,created_at,indexed_at,last_seen_at,"
+            "state,trust,owner_approved,pinned,use_count,rank_score) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (iid, "file", real, None, "file", rel, fkind, size, mtime, chash, title, summary,
+             iso, now_iso, now_iso, "active", 0.5, 0, 0, 0, rank))
+        con.execute("DELETE FROM hot_fts WHERE item_id=?", (iid,))
+        con.execute("INSERT INTO hot_fts(item_id, txt) VALUES(?,?)", (iid, title))
+        if prev:
+            updated += 1
+        else:
+            added += 1
+    removed = 0
+    for iid, v in existing.items():
+        if iid not in seen and v[1] != "deleted":
+            con.execute("UPDATE hot_items SET state='deleted', last_seen_at=? WHERE item_id=?",
+                        (now_iso, iid))
+            con.execute("DELETE FROM hot_fts WHERE item_id=?", (iid,))
+            removed += 1
+    return {"added": added, "updated": updated, "unchanged": unchanged,
+            "removed": removed, "scanned": len(scanned)}
+
+
+def index_update(ledger_path, home=None, now_iso=None):
+    """ledger(+허용 로컬 파일) → 색인 증분 반영. 신규/변경만 upsert, 사라진 항목 deleted. write=색인만.
+
+    반환 {status, scanned, added, updated, unchanged, removed, deprecated, files, ms}.
     """
     t0 = time.perf_counter()
     now_iso = now_iso or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -340,6 +522,8 @@ def index_update(ledger_path, home=None, now_iso=None):
                         (now_iso, iid))
             con.execute("DELETE FROM hot_fts WHERE item_id=?", (iid,))  # 삭제 노드는 FTS 후보 제외
             removed += 1
+    # 2단계: 허용 로컬 파일(md/traj) 포인터 동기화(허용목록 빈 경우 no-op).
+    files = _sync_files(con, home, now_iso, weights)
     _meta_set(con, "last_update_ts", now_iso)
     _meta_set(con, "ledger_node_count", str(len(nodes)))
     _meta_set(con, "ledger_path", os.path.abspath(ledger_path) if ledger_path else "")
@@ -347,7 +531,8 @@ def index_update(ledger_path, home=None, now_iso=None):
     con.close()
     ms = round((time.perf_counter() - t0) * 1000.0, 2)
     return {"status": "OK", "scanned": len(nodes), "added": added, "updated": updated,
-            "unchanged": unchanged, "removed": removed, "deprecated": deprecated, "ms": ms}
+            "unchanged": unchanged, "removed": removed, "deprecated": deprecated,
+            "files": files, "ms": ms}
 
 
 def index_status(ledger_path, home=None):
@@ -362,6 +547,8 @@ def index_status(ledger_path, home=None):
     total = con.execute("SELECT COUNT(*) FROM hot_items WHERE kind='node' AND state='active'").fetchone()[0]
     deprecated = con.execute("SELECT COUNT(*) FROM hot_items WHERE state='deprecated'").fetchone()[0]
     pinned = con.execute("SELECT COUNT(*) FROM hot_items WHERE pinned=1").fetchone()[0]
+    files_active = con.execute(
+        "SELECT COUNT(*) FROM hot_items WHERE kind='file' AND state='active'").fetchone()[0]
     # 변경 대기 = ledger sig 와 색인 sig 비교(단일 패스).
     nodes, _acc = _read_ledger_nodes(ledger_path)
     idx = {r[0]: (r[1], r[2]) for r in
@@ -380,7 +567,8 @@ def index_status(ledger_path, home=None):
     ms = round((time.perf_counter() - t0) * 1000.0, 2)
     return {"status": "OK" if pending == 0 and removed == 0 else "STALE",
             "index_path": p, "last_update_ts": last, "active": total,
-            "deprecated": deprecated, "pinned": pinned, "ledger_nodes": len(nodes),
+            "deprecated": deprecated, "pinned": pinned, "files": files_active,
+            "ledger_nodes": len(nodes),
             "pending_changes": pending, "pending_removals": removed, "ms": ms}
 
 
@@ -551,7 +739,7 @@ def hot_recall(query, home=None, limit=5, project=None, semantic=False,
                         "WHERE kind='node' AND title LIKE ? ESCAPE '\\'", (_like(t),))
     for t in short_toks:  # 2자 토큰 — trigram 최소길이 미만이라 LIKE 로 보완
         con.execute("INSERT OR IGNORE INTO _cand(item_id) SELECT item_id FROM hot_items "
-                    "WHERE kind='node' AND title LIKE ? ESCAPE '\\'", (_like(t),))
+                    "WHERE kind IN ('node','file') AND title LIKE ? ESCAPE '\\'", (_like(t),))
     con.execute("INSERT OR IGNORE INTO _cand(item_id) SELECT item_id FROM hot_items "
                 "WHERE kind='node' AND pinned=1")  # 영구 규칙은 항상 후보
 
@@ -569,10 +757,10 @@ def hot_recall(query, home=None, limit=5, project=None, semantic=False,
     fetch_limit = limit if not semantic else max(limit * 8, 40)
     ph = ",".join("?" * len(states))
     sql = ("SELECT h.item_id,h.source_id,h.title,h.summary,h.node_type,h.file_kind,h.rank_score,"
-           "h.trust,h.pinned,h.owner_approved,h.created_at,h.state,h.project_id,"
+           "h.trust,h.pinned,h.owner_approved,h.created_at,h.state,h.project_id,h.kind,h.rel_path,"
            "(" + rel_expr + ") AS mc "
            "FROM hot_items h JOIN _cand c ON h.item_id=c.item_id "
-           "WHERE h.kind='node' AND h.state IN (" + ph + ")")
+           "WHERE h.kind IN ('node','file') AND h.state IN (" + ph + ")")
     params = list(uniq) + list(states)
     if project:
         sql += " AND (h.project_id=? OR h.project_id IS NULL)"
@@ -582,13 +770,14 @@ def hot_recall(query, home=None, limit=5, project=None, semantic=False,
     rows = con.execute(sql, params).fetchall()  # top-K 만(SQL 이 정렬·LIMIT)
     scored = []
     for r in rows:
-        (iid, sid, title, summary, ntype, fkind, rank, trust, pinned, own, created, state, pid, mc) = r
+        (iid, sid, title, summary, ntype, fkind, rank, trust, pinned, own,
+         created, state, pid, kind, rel_path, mc) = r
         rel = round((mc or 0) / ntok, 4)
         if rel <= 0.0 and not pinned:
             continue
         scored.append({"item_id": iid, "node_id": sid, "title": title or "",
                        "claim": (title or "")[:120], "node_type": ntype or "judgment",
-                       "semantic_subtype": fkind,
+                       "semantic_subtype": fkind, "kind": kind, "rel_path": rel_path,
                        "rank_score": rank, "relevance": rel, "trust": trust,
                        "pinned": bool(pinned), "owner_approved": bool(own),
                        "created_at": created, "state": state, "project_id": pid,

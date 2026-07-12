@@ -49,13 +49,25 @@ rank_score 재계산. 후킹 지점(기존 write 경로): `cmd_save`/`cmd_pair`/
 
 ## 3. 3단 조회
 
-- **Hot(기본)** `binggu recall "<q>"` — 색인만 읽는다. `why_search` 와 **동일한** substring
-  relevance 1차 + rank_score 2차 → 중복제거 top 5. 전체 ledger 스캔 0 · 노드 전수 embed 0 ·
-  provider hang 0. semantic 은 opt-in(top-K 후보만 저장 vec 로 재랭킹 · query 1회 짧은 timeout ·
-  circuit breaker · 실패 즉시 어휘 폴백).
+- **Hot(기본)** `binggu recall "<q>"` — 색인만 읽는다. **대규모 확장성**을 위해 후보 narrowing 과
+  정렬·LIMIT 을 전부 SQLite 레벨에서 처리한다:
+  - 후보: **FTS5 trigram 인덱스**(≥3자 substring·조사/합성어 포함)로 MATCH → 2자 한국어 토큰은
+    `LIKE` 보완 → pinned 항상 포함.
+  - 관련성·정렬·절단: `ORDER BY (Σ instr(lower(title),tok)>0) DESC, rank_score DESC LIMIT` →
+    **Python 은 top-K 만 적재**(전체행/전체후보 미적재). `why_search` 와 동일 substring 규약(파리티).
+  - 전체 ledger 스캔 0 · 노드 전수 embed 0 · provider hang 0. semantic 은 opt-in(top-K 저장 vec
+    재랭킹 · query 1회 짧은 timeout · circuit breaker · 실패 즉시 어휘 폴백).
+  - Hot 결과에는 노드 기억과 **로컬 파일 포인터(kind='file')** 가 함께 랭킹된다(2단계).
 - **Warm** `binggu recall "<q>" --project <P>` — project 스코프 확장(색인 내).
 - **Deep** `binggu recall "<q>" --deep` — 원본 전체 `why_search`(느리지만 넓음). Hot 이 부족해도
   자동 Deep 승격 0 — 안내만.
+
+### 로컬 파일 인덱싱 (2단계 · md/traj)
+- 대상 = **명시 허용 경로만**(`fresh_index.allowed_paths` config · 기본 빈 · owner 옵트인).
+- 스캔: 허용 dir 하위 `*.md`(markdown/traj) · **realpath commonpath 격리·symlink 거부·1MB size cap·
+  파일 수 상한**. mtime/size 우선 비교 → 변경 시만 hash·요약(싼 경로).
+- 저장 = **포인터만**(제목=첫 헤딩/파일명 · 요약=앞부분 · redact 통과분). 원문 전체 미저장.
+  파일 이동·삭제 = 다음 update 에서 반영. 파일 = 중립 trust(참조·미검증).
 
 ## 4. 안전 경계
 
@@ -66,10 +78,11 @@ rank_score 재계산. 후킹 지점(기존 write 경로): `cmd_save`/`cmd_pair`/
 
 ## 5. CLI
 
-- `binggu index status [--json]` — 마지막 갱신·색인 항목수·변경/제거 대기·상태
-- `binggu index update` — 변경분만 증분 반영
+- `binggu index status [--json]` — 마지막 갱신·색인 항목수(노드·파일)·변경/제거 대기·허용 경로
+- `binggu index update` — 변경분만 증분 반영(노드 + 허용 파일)
 - `binggu index rebuild` — 전체 재생성(손상 복구 포함 · 핀 보존)
 - `binggu index pin|unpin <node_id>` — 영구 규칙 고정/해제(색인 레벨 · ledger 불변)
+- `binggu index add-path <dir>` / `list-paths` / `remove-path <dir>` — 로컬 md/traj 인덱싱 경로 옵트인
 - `binggu recall "<q>" [--deep] [--project P] [--limit N] [--record]`
 - `binggu home` — 색인 최신/갱신필요 표시
 
@@ -85,19 +98,29 @@ rank_score 재계산. 후킹 지점(기존 write 경로): `cmd_save`/`cmd_pair`/
 | 기본 회상 노드 임베딩 | 전수 | **0** |
 | 관련성(top5, full-sentence relevance) | mean 0.367 | mean **0.367**(회귀 0) |
 
+### 확장성 (synthetic 5K/50K · FTS5 + SQL LIMIT)
+| 규모 | Hot p95 | **Python 적재행** | index 후보 | build |
+|---|---|---|---|---|
+| 5,000 | 10.8ms | **5** | 2,180 | 355ms |
+| 50,000 | **139ms** | **5** | 21,842 | 2,884ms |
+
+Python 은 색인 규모와 무관하게 top-K 만 적재(SQL ORDER BY LIMIT). query plan =
+`SCAN hot_fts VIRTUAL TABLE INDEX(M1)` + 인덱스 JOIN.
+
 ## 7. 테스트
 
-`tests/test_fresh_index.py` (pytest, 14 케이스) + 모듈 `--selftest`(GATE=GO):
-최초 색인 · 변경없음 · 추가/수정/삭제 · 저장/교체/폐기 · 프로젝트 스코프 · pinned 보존 ·
-최근/고신뢰 우선순위 · 중복제거 · Hot/Warm/Deep 경계 · 원본 전체스캔 방지 · query-time 전수
-임베딩 방지 · provider timeout+lexical fallback · 색인 손상 후 rebuild · 중간종료 정합성 ·
-PII/시크릿 미노출 · owner approval·mutation 무회귀. CI 매트릭스에 **Python 3.14**(windows+ubuntu)
-추가 + 기존 3.10/3.12/3.13 무회귀.
+`tests/test_fresh_index.py` (pytest, **20 케이스**) + 모듈 `--selftest`(GATE=GO):
+- 노드(14): 최초 색인 · 변경없음 · 추가/수정/삭제 · 저장/교체/폐기 · 프로젝트 스코프 · pinned 보존 ·
+  최근/고신뢰 우선순위 · 중복제거 · Hot/Warm/Deep 경계 · 원본 전체스캔 방지 · query-time 전수
+  임베딩 방지 · provider timeout+lexical fallback · 색인 손상 후 rebuild · 중간종료 정합성 ·
+  PII/시크릿 미노출 · owner approval·mutation 무회귀.
+- 파일(6): 기본 빈 허용목록 · 추가/수정/삭제 · traj file_kind · 경로 밖 미인덱싱(격리) · 파일 PII
+  redaction · 노드+파일 공존·ledger 불변 · remove-path 후 파일 항목 제거.
+CI 매트릭스에 **Python 3.14**(windows+ubuntu) + fresh_index pytest·selftest + 기존 3.10/3.12/3.13 무회귀.
 
-## 8. 2단계(분리 · 이 PR 범위 밖)
+## 8. 남은 작업 (별도 · 소킹 이후)
 
-- 로컬 markdown/traj 파일 포인터 인덱싱 — **명시 허용 경로만**(`fresh_index.allowed_paths` config,
-  기본 빈=owner 옵트인). mtime/size/hash 로 이동/삭제 반영. 원문은 Deep 요청 전까지 미로드.
-- 기본 회상 경로(preflight hook · MCP 도구)의 Hot cutover — shadow 소킹 후.
+- 기본 회상 경로(preflight hook · MCP 도구)의 Hot cutover — 실사용 소킹 후.
 - 세션 종료(session_close) 후킹으로 증분 갱신 지점 추가.
-- (선택) FTS5/BM25 가속 — 노드 수가 수천을 넘어 substring 스캔이 병목이 될 때.
+- Deep 계층의 파일 원문(full content) 탐색(현재 Hot 은 파일 포인터·요약까지).
+- (선택) 노드 수가 수십만을 넘을 때 rank 기반 후보 상한.

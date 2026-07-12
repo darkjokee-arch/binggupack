@@ -488,17 +488,21 @@ def cmd_index(a):
         print("# Local Fresh Index — %s" % ("갱신 필요(STALE)" if stale else "최신(OK)"))
         print("  경로: %s" % st["index_path"])
         print("  마지막 갱신: %s" % (st.get("last_update_ts") or "-"))
-        print("  색인 항목: active %d · deprecated %d · pinned %d"
-              % (st["active"], st["deprecated"], st["pinned"]))
+        print("  색인 항목: active %d · deprecated %d · pinned %d · 파일 %d"
+              % (st["active"], st["deprecated"], st["pinned"], st.get("files", 0)))
         print("  ledger 노드: %d · 변경 대기: %d · 제거 대기: %d (확인 %sms)"
               % (st["ledger_nodes"], st["pending_changes"], st["pending_removals"], st["ms"]))
+        _paths = FI.allowed_paths(home)
+        print("  허용 로컬 경로: %s" % (", ".join(_paths) if _paths else "(없음 · index add-path 로 옵트인)"))
         if stale:
             print("  → 반영: python binggu.py index update")
         return 0
     if cmd == "update":
         r = FI.index_update(ledger, home=home)
-        print("OK: 색인 증분 갱신 — 신규 %d · 수정 %d · 유지 %d · 제거 %d · 폐기 %d (%sms · ledger write 0)"
-              % (r["added"], r["updated"], r["unchanged"], r["removed"], r["deprecated"], r["ms"]))
+        f = r.get("files", {})
+        print("OK: 색인 증분 갱신 — 노드 신규 %d·수정 %d·유지 %d·제거 %d·폐기 %d | 파일 신규 %d·수정 %d·제거 %d (%sms · ledger write 0)"
+              % (r["added"], r["updated"], r["unchanged"], r["removed"], r["deprecated"],
+                 f.get("added", 0), f.get("updated", 0), f.get("removed", 0), r["ms"]))
         return 0
     if cmd == "rebuild":
         r = FI.index_rebuild(ledger, home=home)
@@ -508,6 +512,28 @@ def cmd_index(a):
         r = FI.set_pin(a.node_id, home=home, pinned=(cmd == "pin"))
         print("OK: %s %s (영구 규칙 %s · 색인 레벨 · ledger 불변)"
               % (cmd, r["node_id"], "고정" if cmd == "pin" else "해제"))
+        return 0
+    if cmd == "add-path":
+        if not os.path.isdir(a.path):
+            print("BLOCK: 디렉토리가 아닙니다: %s" % a.path)
+            return 1
+        paths = FI.add_allowed_path(a.path, home=home)
+        print("OK: 허용 경로 추가 — %s (총 %d개 · 다음 index update 부터 md/traj 인덱싱)"
+              % (os.path.abspath(a.path), len(paths)))
+        return 0
+    if cmd == "remove-path":
+        paths = FI.remove_allowed_path(a.path, home=home)
+        print("OK: 허용 경로 제거 — %s (남은 %d개 · 해당 파일 항목은 다음 update 에서 제거)"
+              % (os.path.abspath(a.path), len(paths)))
+        return 0
+    if cmd == "list-paths":
+        paths = FI.allowed_paths(home)
+        if not paths:
+            print("허용 로컬 경로 없음 (기본 빈 · owner 옵트인). 추가: python binggu.py index add-path <dir>")
+        else:
+            print("# 허용 로컬 경로 (md/traj 인덱싱 대상)")
+            for p in paths:
+                print("  · %s" % p)
         return 0
     print("BLOCK: unknown index subcommand: %s" % cmd)
     return 1
@@ -2011,6 +2037,9 @@ def main():
     ixsub.add_parser("rebuild")
     ixsub.add_parser("pin").add_argument("node_id")
     ixsub.add_parser("unpin").add_argument("node_id")
+    ixsub.add_parser("add-path").add_argument("path")       # 로컬 md/traj 인덱싱 경로 옵트인
+    ixsub.add_parser("remove-path").add_argument("path")
+    ixsub.add_parser("list-paths")
     # 기본 사용자 흐름 별칭(직관 명령) — 기존 명령 위임, 안전 게이트 동일.
     exp = sub.add_parser("explain"); exp.add_argument("memory_id")   # = trace show <id>(근거·이력)
     fgp = sub.add_parser("forget"); fgp.add_argument("memory_id")    # deprecate 안내(확인 문구 유지)
