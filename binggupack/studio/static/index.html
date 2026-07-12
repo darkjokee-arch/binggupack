@@ -16,6 +16,11 @@
       <span class="title">BingguPack</span>
       <span class="badge badge-ro" title="이 화면은 읽기 전용입니다">Read-only</span>
     </div>
+    <nav class="mainnav" id="mainnav" aria-label="주 메뉴">
+      <button type="button" class="navbtn" data-view="home" aria-current="page">Home</button>
+      <button type="button" class="navbtn" data-view="inbox">Inbox</button>
+      <button type="button" class="navbtn" data-view="memories">Memories</button>
+    </nav>
     <div class="status" id="status-strip" aria-live="polite">
       <span class="chip" id="chip-integrity">장부 —</span>
       <span class="chip" id="chip-capture">capture —</span>
@@ -31,18 +36,49 @@
   <main id="main" tabindex="-1">
     <p class="notice" id="global-error" role="alert" hidden></p>
 
-    <section class="panel" aria-labelledby="home-h">
+    <!-- HOME -->
+    <section class="view panel" id="view-home" aria-labelledby="home-h">
       <h2 id="home-h">Home</h2>
-      <div class="cards" id="home-cards">
-        <p class="loading">불러오는 중…</p>
-      </div>
+      <div class="cards" id="home-cards"><p class="loading">불러오는 중…</p></div>
     </section>
 
-    <section class="panel" aria-labelledby="inbox-h">
+    <!-- INBOX -->
+    <section class="view panel" id="view-inbox" aria-labelledby="inbox-h" hidden>
       <h2 id="inbox-h">검토함 (Inbox)</h2>
       <nav class="tabs" id="inbox-tabs" role="tablist" aria-label="검토함 탭"></nav>
-      <div id="inbox-body">
-        <p class="loading">불러오는 중…</p>
+      <div id="inbox-body"><p class="loading">불러오는 중…</p></div>
+    </section>
+
+    <!-- MEMORIES -->
+    <section class="view panel" id="view-memories" aria-labelledby="mem-h" hidden>
+      <h2 id="mem-h">기억 (Memories)</h2>
+      <p class="lexnote" id="mem-lexnote"></p>
+      <form class="memtools" id="mem-form" role="search">
+        <input type="search" id="mem-q" name="q" placeholder="기억 검색 (문장 포함)" autocomplete="off" aria-label="기억 검색">
+        <select id="mem-state" aria-label="상태 필터">
+          <option value="active">활성</option>
+          <option value="deprecated">폐기</option>
+          <option value="all">전체</option>
+        </select>
+        <select id="mem-type" aria-label="종류 필터">
+          <option value="">종류 전체</option>
+          <option value="judgment">judgment</option>
+          <option value="state">state</option>
+          <option value="evidence">evidence</option>
+          <option value="concept">concept</option>
+          <option value="doc">doc</option>
+        </select>
+        <input type="text" id="mem-subtype" placeholder="subtype" autocomplete="off" aria-label="subtype 필터">
+        <button type="submit" class="btn" id="mem-search">목록</button>
+        <button type="button" class="btn btn-ghost" id="mem-recall">회상</button>
+      </form>
+      <div class="memcount" id="mem-count" aria-live="polite"></div>
+      <div class="memlayout">
+        <div class="memlist" id="mem-list"><p class="empty">검색어를 입력하거나 목록을 누르세요.</p></div>
+        <aside class="memdetail" id="mem-detail" aria-live="polite" hidden></aside>
+      </div>
+      <div class="mempager" id="mem-pager" hidden>
+        <button type="button" class="btn btn-ghost" id="mem-more">더 보기</button>
       </div>
     </section>
 
@@ -54,7 +90,6 @@
   </main>
 
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-
   <script src="static/app.js"></script>
 </body>
 </html>

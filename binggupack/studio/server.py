@@ -14,10 +14,12 @@ import json
 import os
 import secrets
 import sys
+import urllib.parse
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from binggupack.cli import daily
+from binggupack.studio import read_model
 
 try:
     from importlib.resources import files as _res_files
@@ -68,6 +70,15 @@ def _meta():
     return {"studio_version": STUDIO_VERSION, "product": "BingguPack", "mode": "read-only"}
 
 
+def _query(raw_path):
+    return urllib.parse.parse_qs(urllib.parse.urlsplit(raw_path).query)
+
+
+def _qget(query, key, default):
+    v = query.get(key)
+    return v[0] if v else default
+
+
 def _make_handler(ledger, session):
     class StudioHandler(BaseHTTPRequestHandler):
         server_version = "BingguStudio"
@@ -111,7 +122,8 @@ def _make_handler(ledger, session):
             if not self._host_ok():
                 self._text(403, "forbidden", head_only)
                 return
-            path = self.path.split("?", 1)[0].split("#", 1)[0]
+            raw = self.path
+            path = raw.split("?", 1)[0].split("#", 1)[0]
             parts = [p for p in path.split("/") if p]
             if len(parts) < 2 or parts[0] != "s" or not self._session_ok(parts[1]):
                 self._text(404, "not found", head_only)
@@ -121,8 +133,10 @@ def _make_handler(ledger, session):
                 self._serve_static("index.html", head_only)
             elif rest[0] == "static" and len(rest) == 2:
                 self._serve_static(rest[1], head_only)
+            elif rest[0] == "api" and len(rest) == 3 and rest[1] == "memory":
+                self._serve_memory_detail(rest[2], head_only)
             elif rest[0] == "api" and len(rest) == 2:
-                self._serve_api(rest[1], head_only)
+                self._serve_api(rest[1], _query(raw), head_only)
             else:
                 self._text(404, "not found", head_only)
 
@@ -137,15 +151,63 @@ def _make_handler(ledger, session):
                 return
             self._emit(200, body, ctype, head_only)
 
-        def _serve_api(self, name, head_only):
+        def _serve_api(self, name, query, head_only):
             if name == "home":
                 self._json(daily.collect_home_snapshot(ledger), head_only=head_only)
             elif name == "inbox":
                 self._json(daily.collect_inbox_snapshot(ledger), head_only=head_only)
             elif name == "meta":
                 self._json(_meta(), head_only=head_only)
+            elif name == "memories":
+                self._serve_memories(query, head_only)
+            elif name == "recall":
+                self._serve_recall(query, head_only)
             else:
-                self._json({"error": "not found"}, code=404, head_only=head_only)
+                self._json({"error": "not_found"}, code=404, head_only=head_only)
+
+        def _serve_memories(self, query, head_only):
+            state = _qget(query, "state", "active")
+            node_type = _qget(query, "type", None)
+            subtype = _qget(query, "subtype", None)
+            q = _qget(query, "q", None)
+            try:
+                limit = read_model.parse_int(_qget(query, "limit", str(read_model.LIST_LIMIT_DEFAULT)), "limit")
+                offset = read_model.parse_int(_qget(query, "offset", "0"), "offset")
+                read_model.validate_list_params(state, limit, offset)
+                if q is not None:
+                    q = read_model.normalize_text(q)
+                    if len(q) > read_model.QUERY_MAX:
+                        raise read_model.ValidationError("q", "q too long")
+                    q = q or None
+            except read_model.ValidationError as e:
+                self._json({"error": "invalid_request", "field": e.field}, code=400, head_only=head_only)
+                return
+            snap = read_model.collect_memory_list_snapshot(
+                ledger, state=state, node_type=node_type, subtype=subtype, q=q, limit=limit, offset=offset)
+            self._json(snap, head_only=head_only)
+
+        def _serve_recall(self, query, head_only):
+            try:
+                q = read_model.validate_query(_qget(query, "q", None))
+                limit = read_model.parse_int(_qget(query, "limit", str(read_model.RECALL_LIMIT_DEFAULT)), "limit")
+                if not (1 <= limit <= read_model.RECALL_LIMIT_MAX):
+                    raise read_model.ValidationError("limit", "limit must be 1..%d" % read_model.RECALL_LIMIT_MAX)
+            except read_model.ValidationError as e:
+                self._json({"error": "invalid_request", "field": e.field}, code=400, head_only=head_only)
+                return
+            self._json(read_model.collect_recall_snapshot(ledger, q, limit=limit), head_only=head_only)
+
+        def _serve_memory_detail(self, raw_id, head_only):
+            try:
+                node_id = read_model.validate_node_id(urllib.parse.unquote(raw_id))
+            except read_model.ValidationError as e:
+                self._json({"error": "invalid_request", "field": e.field}, code=400, head_only=head_only)
+                return
+            snap = read_model.collect_memory_detail_snapshot(ledger, node_id)
+            if snap is None:
+                self._json({"error": "not_found"}, code=404, head_only=head_only)
+                return
+            self._json(snap, head_only=head_only)
 
         # ── 메서드 ──────────────────────────────────────────────────────────────
         def do_GET(self):
