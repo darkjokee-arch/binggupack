@@ -1,7 +1,10 @@
-# BingguPack App Path 설계 — `@BingguPack` 호출 (DESIGN ONLY, planned)
+# BingguPack App Path 설계 — `@BingguPack` 호출 (read core IMPLEMENTED, transport DESIGN ONLY)
 
 > 최종 UX: 일반 채팅 앱에서 `@BingguPack`처럼 자기 pack context를 호출.
-> 이 문서는 설계 초안이며 **코드 구현 0 · hosted 배포 0**. ChatGPT Apps/HTTPS MCP first, Claude/Gemini는 platform adapter later.
+> **상태 (v1.21-A, 2026-07-12):**
+> - ✅ **read core IMPLEMENTED** — `binggupack/app/read_core.py` 에 transport-independent 5-tool 순수 core(pack_list·pack_summary·evidence_search·node_edge_lookup·handoff_context) 구현. read-only · write/network/cache 0 · conformance harness GO.
+> - ❌ **HTTPS transport NOT implemented** · ❌ **auth/user isolation NOT implemented** · ❌ **upload/deploy 0** · ❌ hosted 배포 0.
+> ChatGPT Apps/HTTPS MCP first, Claude/Gemini는 platform adapter later. §1~§6 spec 은 read core 가 그대로 구현했고, transport/auth/upload 는 v1.21-B/C/D 로 남는다.
 
 ## 1. hosted MCP 최소 v1 범위
 

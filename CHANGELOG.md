@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Added
+- **Transport-independent read-only Pack Service Core (v1.21-A)** — 미래 HTTPS MCP / `@BingguPack` 앱이 호출할 순수 core(`binggupack/app/read_core.py`). HTTP/MCP/OAuth/cloud/ledger 미의존.
+- **Five App Path read tools** — `list_packs`·`get_pack_summary`·`search_evidence`(deterministic lexical-only)·`lookup_node_edges`(exact node_id / ambiguous keyword)·`build_handoff_context`(Phase 3 handoff guide 단일 정본). 기존 pack contract(`validate_pack`)·canonical layout(manifest + graph/nodes.jsonl + graph/edges.jsonl + evidence/index.jsonl) 재사용(신규 schema 0).
+- **Deterministic conformance harness** — `python -m binggupack.app.conformance --selftest` (synthetic pack 10종 · 운영 ledger/네트워크 0).
+
+### Security
+- **pack root traversal/symlink 차단** — repository 밖 파일 미접근(realpath 격리) · symlink/비정규 파일 거부 · pack_id 정규식.
+- **raw path/secret/PII 출력 0** — source_pointer 원문·source hash·절대경로 미노출 · pack .jsonl content 의 secret/PII scan(CLEAN 만 서비스) · 오류 message 에 내부 경로/stack 미노출.
+- **write/network/cache 0** — 파일 read 만 · index/cache/log/temp/SQLite WAL 생성 0 · embedding/remote model/query log/usage trace 0.
+- **candidate/evidence semantics 유지** — 모든 node/edge candidate(confirmed 자동 승격 0) · 없는 evidence_ref 미생성 · malformed/unsafe pack fail-closed(부분 서비스 0).
+
 ## [1.20.0] - 2026-07-12 — Your AI memory, visible and understandable
 
 v1.20 은 consent-first memory 엔진을 CLI·MCP·로컬 Studio 에서 들여다볼 수 있는 일상 제품으로 만든다.
