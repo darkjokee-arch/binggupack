@@ -1,0 +1,12 @@
+# Binggu Anywhere — PRIVATE Python core worker.
+# No public route: reached only via the gateway's Service Binding (workers_dev disabled,
+# no [[routes]] / custom domain). Owner attaches the R2 bucket at deploy time.
+name = "binggu-anywhere-core"
+main = "anywhere/core/entry.py"
+compatibility_date = "2025-06-01"
+compatibility_flags = ["python_workers"]
+workers_dev = false
+
+[[r2_buckets]]
+binding = "SNAPSHOTS"
+bucket_name = "binggu-anywhere-snapshots"
