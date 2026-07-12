@@ -5,16 +5,17 @@
 outbox = 로컬 디렉토리(파일 1건 = intent 1건, 파일명 <intent_id>.json).
 D3에서 worker 적재로 전송 계층만 교체 — 게이트는 본 러너 그대로 불변.
 
-★A3(P1-B) 재배선: hosted 저장의 유일 경로 = binggu_hosted_bundle.commit_bundle(로컬 exact-bound
-승인 이벤트). 본 러너의 옛 direct save_selected(actor=human) 경로는 폐지됐다 — transported
-actor/confirm 은 신뢰하지 않는다(untrusted). process_outbox 는 이제 검증·보고만 하고 절대 write 0.
-정상(게이트 1~4 통과) intent 는 원문 그대로 보존(삭제/스트립 0) + pending_approval 보고(계약 5·9·11·14).
+★A3(P1-B)+save-n 참조 바인딩(2026-07-12): hosted 저장의 유일 경로 = binggu_hosted_bundle.commit_bundle
+(사람 저장 게이트 = preview + save n). 본 러너의 옛 direct save_selected(actor=human) 경로는 폐지됐다 —
+transported actor/confirm 은 신뢰하지 않는다(untrusted). process_outbox 는 이제 검증·보고만 하고 절대 write 0.
+정상(게이트 1~4 통과) intent 는 원문 그대로 보존(삭제/스트립 0) + pending_approval 보고(사유
+human_save_required — 사람의 inbox preview + save n 대기 · 계약 5·9·11·14).
 
 게이트 순서 (고정 — 우회 0):
   1 schema_ver 검증(schema_mismatch) → 2 TTL 만료 폐기(.expired 마킹만, 미적용)
   → 3 intent_id 재해시 일치(intent_id_mismatch) → 4 confirm 형식("SAVE i,j" 정확 일치)
-  → 5 정상 intent = pending_approval 보고(원문 보존·write 0). 실제 저장은 commit_bundle 승인 후에만.
-  → 7 실패 = .rejected 보존(사유 포함) — 재시도는 사람 재승인만(자동 재시도 0)
+  → 5 정상 intent = pending_approval 보고(원문 보존·write 0). 실제 저장은 사람 save n 이후 commit_bundle 만.
+  → 7 실패 = .rejected 보존(사유 포함) — 재시도는 사람 재실행만(자동 재시도 0)
 
 불변/금지: real staging DB 0 · live/wrangler/deploy/외부 네트워크 0 · OpenCrab 0 ·
   confirmed 자동 생성 0 · marketplace/결제 0 · hosted write live 노출 0.
@@ -201,16 +202,16 @@ def process_outbox(db, outbox_dir, ctx, snap_dir, now_ts):
             continue
 
         # 게이트 5 — ★A3(P1-B): direct hosted write 폐지. transported actor/confirm 은 신뢰하지 않는다.
-        # 저장의 유일 경로 = binggu_hosted_bundle.commit_bundle(로컬 exact-bound 승인 이벤트). 본 러너는
+        # 저장의 유일 경로 = binggu_hosted_bundle.commit_bundle(사람 저장 게이트 = preview + save n). 본 러너는
         # 절대 write 0. 게이트 1~4 를 통과한 정상 intent 는 원문 그대로 보존(삭제/스트립 0·계약 5·9·14) +
-        # pending_approval 보고. 실제 저장은 owner 가 승인한 뒤 commit_bundle 이 한다(계약 11).
+        # pending_approval 보고. 실제 저장은 사람이 inbox preview 확인 후 save n 으로 확정한다(계약 11).
         before = db.store_checksum()
         db.audit_append(actor, "hosted_intent", it["intent_id"], "BLOCK",
-                        "direct_write_disabled:approval_required", before, before)
+                        "direct_write_disabled:human_save_required", before, before)
         counts["pending_approval"] = counts.get("pending_approval", 0) + 1
         details.append({"file": fn, "status": "pending_approval",
-                        "reason": "approval_required", "intent_id": it["intent_id"]})
-        # 원문 파일은 그대로 둔다(계약 5·9·14) — commit_bundle 승인 후에만 archive(processed).
+                        "reason": "human_save_required", "intent_id": it["intent_id"]})
+        # 원문 파일은 그대로 둔다(계약 5·9·14) — 사람 save n(commit_bundle) 후에만 archive(processed).
 
     counts["details"] = details
     return counts
@@ -257,7 +258,7 @@ def run():
     ctx = {"actor": "human"}
 
     # 1. ★A3: 정상 intent = direct write 폐지 → pending_approval + 원문 보존(파일 유지·노드 0).
-    #    저장은 commit_bundle(로컬 승인 이벤트) 경유만 — process_outbox 는 절대 write 0.
+    #    저장은 commit_bundle(사람 저장 게이트 = preview + save n) 경유만 — process_outbox 는 절대 write 0.
     it1, p1 = _mk_intent(outbox, CONVO, [1, 5])
     r1 = process_outbox(db, outbox, ctx, snap_dir, NOW)
     n1 = db.con.execute("SELECT count(*) FROM nodes").fetchone()[0]
@@ -339,7 +340,7 @@ def run():
     rec(10, "audit chain INTACT", db.verify_chain())
 
     # 11. ★A3: hosted_intent audit 에 ALLOW(직접 저장) 는 0 — 전부 BLOCK(direct_write_disabled).
-    #     원문/PII 무누설(해시만). 실제 저장 ALLOW 는 commit_bundle 의 approval_consume audit 이 담당.
+    #     원문/PII 무누설(해시만). 실제 저장 ALLOW 는 commit_bundle 의 hosted_bundle_commit audit 이 담당.
     h_allow = db.con.execute("SELECT count(*) FROM audit_log "
                              "WHERE action='hosted_intent' AND result='ALLOW'").fetchone()[0]
     h_block = db.con.execute("SELECT count(*) FROM audit_log WHERE action='hosted_intent' "

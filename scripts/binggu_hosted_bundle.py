@@ -1,22 +1,23 @@
 # -*- coding: utf-8 -*-
-"""binggu_hosted_bundle.py — hosted 묶음 승인(bundle) exact-bound 저장 (owner 16계약 · P1-B A3).
+"""binggu_hosted_bundle.py — hosted 묶음 저장 · 사람 저장 게이트(preview + save n) (owner 16계약 · P1-B A3).
 
-owner 결정(2026-07-11): 휴대폰→PC 저장의 영구 write 는 PC 의 exact-bound 로컬 승인 이벤트 이후에만
-정확히 한 번. 명시 선택한 intent 를 immutable bundle(전체 digest + 각 intent digest 바인딩)로 만들어
-한 번 승인 → atomic all-or-nothing 저장. 부분저장 금지 · 원문 자동삭제 0.
+owner 확정 룰(2026-07-12): 휴대폰→PC 저장의 영구 write 는 PC 의 사람 저장 게이트(preview + 사람의
+save n 입력 = ctx.actor=='human') 통과 이후에만 정확히 한 번. 명시 선택한 intent 를 immutable
+bundle 로 만들어 atomic all-or-nothing 저장. 부분저장 금지 · 원문 자동삭제 0.
+(구 approval mint/consume 배선은 저장 경로에서 제거 — approval core 자체는 별도 자산·무손상.)
 
 16계약:
-  1 선택 intent 만 포함 · 2 요청 후 membership 수정 금지(digest 고정) · 3 수정 = revoke/supersede + 새 요청
-  4 op + stable ledger_id + protocol + request_id + 각 intent digest + 전체 bundle digest + expiry 바인딩
-  5 하나라도 mismatch/validation 실패 → 전체 write 0 · 6 실패 시 approval consume 0
-  7 성공 시 bundle 전체 write + consume 을 동일(논리) 트랜잭션에서 확정
-  8 재시도는 original receipt 만 반환 · second write 0 · 9 미선택 intent = 원문과 함께 PENDING 유지
-  10 provenance(source_intent_id, bundle_id, approval_id, receipt_id) · 11 legacy(confirm/SAVE/actor=human)
-     = PENDING approval request 만 생성 · 직접 write 0 · 12 payload 모호(exact binding 불가) = quarantine + write 0 + 원문 보존
-  13 approval request 에 raw conversation 복제 0 · source reference + digest 만 · 14 어떤 상태서도 원문 자동삭제 0
+  1 선택 intent 만 포함 · 2 선택 후 membership 수정 금지(intent digest 고정) · 3 수정 = 새 선택 + 새 confirm
+  4 사람 저장 게이트: ctx.actor=='human'(preview + save n 증명) + confirm='SAVE <idx[,idx]>' 정확 일치
+  5 하나라도 mismatch/validation 실패 → 전체 write 0 · 6 실패 시 부분 write 0(전체 BLOCK)
+  7 성공 시 bundle 전체 write 를 동일(단일) 트랜잭션에서 확정
+  8 재시도 = applied_registry 멱등(재insert 0) · second write 0 · 9 미선택 intent = 원문과 함께 staging 유지
+  10 provenance(source_intent_id, bundle_id, actor_source) · 11 transported actor/confirm 신뢰 0
+     — 로컬 사람 게이트 미통과 = 직접 write 0 · 12 payload 모호(exact binding 불가) = quarantine + write 0 + 원문 보존
+  13 게이트/저널에 raw conversation 복제 0 · source reference + digest 만 · 14 어떤 상태서도 원문 자동삭제 0
   15 성공 후 원문 = processed/archived 전환(삭제 아님) · 16 삭제 = 별도 명시 owner purge 만
 
-정직 경계: 로컬 TTY 승인 assurance = L1. shell/PTY 가능 agent 상대 hard security 아님(SECURITY.md · Track B RFC).
+정직 경계: 사람 저장 게이트 assurance = L1. shell/PTY 가능 agent 상대 hard security 아님(SECURITY.md · Track B RFC).
 CLI: python binggu_hosted_bundle.py --selftest   (temp 전용)
 """
 import hashlib
@@ -33,15 +34,11 @@ _BASE = os.path.dirname(HERE)
 if _BASE not in sys.path:
     sys.path.insert(0, _BASE)
 
-import time as _t  # noqa: E402
 from openbinggu_save_intent_outbox_runner import (SCHEMA_VER, DEFAULT_TTL_S,  # noqa: E402
                                                   intent_hash, _CONFIRM_RE, OPERATING_PATHS)
 import openbinggu_conversation_candidate_save as _convsave  # noqa: E402
 from openbinggu_staging_write_selftest import (apply_pack_in_txn,  # noqa: E402
                                                _now_iso as _sw_now_iso, _hash as _sw_hash)
-from binggupack.mcp import approval_gate  # noqa: E402
-from binggupack.safety import trusted_approval as ta  # noqa: E402
-from binggupack.storage.schema import ledger_id as _ledger_id  # noqa: E402
 
 
 # ── 테스트 전용 crash failpoint (운영 기본 미설정 = no-op) ─────────────────────────────
@@ -117,16 +114,6 @@ def build_bundle(staging_dir, selected_intent_ids, now_ts):
             "selected_count": len(selected_intent_ids)}
 
 
-def _bind(items, approval_id=None):
-    """authorize 에 넘길 payload — trusted_approval.binding_fields('hosted_bundle') 가 각 intent 의
-    save_candidate digest + bundle digest 로 캐논화(raw 는 digest 재료일 뿐 store 미저장·계약 13)."""
-    b = {"items": [{"intent_id": it["intent_id"], "text": it["text"],
-                    "indices": it["indices"], "speaker": it.get("speaker")} for it in items]}
-    if approval_id is not None:
-        b["approval_id"] = approval_id
-    return b
-
-
 def _archive_member(staging_dir, intent_id, meta, archive_dir):
     """저장된 intent 원문을 archive(processed) — staging→archive 이동. 원문 삭제 아님(계약 15).
     ★P1-B.1: idempotent post-commit reconciliation. dst 이미 존재 + src 부재 = 이미 archive 완료
@@ -189,47 +176,52 @@ def _fail_audit(db, rid, reason):
         pass
 
 
-def commit_bundle(db, home, staging_dir, selected_intent_ids, approval_id, snap_dir, now_ts,
-                  archive_dir=None):
-    """묶음 exact-bound 저장(owner 16계약 · P1-B.1 crash-atomic).
+def commit_bundle(db, home, staging_dir, selected_intent_ids, ctx, confirm, snap_dir, now_ts,
+                  archive_dir=None, indices=None):
+    """묶음 저장 — 사람 저장 게이트(preview + save n)(owner 16계약 · P1-B.1 crash-atomic).
 
-    흐름: ①Contract-8(approval_id 이미 consumed → original receipt·reconcile only)
-    ②build_bundle(source load) ③H1 exact membership(하나라도 invalid/dup → 전체 BLOCK·authorize 전)
-    ④approval_id 없음 → PENDING 요청 ⑤Phase1 prepare(DB write 0·하나라도 hard-fail → BLOCK·reserve 전)
-    ⑥Phase2 authorize/reserve ⑦Phase3 단일 BEGIN IMMEDIATE(전 intent insert + finalize_consumed +
-    approval_requests consumed + 성공 audit → COMMIT 정확히 1회) ⑧post-commit idempotent archive.
+    흐름: ①사람 게이트(ctx['actor']=='human' 아니면 human_save_required · confirm 이
+    'SAVE <idx[,idx]>' 정확 일치 아니면 confirm_phrase_mismatch — source load/prepare 전 fail-closed)
+    ②build_bundle(source load) ③H1 exact membership(하나라도 invalid/dup → 전체 BLOCK)
+    ④Phase1 prepare(DB write 0·하나라도 hard-fail → BLOCK) ⑤Phase2 단일 BEGIN IMMEDIATE(전 intent
+    insert + 성공 audit → COMMIT 정확히 1회) ⑥post-commit idempotent archive.
 
-    crash 규칙: COMMIT 이전 kill → ledger write 0·approval consume 0(예약은 stale → lease 회복).
-    COMMIT 이후 kill → ledger 전체 write + consumed receipt. 부분 bundle 은 어떤 재오픈 시점에도 없음.
+    indices = 선택 번호(1-base inbox 번호 · confirm 대조용). 미지정 시 1..N(직접 호출 편의).
+    ctx 는 호출자(_resolve_human_ctx 등)가 판정한 actor/actor_source — transported 값 신뢰 0(계약 11).
+
+    crash 규칙: COMMIT 이전 kill → ledger write 0. COMMIT 이후 kill → ledger 전체 write.
+    부분 bundle 은 어떤 재오픈 시점에도 없음. ★COMMIT 후 crash 재시도 semantics(구 approval
+    receipt 재사용 대체 계약): 재시도는 applied_registry 멱등 — 전 intent 가 기존재 dup 으로
+    _new=False → 재insert 0 · reason='idempotent_already_applied' + ⑥ archive 수렴(부분 write 0·
+    중복 insert 0). archive 완료 후 재시도 = staging 부재 → intent_not_found quarantine(원문은
+    archive 에 보존 — 이미 처리 완료 상태의 표면화).
     archive(filesystem)는 DB 트랜잭션과 분리 = post-commit reconciliation(실패해도 ledger 성공 불변).
 
-    반환 {applied, write(0/1), reason, request_id, bundle_id, receipt?, archived?, archive_pending?,
+    반환 {applied, write(0/1), reason, bundle_id, receipt?, archived?, archive_pending?,
           quarantined, selected_count, validated_count, executed_write}.
     """
     if archive_dir is None:
         archive_dir = os.path.join(staging_dir, "_archive")
 
-    # ── ① Contract-8: source load 전 consumption receipt 우선 조회(재시도 멱등·§5) ──────────────
-    if approval_id:
-        prior = ta.get_consumption(db.con, approval_id)
-        if prior is not None:
-            receipt = prior["receipt"] or {}
-            base_meta = {"bundle_id": receipt.get("bundle_id"), "approval_id": approval_id,
-                         "receipt_id": receipt.get("request_id"), "processed_ts": now_ts,
-                         "reconciled": True}
-            archived, pending = _reconcile_archive(staging_dir, receipt.get("members"),
-                                                   base_meta, archive_dir)
-            return {"applied": 0, "write": 0, "reason": "already_consumed",
-                    "request_id": approval_id, "bundle_id": receipt.get("bundle_id"),
-                    "receipt": _trim_receipt(receipt), "archived": archived,
-                    "archive_pending": pending, "quarantined": [], "executed_write": False}
+    # ── ① 사람 저장 게이트: preview + save n (구 approval mint/consume 배선 대체 · write 전 fail-closed) ──
+    if not isinstance(ctx, dict) or ctx.get("actor") != "human":
+        return {"applied": 0, "write": 0, "reason": "human_save_required",
+                "guidance": "inbox preview 확인 → Claude Code 에선 '세이브 n' 발화, 터미널에선 직접 실행",
+                "quarantined": [], "selected_count": len(selected_intent_ids),
+                "executed_write": False}
+    idxs = [int(i) for i in indices] if indices else list(range(1, len(selected_intent_ids) + 1))
+    if confirm != "SAVE " + ",".join(str(i) for i in idxs):
+        return {"applied": 0, "write": 0, "reason": "confirm_phrase_mismatch",
+                "expected_confirm_format": "SAVE <n[,n]>",
+                "quarantined": [], "selected_count": len(selected_intent_ids),
+                "executed_write": False}
 
     # ── ② source load + pre-validate ───────────────────────────────────────────────────────
     bl = build_bundle(staging_dir, selected_intent_ids, now_ts)
     items, quarantined = bl["items"], bl["quarantined"]
     bid = bundle_id_of([it["intent_id"] for it in items]) if items else None
 
-    # ── ③ H1 exact membership: 선택 중 하나라도 invalid/dup → 전체 BLOCK(authorize/reserve/write 0) ─
+    # ── ③ H1 exact membership: 선택 중 하나라도 invalid/dup → 전체 BLOCK(write 0) ─────────────────
     if quarantined:
         return {"applied": 0, "write": 0, "reason": "bundle_prevalidation_failed",
                 "selected_count": bl["selected_count"], "validated_count": len(items),
@@ -239,38 +231,7 @@ def commit_bundle(db, home, staging_dir, selected_intent_ids, approval_id, snap_
                 "selected_count": bl["selected_count"], "validated_count": 0,
                 "quarantined": quarantined, "bundle_id": bid, "executed_write": False}
 
-    bind = _bind(items, approval_id)
-
-    # ── ④ approval_id 없음 → PENDING 승인 요청만(직접 write 0·원문 보존·계약 11). prevalidation 통과 intent 는
-    #   요청 생성 · 저장 게이트(PII/a0/index) 실패는 commit(승인 후) 단계에서 전체 차단(§2·SECURITY §8 2계층).
-    if not approval_id:
-        with approval_gate.authorize("hosted_bundle", bind, home, db) as auth:
-            rid = auth.request_id
-            auth.settle({"applied": False, "reason": auth.reason})
-            extra = auth.response_extra()
-        return {"applied": 0, "write": 0, "reason": extra.get("reason"),
-                "request_id": rid, "bundle_id": bid, "quarantined": quarantined,
-                "selected_count": bl["selected_count"], "validated_count": len(items),
-                "guidance": extra.get("guidance"), "executed_write": False}
-
-    # ── binding pre-check: 제시된 approval_id 가 현 membership 의 request_id 와 다르면 조기 차단 ──
-    #   (membership 팽창/축소·잘못된 approval_id). read-only·prepare/reserve 전. binding_fields 는 approval_id 제외.
-    try:
-        _digest = ta.canonical_payload_digest("hosted_bundle", bind)
-        _expected_rid = ta.compute_request_id("hosted_bundle", _digest, _ledger_id(db.con))
-    except ta.ControlCharReject:
-        return {"applied": 0, "write": 0, "reason": "binding_reject:control_char",
-                "bundle_id": bid, "quarantined": quarantined, "executed_write": False}
-    except Exception:
-        return {"applied": 0, "write": 0, "reason": "binding_error",
-                "bundle_id": bid, "quarantined": quarantined, "executed_write": False}
-    if approval_id != _expected_rid:
-        return {"applied": 0, "write": 0, "reason": "binding_mismatch:request_id",
-                "request_id": _expected_rid, "bundle_id": bid, "quarantined": quarantined,
-                "selected_count": bl["selected_count"], "validated_count": len(items),
-                "executed_write": False}
-
-    # ── ⑤ Phase 1: prepare all (DB persistent write 0). 하나라도 hard-fail → BLOCK(reserve 전) ──
+    # ── ④ Phase 1: prepare all (DB persistent write 0). 하나라도 hard-fail → BLOCK(write 전) ──
     #   ★exact membership(intra-intent): 선택 index 중 하나라도 거부(index/a0/pii)면 부분 저장(silent subset
     #   shrink)이 되므로 — ok 이어도 rejected 가 있으면 hard-fail 로 취급해 전체 BLOCK(§2·계약 5).
     prepared, prep_fail = [], None
@@ -288,7 +249,7 @@ def commit_bundle(db, home, staging_dir, selected_intent_ids, approval_id, snap_
             pr["_new"] = False     # 전부 기존재(idempotent·계약 8)
             prepared.append((it, pr))
         else:
-            # 하나라도 거부(부분 포함)/전부 거부 = hard-fail → 전체 BLOCK(계약 5·consume 0·원문 보존)
+            # 하나라도 거부(부분 포함)/전부 거부 = hard-fail → 전체 BLOCK(계약 5·write 0·원문 보존)
             _rr = next(iter(pr.get("rejected") or {}), None) or pr.get("reason") or "prepare_failed"
             prep_fail = {"intent_id": it["intent_id"], "reason": _rr, "rejected": pr.get("rejected")}
             break
@@ -329,74 +290,50 @@ def commit_bundle(db, home, staging_dir, selected_intent_ids, approval_id, snap_
     members = [{"intent_id": it["intent_id"], "node_ids": pr["node_ids"]} for it, pr in prepared]
     receipt = {"request_id": None, "operation": "hosted_bundle", "bundle_id": bid,
                "node_ids": all_node_ids, "members": members, "decision_id": None}
+    con = db.con
 
-    # ── ⑥ Phase 2: authorize/reserve ───────────────────────────────────────────────────────
-    with approval_gate.authorize("hosted_bundle", bind, home, db) as auth:
-        rid = auth.request_id
-        receipt["request_id"] = rid
-        if auth.actor != "human":
-            # binding 불일치 · verify 실패 · provider 미구성 · already_consumed(race). write 0 · 원문 보존.
-            auth.settle({"applied": False, "reason": auth.reason})
-            extra = auth.response_extra()
-            return {"applied": 0, "write": 0, "reason": extra.get("reason"),
-                    "request_id": rid, "bundle_id": bid, "quarantined": quarantined,
-                    "receipt": extra.get("receipt"), "guidance": extra.get("guidance"),
-                    "selected_count": bl["selected_count"], "validated_count": len(items),
-                    "executed_write": False}
-        nonce = auth._nonce
-        con = db.con
-
-        # ── ⑦ Phase 3: 단일 BEGIN IMMEDIATE — 전 intent insert + finalize + audit → COMMIT 1회 ──
-        try:
-            con.execute("BEGIN IMMEDIATE")
-            ts_iso = _sw_now_iso(now_ts)
-            saved = 0
-            for k, (it, pr) in enumerate(prepared):
-                if pr["_new"]:
-                    b = db.store_checksum()
-                    apply_pack_in_txn(db, pr["pack"], ts_iso)
-                    a = db.store_checksum()
-                    db.audit_append("human", "conv_save", pr["pack"]["pack_id"], "ALLOW",
-                                    "hosted_bundle saved=%d" % len(pr["pack"]["nodes"]),
-                                    b, a, commit=False)
-                    saved += 1
-                if k == 0:
-                    _failpoint("mid_apply")   # 첫 insert 후 hard crash → txn 미커밋 → 부분 write 0
-            # 승인 소비를 같은 트랜잭션 안에서 확정(§3 금지: 별도 consume COMMIT)
-            ta.finalize_consumed(con, nonce, rid, receipt, _t.time(), commit=False)
-            con.execute("UPDATE approval_requests SET state='consumed' WHERE request_id=?", (rid,))
-            ck = db.store_checksum()
-            db.audit_append("human", "approval_consume:hosted_bundle", rid, "ALLOW",
-                            "receipt nodes=%d bundle=%s" % (len(all_node_ids), bid),
-                            ck, ck, commit=False)
-            _failpoint("before_commit")       # 모든 write 준비 후 COMMIT 직전 crash → ledger write 0
-            con.execute("COMMIT")             # ★ 정확히 1회 — 여기 통과 = 전체 확정
-            _failpoint("after_commit")        # COMMIT 후 archive 전 crash → 재시도 시 receipt 재사용
-        except Exception as _e:
-            try:
-                con.execute("ROLLBACK")       # 단일 txn 원복 — 부분 bundle 0
-            except Exception:
-                pass
-            _fail_audit(db, rid, "bundle_txn_exception:%s" % type(_e).__name__)
-            # auth._nonce 유지 → with __exit__ 이 release(예약 해제·승인 재사용 가능·소각 0)
-            return {"applied": 0, "write": 0, "reason": "bundle_exception",
-                    "request_id": rid, "bundle_id": bid, "quarantined": quarantined,
-                    "selected_count": bl["selected_count"], "validated_count": len(items),
-                    "executed_write": False}
-        # 성공 — __exit__ 의 release 억제(이미 consumed) + PENDING 검토 레코드 정리
-        auth._nonce = None
+    # ── ⑤ Phase 2: 단일 BEGIN IMMEDIATE — 전 intent insert + 성공 audit → COMMIT 정확히 1회 ──
     try:
-        ta.purge_review(home, rid)   # post-commit 정리 — 실패해도 커밋된 저장을 뒤집지 않음(§4)
-    except Exception:
-        pass
+        con.execute("BEGIN IMMEDIATE")
+        ts_iso = _sw_now_iso(now_ts)
+        saved = 0
+        for k, (it, pr) in enumerate(prepared):
+            if pr["_new"]:
+                b = db.store_checksum()
+                apply_pack_in_txn(db, pr["pack"], ts_iso)
+                a = db.store_checksum()
+                db.audit_append("human", "conv_save", pr["pack"]["pack_id"], "ALLOW",
+                                "hosted_bundle saved=%d" % len(pr["pack"]["nodes"]),
+                                b, a, commit=False)
+                saved += 1
+            if k == 0:
+                _failpoint("mid_apply")   # 첫 insert 후 hard crash → txn 미커밋 → 부분 write 0
+        ck = db.store_checksum()
+        db.audit_append("human", "hosted_bundle_commit", bid, "ALLOW",
+                        "human_save nodes=%d src=%s" % (len(all_node_ids),
+                                                        ctx.get("actor_source")),
+                        ck, ck, commit=False)
+        _failpoint("before_commit")       # 모든 write 준비 후 COMMIT 직전 crash → ledger write 0
+        con.execute("COMMIT")             # ★ 정확히 1회 — 여기 통과 = 전체 확정
+        _failpoint("after_commit")        # COMMIT 후 archive 전 crash → 재시도 = 멱등(docstring ★)
+    except Exception as _e:
+        try:
+            con.execute("ROLLBACK")       # 단일 txn 원복 — 부분 bundle 0
+        except Exception:
+            pass
+        _fail_audit(db, bid, "bundle_txn_exception:%s" % type(_e).__name__)
+        return {"applied": 0, "write": 0, "reason": "bundle_exception",
+                "bundle_id": bid, "quarantined": quarantined,
+                "selected_count": bl["selected_count"], "validated_count": len(items),
+                "executed_write": False}
 
-    # ── ⑧ post-commit: idempotent archive(원문 삭제 0·계약 15·§4 DB 트랜잭션과 분리) ──────────────
-    base_meta = {"bundle_id": bid, "approval_id": approval_id, "receipt_id": rid,
+    # ── ⑥ post-commit: idempotent archive(원문 삭제 0·계약 15·§4 DB 트랜잭션과 분리) ──────────────
+    base_meta = {"bundle_id": bid, "actor_source": ctx.get("actor_source"),
                  "processed_ts": now_ts}
     archived, pending = _reconcile_archive(staging_dir, members, base_meta, archive_dir)
     return {"applied": saved, "write": 1 if saved > 0 else 0,
             "reason": None if saved > 0 else "idempotent_already_applied",
-            "receipt": _trim_receipt(receipt), "request_id": rid, "bundle_id": bid,
+            "receipt": _trim_receipt(receipt), "bundle_id": bid,
             "archived": archived, "archive_pending": pending, "quarantined": quarantined,
             "selected_count": bl["selected_count"], "validated_count": len(items),
             "executed_write": saved > 0}
@@ -418,6 +355,8 @@ def _selftest():
          "백업은 항상 작업 전에 먼저 해 둔다.",
          "캐시 전략은 이걸로 확정한다."]
     PII = "담당자 연락처는 010-" + "1234-5678 이고 마진이 낮아 보류한다."
+    HUMAN = {"actor": "human", "actor_source": "cli_command"}
+    READER = {"actor": "reader", "actor_source": "agent_session_unanchored"}
 
     def mk(staging, text, idxs, created=NOW - 10):
         confirm = "SAVE " + ",".join(str(i) for i in idxs)
@@ -428,17 +367,12 @@ def _selftest():
             json.dump(it, f, ensure_ascii=False)
         return it["intent_id"]
 
-    def enable_provider(home):
-        os.makedirs(home, exist_ok=True)
-        with open(ta.config_path(home), "w", encoding="utf-8") as f:
-            json.dump({"enabled": True}, f)
-
-    def approve(db, home, rid):
-        """owner 승인 시뮬 — CLI TTY 검증은 selftest 밖. mint_approval 기본 채널(ship-guard 회피).
-        ★ authorize 는 verify 에 실제 time.time() 을 쓰므로 mint 도 실제 시간으로(NOW=미래면 approval_time_invalid)."""
-        import time as _t
-        req = ta.get_request(db.con, rid)
-        ta.mint_approval(home, req, 900, _t.time())   # 기본 channel="unverified_direct"(test_double 리터럴 금지)
+    def apr_count(dbx):
+        """approval_requests 무증가 단정용(테이블 부재=0) — 저장 경로의 approval 배선 제거 증명."""
+        try:
+            return dbx.con.execute("SELECT count(*) FROM approval_requests").fetchone()[0]
+        except Exception:
+            return 0
 
     tmp = tempfile.mkdtemp(prefix="bgp_bundle_")
     home = os.path.join(tmp, ".binggupack")
@@ -449,22 +383,21 @@ def _selftest():
     ledger = os.path.join(home, "ledger.sqlite")
     db = open_g3(ledger)
 
-    # 1) provider 미구성 → PENDING 아니고 fail-closed(approval 없음) · write 0 · 원문 보존
+    # 1) 사람 게이트: actor!=human → human_save_required · write 0 · 원문 보존 · approval_requests 무증가
     i1, i2 = mk(staging, S[0], [1]), mk(staging, S[1], [1])
-    r1 = commit_bundle(db, home, staging, [i1, i2], None, snap, NOW)
-    ck(r1["write"] == 0 and r1["reason"] == "provider_not_configured"
-       and os.path.isfile(os.path.join(staging, i1 + ".json")), "1 provider 미구성 → write 0 · 원문 보존")
+    r1 = commit_bundle(db, home, staging, [i1, i2], READER, "SAVE 1,2", snap, NOW)
+    ck(r1["write"] == 0 and r1["reason"] == "human_save_required" and r1.get("guidance")
+       and os.path.isfile(os.path.join(staging, i1 + ".json")) and apr_count(db) == 0,
+       "1 actor!=human → human_save_required · write 0 · 원문 보존 · approval_requests 0")
 
-    # 2) provider 활성 · approval_id 없음 → PENDING 생성 · write 0 · 원문 보존(계약 11)
-    enable_provider(home)
-    r2 = commit_bundle(db, home, staging, [i1, i2], None, snap, NOW)
-    rid = r2["request_id"]
-    ck(r2["write"] == 0 and r2["reason"] == "approval_required" and rid
-       and os.path.isfile(os.path.join(staging, i1 + ".json")), "2 approval_id 없음 → PENDING · write 0 · 원문 보존")
+    # 2) confirm 불일치 → confirm_phrase_mismatch · write 0 · 원문 보존(계약 4)
+    r2 = commit_bundle(db, home, staging, [i1, i2], HUMAN, "SAVE 1", snap, NOW)
+    ck(r2["write"] == 0 and r2["reason"] == "confirm_phrase_mismatch"
+       and os.path.isfile(os.path.join(staging, i1 + ".json")),
+       "2 confirm 불일치 → confirm_phrase_mismatch · write 0 · 원문 보존")
 
-    # 3) 승인 후 approval_id 제시 → atomic 저장(2건) · 원문 archive(삭제 아님) · provenance
-    approve(db, home, rid)
-    r3 = commit_bundle(db, home, staging, [i1, i2], rid, snap, NOW)
+    # 3) human + 정확 confirm → atomic 저장(2건) · 원문 archive(삭제 아님) · provenance(actor_source)
+    r3 = commit_bundle(db, home, staging, [i1, i2], HUMAN, "SAVE 1,2", snap, NOW)
     n_active = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
     arch_ok = all(not os.path.isfile(os.path.join(staging, x + ".json"))
                   and os.path.isfile(os.path.join(staging, "_archive", x + ".processed.json"))
@@ -472,53 +405,54 @@ def _selftest():
     prov = json.load(open(os.path.join(staging, "_archive", i1 + ".processed.json"), encoding="utf-8"))
     ck(r3["write"] == 1 and r3["applied"] == 2 and n_active >= 2 and arch_ok
        and prov["_provenance"]["bundle_id"] == r3["bundle_id"]
-       and prov["_provenance"]["approval_id"] == rid, "3 승인 후 atomic 저장 2건 · archive · provenance")
+       and prov["_provenance"]["actor_source"] == "cli_command" and apr_count(db) == 0,
+       "3 human+confirm → atomic 저장 2건 · archive · provenance · approval_requests 0")
 
-    # 4) 재시도(같은 approval_id) → Contract-8 already_consumed · original receipt · 재write 0(계약 8)
-    #    (원문은 이미 archive 이동 → build_bundle 이전에 get_consumption 이 receipt 반환·M1 봉인)
-    r4 = commit_bundle(db, home, staging, [i1, i2], rid, snap, NOW)
+    # 4) 동일 문장 재적재 후 재커밋 → applied_registry 멱등 · 재insert 0 · 재write 0(계약 8·★재시도 semantics)
+    i4a, i4b = mk(staging, S[0], [1]), mk(staging, S[1], [1])
+    r4 = commit_bundle(db, home, staging, [i4a, i4b], HUMAN, "SAVE 1,2", snap, NOW)
     n_active2 = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
-    ck(r4["write"] == 0 and r4["reason"] == "already_consumed" and r4.get("receipt")
-       and r4["receipt"].get("request_id") == rid and n_active2 == n_active,
-       "4 재시도 → already_consumed · original receipt · 재write 0(계약 8·M1)")
+    ck(r4["write"] == 0 and r4["reason"] == "idempotent_already_applied"
+       and n_active2 == n_active, "4 재커밋(동일 문장) → idempotent_already_applied · 재write 0(계약 8)")
 
-    # 5) exact membership — 2건 중 1건 PII → Phase1 prepare hard-fail → 전체 write 0 · reserve/consume 0 · 원문 보존
+    # 4b) archive 완료 후 같은 선택 재시도 → intent_not_found quarantine(원문은 archive 보존)
+    r4b = commit_bundle(db, home, staging, [i1, i2], HUMAN, "SAVE 1,2", snap, NOW)
+    ck(r4b["write"] == 0 and r4b["reason"] == "bundle_prevalidation_failed"
+       and all(q["reason"] == "intent_not_found" for q in r4b["quarantined"])
+       and os.path.isfile(os.path.join(staging, "_archive", i1 + ".processed.json")),
+       "4b archive 후 재시도 → intent_not_found · 재write 0(원문 archive 보존)")
+
+    # 5) exact membership — 2건 중 1건 PII → Phase1 prepare hard-fail → 전체 write 0 · 원문 보존
     i5a, i5b = mk(staging, S[2], [1]), mk(staging, PII, [1])
-    r5pending = commit_bundle(db, home, staging, [i5a, i5b], None, snap, NOW)
-    rid5 = r5pending["request_id"]
-    approve(db, home, rid5)
     n_before5 = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
-    r5 = commit_bundle(db, home, staging, [i5a, i5b], rid5, snap, NOW)
+    r5 = commit_bundle(db, home, staging, [i5a, i5b], HUMAN, "SAVE 1,2", snap, NOW)
     n_after5 = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
     both_preserved = all(os.path.isfile(os.path.join(staging, x + ".json")) for x in (i5a, i5b))
-    consumed5 = db.con.execute("SELECT count(*) FROM approval_consumptions WHERE state='consumed'"
-                               " AND request_id=?", (rid5,)).fetchone()[0]
     ck(r5["write"] == 0 and r5["reason"] == "bundle_prepare_failed" and n_after5 == n_before5
-       and both_preserved and consumed5 == 0,
-       "5 exact membership: 1건 PII → 전체 write 0 · reserve/consume 0 · 원문 보존")
+       and both_preserved,
+       "5 exact membership: 1건 PII → 전체 write 0 · 원문 보존")
 
-    # 6) membership 변경(부분 재선택) → 기존 승인 request_id 불일치 → write 0(계약 2·3)
-    r6 = commit_bundle(db, home, staging, [i5a], rid5, snap, NOW)
-    ck(r6["write"] == 0 and r6["reason"] in ("binding_mismatch:request_id", "approval_required"),
-       "6 membership 변경(부분) → 기존 승인 무효(계약 2·3)")
+    # 6) 선택 번호와 confirm 의 idx 바인딩 — indices 명시 시 confirm 은 그 번호와 정확 일치해야
+    r6 = commit_bundle(db, home, staging, [i5a], HUMAN, "SAVE 1", snap, NOW, indices=[3])
+    r6b = commit_bundle(db, home, staging, [i5a], HUMAN, "SAVE 3", snap, NOW, indices=[3])
+    ck(r6["write"] == 0 and r6["reason"] == "confirm_phrase_mismatch"
+       and r6b["write"] == 1 and r6b["applied"] == 1,
+       "6 indices 바인딩: confirm 은 선택 번호(inbox n) 정확 일치(불일치 BLOCK)")
 
     # 7) quarantine — 변조 intent(재해시 불일치) → bundle_prevalidation_failed · write 0
     i7 = mk(staging, S[0], [1])
     p7 = os.path.join(staging, i7 + ".json")
     b7 = json.load(open(p7, encoding="utf-8")); b7["text"] = b7["text"] + " 변조."
     json.dump(b7, open(p7, "w", encoding="utf-8"), ensure_ascii=False)
-    r7 = commit_bundle(db, home, staging, [i7], None, snap, NOW)
+    r7 = commit_bundle(db, home, staging, [i7], HUMAN, "SAVE 1", snap, NOW)
     ck(r7["write"] == 0 and r7["reason"] == "bundle_prevalidation_failed"
        and any(q["reason"] == "intent_id_mismatch" for q in r7["quarantined"])
        and os.path.isfile(p7), "7 변조 intent → bundle_prevalidation_failed · write 0 · 원문 보존")
 
-    # 7b) 단일 txn 내 in-process 예외(apply_pack_in_txn raise) → ROLLBACK · 전체 write 0 · 원문 보존 · consume 0
+    # 7b) 단일 txn 내 in-process 예외(apply_pack_in_txn raise) → ROLLBACK · 전체 write 0 · 원문 보존
     global apply_pack_in_txn
     i8a = mk(staging, "이 계약은 조건이 유리하여 진행하기로 결정했다.", [1])
     i8b = mk(staging, "신규 거래처는 항상 신용조사를 먼저 한다.", [1])
-    r8p = commit_bundle(db, home, staging, [i8a, i8b], None, snap, NOW)
-    rid8 = r8p["request_id"]
-    approve(db, home, rid8)
     n_b8 = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
     _orig_apply, _calls = apply_pack_in_txn, {"n": 0}
 
@@ -529,19 +463,18 @@ def _selftest():
         return _orig_apply(dbx, pack, ts)
     try:
         apply_pack_in_txn = _boom
-        r8 = commit_bundle(db, home, staging, [i8a, i8b], rid8, snap, NOW)
+        r8 = commit_bundle(db, home, staging, [i8a, i8b], HUMAN, "SAVE 1,2", snap, NOW)
     finally:
         apply_pack_in_txn = _orig_apply
     n_a8 = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
     exc_audit = db.con.execute(
         "SELECT count(*) FROM audit_log WHERE reason_code LIKE 'bundle_txn_exception%'").fetchone()[0]
     both8 = all(os.path.isfile(os.path.join(staging, x + ".json")) for x in (i8a, i8b))
-    consumed8 = db.con.execute("SELECT count(*) FROM approval_consumptions WHERE state='consumed'"
-                               " AND request_id=?", (rid8,)).fetchone()[0]
     ck(r8["write"] == 0 and r8["reason"] == "bundle_exception" and n_a8 == n_b8 and both8
-       and exc_audit >= 1 and consumed8 == 0,
-       "7b 단일 txn 예외 → ROLLBACK · 전체 write 0 · 원문 보존 · consume 0 · txn_exception audit")
+       and exc_audit >= 1,
+       "7b 단일 txn 예외 → ROLLBACK · 전체 write 0 · 원문 보존 · txn_exception audit")
 
+    ck(apr_count(db) == 0, "7c 전 구간 approval_requests 무증가(저장 경로 approval 배선 제거)")
     ck(db.verify_chain(), "8 audit chain INTACT")
     bad = (db.con.execute("SELECT count(*) FROM nodes WHERE candidate!=1 OR promotion_allowed!=0").fetchone()[0]
            + db.con.execute("SELECT count(*) FROM edges WHERE candidate!=1").fetchone()[0])
