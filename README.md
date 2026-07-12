@@ -60,6 +60,7 @@ binggu studio --no-open  # 브라우저를 열지 않음(headless/원격)
 - **read-only preview** — GET/HEAD 만. mutation endpoint 0·외부 asset/network 0·CORS/cache 비활성. Ctrl+C 로 종료합니다.
 - **Home + unified Inbox** — 활성 기억·자동 수집 후보·원격 저장 의도·승인 요청·검토 예정을 카드/탭으로. 각 항목의 버튼은 CLI 명령을 클립보드에 복사만 합니다.
 - **Memories** — 저장된 기억을 브라우저에서 탐색합니다. active/deprecated·종류·subtype 필터, 문장 검색, **읽기 전용 lexical 회상**(의미 검색 설정·캐시를 만들지 않습니다), 기억 상세와 근거 사슬(evidence 발췌·관계·owner 승인 요약)을 봅니다. 카드/상세의 버튼은 `binggu explain <id>`·`binggu recall "<질문>"` 명령을 클립보드에 복사만 하며, **저장·폐기·교체·승인 같은 mutation 은 아직 Studio 에서 실행하지 않습니다**(기존 CLI 와 owner 승인 경계를 사용).
+- **Approvals** — 승인 요청의 exact 내용·operation/payload/ledger binding·상태·이력(timeline)·소비 결과(receipt)를 봅니다. effective 상태(pending/approved/consuming/consumed/rejected/revoked/expired)를 기존 verifier·consumption 으로 read-only 해석하고, review 파일은 무결성(operation/payload_digest 일치)을 검증해 표시합니다. **Studio 는 승인을 실행하지 않습니다** — owner 가 별도 로컬 터미널에서 실행할 `binggu approval show/approve/reject/revoke <request-id>` 명령을 복사만 제공하는 **read-only handoff UI** 입니다(approval nonce·private path·provider config 미노출).
 - 저장·승인 등 **mutation 은 기존 CLI 와 owner approval 경계를 그대로 사용**합니다 — Studio 자체는 승인을 실행하지 않습니다.
 
 ## 1 · 왜 만들었나

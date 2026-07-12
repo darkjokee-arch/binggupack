@@ -12,6 +12,7 @@
   var lastInbox = null;
   var mem = { mode: "list", offset: 0, limit: 30, count: 0, total: 0,
               q: "", state: "active", type: "", subtype: "", loaded: false };
+  var appr = { offset: 0, limit: 30, total: 0, state: "all", op: "", loaded: false };
 
   // ── API base ──
   function apiBase() {
@@ -370,10 +371,141 @@
     addClose(d);
   }
 
+  // ── approvals ──
+  function apprBadge(state) { return el("span", "badge-state st-appr-" + (state || ""), state || "?"); }
+  function apprSummaryCards(counts) {
+    counts = counts || {};
+    var host = byId("appr-cards"); clear(host);
+    var order = [["pending", "대기"], ["approved", "승인"], ["consuming", "소비중"],
+                 ["consumed", "완료"], ["rejected", "거절"], ["revoked", "취소"], ["expired", "만료"]];
+    order.forEach(function (p) { host.appendChild(card(p[1], counts[p[0]] || 0, (counts[p[0]] || 0) > 0)); });
+  }
+  function apprCard(it) {
+    var c = el("article", "memcard"); c.tabIndex = 0; c.setAttribute("role", "button");
+    var top = el("div", "memcard-top");
+    top.appendChild(el("span", "badge-type", it.operation || "?"));
+    top.appendChild(apprBadge(it.effective_state));
+    if (it.expired) { top.appendChild(el("span", "tag flag-warn", "만료")); }
+    c.appendChild(top);
+    c.appendChild(el("p", "memcard-claim", it.summary || "(요약 없음)"));
+    var meta = el("div", "memcard-meta");
+    meta.appendChild(el("span", null, "id " + it.display_id));
+    if (it.created_at) { meta.appendChild(el("span", null, it.created_at)); }
+    if (it.has_review) { meta.appendChild(el("span", null, "review")); }
+    if (it.has_receipt) { meta.appendChild(el("span", null, "receipt")); }
+    c.appendChild(meta);
+    function open() { openApprovalDetail(it.request_id); }
+    c.addEventListener("click", open);
+    c.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } });
+    return c;
+  }
+  function doApprovalSearch(reset) {
+    appr.state = byId("appr-state").value;
+    appr.op = byId("appr-op").value.trim();
+    appr.loaded = true;
+    if (reset) { appr.offset = 0; }
+    var p = new URLSearchParams();
+    p.set("state", appr.state); p.set("limit", String(appr.limit)); p.set("offset", String(appr.offset));
+    if (appr.op) { p.set("operation", appr.op); }
+    getJSON("approvals?" + p.toString()).then(function (j) {
+      apprSummaryCards(j.summary_counts);
+      var host = byId("appr-list");
+      if (reset) { clear(host); }
+      if (reset && (!j.items || !j.items.length)) { host.appendChild(el("p", "empty", "해당하는 승인 요청이 없습니다.")); }
+      (j.items || []).forEach(function (it) { host.appendChild(apprCard(it)); });
+      appr.total = j.total;
+      var shown = host.querySelectorAll(".memcard").length;
+      byId("appr-count").textContent = "총 " + j.total + "개 · 표시 " + shown + "개";
+      byId("appr-pager").hidden = shown >= j.total;
+    }).catch(function () {
+      var host = byId("appr-list"); clear(host); host.appendChild(el("p", "empty", "조회 오류. 다시 시도하세요."));
+    });
+  }
+  function apprAddClose(d) {
+    var close = el("button", "memclose", "닫기"); close.type = "button";
+    close.addEventListener("click", function () { d.hidden = true; });
+    d.insertBefore(close, d.firstChild);
+  }
+  function openApprovalDetail(rid) {
+    var d = byId("appr-detail"); d.hidden = false; clear(d);
+    d.appendChild(el("p", "loading", "불러오는 중…"));
+    getJSON("approval/" + encodeURIComponent(rid)).then(renderApprovalDetail).catch(function () {
+      clear(d); d.appendChild(el("p", "empty", "상세를 불러오지 못했습니다.")); apprAddClose(d);
+    });
+  }
+  function _provRow(tagText, exText, warn) {
+    var row = el("div", "provrow");
+    row.appendChild(el("span", "tag" + (warn ? " flag-warn" : ""), tagText));
+    if (exText != null) { row.appendChild(el("span", "prov-ex", exText)); }
+    return row;
+  }
+  function renderApprovalDetail(j) {
+    var d = byId("appr-detail"); clear(d);
+    var rq = j.request;
+    var head = el("div", "memcard-top");
+    head.appendChild(el("span", "badge-type", rq.operation || "?"));
+    head.appendChild(apprBadge(rq.effective_state));
+    if (rq.expired) { head.appendChild(el("span", "tag flag-warn", "만료")); }
+    d.appendChild(head);
+    d.appendChild(el("p", "detail-claim", rq.summary || ""));
+    var meta = el("dl", "detail-meta");
+    function kv(k, v) { meta.appendChild(el("dt", null, k)); meta.appendChild(el("dd", null, v == null ? "—" : String(v))); }
+    kv("request ID", rq.display_id); kv("operation", rq.operation); kv("protocol", rq.protocol_version);
+    kv("digest", rq.payload_digest_display); kv("ledger", rq.ledger_display_id);
+    kv("db 상태", rq.db_state); kv("effective", rq.effective_state);
+    kv("생성", rq.created_at); kv("만료", rq.expires_at);
+    d.appendChild(meta);
+    // review
+    d.appendChild(el("h4", null, "검토 내용"));
+    if (j.review && j.review.available) {
+      var items = j.review.items || [];
+      if (!items.length) { d.appendChild(el("p", "empty", "표시할 항목이 없습니다.")); }
+      items.forEach(function (it) { d.appendChild(_provRow(it.label, it.value)); });
+    } else {
+      var integ = j.review ? j.review.integrity : null;
+      var msg = integ === "mismatch" ? "검토 파일 무결성 불일치 — 항목을 표시하지 않습니다."
+        : (integ === "unavailable_after_decision" ? "결정 후 검토 파일이 정리되었습니다(정상)." : "검토 파일 없음.");
+      d.appendChild(el("p", "empty", msg));
+    }
+    // timeline
+    d.appendChild(el("h4", null, "이력"));
+    (j.timeline || []).forEach(function (e) {
+      d.appendChild(_provRow(e.kind, (e.at || "") + (e.channel ? " · " + e.channel : "")));
+    });
+    // consumption / receipt
+    var cv = j.consumption;
+    if (cv && cv.receipt_available && cv.receipt) {
+      d.appendChild(el("h4", null, "결과(receipt)"));
+      d.appendChild(el("p", "detail-explain", "이미 완료된 작업입니다 — 재실행해도 second write 는 0입니다."));
+      (cv.receipt.nodes || []).forEach(function (n) {
+        var row = _provRow("node " + n.display_id, null, n.dangling);
+        if (!n.dangling) {
+          var link = el("button", "copy", "기억 열기"); link.type = "button";
+          link.addEventListener("click", function () { setView("memories"); openDetail(n.node_id); });
+          row.appendChild(link);
+        } else { row.appendChild(el("span", "prov-ex", "(연결된 기억 없음)")); }
+        d.appendChild(row);
+      });
+    } else if (rq.effective_state === "approved") {
+      d.appendChild(el("h4", null, "다음 단계"));
+      d.appendChild(el("p", "detail-explain", "승인은 발행됐습니다. 원 요청을 보낸 앱·MCP·hosted 흐름에서 작업을 다시 실행하세요."));
+    }
+    // owner handoff — 명령 복사만
+    d.appendChild(el("h4", null, "owner 터미널 명령 복사"));
+    var acts = el("div", "actions");
+    acts.appendChild(copyButton("내용 확인", j.commands.show));
+    acts.appendChild(copyButton("승인", j.commands.approve));
+    acts.appendChild(copyButton("거절", j.commands.reject));
+    acts.appendChild(copyButton("취소", j.commands.revoke));
+    d.appendChild(acts);
+    d.appendChild(el("p", "empty", "Studio 는 승인을 실행하지 않습니다 — 명령을 복사해 owner 가 로컬 터미널에서 직접 입력하세요."));
+    apprAddClose(d);
+  }
+
   // ── view routing ──
   function setView(name) {
     view = name;
-    ["home", "inbox", "memories"].forEach(function (v) { byId("view-" + v).hidden = (v !== name); });
+    ["home", "inbox", "memories", "approvals"].forEach(function (v) { byId("view-" + v).hidden = (v !== name); });
     var btns = document.querySelectorAll(".navbtn");
     Array.prototype.forEach.call(btns, function (b) {
       if (b.getAttribute("data-view") === name) { b.setAttribute("aria-current", "page"); }
@@ -381,9 +513,11 @@
     });
     loadStatus();
     if (name === "memories" && !mem.loaded) { doMemorySearch(true); }
+    if (name === "approvals" && !appr.loaded) { doApprovalSearch(true); }
     schedule();
-    if (name !== "memories") { tick(); }
+    if (name !== "memories" && name !== "approvals") { tick(); }
   }
+  function _isManualView() { return view === "memories" || view === "approvals"; }
 
   // ── load cycle (home/inbox) ──
   function showError(msg) {
@@ -406,7 +540,7 @@
   }
   function schedule() {
     if (timer) { window.clearTimeout(timer); timer = null; }
-    if (auto && view !== "memories") { timer = window.setTimeout(tick, REFRESH_MS); }
+    if (auto && !_isManualView()) { timer = window.setTimeout(tick, REFRESH_MS); }
   }
   function tick() { loadHomeInbox().then(schedule); }
   function setAuto(on) {
@@ -428,8 +562,14 @@
       mem.offset = (byId("mem-list").querySelectorAll(".memcard")).length;
       doMemorySearch(false);
     });
+    byId("appr-form").addEventListener("submit", function (e) { e.preventDefault(); doApprovalSearch(true); });
+    byId("appr-more").addEventListener("click", function () {
+      appr.offset = (byId("appr-list").querySelectorAll(".memcard")).length;
+      doApprovalSearch(false);
+    });
     byId("btn-refresh").addEventListener("click", function () {
       if (view === "memories") { mem.mode === "recall" ? doRecall() : doMemorySearch(true); }
+      else if (view === "approvals") { doApprovalSearch(true); }
       else { loadHomeInbox().then(schedule); }
     });
     byId("btn-auto").addEventListener("click", function () { setAuto(!auto); });
