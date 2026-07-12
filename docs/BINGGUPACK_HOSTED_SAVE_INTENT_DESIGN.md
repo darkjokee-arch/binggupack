@@ -7,6 +7,12 @@
 > (`docs/BINGGUPACK_TRUSTED_APPROVAL_EVENT_RFC.md`). ★ hosted save-intent **runner** 봉인은 STILL-OPEN(P1-B).
 > 상세 = RFC §23.
 
+> ⚠ **[2026-07-12 저장 게이트 개정 노트]** 위 P1-A 노트의 "사람 승인 = trusted approval event" 및 P1-B 의
+> hosted 묶음 exact-bound approval 커밋은 저장 게이트 개정으로 다시 대체됨 — hosted commit 의 사람 증명은
+> **inbox preview + 사람의 `SAVE n` 입력**(save-n 참조 바인딩 · `CLAUDECODE` deny 가드 · isatty 미사용).
+> transport ≠ authority·intent_id rehash·all-or-nothing 단일 COMMIT 은 유지. trusted approval event 는
+> 비-저장 mutation 자산으로 존치. 정본: `CHANGELOG.md` [Unreleased] · `SECURITY.md`.
+
 > DRAFT(`BINGGUPACK_HOSTED_SAVE_BUTTON_DESIGN_DRAFT.md`)를 승격·구체화한 정본. **설계만 — 코드 0.**
 > live 노출 = D5 owner 명시 GO 전 영구 금지 (fail-closed).
 

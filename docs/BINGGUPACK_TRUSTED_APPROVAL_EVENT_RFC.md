@@ -23,6 +23,14 @@ Base: `feat/p1a-trusted-approval-event` (= PR #2 head `78486e7`, P0/P0.1 포함)
 > 5 Low 를 코드 실측 기반으로 제기했다. 전부 "기능 불가"가 아니라 "RFC 부정확/과장/누락" 이라
 > 이 v2 에서 인라인 해소했다. 추적표 = §27.
 
+> ⚠ **[2026-07-12 상태 노트 — 저장 경로 분리]** 이후 저장 게이트 개정으로 **저장 경로의 approval 배선은
+> 제거**됐다: hosted bundle 커밋(`hosted pull`→`commit_bundle`)은 더 이상 approval mint/consume 을 쓰지 않고,
+> 사람 증명 = **preview + 사람의 `SAVE n` 입력**(save-n 참조 바인딩 · 터미널 명령 직접 입력 · `CLAUDECODE`
+> deny 가드)이다. §23/R5 의 "유일 저장 경로 = 로컬 exact-bound `hosted_bundle` 승인" 서술은 그 시점 기준
+> (저장 경로에 한해 superseded). 본 RFC 의 나머지 자산 — MCP mutation fail-closed·`binggu approval` 채널·
+> exact binding·one-time consume·비-저장 mutation(P1-B) 봉인 — 은 무손상 유지. 정본: `CHANGELOG.md`
+> [Unreleased] 저장 게이트 개정 · `SECURITY.md`.
+
 ---
 
 ## 1. 문제 정의
