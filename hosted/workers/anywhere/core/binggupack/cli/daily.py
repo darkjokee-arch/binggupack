@@ -293,6 +293,17 @@ def collect_home_snapshot(ledger, now=None):
         snap["ledger"]["audit"] = "NONE"
     snap["queues"]["capture"] = len(_capture_items(home, now))
     snap["queues"]["hosted"] = _hosted_summary(home, now).get("total", 0)
+    # Local Fresh Index 상태(읽기전용 peek · 생성/write 0). stale = 색인 노드수 != ledger active.
+    try:
+        from binggupack.pack import fresh_index as _FI
+        ix = _FI.peek(home)
+    except Exception:
+        ix = {"exists": False}
+    if ix.get("exists"):
+        ix["stale"] = ix.get("active") != snap["ledger"]["active"]
+    else:
+        ix["stale"] = exists  # ledger 는 있는데 색인이 없으면 갱신 필요
+    snap["index"] = ix
     snap["next_actions"] = _next_actions(snap)
     return snap
 
@@ -409,12 +420,22 @@ def render_home_text(snap, unicode_ok=True):
         L["active"], Q["capture"], Q["hosted"], Q["approvals"], Q["due"])
     status = "장부 %s  capture %s  provider %s" % (
         L["audit"], S["capture"].upper(), S["approval_provider"].upper())
-    lines = _boxed("BingguPack", [counts, status], unicode_ok)
+    ix = snap.get("index", {})
+    if ix.get("exists"):
+        ix_line = "색인 %s  (기억 %d 색인됨)" % (
+            "갱신필요" if ix.get("stale") else "최신", ix.get("active", 0))
+    else:
+        ix_line = "색인 없음 (첫 회상 시 자동 생성)"
+    lines = _boxed("BingguPack", [counts, status, ix_line], unicode_ok)
     lines.append("")
     ar = _arrow(unicode_ok)
     if L["audit"] == "BROKEN":
         lines.append(_warn("장부 무결성 점검 필요", unicode_ok))
         lines.append("  %s binggu doctor" % ar)
+        lines.append("")
+    if ix.get("stale"):
+        lines.append(_warn("Local Fresh Index 갱신 필요(변경분 미반영)", unicode_ok))
+        lines.append("  %s binggu index update" % ar)
         lines.append("")
     queue_acts = [a for a in snap["next_actions"] if a["kind"] != "audit"]
     if queue_acts:
