@@ -211,6 +211,7 @@ def check_gate_log_canonical():
     try:
         from binggupack.safety.gate_log import (
             gate_record, gate_human_for, write_last_preview, gate_record_from_prompt,
+            gate_record_ref, gate_human_for_ref, preview_ref_for_candidates,
         )
     except Exception as e:  # noqa: BLE001
         chk(False, "(e) gate_log package import", repr(e))
@@ -230,12 +231,30 @@ def check_gate_log_canonical():
     chk(sg.write_last_preview is write_last_preview, "(e) write_last_preview identical fn", "")
     chk(sg.gate_record_from_prompt is gate_record_from_prompt,
         "(e) gate_record_from_prompt identical fn", "")
+    # save-n 참조 바인딩 신 심볼(승격 정본) — scripts shim ↔ package 정본 identity.
+    chk(sg.gate_record_ref is gate_record_ref, "(e) gate_record_ref identical fn", "")
+    chk(sg.gate_human_for_ref is gate_human_for_ref, "(e) gate_human_for_ref identical fn", "")
+    chk(sg.preview_ref_for_candidates is preview_ref_for_candidates,
+        "(e) preview_ref_for_candidates identical fn", "")
+
+    # 패키지 shim(binggupack.safety.save_gate)도 신 3심볼 re-export 패리티(issue5).
+    try:
+        from binggupack.safety import save_gate as pkg_sg
+        chk(pkg_sg.gate_record_ref is gate_record_ref
+            and pkg_sg.gate_human_for_ref is gate_human_for_ref
+            and pkg_sg.preview_ref_for_candidates is preview_ref_for_candidates,
+            "(e) package save_gate shim ref symbols identical", "")
+    except Exception as e:  # noqa: BLE001
+        chk(False, "(e) package save_gate shim ref symbols identical", repr(e))
 
     # __module__ 정본 경로 == binggupack.safety.gate_log (S4-1 정본화 회귀 고정).
     CANON = "binggupack.safety.gate_log"
     for name, fn in (("gate_record", gate_record), ("gate_human_for", gate_human_for),
                      ("write_last_preview", write_last_preview),
-                     ("gate_record_from_prompt", gate_record_from_prompt)):
+                     ("gate_record_from_prompt", gate_record_from_prompt),
+                     ("gate_record_ref", gate_record_ref),
+                     ("gate_human_for_ref", gate_human_for_ref),
+                     ("preview_ref_for_candidates", preview_ref_for_candidates)):
         chk(fn.__module__ == CANON, "(e) %s __module__ canonical" % name,
             "got %s" % fn.__module__)
 

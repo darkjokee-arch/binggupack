@@ -104,7 +104,10 @@ def run_smoke(home=None):
         and tr.get("reason") in ("G4_no_auto", "provider_not_configured", "trusted_approval_event_required"))
 
     # 9c. 사장님이 실제 'SAVE 1' 을 키보드 입력하면 save_gate hook 이 앵커를 남긴다(여기선 그 앵커를 직접
-    #     기록해 시뮬). 그때만 confirm 정확일치가 human 승격 저장으로 이어진다(격리 BINGGU_HOME 에만).
+    #     기록해 시뮬). save-n 참조 바인딩: 훅은 (preview_ref, idx) ref 레코드 1행 + 레거시 sh 행을
+    #     병기 append 하고, 승격 정본은 ref 대조다. 그때만 confirm 정확일치가 human 승격 저장으로
+    #     이어진다(격리 BINGGU_HOME 에만).
+    import json as _json
     import os as _os
     import sys as _sys
     _sd = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))), "scripts")
@@ -112,8 +115,21 @@ def run_smoke(home=None):
         _sys.path.insert(0, _sd)
     import binggu_save_gate as _sgate
     from binggupack.capture import preview as _cvp
-    _sgate.write_last_preview(_cvp.capture_preview(KO)["candidates"])
+    _cands9 = _cvp.capture_preview(KO)["candidates"]
+    _sgate.write_last_preview(_cands9)
     _sgate.gate_record_from_prompt("SAVE 1")
+    # ref 레코드 단정 — gate log 에 (pref, idx=1) 이 실재(승격 정본 경로 증명 · 원문 미저장)
+    _pref9 = _sgate.preview_ref_for_candidates(_cands9)
+    _ref_seen = False
+    with open(_sgate.gate_path(), encoding="utf-8") as _f9:
+        for _ln in _f9:
+            try:
+                _d9 = _json.loads(_ln)
+            except Exception:
+                continue
+            if _d9.get("pref") == _pref9 and 1 in (_d9.get("idxs") or []):
+                _ref_seen = True
+    chk("9c0.save_gate_ref_record_present", _ref_seen)
     r = handle_tool("save_candidate",
                     {"text": KO, "indices": [1], "dry_run": False, "confirm": "SAVE 1"}, allow_root)
     tr = r.get("tool_result") or {}
