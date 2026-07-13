@@ -1,9 +1,13 @@
 # -*- coding: utf-8 -*-
-"""binggupack.mcp.approval_gate — P1-A MCP write 핸들러 ↔ trusted approval event 결선.
+"""binggupack.mcp.approval_gate — trusted approval event 소비 게이트 (owner CLI 전용).
 
 정본 설계: docs/BINGGUPACK_TRUSTED_APPROVAL_EVENT_RFC.md §18.
+2026-07-13 스코프 축소(owner 결정): MCP write 핸들러 배선은 제거됐다 — MCP 도구 호출은 approval 로
+승격되지 않는다(fail-closed). 이 모듈의 현행 소비자는 **owner CLI 경로뿐**이다:
+binggu.py `_mutation_via_approval`(accept/unaccept/due/resolve `--approval-id`).
+(hag_sync_adapter `--import-edges` 는 trusted_approval core 를 직접 쓴다 — 본 모듈 미경유.)
 
-MCP write 핸들러의 `actor="reader"` 리터럴을 이 authorize() 컨텍스트 매니저로 교체한다:
+사용 계약(불변):
 
     with approval_gate.authorize(operation, params, home, db) as auth:
         r = core_mutation(db, ..., {"actor": auth.actor, "confirm": confirm}, ...)

@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""P1-A Trusted Approval Event — 적대 경계 회귀 하니스 (TIER-2).
+"""Trusted Approval Event — 적대 경계 회귀 하니스 (TIER-2).
 
-정본 설계: docs/BINGGUPACK_TRUSTED_APPROVAL_EVENT_RFC.md §24.
+정본 설계: docs/BINGGUPACK_TRUSTED_APPROVAL_EVENT_RFC.md §24 (+ 2026-07-13 MCP save approval 제거).
 전부 temp home(격리)·운영 ~/.binggupack 미접촉. handle_tool(MCP) + trusted_approval(core) 직접 구동.
 
-공격 커버: no-provider fail-closed · valid owner approval 정확 1회 · replay 무-2차-write ·
-operation/ledger/payload/protocol mismatch · expired · revoked · rejected · id-guessing ·
-concurrent double-consume(정확 1) · demo/test actor · env-var spoof · nonce 응답 미노출 ·
-summary PII residue · harvest fail-closed · 6-core actor sweep(TAE-2) · migration 비파괴 ·
-control-char binding · MCP TOOLS 파일write 도구 부재 · 운영 ledger sentinel.
+2026-07-13 개정: MCP mutation 표면의 approval 요청/소비 배선은 제거됐다(owner 결정 · 저장 게이트
+"preview + 사람의 save n 입력" 단일 원칙 후속). 따라서 이 하니스의 MCP 벡터는 "approval 로 소비된다"가
+아니라 "approval 이 있어도 절대 승격되지 않는다(fail-closed)"를 회귀로 봉인한다. approval core 의
+소비 semantics(정확 1회·replay·binding·expiry·tombstone)는 CLI/HAG 경로 하니스가 담당
+(binggu_p1b_mutation_closure_selftest · binggu_trusted_approval_binding_characterization_selftest ·
+tests/test_trusted_approval_e2e.py 의 CLI --approval-id 흐름).
+
+공격 커버: no-provider fail-closed · MCP 는 PENDING 요청 미발행 · owner mint approval 도 MCP 승격 0
+(소비 0·approval_id_ignored) · dry-run fail-closed 안내 정합 · concurrent double-consume(core 정확 1) ·
+env-var spoof · nonce 응답 미노출 · summary PII residue · harvest fail-closed ·
+6-core actor sweep(TAE-2) · migration 비파괴 · control-char binding ·
+MCP TOOLS 파일write 도구 부재 · 운영 ledger sentinel.
 
 CLI: python scripts/openbinggu_trusted_approval_boundary_selftest.py --selftest
 """
@@ -102,90 +109,52 @@ def run():
         os.environ.pop("BINGGU_TRUSTED_APPROVAL", None)
         os.environ.pop("BINGGU_APPROVAL_TOKEN", None)
 
-        # ── 2) valid owner approval → 정확히 1회 write (deprecate canary) ──────────
+        # ── 2) provider 구성돼도 MCP 는 approval 요청/소비 경로가 없다(2026-07-13 제거) ──
         enable_provider()
-        # 모델: dry_run=False, approval 없음 → approval_required + request_id.
         tr = rr("deprecate", {"index": 1, "id8": id8A, "reason": "오판이라 기각", "dry_run": False,
                               "confirm": "DEPRECATE 1 " + id8A})
-        rid = tr.get("request_id")
-        ck("approval_required + request_id", tr.get("reason") == "approval_required" and bool(rid))
-        ck("approval_required → write0", tr.get("executed_write") is False and _state(home, "nA") == "active")
-        # owner CLI: mint approval(get_request → mint_approval).
+        ck("MCP write 시도 → G4_no_auto(write0·request_id 미발행)",
+           tr.get("executed_write") is False and tr.get("reason") == "G4_no_auto"
+           and not tr.get("request_id"))
         db = open_g3(os.path.join(home, "ledger.sqlite"))
         try:
+            n_req = db.con.execute("SELECT count(*) FROM approval_requests").fetchone()[0]
+        finally:
+            db.close()
+        ck("MCP 는 PENDING approval 요청도 만들지 않는다(0행)", n_req == 0)
+        ck("MCP 차단 → nA 여전히 active", _state(home, "nA") == "active")
+
+        # ── 3) owner 가 진짜 mint 한 approval 이라도 MCP 표면은 소비/승격 불가 ────────
+        #    (구 P1-A 경로 재현: 요청을 owner 측에서 직접 등록 + mint → MCP 에 approval_id 제시)
+        payload = {"index": 1, "id8": id8A, "reason": "오판이라 기각"}
+        digest = ta.canonical_payload_digest("deprecate", payload)
+        db = open_g3(os.path.join(home, "ledger.sqlite"))
+        try:
+            from binggupack.storage.schema import ledger_id as _lid
+            lid = _lid(db.con)
+            rid = ta.compute_request_id("deprecate", digest, lid)
+            ta.upsert_request(db.con, rid, ta.PROTOCOL_VERSION, "deprecate", digest, lid,
+                              ta.summary_for("deprecate", payload, lid), time.time(), 900, 8)
             req = ta.get_request(db.con, rid)
         finally:
             db.close()
-        ck("PENDING request 저장됨", req is not None and req["operation"] == "deprecate")
+        ck("owner 측 요청 등록됨(픽스처)", req is not None and req["operation"] == "deprecate")
         ta.mint_approval(home, req, 900, time.time())
-        # 모델: approval_id 제시 → consume → 정확히 1회.
         tr = rr("deprecate", {"index": 1, "id8": id8A, "reason": "오판이라 기각", "dry_run": False,
                               "confirm": "DEPRECATE 1 " + id8A, "approval_id": rid})
-        ck("valid approval → executed_write True", tr.get("executed_write") is True)
-        ck("valid approval → nA deprecated", _state(home, "nA") == "deprecated")
-        ck("valid approval → nonce 응답 미노출", "nonce" not in json.dumps(tr, ensure_ascii=False)
+        ck("owner mint approval + approval_id 제시 → 승격 0(G4_no_auto·write0)",
+           tr.get("executed_write") is False and tr.get("reason") == "G4_no_auto"
+           and tr.get("approval_id_ignored") is True)
+        ck("approval 미소비(consumptions 0행)", _consumption_count(home) == 0)
+        ck("approval 제시에도 nA 여전히 active", _state(home, "nA") == "active")
+        ck("nonce 응답 미노출", "nonce" not in json.dumps(tr, ensure_ascii=False)
            or tr.get("nonce") is None)
 
-        # ── 3) replay — 같은 approval 재사용 → already_consumed · 2차 write 0 ──────
-        n_before = _node_count(home)
-        tr = rr("deprecate", {"index": 1, "id8": id8A, "reason": "오판이라 기각", "dry_run": False,
-                              "confirm": "DEPRECATE 1 " + id8A, "approval_id": rid})
-        ck("replay → already_consumed", tr.get("reason") == "approval_already_consumed")
-        ck("replay → 2차 write 0", tr.get("executed_write") is False and _node_count(home) == n_before)
-
-        # ── 4) binding mismatch (operation / payload / ledger / id) ───────────────
-        seed_node("nB", "이 거래처는 결제가 느려 주의가 필요하다")
-        id8B = node_id8("nB")
-        tr = rr("deprecate", {"index": 2, "id8": id8B, "reason": "다른 사유", "dry_run": False,
-                              "confirm": "DEPRECATE 2 " + id8B})
-        rid_b = tr.get("request_id")
-        db = open_g3(os.path.join(home, "ledger.sqlite"))
-        req_b = ta.get_request(db.con, rid_b)
-        db.close()
-        ta.mint_approval(home, req_b, 900, time.time())
-        # payload 변조: 같은 approval_id(rid_b) 인데 reason 을 바꿔 재시도 → 다른 request_id → mismatch.
-        tr = rr("deprecate", {"index": 2, "id8": id8B, "reason": "변조된 사유", "dry_run": False,
-                              "confirm": "DEPRECATE 2 " + id8B, "approval_id": rid_b})
-        ck("payload 변조 → binding_mismatch:request_id",
-           tr.get("reason") == "binding_mismatch:request_id" and tr.get("executed_write") is False)
-        ck("payload 변조 → nB 여전히 active", _state(home, "nB") == "active")
-
-        # ── 5) expired · revoked · rejected (event store 직접 조작) ────────────────
-        # expired: approve 이벤트를 과거 만료로 직접 기록.
-        seed_node("nC", "이 공고는 조건이 까다로워 재검토한다")
-        id8C = node_id8("nC")
-        tr = rr("deprecate", {"index": 3, "id8": id8C, "reason": "만료테스트", "dry_run": False,
-                              "confirm": "DEPRECATE 3 " + id8C})
-        rid_c = tr.get("request_id")
-        db = open_g3(os.path.join(home, "ledger.sqlite"))
-        req_c = ta.get_request(db.con, rid_c)
-        db.close()
-        past = time.time() - 10000
-        ta.append_event(home, {"request_id": rid_c, "protocol_version": ta.PROTOCOL_VERSION,
-                               "operation": "deprecate", "payload_digest": req_c["payload_digest"],
-                               "ledger_id": req_c["ledger_id"], "approval_nonce": "expired_nonce_deadbeef00000000",
-                               "approved_at": past, "expires_at": past + 60, "record_type": "approve"})
-        tr = rr("deprecate", {"index": 3, "id8": id8C, "reason": "만료테스트", "dry_run": False,
-                              "confirm": "DEPRECATE 3 " + id8C, "approval_id": rid_c})
-        ck("expired approval → blocked(write0)",
-           tr.get("reason") == "approval_expired" and tr.get("executed_write") is False
-           and _state(home, "nC") == "active")
-
-        # rejected: tombstone → 이후 approve 이벤트가 있어도 reject 우선.
-        seed_node("nD", "이 견적은 마진이 확보되어 진행한다")
-        id8D = node_id8("nD")
-        tr = rr("deprecate", {"index": 4, "id8": id8D, "reason": "거절테스트", "dry_run": False,
-                              "confirm": "DEPRECATE 4 " + id8D})
-        rid_d = tr.get("request_id")
-        db = open_g3(os.path.join(home, "ledger.sqlite"))
-        req_d = ta.get_request(db.con, rid_d)
-        db.close()
-        ta.tombstone(home, req_d, "reject", time.time())
-        ta.mint_approval(home, req_d, 900, time.time())  # reject 후 approve 가 와도
-        tr = rr("deprecate", {"index": 4, "id8": id8D, "reason": "거절테스트", "dry_run": False,
-                              "confirm": "DEPRECATE 4 " + id8D, "approval_id": rid_d})
-        ck("rejected(tombstone) → blocked(write0)",
-           tr.get("reason") == "approval_rejected" and tr.get("executed_write") is False)
+        # ── 4) dry-run fail-closed 안내 정합 — write_available=False·human_save_required·CLI 안내 ──
+        tr = rr("deprecate", {"index": 1, "id8": id8A, "dry_run": True})
+        ck("dry-run fail-closed 안내(human_save_required·use_local_cli)",
+           tr.get("write_available") is False and tr.get("reason") == "human_save_required"
+           and tr.get("owner_action") == "use_local_cli")
 
         # ── 6) concurrent double-consume → 정확히 1 winner (연결 2개가 같은 파일 경쟁) ──
         # 실제 시나리오: 두 프로세스/연결이 같은 ledger 의 같은 nonce 를 동시에 reserve. UNIQUE PK +
@@ -211,13 +180,14 @@ def run():
         ck("concurrent reserve → 정확히 1 winner",
            len(winners) == 1 and len(results) == 2)
 
-        # ── 7) id-guessing — 아무 approval_id 나 제시(승인 없음) → not_found · write0 ─
+        # ── 7) id-guessing — 아무 approval_id 나 제시(승인 없음) → 무시 + write0 ──────
         seed_node("nE", "이 사업은 리스크가 커서 보류한다")
         id8E = node_id8("nE")
-        tr = rr("deprecate", {"index": 5, "id8": id8E, "reason": "추측", "dry_run": False,
-                              "confirm": "DEPRECATE 5 " + id8E, "approval_id": "deadbeef" * 3})
-        ck("id_guessing → binding_mismatch/not_found · write0",
-           tr.get("executed_write") is False and _state(home, "nE") == "active")
+        tr = rr("deprecate", {"index": 2, "id8": id8E, "reason": "추측", "dry_run": False,
+                              "confirm": "DEPRECATE 2 " + id8E, "approval_id": "deadbeef" * 3})
+        ck("id_guessing → approval_id 무시(G4_no_auto) · write0",
+           tr.get("executed_write") is False and tr.get("reason") == "G4_no_auto"
+           and tr.get("approval_id_ignored") is True and _state(home, "nE") == "active")
 
         # ── 8) control-char binding reject ────────────────────────────────────────
         try:
@@ -237,7 +207,8 @@ def run():
         ck("migration 비파괴(nodes 보존·auto-grant 0)", _migration_check())
 
         # ── 12) MCP TOOLS 에 파일/셸 write 도구 부재(TAE-1 이 보증 가능한 것) ──────
-        # write-gated 핸들러(save/pair/deprecate/replace/mark/harvest)는 approval 필요. 임의 파일write·셸 도구 0.
+        # write-gated 핸들러(save/pair/deprecate/replace/mark/harvest)는 사람 앵커 없이는
+        # fail-closed(approval_id 승격 경로 없음). 임의 파일write·셸 도구 0.
         forbidden_names = ("write_file", "edit_file", "shell", "bash", "exec", "run_code", "fs_write")
         exposed = set(TOOLS.keys())
         ck("MCP TOOLS 파일/셸 write 도구 부재",
@@ -280,6 +251,16 @@ def _node_count(home):
     db = open_g3(os.path.join(home, "ledger.sqlite"))
     try:
         return db.con.execute("SELECT count(*) FROM nodes").fetchone()[0]
+    finally:
+        db.close()
+
+
+def _consumption_count(home):
+    """approval_consumptions 행수 — MCP 가 approval 을 소비하지 않음을 단정하는 용도."""
+    from binggupack.storage import open_g3
+    db = open_g3(os.path.join(home, "ledger.sqlite"))
+    try:
+        return db.con.execute("SELECT count(*) FROM approval_consumptions").fetchone()[0]
     finally:
         db.close()
 
@@ -344,7 +325,7 @@ def _migration_check():
 
 if __name__ == "__main__":
     print("=" * 70)
-    print("P1-A Trusted Approval Event — 적대 경계 회귀 하니스 (TIER-2)")
+    print("Trusted Approval Event — 적대 경계 회귀 하니스 (TIER-2 · MCP 승격 배선 제거 반영)")
     print("=" * 70)
     if not sys.argv[1:] or "--selftest" in sys.argv:
         raise SystemExit(run())

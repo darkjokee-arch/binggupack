@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Removed — MCP save approval 제거: MCP 도구 표면의 approval 요청/소비 배선 삭제 (2026-07-13)
+저장 게이트 단일 원칙("preview + 사람의 `SAVE n` 입력") 후속 — owner 결정. 스코프는 **모델-facing MCP tool surface 만**.
+- **MCP 핸들러의 `approval_gate.authorize` 배선 7곳 제거**(`binggupack/mcp/server_handlers.py` — save_candidate·pair·deprecate·replace·harvest_add/remove·mark_hit/miss). MCP write 시도는 `actor=reader` 고정으로 core 게이트(G4 fail-closed)에 위임 — 핸들러 게이트 재구현 0. `save_candidate` 만 core 의 사람 save-n 앵커(owner 키보드 `SAVE n` → hook 기록)로 확정 가능(기존 동작 유지).
+- **`approval_id` 는 MCP write 를 승격하지 않는다** — tools/list 스키마 노출 제거·제시 시 무시(`approval_id_ignored` 응답 명시). MCP 는 PENDING 승인 요청도 만들지 않는다. dry-run fail-closed 안내는 `reason=human_save_required`(구 `trusted_approval_event_required`) + owner CLI 안내로 수렴.
+- **보존(1바이트도 무변인 자산)**: approval core `binggupack/safety/trusted_approval.py` · `binggupack/mcp/approval_gate.py` 모듈(CLI `_mutation_via_approval` 가 공유) · owner CLI `binggu approval`/`approvals` 채널과 비-저장 mutation `--approval-id` 경로(accept/unaccept/due/resolve) · hag `--import-edges` · Studio Approval Center.
+- **테스트 정렬**: `tests/test_trusted_approval_e2e.py` 의 MCP consume 단언을 "MCP 는 owner 가 mint 한 approval 조차 소비/승격 불가(fail-closed)" 보안 회귀로 반전 + CLI `--approval-id` 정확 1회/replay 차단 생존 케이스 신설. `openbinggu_trusted_approval_boundary_selftest.py` 동일 반전. handlers selftest 에 `approval_id_no_longer_promotes_BLOCKED` 회귀 추가.
+
 ### Changed — 저장 게이트 개정: preview + 사람의 `SAVE n` 입력 단일 원칙 (2026-07-12)
 저장 경로(save/pair·hosted 커밋)의 사람 증명을 단일 원칙으로 개정. approval core(비-저장 mutation·`binggu approval` 채널·Approval Center·trusted_approval verifier·MCP fail-closed)는 무손상.
 - **① Claude Code 환경** — UserPromptSubmit 훅이 기록한 "세이브 n" 발화가 유일한 사람 앵커. AI 는 훅을 거치지 못하므로 confirm 문구를 재현해도 승격 0(위조 불가 성질 유지) · `actor_source=save_gate_ref`.
