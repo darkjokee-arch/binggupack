@@ -181,6 +181,27 @@ def _unpack_vec(blob, dim):
 
 _PREFILL_CHUNK = 64   # 배치 임베드 1왕복당 문장 수(Ollama /api/embed input 리스트)
 
+# model_digest 프로세스 메모(감사 #2) — scorer 빌드마다 /api/tags 왕복 제거.
+# 장수 프로세스에서 모델 교체는 재시작 후 반영(수용된 트레이드오프 — 캐시 GC 도 같은 값 사용).
+_MODEL_DIGEST_MEMO = {}
+
+
+def _model_digest_memo(SH):
+    v = _MODEL_DIGEST_MEMO.get("v")
+    if v is None:
+        v = SH.model_digest()
+        _MODEL_DIGEST_MEMO["v"] = v
+    return v
+
+
+def _gc_stale_models(cache, model):
+    """구모델 행 청소(감사 #4) — 모델 교체 시 남는 고아 행으로 캐시 단조 증가 방지. 실패 무해."""
+    try:
+        cache.execute("DELETE FROM embed_cache WHERE model<>?", (model,))
+        cache.commit()
+    except Exception:
+        pass
+
 
 def _prefill_cache(cache, model, sentences, batch_fn, leak_guard):
     """콜드 영속 캐시 일괄 채움 — 미캐시 sentence 만 배치 임베드로 선적재(35s 근본원인 제거).
@@ -230,9 +251,17 @@ def precompute_embeddings(ledger_path, home=None, embed_fn=None):
                 return {"status": "SKIP", "reason": "semantic OFF (opt-in 미통과)"}
         import binggu_semantic_shadow as SH
         embed = embed_fn or SH._embed
-        model = SH.model_digest()
+        model = _model_digest_memo(SH)
         g = _load_graph(ledger_path)
         cache = _open_embed_cache(home)
+        _gc_stale_models(cache, model)
+        # 배치 선채움(감사 #6) — 미캐시분을 1~수회 왕복으로 먼저 채우고, 아래 루프는 집계용
+        # (배치가 채운 항목은 skipped 로 잡힘). embed_fn 주입 테스트는 단건 경로 그대로.
+        if embed_fn is None:
+            batch_fn = getattr(SH, "_embed_batch", None)
+            if batch_fn is not None:
+                _prefill_cache(cache, model, [n["sentence"] for n in g["nodes"]],
+                               batch_fn, SH.leak_guard)
         computed = skipped = failed = 0
         for n in g["nodes"]:
             text = n["sentence"]
@@ -285,8 +314,8 @@ def _semantic_scorer(home=None, embed_fn=None):
             import binggu_semantic_shadow as SH
             embed = SH._embed
             dot = SH._dot
-            if embed("점검", timeout=3) is None:
-                return None  # 엔진 미응답 → term-frequency fallback
+            # probe embed("점검") 제거(2026-07-13 감사 #2) — 매 빌드 1왕복 낭비였고 liveness 는
+            # 아래 query embed(timeout=3) 실패 → None → 어휘 폴백이 동일하게 보장한다.
         else:
             import binggu_semantic_shadow as SH
             embed, dot = embed_fn, SH._dot
@@ -294,9 +323,11 @@ def _semantic_scorer(home=None, embed_fn=None):
         _qcache = {}
         # 노드 임베딩 영속 캐시 — 실 Ollama 경로(embed_fn None)만. fake embed 주입(테스트)은 캐시 우회.
         _cache = _open_embed_cache(home) if embed_fn is None else None
-        _model = SH.model_digest()
+        _model = _model_digest_memo(SH)
+        if _cache is not None:
+            _gc_stale_models(_cache, _model)  # 구모델 행 영구 고아 방지(감사 #4)
 
-        def _emb(text):
+        def _emb(text, timeout=None):
             if _cache is None:
                 return embed(text)
             sha = _sent_sha(text)
@@ -304,7 +335,7 @@ def _semantic_scorer(home=None, embed_fn=None):
                                  (sha, _model)).fetchone()
             if row:
                 return _unpack_vec(row[1], row[0])  # 캐시 hit — embed 0
-            v = embed(text)
+            v = embed(text) if timeout is None else embed(text, timeout=timeout)
             if v is not None:
                 _cache.execute("INSERT OR REPLACE INTO embed_cache VALUES(?,?,?,?)",
                                (sha, _model, len(v), _pack_vec(v)))
@@ -315,7 +346,8 @@ def _semantic_scorer(home=None, embed_fn=None):
             # PII/secret 선차단(leak_guard) — shadow/canonical 임베드 경로와 동일 패리티(회상 경로 누락 수정).
             if query not in _qcache:
                 ok_q, _ = SH.leak_guard(query)
-                _qcache[query] = _emb(query) if ok_q else None  # query 1회만 임베드(캐시)
+                # query 1회만 임베드(캐시) — timeout=3 으로 provider 다운 시 빠른 어휘 폴백(구 probe 역할).
+                _qcache[query] = _emb(query, timeout=3) if ok_q else None
             qe = _qcache[query]
             if qe is None:
                 return None
@@ -337,7 +369,16 @@ def _semantic_scorer(home=None, embed_fn=None):
                 return 0
             return _prefill_cache(_cache, _model, sentences, batch_fn, SH.leak_guard)
 
+        def close():
+            """캐시 커넥션 반납 — 장수 프로세스(MCP 서버) 누수 방지(감사 #5). 멱등."""
+            if _cache is not None:
+                try:
+                    _cache.close()
+                except Exception:
+                    pass
+
         score.prefill = prefill
+        score.close = close
         return score
     except Exception:
         return None
@@ -354,11 +395,22 @@ def why_search(ledger_path, query, limit=None, home=None, scorer=None):
     """
     rc = CFG.recall_config(home)
     limit = limit or rc["recall_limit"]
+    _own_scorer = False
     if scorer is None:
         scorer = _semantic_scorer(home=home)  # opt-in 통과 시만 활성, 아니면 None(어휘만)
+        _own_scorer = True
+
+    def _release():
+        # 내부 생성 scorer 의 캐시 커넥션 반납(감사 #5) — 호출자 주입 scorer 는 호출자 소유.
+        if _own_scorer and scorer is not None:
+            _c = getattr(scorer, "close", None)
+            if _c is not None:
+                _c()
+
     g = _load_graph(ledger_path)
     qtok = _tokens(query)
     if not g["nodes"]:
+        _release()
         return {"relevant_nodes": [], "relevant_edges": [], "evidence": [],
                 "summary": "그래프가 비어 있습니다(관련 기억 없음).",
                 "recommended_question": None, "confidence": 0.0}
@@ -402,6 +454,7 @@ def why_search(ledger_path, query, limit=None, home=None, scorer=None):
     confidence = round(top[0][0], 4) if top else 0.0
     summary = ("관련 기억 %d건(랭킹순). candidate — 사람 확정 전 참고용." % len(top)
                if top else "query 와 관련된 판단/근거 노드를 찾지 못했습니다.")
+    _release()
     return {"relevant_nodes": rel_nodes, "relevant_edges": rel_edges,
             "evidence": evidence, "summary": summary,
             "recommended_question": None, "confidence": confidence}
@@ -539,8 +592,18 @@ def preflight_context(ledger_path, prompt=None, cwd=None, domain=None,
     빈 그래프 → 전부 빈 리스트 · risk_level=낮음 · needs_question=False(에러 0).
     """
     rc = CFG.recall_config(home)
+    _own_scorer = False
     if scorer is None:
         scorer = _semantic_scorer(home=home)  # opt-in 통과 시 의미 회상·반문 보강
+        _own_scorer = True
+
+    def _release():
+        # 내부 생성 scorer 의 캐시 커넥션 반납(감사 #5) — why_search 는 주입 scorer 를 닫지 않는다.
+        if _own_scorer and scorer is not None:
+            _c = getattr(scorer, "close", None)
+            if _c is not None:
+                _c()
+
     g = _load_graph(ledger_path)
     # 작업 텍스트 = prompt + 명시 domain + 변경 파일명(거친 1차 신호 — 키워드 prefilter).
     # Fable5 E(surgical): 명시 `domain` 인자만 매칭 토큰에 유지하고, cwd basename 파생분은 제외한다.
@@ -554,6 +617,7 @@ def preflight_context(ledger_path, prompt=None, cwd=None, domain=None,
     qtok = _tokens(work_text)
 
     if not g["nodes"]:
+        _release()
         return {"remember": [], "ask": [], "avoid_patterns": [], "preferences": [],
                 "risk_level": "낮음", "needs_question": False, "question": None,
                 "confidence": 0.0,
@@ -580,6 +644,7 @@ def preflight_context(ledger_path, prompt=None, cwd=None, domain=None,
     preferences.sort(key=lambda p: -p["relevance"])
 
     ask = [risk["question"]] if risk["question"] else []
+    _release()
     return {"remember": remember, "ask": ask, "avoid_patterns": avoid,
             "preferences": preferences[:rc["preflight_max"]],
             "risk_level": risk["risk_level"], "needs_question": risk["needs_question"],

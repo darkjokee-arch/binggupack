@@ -422,7 +422,17 @@ def _reindex_after_write(ledger_arg):
     try:
         from binggupack.pack import fresh_index as FI
         ledger, _ = _ledger_paths(ledger_arg)
-        FI.index_update(ledger, home=os.path.dirname(ledger))
+        home = os.path.dirname(ledger)
+        FI.index_update(ledger, home=home)
+    except Exception:
+        pass
+    # Deep 임베드 캐시 선워밍(감사 #6) — owner 가 semantic 회상을 켠 경우에만(이중 게이트는
+    # precompute 내부 CS.enabled() + 여기 recall_config 스위치). 변경분만 배치 왕복·실패 침묵.
+    try:
+        from binggupack.pack import recall as RC
+        from binggupack.safety.p1_config import recall_config as _rcfg
+        if _rcfg(home).get("semantic_recall_enabled", False):
+            RC.precompute_embeddings(ledger, home=home)
     except Exception:
         pass
 

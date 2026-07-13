@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Removed/Fixed — Hot semantic 死스텁 삭제 + 임베딩 위생 5건 (2026-07-13 · 4cli+Fable5 적대검증 owner GO)
+결정 근거: Hot 은 후보 진입이 어휘 매칭 전용이라 semantic 재랭킹을 완성해도 의미 검색이 원리적으로 불가(순서만 조정) — (a) 구현 REFUTED · (b) 삭제 SURVIVES. 의미 회상은 Deep(why_search·배치 선채움) 전담 확정. debate 세션 `20260713_1819_hot_semantic_dead_code`.
+- **삭제**: `fresh_index` embed_vec 테이블(INSERT 미구현 死스텁)·`_semantic_query_embed`·circuit breaker·`hot_recall` semantic/semantic_timeout 인자·`semantic_used` 키. docs/tests/selftest 연쇄 정리(§12). sem_used 거짓 플래그·0.55 리터럴 중복은 삭제로 소멸.
+- **임베딩 위생(Deep·감사 #2~#6)**: ① probe embed("점검") 제거 — scorer 빌드마다 버려지던 1왕복, liveness 는 query embed(timeout=3)가 승계 ② `model_digest` 프로세스 메모 — 빌드마다 /api/tags 왕복 제거(웜 회상 0.37s→**0.071s** 실측) ③ Ollama `keep_alive=30m` — 5분 유휴 후 콜드 재발 방지 ④ 구모델 캐시 행 GC ⑤ scorer `close()` + why_search/preflight 반납 배선 — MCP 상주 서버 커넥션 누수 해소 ⑥ `precompute_embeddings` 배치 승격 + 저장 후(`_reindex_after_write`) semantic 켠 owner 만 선워밍(변경분만·실패 침묵).
+- 검증: pytest 28(신규 GC/메모/close 포함) · fresh_index/recall/semantic_shadow selftest GATE=GO×3 · 격리 E2E cold 7.98s/warm 0.071s/top-5 무회귀 · ruff F clean · 벤더 drift 0.
+
 ### Fixed
 - `backup_ledger` 가 손상 ledger.sqlite 에서 raw traceback 으로 죽던 갭 — `CORRUPT_LEDGER` status 반환 + 빈 산출물 정리 + CLI 복구 안내(restore 의 `INVALID_BACKUP` 방어와 대칭).
 
