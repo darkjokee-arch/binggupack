@@ -990,13 +990,47 @@ def cmd_save(a):
 
 def cmd_pair(a):
     """owner 발화 + ai 요약을 각각 독립 노드(speaker=owner/ai)로 저장하고 연결 엣지로 묶는다.
-    ai_text 생략 = owner 단독(순수 직감·억지 ai 금지). relation: accepts/refutes/revises."""
+    ai_text 생략 = owner 단독(순수 직감·억지 ai 금지). relation: accepts/refutes/revises.
+    --confirm 생략 = 결합 미리보기 스테이징(저장 0) — 양축 후보를 한 preview(연속 번호:
+    owner 1..N · ai N+1..)에 담아 사람 도장 1회('세이브 o,a')로 양축 ref 가 함께 기록되게
+    한다(축별 preview+도장 2회 마찰 제거 · 도장=사람 키보드만 원칙 불변)."""
     from binggupack.storage import save_paired   # 트랙 C: storage facade 경유
-    db, snap_dir = _open(a.ledger)
     rel = getattr(a, "by", "ai") + "_" + a.relation  # 반응 주체: ai(AI가 사용자 발화를) / owner(사용자가 AI 발화를)
+    if a.confirm is None:
+        # 결합 미리보기/스테이징(ledger 미접촉) — pair 는 명시 입력이므로 explicit 고정
+        # (판단-veto 면제 · PII/secret/길이 안전 게이트는 그대로). 앵커 경로 = ledger 기준
+        # home(PR#19 정합 — --ledger 격리 실행이 운영 앵커를 오염시키지 않게).
+        try:
+            import binggu_save_gate as _sg
+            _oc = capture_preview(a.owner_text, explicit=True)["candidates"]
+            _ac = capture_preview(a.ai_text, explicit=True)["candidates"] if a.ai_text else []
+        except Exception as e:
+            print("BLOCK: preview_unavailable — %s" % e)
+            return 1
+        if not _oc or (a.ai_text and not _ac):
+            print("BLOCK: no_candidates — 후보 0건(빈 입력/안전 게이트 제외). 입력 문장을 확인하세요.")
+            return 1
+        home = os.path.dirname(os.path.abspath(a.ledger))
+        _sg.write_last_preview(_oc + _ac, explicit=True,
+                               path=os.path.join(home, "last_preview_candidates.json"))
+        print("# pair 미리보기 — 결합 번호축(owner 1..%d · ai %s) · 도장 1회 · 미저장"
+              % (len(_oc), ("%d.." % (len(_oc) + 1)) if _ac else "없음"))
+        print("| # | 축 | 문장 |")
+        print("|---|---|---|")
+        for i, c in enumerate(_oc + _ac, 1):
+            print("| %d | %s | %s |" % (i, "owner" if i <= len(_oc) else "ai",
+                                        c.get("sentence", "")))
+        stamp = ("세이브 %d,%d" % (a.owner_pick, len(_oc) + a.ai_pick)) if a.ai_text \
+            else ("세이브 %d" % a.owner_pick)
+        conf = ("PAIR %s owner:%d ai:%d" % (rel, a.owner_pick, a.ai_pick)) if a.ai_text \
+            else ("PAIR owner:%d" % a.owner_pick)
+        print('\n도장(사람 키보드): "%s" 입력 → 이후 같은 pair 명령에 --confirm "%s" 로 저장' % (stamp, conf))
+        return 0
+    db, snap_dir = _open(a.ledger)
     # save-n 참조 바인딩 — owner/ai 각 preview 의 (pref, pick) 2-튜플 대조. explicit 모드는
     # last_preview 기록 모드로 동일 재계산(pref 패리티 · MUST_FIX 2 — 기본은 _pick_one_node 와 동일 True).
     _refs = None
+    _refs_combined = None
     try:
         import binggu_save_gate as _sg
         import json as _json
@@ -1008,12 +1042,20 @@ def cmd_pair(a):
             pass
         _oc = capture_preview(a.owner_text, explicit=_mode)["candidates"]
         _refs = [(_sg.preview_ref_for_candidates(_oc), [a.owner_pick])]
+        _ac = []
         if a.ai_text:
             _ac = capture_preview(a.ai_text, explicit=_mode)["candidates"]
             _refs.append((_sg.preview_ref_for_candidates(_ac), [a.ai_pick]))
+        # 결합 번호축(도장 1회) 대안 — 위 preview 모드가 스테이징한 owner+ai 연속 번호 preview 에
+        # 사람이 '세이브 o,a' 를 찍은 경우. 축별 2-튜플과 결합 1-튜플 중 어느 쪽이든 전부 통과면 human.
+        _cidx = [a.owner_pick] + ([len(_oc) + a.ai_pick] if a.ai_text else [])
+        _refs_combined = [(_sg.preview_ref_for_candidates(_oc + _ac), _cidx)]
     except Exception:
         _refs = None
-    ctx = _resolve_human_ctx(a.ledger, _refs, a.confirm)
+        _refs_combined = None
+    ctx = _resolve_human_ctx(a.ledger, _refs_combined, a.confirm)
+    if ctx.get("actor") != "human" and _refs is not None:
+        ctx = _resolve_human_ctx(a.ledger, _refs, a.confirm)
     r = save_paired(db, a.owner_text, a.ai_text, ctx,
                     snap_dir, relation_kind=rel, owner_pick=a.owner_pick, ai_pick=a.ai_pick, due_date=a.due)
     acc_note = ""
@@ -1319,7 +1361,18 @@ def cmd_learn_consume(a):
         db, _ = _open(ledger)
         # 소비 승인 actor 판정 = _resolve_human_ctx(save-n 바인딩/cli_command · 에이전트 세션 deny).
         #   env fail-open 없음. CONSUME <n> 문구 단독으로 human 승격 금지(AOB-3 동종).
-        _ctx = _resolve_human_ctx(a.ledger, None)
+        #   dry-run 이 스테이징한 큐 preview(발화 원문 축·번호=qi+1)에 사람이 '세이브 qi+1' 도장을
+        #   찍었으면 ref 바인딩으로 human 승격 — 에이전트 세션에서도 소비 가능(도장=사람 키보드만).
+        _refs = None
+        try:
+            import binggu_save_gate as _sg
+            _cands = [{"sentence": ((e.get("evidence") or {}).get("feedback") or "")}
+                      for _li, e in LC.load_pending(qpath)]
+            if _cands:
+                _refs = [(_sg.preview_ref_for_candidates(_cands), [qi + 1])]
+        except Exception:
+            _refs = None
+        _ctx = _resolve_human_ctx(a.ledger, _refs)
         r = LC.consume(db, ledger, qpath, qi, index=a.index, home=os.path.dirname(ledger), ctx=_ctx)
         db.close()
         if r.get("consumed"):
@@ -1348,6 +1401,20 @@ def cmd_learn_consume(a):
     # dry-run(기본): 소비 대기 목록 + 회상 top preview(read-only · 저장 0)
     pv = LC.preview(ledger, qpath, home=os.path.dirname(ledger))
     print(LC.render_preview_md(pv))
+    # 도장 스테이징 — 대기 발화 원문을 preview 축(번호=qi+1)으로 영속(hash만·ledger write 0).
+    # 사람이 '세이브 <qi+1>' 도장 후 --confirm "CONSUME <qi>" 재실행 = 에이전트 세션에서도 소비.
+    try:
+        import binggu_save_gate as _sg
+        _cands = [{"sentence": ((e.get("evidence") or {}).get("feedback") or "")}
+                  for _li, e in LC.load_pending(qpath)]
+        if _cands:
+            _sg.write_last_preview(_cands, explicit=True,
+                                   path=os.path.join(os.path.dirname(ledger),
+                                                     "last_preview_candidates.json"))
+            print('\n도장(사람 키보드): 표의 [N]번 소비 = "세이브 N+1" 입력 → '
+                  '--confirm "CONSUME N" 재실행')
+    except Exception:
+        pass
     return 0
 
 
@@ -2153,7 +2220,8 @@ def main():
     pp.add_argument("--by", choices=["ai", "owner"], default="ai")  # 반응 주체(누가 누구를 수용/반박/수정)
     pp.add_argument("--owner-pick", type=int, default=1, dest="owner_pick")
     pp.add_argument("--ai-pick", type=int, default=1, dest="ai_pick")
-    pp.add_argument("--confirm", required=True); pp.add_argument("--due", default=None)
+    # --confirm 생략 = 결합 미리보기 스테이징(저장 0·도장 1회 흐름). 저장은 confirm 정확문구+사람 도장.
+    pp.add_argument("--confirm", default=None); pp.add_argument("--due", default=None)
     pp.add_argument("--accept", action="store_true")  # 저장과 동시에 owner_accepted 확정(별도 ACCEPT 문구 면제)
     tp = sub.add_parser("trust"); tp.add_argument("--subtype", default=None)  # 양방향 신뢰도(read-only)
     rtp = sub.add_parser("route"); rtp.add_argument("text")  # 저장 의도 라우팅(신규/수정/결과 read-only 안내)

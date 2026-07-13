@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Changed — pair 결합 번호축(도장 1회) + learn-consume 도장 소비 (2026-07-13)
+owner 지적("같이 프리뷰 주면 해결") — 축별 preview+도장 2회 마찰 제거. 도장=사람 키보드만 원칙·fail-closed 완화 0.
+- **`binggu pair` `--confirm` 생략 = 결합 미리보기 스테이징(저장 0)** — owner+ai 후보를 한 preview(연속 번호: owner 1..N · ai N+1..)로 `write_last_preview`(explicit·ledger 기준 home). 사람 도장 1회(`세이브 o,a`)로 양축이 함께 기록되고, confirm 재실행 시 결합 1-튜플 ref(`(pref(owner+ai), [o, N+a])`)를 우선 대조(기존 축별 2-튜플 폴백 유지 — 구 흐름 무손상).
+- **`binggu learn-consume` 에이전트 세션 소비** — dry-run 이 큐 발화 원문을 preview 로 스테이징(번호=qi+1)하고, 사람 도장(`세이브 qi+1`) 후 `--confirm "CONSUME <qi>"` 재실행이 save-n ref 바인딩으로 human 승격. 도장 없으면 기존대로 G4 차단(fail-closed 불변).
+- 회귀망: `tests/test_pair_single_stamp.py` 5건(결합 도장 승격·무도장 차단·부분 도장 all-or-nothing 차단·learn-consume 도장 소비·무도장 차단).
+
 ### Removed — MCP save approval 제거: MCP 도구 표면의 approval 요청/소비 배선 삭제 (2026-07-13)
 저장 게이트 단일 원칙("preview + 사람의 `SAVE n` 입력") 후속 — owner 결정. 스코프는 **모델-facing MCP tool surface 만**.
 - **MCP 핸들러의 `approval_gate.authorize` 배선 7곳 제거**(`binggupack/mcp/server_handlers.py` — save_candidate·pair·deprecate·replace·harvest_add/remove·mark_hit/miss). MCP write 시도는 `actor=reader` 고정으로 core 게이트(G4 fail-closed)에 위임 — 핸들러 게이트 재구현 0. `save_candidate` 만 core 의 사람 save-n 앵커(owner 키보드 `SAVE n` → hook 기록)로 확정 가능(기존 동작 유지).
