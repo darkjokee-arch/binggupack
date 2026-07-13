@@ -13,6 +13,7 @@ CLI: py scripts/binggu_platform_selftest.py   (WSL/macOS: python3 ...)
 """
 import os
 import sqlite3
+import subprocess
 import sys
 import tempfile
 
@@ -129,19 +130,26 @@ def main():
         led = os.path.join(tmp, "ledger.sqlite")
         db = StagingDB(led)               # temp — 운영 경로 아님
         lock = P.lock_path_for(led)       # helper 가 계산한 lock 경로
-        # 다른 OS/프로세스가 잡고 있는 상황 흉내: 가짜 pid 로 lock 선점
-        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        os.write(fd, b"999999")           # 자기 pid 아님
-        os.close(fd)
-        blocked = False
+        # 다른 프로세스가 잡고 있는 상황: 살아있는 자식 pid 로 lock 선점
+        # (죽은 pid lock 은 stale 로 자동 정리되므로 차단 계약은 live pid 로만 성립)
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
         try:
-            with db.write_lock():
-                pass
-        except RuntimeError as e:
-            blocked = "locked" in str(e)
-        ck("17_lock_conflict_fail_closed", blocked)
-        ck("17b_lock_path_matches", lock == led + ".lock")
-        os.remove(lock)
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(child.pid).encode())   # 자기 pid 아님 · 생존 중
+            os.close(fd)
+            blocked = False
+            try:
+                with db.write_lock():
+                    pass
+            except RuntimeError as e:
+                blocked = "locked" in str(e)
+            ck("17_lock_conflict_fail_closed", blocked)
+            ck("17b_lock_path_matches", lock == led + ".lock")
+        finally:
+            child.kill()
+            child.wait()
+            if os.path.exists(lock):
+                os.remove(lock)
         # 선점 해제 후엔 정상 진입(같은 프로세스)
         ok_after = False
         with db.write_lock():

@@ -26,7 +26,7 @@ def _connect_ro(ledger_path):
 def _cols(cur, table):
     try:
         return [c[1] for c in cur.execute("PRAGMA table_info(%s)" % table)]
-    except sqlite3.OperationalError:
+    except sqlite3.DatabaseError:  # OperationalError 포함 + 손상 파일('file is not a database')
         return []
 
 
@@ -116,6 +116,10 @@ def restore_ledger(backup_path, ledger_path, home=None, ts=None, confirm=None):
       ① 백업 유효성(sqlite + nodes 테이블) ② 현 ledger 를 _backup/pre_restore_<ts>.sqlite
       자동 스냅샷(복구의 복구) ③ os.replace 원자 교체 + 낡은 -wal/-shm 제거
       (직전 스냅샷이 WAL 반영분 포함이므로 안전).
+    현 ledger 가 손상(sqlite 로 안 열림)이어도 crash 하지 않는다 — restore 가 곧 치료 경로:
+      current_nodes/current_edges = -1 + current_ledger_corrupt: true 로 표기하고,
+      ②의 pre-snapshot 은 sqlite backup API 대신 shutil.copy2 byte 보존
+      (_backup/pre_restore_corrupt_<ts>.sqlite)으로 대체한 뒤 교체를 진행한다.
     반환 status: NO_BACKUP / INVALID_BACKUP / DRY_RUN / CONFIRM_MISMATCH /
                  PRE_SNAPSHOT_FAIL / BUSY / OK.
     """
@@ -134,23 +138,41 @@ def restore_ledger(backup_path, ledger_path, home=None, ts=None, confirm=None):
     if "nodes" not in tables:
         return {"status": "INVALID_BACKUP", "backup": backup_path, "reason": "no_nodes_table"}
     bdata = read_all(backup_path)
-    cur = read_all(ledger_path) if os.path.exists(ledger_path) else {"nodes": [], "edges": []}
+    cur_corrupt = False
+    cur = {"nodes": [], "edges": []}
+    if os.path.exists(ledger_path):
+        try:
+            cur = read_all(ledger_path)
+        except sqlite3.DatabaseError:  # 현 ledger 손상 — restore 가 곧 치료 경로라 중단하지 않음
+            cur_corrupt = True
     expected = "RESTORE " + os.path.basename(backup_path)
     info = {"backup": backup_path, "backup_nodes": len(bdata["nodes"]),
-            "backup_edges": len(bdata["edges"]), "current_nodes": len(cur["nodes"]),
-            "current_edges": len(cur["edges"]), "expected_confirm": expected}
+            "backup_edges": len(bdata["edges"]),
+            "current_nodes": -1 if cur_corrupt else len(cur["nodes"]),
+            "current_edges": -1 if cur_corrupt else len(cur["edges"]),
+            "expected_confirm": expected}
+    if cur_corrupt:
+        info["current_ledger_corrupt"] = True
     if confirm != expected:
         info["status"] = "CONFIRM_MISMATCH" if confirm else "DRY_RUN"
         return info
     pre = None
     if os.path.exists(ledger_path):
         base = home or os.path.dirname(ledger_path)
-        pre_path = os.path.join(base, "_backup", "pre_restore_%s.sqlite" % _stamp(ts))
-        b = backup_ledger(ledger_path, out_path=pre_path, home=base, ts=ts)
-        if b["status"] != "OK":
-            info["status"] = "PRE_SNAPSHOT_FAIL"
-            return info
-        pre = b["out_path"]
+        if cur_corrupt:
+            # 손상 파일은 sqlite backup API 가 실패 — 읽지 않고 byte 그대로 보존(복구의 복구).
+            bdir = os.path.join(base, "_backup")
+            os.makedirs(bdir, exist_ok=True)
+            pre_path = os.path.join(bdir, "pre_restore_corrupt_%s.sqlite" % _stamp(ts))
+            shutil.copy2(ledger_path, pre_path)
+            pre = pre_path
+        else:
+            pre_path = os.path.join(base, "_backup", "pre_restore_%s.sqlite" % _stamp(ts))
+            b = backup_ledger(ledger_path, out_path=pre_path, home=base, ts=ts)
+            if b["status"] != "OK":
+                info["status"] = "PRE_SNAPSHOT_FAIL"
+                return info
+            pre = b["out_path"]
     d = os.path.dirname(ledger_path) or "."
     os.makedirs(d, exist_ok=True)
     tmp_path = os.path.join(d, ".restore_tmp_%s" % _stamp(ts))
@@ -334,6 +356,22 @@ def _selftest():
         r = restore_ledger(bad, led, confirm="RESTORE bad.sqlite")
         ck(r["status"] == "INVALID_BACKUP" and len(read_all(led)["nodes"]) == 2,
            "restore 비정상 백업 → INVALID + 원본 무손상")
+
+        # 10. 현 ledger 손상 → dry-run corrupt 표기(비충돌) + 정확 confirm 은 byte 보존 후 교체
+        garbage = b"GARBAGE not sqlite"
+        with open(led, "wb") as f:
+            f.write(garbage)
+        r = restore_ledger(b["out_path"], led)
+        ck(r["status"] == "DRY_RUN" and r.get("current_ledger_corrupt") is True
+           and r["current_nodes"] == -1, "손상 ledger dry-run — corrupt 표기 + crash 0")
+        r = restore_ledger(b["out_path"], led,
+                           confirm="RESTORE " + os.path.basename(b["out_path"]))
+        with open(r["pre_snapshot"], "rb") as f:
+            preserved = f.read()
+        ck(r["status"] == "OK" and len(read_all(led)["nodes"]) == 2
+           and "pre_restore_corrupt_" in os.path.basename(r["pre_snapshot"])
+           and preserved == garbage,
+           "손상 ledger 정확 confirm — byte 보존 스냅샷 + 교체 성공")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

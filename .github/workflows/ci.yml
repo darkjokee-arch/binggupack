@@ -115,3 +115,36 @@ jobs:
 
       - name: Public tree secret/PII scan (verdict=CLEAN required)
         run: python scripts/openbinggu_public_tree_scan.py --tree . --public
+
+  wheel-selfcontained:
+    # wheel 자족성 게이트(2026-07-13) — 설치본이 repo checkout 없이 자족하는지 실측.
+    # ① 클린 venv 설치본 `binggu --selftest`(과거: tests/ 미동봉 ModuleNotFoundError)
+    # ② 전 모듈(binggu·binggupack.*·scripts.*) fresh-subprocess import sweep — 저장소 밖 cwd 로
+    #    repo sys.path 우연 통과 차단. 경량 단일 잡(매트릭스 불변).
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Build wheel
+        run: python -m pip wheel . --no-deps -w "$RUNNER_TEMP/dist"
+
+      - name: Clean venv install
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --quiet "$RUNNER_TEMP"/dist/binggupack-*.whl
+
+      - name: Installed binggu --selftest (repo 밖 cwd · GATE=GO)
+        working-directory: ${{ runner.temp }}
+        run: '"$RUNNER_TEMP/venv/bin/binggu" --selftest'
+
+      - name: Wheel import sweep (전 모듈 fresh subprocess · 실패 0)
+        run: |
+          cp scripts/wheel_import_sweep.py "$RUNNER_TEMP/wheel_import_sweep.py"
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/venv/bin/python" wheel_import_sweep.py

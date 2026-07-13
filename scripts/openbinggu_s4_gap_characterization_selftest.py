@@ -19,6 +19,7 @@
 CLI: python openbinggu_s4_gap_characterization_selftest.py --selftest
 """
 import os
+import subprocess
 import sys
 import types
 import sqlite3
@@ -349,16 +350,23 @@ def run():
             entered = True
         if os.path.exists(d3_db.path + ".lock"):
             os.remove(d3_db.path + ".lock")
-        # 대조군: 타 pid lock → RuntimeError
-        with open(d3_db.path + ".lock", "w") as f:
-            f.write("999999")
+        # 대조군: 살아있는 타 pid lock → RuntimeError
+        # (죽은 pid lock 은 stale 로 자동 정리되므로 차단 계약은 live pid 로만 성립)
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
         other_raised = False
         try:
-            with d3_db.write_lock():
-                pass
-        except RuntimeError:
-            other_raised = True
-        os.remove(d3_db.path + ".lock")
+            with open(d3_db.path + ".lock", "w") as f:
+                f.write(str(child.pid))
+            try:
+                with d3_db.write_lock():
+                    pass
+            except RuntimeError:
+                other_raised = True
+        finally:
+            child.kill()
+            child.wait()
+            if os.path.exists(d3_db.path + ".lock"):
+                os.remove(d3_db.path + ".lock")
         rec("D3", "write_lock 같은 pid 재진입 허용 / 타 pid RuntimeError", entered and other_raised)
         d3_db.close()
 

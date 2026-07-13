@@ -28,6 +28,7 @@
 import argparse
 import datetime
 import os
+import sqlite3
 import sys
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -47,7 +48,7 @@ from binggu_capture_profile import (  # noqa: E402
     init_profile, pause as cap_pause, resume as cap_resume,
     disable_capture as cap_disable, enable_capture as cap_enable,
     uninstall as cap_uninstall, status as cap_status,
-    register_hook, unregister_hook, hook_registered)
+    register_hook, unregister_hook, hook_registered, hook_health)
 
 SAVE_GATE_MARKER = "binggu_save_gate_hook"  # 사람-발화 저장 게이트 hook 식별 토큰
 PREFLIGHT_MARKER = "binggu_preflight_hook"  # preflight 자동주입 hook 식별 토큰
@@ -90,7 +91,25 @@ def _open(ledger, must_exist=True):
         print("먼저 만드세요:  python binggu.py init")
         sys.exit(2)
     os.makedirs(snap_dir, exist_ok=True)
-    return open_accept(ledger), snap_dir
+    # 손상 장부 내성: sqlite 로 못 여는 장부는 traceback 대신 restore 안내(exit 2 = 장부없음과 일관).
+    try:
+        return open_accept(ledger), snap_dir
+    except sqlite3.DatabaseError:
+        print("장부 손상 감지: %s (sqlite 로 열 수 없습니다)" % ledger)
+        bdir = os.path.join(os.path.dirname(ledger), "_backup")
+        backs = []
+        if os.path.isdir(bdir):
+            backs = sorted((f for f in os.listdir(bdir) if f.endswith(".sqlite")),
+                           key=lambda f: os.path.getmtime(os.path.join(bdir, f)),
+                           reverse=True)
+        if backs:
+            print("백업으로 복구하세요 (최신순 · %s):" % bdir)
+            for f in backs[:5]:
+                print('  python binggu.py restore "%s"' % os.path.join(bdir, f))
+            print("  (confirm 없이 실행하면 dry-run 검증 + 교체용 --confirm 문구를 안내합니다)")
+        else:
+            print("백업 폴더가 비어 있습니다: %s — ledger_*.sqlite 백업을 찾아 python binggu.py restore <백업> 하세요." % bdir)
+        sys.exit(2)
 
 
 def _node_id_of(db, index, status="all", kind=None):
@@ -148,9 +167,14 @@ def cmd_init(a):
             print("정말 켜려면:  python binggu.py capture enable   (또는 init --force-capture)")
         else:
             print("AGI memory capture ON — scope: %s" % scope_desc)
-            if r["hook_events"]:
-                print("hook 등록(settings.json 백업됨): %s" % ", ".join(r["hook_events"]))
-            else:
+            # "repaired:<ev>" = 죽은 hook 경로(파일 소실)를 산 경로로 자동 교체한 이벤트 — 신규 등록과 분리 표시.
+            new_ev = [e for e in r["hook_events"] if not e.startswith("repaired:")]
+            rep_ev = [e.split(":", 1)[1] for e in r["hook_events"] if e.startswith("repaired:")]
+            if new_ev:
+                print("hook 등록(settings.json 백업됨): %s" % ", ".join(new_ev))
+            if rep_ev:
+                print("죽은 hook 경로 수리됨: %s (settings.json 백업됨)" % ", ".join(rep_ev))
+            if not r["hook_events"]:
                 print("hook 이미 등록됨 — 그대로 사용")
             print("자동 후보 수집만 켜집니다. 저장은 preview 후 SAVE n 게이트로만(자동 저장 없음).")
         print("상태:  capture status   ·   잠깐 끄기:  capture pause   ·   영구 끄기:  capture disable   ·   제거:  capture uninstall")
@@ -770,6 +794,15 @@ def cmd_status(a):
              "예(opt-in)" if _plat.shared_opt_in() else "아니오(OS별 로컬)"))
     print("active 후보 %d · 기각 %d · 검증 예정 %d · 수용 %d · audit chain %s"
           % (n, d, p, acc, "INTACT" if chain else "BROKEN!"))
+    # capture hook 건강 진단 — 등록돼 있어도 대상 .py 소실이면 수집이 조용히 죽는 결함 표면화.
+    hh = hook_health(DEFAULT_SETTINGS)
+    if hh["dead_paths"]:
+        print("⚠ capture hook 죽은 경로 %d건: %s" % (len(hh["dead_paths"]), ", ".join(hh["dead_paths"])))
+        print("  수리: `binggu start` 재실행하면 자동 교체됩니다.")
+    elif hh["registered"]:
+        print("capture hook: 정상 등록(경로 실존)")
+    else:
+        print("capture hook: 미등록 (`binggu start`로 등록)")
     return 0
 
 
@@ -1428,14 +1461,16 @@ def cmd_reminders(a):
 
 
 def selftest():
-    """임베드 selftest 는 tests/test_binggu_cli_selftest.py 로 분리(God-file #4).
+    """임베드 selftest 는 binggupack/cli/selftest_embed.py 로 분리(God-file #4 → wheel 자족성).
 
     CLI 동작 불변 — 분리한 케이스(GATE=GO)를 그대로 import 해서 실행한다.
+    (pytest 수집은 tests/test_binggu_cli_selftest.py thin shim — wheel 에 tests/ 미포함이라
+    설치본 `binggu --selftest` ModuleNotFoundError 나던 결함 수정.)
     """
     _here = os.path.dirname(os.path.abspath(__file__))
     if _here not in sys.path:
         sys.path.insert(0, _here)
-    from tests.test_binggu_cli_selftest import selftest as _impl
+    from binggupack.cli.selftest_embed import selftest as _impl
     return _impl()
 
 
@@ -1648,6 +1683,8 @@ def cmd_restore(a):
     if st in ("DRY_RUN", "CONFIRM_MISMATCH"):
         if st == "CONFIRM_MISMATCH":
             print("confirm 불일치 — 교체하지 않았습니다(write 0).")
+        if res.get("current_ledger_corrupt"):
+            print("현재 장부는 손상 상태(카운트 -1 표기) — 교체 시 손상본은 _backup/pre_restore_corrupt_*.sqlite 로 byte 보존됩니다")
         print("백업: 노드 %d · 엣지 %d  ↔  현재: 노드 %d · 엣지 %d"
               % (res["backup_nodes"], res["backup_edges"], res["current_nodes"], res["current_edges"]))
         print('교체하려면:  python binggu.py restore "%s" --confirm "%s"'
