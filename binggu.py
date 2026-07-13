@@ -1406,10 +1406,19 @@ def cmd_learn_consume(a):
         except Exception:
             _refs = None
         _ctx = _resolve_human_ctx(a.ledger, _refs)
-        r = LC.consume(db, ledger, qpath, qi, index=a.index, home=os.path.dirname(ledger), ctx=_ctx)
+        r = LC.consume(db, ledger, qpath, qi, index=a.index, home=os.path.dirname(ledger),
+                       ctx=_ctx, verdict=a.verdict)
         db.close()
         if r.get("consumed"):
-            print('OK: %s 소비 — [%d] "%s"' % (r["outcome"], r["index"], r.get("node_claim") or ""))
+            if r.get("rows"):
+                attribution = " · ".join(
+                    "%s %s" % (row["speaker"], "적중" if row["outcome"] == "hit" else "빗나감")
+                    for row in r["rows"])
+                print('OK: 교환 소비(%s·%s) — "%s" → %s'
+                      % (r.get("stance"), r.get("verdict"), r.get("node_claim") or "", attribution))
+            else:
+                print('OK: 회상 조언 %s 소비 — [%d] "%s"'
+                      % (r.get("outcome"), r.get("index") or 0, r.get("node_claim") or ""))
             print("    decision=%s · 큐 consumed=true · 사람 확정(actor=human·자동 0)"
                   % r.get("decision_id"))
             return 0
@@ -1430,6 +1439,10 @@ def cmd_learn_consume(a):
             print("  큐 항목에 발화 근거(feedback)가 없습니다(소비 불가).")
         elif reason == "dup_decision":
             print("  같은 발화가 이미 적중률에 반영됨(이중계상 차단).")
+        elif reason == "invalid_stance":
+            print("  큐 항목에 stance/outcome 이 없어 입장을 판정할 수 없습니다(소비 불가).")
+        elif reason == "invalid_verdict":
+            print("  --verdict 는 upheld(발화대로·기본) 또는 overturned(뒤집힘)만 가능합니다.")
         return 1
     # dry-run(기본): 소비 대기 목록 + 회상 top preview(read-only · 저장 0)
     pv = LC.preview(ledger, qpath, home=os.path.dirname(ledger))
@@ -1445,7 +1458,9 @@ def cmd_learn_consume(a):
                                    path=os.path.join(os.path.dirname(ledger),
                                                      "last_preview_candidates.json"))
             print('\n도장(사람 키보드): 표의 [N]번 소비 = "세이브 N+1" 입력 → '
-                  '--confirm "CONSUME N" 재실행')
+                  '--confirm "CONSUME N" 재실행'
+                  '\n  확인(교환 축): 기본 = 발화대로(upheld). 나중에 뒤집힌 건이면 '
+                  '--verdict overturned 추가.')
     except Exception:
         pass
     return 0
@@ -2241,10 +2256,12 @@ def main():
         mkp.add_argument("--index", type=int, default=1)   # recall 표시 번호(1-based)
         mkp.add_argument("--nonce", default=None)           # recall 이 발급한 회상 봉인(stale 방어)
         mkp.add_argument("--domain", default=None)          # 분모 분리 키(선택)
-    # 학습 큐(hit/miss 후보) owner 승인 소비(작업C) — dry-run 기본 · CONSUME <n> 정확 confirm(자동 0)
+    # 학습 큐(교환 후보) owner 승인 소비(작업C) — dry-run 기본 · CONSUME <n> 정확 confirm(자동 0)
     lcp = sub.add_parser("learn-consume")
     lcp.add_argument("--confirm", default=None)        # "CONSUME <n>" 정확 일치(자동확정 0)
     lcp.add_argument("--index", type=int, default=1)   # 회상 top 중 적중 노드(1-based·dry-run 확인)
+    lcp.add_argument("--verdict", choices=("upheld", "overturned"), default="upheld")
+    #   ↑ 사람 확인(교환 축): upheld=발화 판단이 결과적으로 옳았음(기본) · overturned=뒤집힘
     # 추상화 규칙 후보 제안(작업4·C) — read-only·자동확정 0. --promote 로 candidate 등록(승격 연결)
     abp = sub.add_parser("abstraction"); abp.add_argument("--domain", default=None)
     abp.add_argument("--promote", default=None,
