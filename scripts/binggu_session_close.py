@@ -30,6 +30,7 @@ from binggupack.review.session_close import (  # noqa: E402,F401  (전체 명시
     register_close_phrase,
     detect_session_close,
     _build_preview,
+    _build_outcome_candidates,
     _RoLedger,
     _ledger_path,
     _build_governance,

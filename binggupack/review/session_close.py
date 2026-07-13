@@ -249,6 +249,36 @@ def _build_preview(home=None, session_id=None):
                 "note": "preview 빌드 실패(graceful 생략)"}
 
 
+# ---------------- 2b. 당일 owner 지적 후보 (learn 큐 · read-only · 사람 확정만) ----------------
+
+def _build_outcome_candidates(home=None, today=None):
+    """당일 owner 지적(learn_outcome_queue 소비 대기) 후보 — read-only(소비 0 · 큐 write 0).
+
+    ★B안(사람 확정): 세션 마무리 preview 에 "오늘 이런 지적이 있었는데 적중한 것 골라주세요"만
+    표시하고, 확정(hit_events 적재)은 owner 가 learn-consume --confirm "CONSUME <번호>" 로만.
+    자동 확정 0 — 소비 경로(actor=human 게이트·dup_decision 차단)는 기존 learn_consume 재사용.
+    ★번호(qi)는 learn_consume.load_pending 인덱스 그대로 — dry-run/CONSUME 번호와 동일 보장.
+    today='YYYY-MM-DD'(UTC · 큐 ts 와 동일 기준) 주입식 — 미지정 시 현재 UTC 날짜.
+    모듈/큐 부재 → graceful(available=False · 에러 0)."""
+    try:
+        from binggupack.pack import learn_consume as LC
+    except Exception:
+        return {"available": False, "count": 0, "items": [],
+                "note": "learn_consume 모듈 미사용(후보 표시 생략)"}
+    try:
+        qpath = LC.queue_path(home)
+        items = []
+        for qi, entry in LC.load_pending_today(qpath, today=today):
+            fb = (entry.get("evidence") or {}).get("feedback") or ""
+            items.append({"qi": qi, "outcome": entry.get("outcome"),
+                          "feedback": fb[:60], "ts": entry.get("ts")})
+        return {"available": True, "count": len(items), "items": items,
+                "note": "확정은 사람만 — 자동 적재 0 · 번호는 learn-consume dry-run 과 동일"}
+    except Exception:
+        return {"available": False, "count": 0, "items": [],
+                "note": "당일 후보 로드 실패(graceful 생략)"}
+
+
 # ---------------- 3. 거버넌스 요약 빌드 (대비 기록·적중률 · read-only · 신호 전용) ----------------
 
 class _RoLedger:
@@ -319,11 +349,14 @@ def _build_governance(home=None, cwd=None, ledger_path=None):
         ro.close()
 
 
-def build_close_summary(home=None, cwd=None, ledger_path=None, session_id=None):
-    """세션 마무리 표시용 요약 빌드(저장 0 · read-only). preview + 거버넌스 정리 묶음.
-    session_id 지정 시 preview 를 그 세션 발화로 한정(세션 경계). 반환 {preview, governance, save_action}."""
+def build_close_summary(home=None, cwd=None, ledger_path=None, session_id=None, today=None):
+    """세션 마무리 표시용 요약 빌드(저장 0 · read-only). preview + 당일 지적 후보 + 거버넌스 묶음.
+    session_id 지정 시 preview 를 그 세션 발화로 한정(세션 경계). today('YYYY-MM-DD' UTC)는
+    당일 지적 후보 필터 주입용(테스트 결정성 · 미지정 시 현재 UTC 날짜).
+    반환 {preview, outcome_candidates, governance, save_action}."""
     return {
         "preview": _build_preview(home, session_id=session_id),
+        "outcome_candidates": _build_outcome_candidates(home, today=today),
         "governance": _build_governance(home, cwd, ledger_path),
         "save_action": {
             "auto_save": False,
@@ -373,6 +406,18 @@ def render_close_md(summary):
     lines.append("### 3) 저장")
     lines.append("- 자동저장: **0** (헌법 — candidate-only · 사람 승인 게이트)")
     lines.append("- %s" % sa.get("how", "저장은 사람이 직접 `SAVE n` 타이핑."))
+
+    # ★B안(사람 확정): 당일 owner 지적 후보 — 0건이면 섹션 자체 생략(노이즈 금지).
+    oc = summary.get("outcome_candidates", {}) or {}
+    if oc.get("available") and oc.get("count"):
+        lines.append("")
+        lines.append("### 4) 당일 owner 지적 후보 — 적중한 것 골라주세요 (자동 확정 0)")
+        for it in oc.get("items", []):
+            tag = "적중(hit)" if it.get("outcome") == "hit" else "빗나감(miss)"
+            lines.append("- [%s] %s · 발화: %s" % (it.get("qi"), tag, it.get("feedback") or ""))
+        lines.append('- 확정: `binggu learn-consume --confirm "CONSUME <번호>"` '
+                     "(사람 확정만 · 번호는 dry-run 과 동일)")
+        lines.append("> %s" % oc.get("note", "확정은 사람만 — 자동 적재 0"))
 
     return "\n".join(lines)
 
@@ -574,6 +619,41 @@ def _selftest():
                            encoding="utf-8")
         check(detect_session_close("Wrap Up!", home=home)["is_close"],
               "T17 casefold(Wrap Up!≡wrap up)→True")
+
+        # ── T18~T20 ★B안(사람 확정): 당일 owner 지적 후보 — read-only 표시·번호 보존·0건 생략 ──
+        #    today 는 주입식(wall-clock 의존 0). 큐 = learn_consume 규칙(home/state/learn_outcome_queue.jsonl).
+        st_dir = home / "state"
+        st_dir.mkdir(parents=True, exist_ok=True)
+        qp = st_dir / "learn_outcome_queue.jsonl"
+        q_entries = [
+            {"ts": "2026-07-12T22:00:00Z", "outcome": "hit", "queries": [],
+             "evidence": {"feedback": "전일 지적 항목"}, "consumed": False},
+            {"ts": "2026-07-13T01:00:00Z", "outcome": "miss", "queries": [],
+             "evidence": {"feedback": "너도 제대로 안 읽었는데"}, "consumed": False},
+            {"ts": "2026-07-13T02:00:00Z", "outcome": "hit", "queries": [],
+             "evidence": {"feedback": "이미 소비된 당일 항목"}, "consumed": True},
+        ]
+        qp.write_text("\n".join(json.dumps(e, ensure_ascii=False) for e in q_entries) + "\n",
+                      encoding="utf-8")
+        q_mtime = qp.stat().st_mtime_ns
+        s18 = build_close_summary(home=home, today="2026-07-13")
+        oc = s18.get("outcome_candidates", {}) or {}
+        md18 = render_close_md(s18)
+        check(oc.get("available") and oc.get("count") == 1
+              and oc["items"][0]["qi"] == 1 and oc["items"][0]["outcome"] == "miss"
+              and qp.stat().st_mtime_ns == q_mtime,
+              "T18 당일 후보만(전일·consumed 제외)·qi=learn-consume 소비 번호 보존·큐 write 0")
+        check("### 4) 당일 owner 지적 후보" in md18
+              and "[1] 빗나감(miss)" in md18 and "너도 제대로 안 읽었는데" in md18
+              and 'learn-consume --confirm "CONSUME' in md18
+              and "전일 지적 항목" not in md18 and "이미 소비된 당일 항목" not in md18,
+              "T19 섹션4 렌더: 번호+outcome+발화 발췌+CONSUME 안내 · 전일/consumed 미표시")
+        # T20 후보 0건(타 일자) → 섹션 생략(노이즈 금지) · summary 키는 존재(count 0)
+        s20 = build_close_summary(home=home, today="2026-07-14")
+        md20 = render_close_md(s20)
+        check((s20.get("outcome_candidates", {}) or {}).get("count") == 0
+              and "당일 owner 지적 후보" not in md20,
+              "T20 당일 후보 0건 → 섹션 생략(노이즈 0)")
 
         print("\nGATE=%s" % ("GO" if ok else "NO-GO"))
         return ok
