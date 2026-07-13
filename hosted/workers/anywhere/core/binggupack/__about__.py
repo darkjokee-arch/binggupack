@@ -44,5 +44,16 @@ actor 라벨은 권한 아님). 정직 경계: 로컬 TTY 는 L1 routing · shel
 하드 승인 권한 아님 · protected writer/verifier/trust root/detached signer 는 RFC only(미구현) ·
 root/admin compromise 방어 주장 없음. PEP440 pre-release("rc1"): 안정 설치는 이 RC 를 받지
 않는다(pip install --pre 필요). 향후 tag = v1.19.0rc1(하이픈 없음).
+
+v1.21.0 — Codex 재감사(main 77/REFINE · PyPI 1.20.0 52/BLOCK) 6트랙 수정. 핵심:
+(1) 의미분류 seed 를 binggupack/data/ 에 패키지 내장 — wheel 에 seed 가 빠져 설치본이
+semantic enabled 로 표시하고도 규칙분류로 조용히 후퇴하던 결함 해소(silent fallback→경고),
+(2) 설치본/소스 명령 자동 구분(invocation_prefix: 설치본 "binggu" / clone "python binggu.py"),
+(3) binggu start 부작용 분리 — 기본 start=장부 생성만, capture hook/Claude settings 편집은
+capture install(+--force)/--with-capture 옵트인 · owner sticky OFF 존중,
+(4) mypy 3건+ruff invalid-noqa 정리 · path_safety 벤더 재동기, (5) help 일상/고급 그룹,
+(6) CI 확대(typecheck-python mypy 게이트 · npm audit 비게이팅 잡 · dependabot 주간).
+저장소 보안 강화 병행(secret scanning · push protection · branch protection 필수검사 13 ·
+PyPI env admin bypass 차단). production 로직/스키마/의존성 변경 0(설치본 결함 수정·문구·게이트).
 """
-__version__ = "1.20.0"
+__version__ = "1.21.0"

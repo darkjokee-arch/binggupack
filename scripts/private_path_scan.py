@@ -83,6 +83,9 @@ def _load_owner_deny():
 # 배포 산출물에 있어선 안 되는 확장자(운영/캡처 데이터·시크릿류) — tree 모드에서 존재만으로 NO-GO.
 _BANNED_ARTIFACT_SUFFIX = (".sqlite", ".sqlite-shm", ".sqlite-wal", ".jsonl", ".log",
                            ".env", ".pem", ".key")
+# 큐레이션 패키지 데이터(binggupack/data/ 하위 semantic seed 등)는 확장자 금지 예외 — 의도적으로 wheel 에
+# 포함되는 정본 데이터. PII/시크릿은 _scan_text + public tree scan 이 별도로 잡으므로 확장자 금지만 면제.
+_ALLOWED_ARTIFACT_DATA_DIR = "/binggupack/data/"
 
 
 def _iter_files(roots, base, tree_mode=False):
@@ -136,7 +139,9 @@ def scan_paths(roots, base, tree_mode=False):
     banned = []
     for fp_path in _iter_files(roots, base, tree_mode):
         if tree_mode and fp_path.lower().endswith(_BANNED_ARTIFACT_SUFFIX):
-            banned.append(os.path.relpath(fp_path, base).replace("\\", "/"))
+            _rel = os.path.relpath(fp_path, base).replace("\\", "/")
+            if _ALLOWED_ARTIFACT_DATA_DIR not in ("/" + _rel):
+                banned.append(_rel)
         try:
             with open(fp_path, "r", encoding="utf-8", errors="strict") as f:
                 text = f.read()
@@ -225,6 +230,13 @@ def run_selftest():
         tr = scan_paths(["."], d, tree_mode=True)
         checks.append(("tree_scans_pruned_dirs_and_jsonl", tr[1] > src[1]))
         checks.append(("tree_flags_banned_suffix", len(tr[6]) >= 1))
+        # 5b) binggupack/data/ 하위 seed jsonl 은 확장자 금지 예외(정본 패키지 데이터)
+        os.makedirs(os.path.join(d, "binggupack", "data", "semantic"), exist_ok=True)
+        with open(os.path.join(d, "binggupack", "data", "semantic", "seed.jsonl"), "w", encoding="utf-8") as f:
+            f.write('{"text": "판단 문장", "canonical_kind": "판단"}\n')
+        tr2 = scan_paths(["."], d, tree_mode=True)
+        checks.append(("pkg_data_seed_jsonl_not_banned",
+                       not any("binggupack/data/" in b for b in tr2[6])))
         print("=" * 60)
         print("private_path_scan 자가검증")
         print("=" * 60)
