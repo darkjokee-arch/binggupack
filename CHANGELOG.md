@@ -5,6 +5,13 @@
 ### Fixed
 - `backup_ledger` 가 손상 ledger.sqlite 에서 raw traceback 으로 죽던 갭 — `CORRUPT_LEDGER` status 반환 + 빈 산출물 정리 + CLI 복구 안내(restore 의 `INVALID_BACKUP` 방어와 대칭).
 
+### Fixed — semantic 콜드스타트 배치 선채움: 첫 회상 126.8s → 6.5s (2026-07-13)
+Codex 감사 잔여(콜드 35s — 실측 시점 413노드에서 126.8s로 악화). 원인 = why_search 가 미캐시 노드마다 1회씩 **순차 HTTP embed(N왕복)** 로 영속 캐시를 채우던 비용(모델 로드 아님 · warm 은 종전에도 0.4s).
+- `binggu_semantic_shadow._embed_batch` 신설 — /api/embed input 리스트 1왕복 다건(실패/개수 불일치 → None·호출측 단건 fallback).
+- `recall._prefill_cache` + scorer `prefill` 부착 + `why_search` 노드 루프 전 배선 — 미캐시분만 64개 청크 배치 선적재(413노드 = 7왕복). leak_guard 패리티(거부 문장은 요청 자체 제외)·멱등(재호출 왕복 0)·배치 실패 시 단건 경로 graceful.
+- 실측(격리 홈·ledger 사본·Ollama bge-m3): 콜드 **126.8s → 6.5s(19.5×)** · 웜 0.37s 동급 · top-5 무회귀. Hot 경로(fresh_index)·기본 semantic OFF 불변(embed 0 회귀 기준 유지).
+- 검증: 신규 pytest 6 + fresh_index 26 passed · recall/semantic_shadow selftest GATE=GO · 벤더 drift 0.
+
 ### Fixed — learn-outcome 축 교정: 발화 극성 → 교환(사용자 발화·AI 답변·확인) (2026-07-13)
 owner 지적("사용자 대화 - ai답변 - 맞는지 틀리는지 확인 이렇게 가야 축이 맞지") — 구축은 발화 극성(hit/miss)을 speaker=owner 로 직결해 **옳은 지적("아니지…")이 owner 빗나감으로 계상되는 축 뒤집힘**이었다.
 - **훅**(`hooks/user-prompt-learn-outcome.js`): 극성 = 결과가 아니라 입장 — `stance`(refutes 반박/accepts 인정) + 직전 AI 답변 발췌(`ai_answer`, 200자 절단) 큐 기록. `outcome` 은 legacy alias 유지. 구큐 항목은 outcome 극성에서 stance 유도(하위호환).

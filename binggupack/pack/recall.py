@@ -179,6 +179,47 @@ def _unpack_vec(blob, dim):
     return list(struct.unpack("<%df" % dim, blob))
 
 
+_PREFILL_CHUNK = 64   # 배치 임베드 1왕복당 문장 수(Ollama /api/embed input 리스트)
+
+
+def _prefill_cache(cache, model, sentences, batch_fn, leak_guard):
+    """콜드 영속 캐시 일괄 채움 — 미캐시 sentence 만 배치 임베드로 선적재(35s 근본원인 제거).
+
+    콜드스타트 35s = why_search 가 노드마다 1회씩 순차 HTTP embed(N왕복) 하던 비용.
+    여기서 미캐시분을 _PREFILL_CHUNK 단위 배치(1~수회 왕복)로 캐시에 채우면 이후 노드 점수
+    계산은 전량 캐시 hit. 배치 실패/미지원 → 중단(단건 경로가 이어받음 · graceful).
+    반환: 채운 개수(실패 0). write 는 파생 캐시 sqlite 만(운영 ledger 불변)."""
+    try:
+        todo, seen = [], set()
+        for text in sentences:
+            sha = _sent_sha(text)
+            if sha in seen:
+                continue
+            seen.add(sha)
+            if cache.execute("SELECT 1 FROM embed_cache WHERE sent_sha=? AND model=?",
+                             (sha, model)).fetchone():
+                continue
+            if not leak_guard(text)[0]:
+                continue  # PII/secret — 임베드 자체를 보내지 않음(단건 경로와 동일 패리티)
+            todo.append((sha, text))
+        filled = 0
+        for i in range(0, len(todo), _PREFILL_CHUNK):
+            chunk = todo[i:i + _PREFILL_CHUNK]
+            vs = batch_fn([t for _, t in chunk])
+            if vs is None:
+                break  # 배치 실패 — 이후는 단건 경로 fallback
+            for (sha, _t), v in zip(chunk, vs):
+                if v is None:
+                    continue
+                cache.execute("INSERT OR REPLACE INTO embed_cache VALUES(?,?,?,?)",
+                              (sha, model, len(v), _pack_vec(v)))
+                filled += 1
+            cache.commit()
+        return filled
+    except Exception:
+        return 0
+
+
 def precompute_embeddings(ledger_path, home=None, embed_fn=None):
     """active 노드 sentence 임베딩 미리 캐시(멱등) — 회상 N+1 embed → query 1회로.
     semantic OFF(opt-in 미통과)면 SKIP. ledger read-only · 캐시 sqlite 만 write(운영 데이터 불변)."""
@@ -285,6 +326,18 @@ def _semantic_scorer(home=None, embed_fn=None):
             if se is None:
                 return None
             return dot(qe, se)
+
+        def prefill(sentences):
+            """콜드 캐시 배치 선채움 — why_search 가 노드 루프 전에 호출(getattr 관례).
+            실 Ollama 경로(_cache 有)만. fake embed(테스트)/배치 미지원 → no-op 0."""
+            if _cache is None:
+                return 0
+            batch_fn = getattr(SH, "_embed_batch", None)
+            if batch_fn is None:
+                return 0
+            return _prefill_cache(_cache, _model, sentences, batch_fn, SH.leak_guard)
+
+        score.prefill = prefill
         return score
     except Exception:
         return None
@@ -309,6 +362,13 @@ def why_search(ledger_path, query, limit=None, home=None, scorer=None):
         return {"relevant_nodes": [], "relevant_edges": [], "evidence": [],
                 "summary": "그래프가 비어 있습니다(관련 기억 없음).",
                 "recommended_question": None, "confidence": 0.0}
+
+    # 콜드 캐시 배치 선채움 — 노드별 순차 HTTP embed(N왕복·콜드 35s)를 배치 1~수회로.
+    # prefill 없는 커스텀 scorer(LEXICAL_ONLY 등)는 getattr 미스로 그대로 통과(호환).
+    if scorer is not None and qtok:
+        _pf = getattr(scorer, "prefill", None)
+        if _pf is not None:
+            _pf([n["sentence"] for n in g["nodes"]])
 
     scored = []
     for n in g["nodes"]:

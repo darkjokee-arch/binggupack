@@ -88,6 +88,25 @@ def _embed(text, timeout=10):
         return None
 
 
+def _embed_batch(texts, timeout=30):
+    """#10 배치 임베딩 — /api/embed input 리스트로 1회 왕복(콜드 캐시 N왕복 제거).
+    실패/개수 불일치 → None(호출측 단건 _embed fallback). 빈 입력 → []."""
+    if not texts:
+        return []
+    body = json.dumps({"model": MODEL, "input": list(texts)}).encode()
+    req = urllib.request.Request(OLLAMA + "/api/embed", data=body,
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            d = json.loads(r.read())
+        vs = d.get("embeddings")
+        if not isinstance(vs, list) or len(vs) != len(texts):
+            return None
+        return [(_l2(v) if v else None) for v in vs]
+    except Exception:
+        return None
+
+
 def _l2(v):
     n = math.sqrt(sum(x * x for x in v)) or 1.0
     return [x / n for x in v]
