@@ -52,7 +52,9 @@ def _run(args):
 
 def main():
     # 1) inbox 회수 + 요약(번호별 후보 수)
-    out = _run(["hosted", "inbox"]).stdout or ""
+    #    --no-anchor: 무인 렌더는 사람 SAVE 앵커(last_preview)를 덮지 않는다 — owner 가 CLI preview
+    #    를 보고 '세이브 n' 을 치기 전에 5분 틱이 앵커를 갈아치우던 결함 봉합(2026-07-13 실측).
+    out = _run(["hosted", "inbox", "--no-anchor"]).stdout or ""
     print(out)
     committed = 0
     # "[N] ... 후보 M[ ⚠PII/secret]" 파싱 — M>0 만 commit.

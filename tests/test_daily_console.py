@@ -376,6 +376,28 @@ def test_existing_hosted_inbox_unchanged(tmp_path):
     assert "hosted inbox" in r.stdout
 
 
+def test_hosted_inbox_anchor_stays_in_ledger_home(tmp_path):
+    """save-n 앵커는 ledger-home 에만 — 전역(BINGGU_HOME) home 오염 0 (2026-07-13 결함 회귀망)."""
+    home, ledger = _full_home(tmp_path)
+    global_home = str(tmp_path / "global_home")
+    os.makedirs(global_home)
+    r = _run(["--ledger", ledger, "hosted", "inbox", "--no-fetch"],
+             env_extra={"BINGGU_HOME": global_home})
+    assert r.returncode == 0, r.stderr
+    # 앵커는 데이터와 같은 축(ledger-home)에 기록된다
+    assert os.path.exists(os.path.join(home, "last_preview_candidates.json"))
+    # ledger 를 격리한 실행이 전역 home 의 앵커를 만들거나 덮지 않는다
+    assert not os.path.exists(os.path.join(global_home, "last_preview_candidates.json"))
+
+
+def test_hosted_inbox_no_anchor_skips_preview(tmp_path):
+    """--no-anchor(무인 렌더)는 사람 SAVE 앵커를 아예 기록하지 않는다(auto_pull 결함 회귀망)."""
+    home, ledger = _full_home(tmp_path)
+    r = _run(["--ledger", ledger, "hosted", "inbox", "--no-fetch", "--no-anchor"])
+    assert r.returncode == 0, r.stderr
+    assert not os.path.exists(os.path.join(home, "last_preview_candidates.json"))
+
+
 def test_existing_mutation_commands_unchanged(tmp_path):
     # 기존 mutation 명령의 인자 표면(‑‑help)이 그대로다(회귀 0)
     for cmd, needle in (("save", "--preview-id"), ("deprecate", "--confirm"),

@@ -320,11 +320,16 @@ def cmd_hosted(a):
         print(render_summary_md(summ))
         # save-n 참조 바인딩 앵커 — inbox 렌더 시 staged 원문을 last_preview 에 영속(해시만·원문 미저장).
         # 사람이 'SAVE n'(세이브 n) 발화하면 hook 이 이 preview_ref 로 ref 레코드를 기록한다.
-        try:
-            import binggu_save_gate as _sg
-            _sg.write_last_preview(_staged_cands(_now))
-        except Exception:
-            pass
+        # 앵커 경로 = ledger 기준 home(데이터와 동일 축) — 전역 home 고정이면 --ledger 격리 실행이
+        # 운영 앵커를 오염시킨다(2026-07-13 실측: 테스트/무인 실행이 owner 발화 도장을 계속 덮음).
+        # --no-anchor = 무인(auto_pull 등) 렌더 전용: 사람 SAVE 앵커를 건드리지 않는다.
+        if not getattr(a, "no_anchor", False):
+            try:
+                import binggu_save_gate as _sg
+                _sg.write_last_preview(_staged_cands(_now),
+                                       path=os.path.join(home, "last_preview_candidates.json"))
+            except Exception:
+                pass
         return 0
 
     if sub == "pull":
@@ -2161,6 +2166,7 @@ def main():
     ibp = hsub.add_parser("inbox")          # 회수(저장0) + read-only 요약
     ibp.add_argument("--since", default=None)            # '7d' 또는 '7' (표시 필터·번호 고정)
     ibp.add_argument("--no-fetch", dest="no_fetch", action="store_true")  # worker 미접촉, staging 만
+    ibp.add_argument("--no-anchor", dest="no_anchor", action="store_true")  # 무인 렌더: 사람 SAVE 앵커(last_preview) 미기록
     ibp.add_argument("--wait", type=int, default=0)
     ibp.add_argument("--variant", choices=["save_mcp", "save_v2"], default="save_mcp")
     ibp.add_argument("--workers-port", dest="wp", default=None)

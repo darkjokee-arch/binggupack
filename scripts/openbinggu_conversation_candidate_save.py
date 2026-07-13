@@ -31,31 +31,43 @@ def _sent_hash(s):
     return hashlib.sha256(re.sub(r"\s+", " ", s).strip().encode("utf-8")).hexdigest()[:8]
 
 
+def _last_preview_mode(default=False):
+    """last_preview 에 기록된 explicit 모드 — 후보 번호축의 단일 기준.
+    '번호의 기준은 항상 마지막으로 보여준 preview' (게이트 대조·저장 pick 이 같은 축을 봐야
+    사람이 고른 번호와 다른 문장이 저장되는 어긋남이 구조적으로 불가능). 부재/오류 → default."""
+    try:
+        import binggu_save_gate as sgate
+        import json as _json
+        with open(sgate.last_preview_path(), "r", encoding="utf-8") as f:
+            return bool(_json.load(f).get("explicit", default))
+    except Exception:
+        return bool(default)
+
+
+def _gate_ref_ok(text, indices, mode):
+    """text 후보(mode 축 재도출)의 (preview_ref, idx) 전부가 사람 save-n 발화로 기록됐는지 —
+    승격 없이 판정만(fail-closed·게이트 부재/오류 False)."""
+    try:
+        import binggu_save_gate as sgate
+        cands = capture_preview(text, explicit=mode)["candidates"]
+        pref = sgate.preview_ref_for_candidates(cands)
+        idxs = [i for i in indices
+                if isinstance(i, int) and 1 <= i <= len(cands)]
+        return bool(idxs) and bool(sgate.gate_human_for_ref(pref, idxs))
+    except Exception:
+        return False
+
+
 def _maybe_promote_actor_by_gate(text, indices, ctx, explicit=False):
     """사람-발화 게이트(binggu_save_gate): actor 비human 이어도 선택 (preview_ref, idx) 가 사람
     save-n 발화로 기록됐으면 human 승격(save-n 참조 바인딩 정본). 게이트 실패/미기록 → 승격 0(fail-closed).
     explicit: last_preview 에 기록된 모드가 있으면 그 모드로 후보 재도출(pref 패리티) — 부재 시 이 인자."""
     if ctx.get("actor", "").strip().lower() == "human":
         return ctx
-    try:
-        import binggu_save_gate as sgate
-        import json as _json
-        mode = bool(explicit)
-        try:
-            with open(sgate.last_preview_path(), "r", encoding="utf-8") as f:
-                mode = bool(_json.load(f).get("explicit", mode))
-        except Exception:
-            pass
-        cands = capture_preview(text, explicit=mode)["candidates"]
-        pref = sgate.preview_ref_for_candidates(cands)
-        idxs = [i for i in indices
-                if isinstance(i, int) and 1 <= i <= len(cands)]
-        if idxs and sgate.gate_human_for_ref(pref, idxs):
-            ctx = dict(ctx)
-            ctx["actor"] = "human"
-            ctx["actor_promoted_by"] = "save_gate_ref"  # 사후감사 표식
-    except Exception:
-        pass  # 게이트 부재/오류 → 기존 actor 게이트 유지(default-deny)
+    if _gate_ref_ok(text, indices, _last_preview_mode(explicit)):
+        ctx = dict(ctx)
+        ctx["actor"] = "human"
+        ctx["actor_promoted_by"] = "save_gate_ref"  # 사후감사 표식
     return ctx
 
 
@@ -224,11 +236,15 @@ PAIR_RELATIONS = {"ai_accepts", "ai_refutes", "ai_revises",
                   "owner_accepts", "owner_refutes", "owner_revises"}
 
 
-def _pick_one_node(text, pick, speaker):
+def _pick_one_node(text, pick, speaker, explicit=None):
     """text 에서 pick 번째 후보 1건을 A0/PII 게이트 통과 후 node dict 로. 실패 시 에러코드(str).
-    pair(owner/ai)는 사용자가 직접 친 명시 저장 입력 → SSOT 판단-veto 면제(explicit=True).
+    explicit=None → last_preview 기록 모드(부재 시 True=명시 저장 입력 판단-veto 면제 현행 유지).
+    번호축 패리티: 사람이 본 preview 의 번호 == 게이트 대조 번호 == 여기서 꺼내는 번호
+    (모드가 어긋나면 사람이 고른 것과 다른 문장이 저장된다 — 2026-07-13 실사용 결함).
     PII/secret(아래)·A0(아래)·중복·confirm·actor(호출부) 안전 게이트는 그대로 강제된다."""
-    pv = capture_preview(text, explicit=True)
+    if explicit is None:
+        explicit = _last_preview_mode(True)
+    pv = capture_preview(text, explicit=explicit)
     cands = pv["candidates"]
     if not isinstance(pick, int) or pick < 1 or pick > len(cands):
         # 명시 입력인데 후보가 없으면 안전 게이트(PII/secret)로 제외됐을 수 있다 → 사유 명확화.
@@ -268,6 +284,17 @@ def _self_evidence(node):
 def save_paired(db, owner_text, ai_text, ctx, snap_dir,
                 relation_kind="ai_accepts", owner_pick=1, ai_pick=1, due_date=None):
     """owner 발화 + ai 요약을 각각 독립 노드로 저장하고 연결 엣지로 묶는다(ai_text=None → owner 단독)."""
+    # 사람-발화 게이트 재승격 — save_selected 와 대칭(pair 만 빠져 있던 갭, 2026-07-13 owner 지적).
+    # MCP/비터미널 경로도 사람이 'SAVE n(세이브 n)' 을 실제 발화했으면(훅 도장) human 승격.
+    # all-or-nothing: owner 축 + (paired 면) ai 축 둘 다 도장돼야 승격(단축 승격 없음·fail-closed).
+    _mode = _last_preview_mode(True)
+    if ctx.get("actor", "").strip().lower() != "human":
+        _o_ok = _gate_ref_ok(owner_text, [owner_pick], _mode)
+        _a_ok = (not ai_text) or _gate_ref_ok(ai_text, [ai_pick], _mode)
+        if _o_ok and _a_ok:
+            ctx = dict(ctx)
+            ctx["actor"] = "human"
+            ctx["actor_promoted_by"] = "save_gate_ref"  # 사후감사 표식
     before = db.store_checksum()
 
     def block(reason):
@@ -285,7 +312,7 @@ def save_paired(db, owner_text, ai_text, ctx, snap_dir,
     if ctx.get("confirm") != expected:
         return block("confirm_phrase_mismatch")
 
-    own = _pick_one_node(owner_text, owner_pick, "owner")
+    own = _pick_one_node(owner_text, owner_pick, "owner", explicit=_mode)
     if isinstance(own, str):
         return block("owner_" + own)
     nodes_pack, edges_pack, ev_pack = [own], [], []
@@ -293,7 +320,7 @@ def save_paired(db, owner_text, ai_text, ctx, snap_dir,
     ev_pack.append(ev); edges_pack.append(ed)
 
     if paired:
-        ain = _pick_one_node(ai_text, ai_pick, "ai")
+        ain = _pick_one_node(ai_text, ai_pick, "ai", explicit=_mode)
         if isinstance(ain, str):
             return block("ai_" + ain)
         if ain["id"] == own["id"]:
