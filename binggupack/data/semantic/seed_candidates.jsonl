@@ -1,0 +1,72 @@
+{"semantic_subtype": "교훈", "text": "백업 없이 큰 변경을 하면 되돌리기 어려우니 먼저 복사본을 둔다.", "domain": "일반", "band": "clear"}
+{"semantic_subtype": "교훈", "text": "마감에 임박해 시작하면 늘 실수가 나오니 하루 먼저 손댄다.", "domain": "일반", "band": "clear"}
+{"semantic_subtype": "교훈", "text": "모르는 채로 단정하지 말고 직접 확인하는 게 사고를 줄인다.", "domain": "일반", "band": "clear"}
+{"semantic_subtype": "교훈", "text": "한꺼번에 여러 가지를 바꾸면 무엇이 문제인지 찾기 어렵다.", "domain": "일반", "band": "clear"}
+{"semantic_subtype": "교훈", "text": "재료를 미리 손질해 두면 요리 중에 허둥대지 않는다.", "domain": "요리", "band": "clear"}
+{"semantic_subtype": "교훈", "text": "시험 전날 몰아서 외우면 금방 잊으니 매일 조금씩 본다.", "domain": "공부", "band": "clear"}
+{"semantic_subtype": "교훈", "text": "손님 동선을 막는 진열은 매출을 깎으니 통로를 비워 둔다.", "domain": "장사", "band": "clear"}
+{"semantic_subtype": "교훈", "text": "첫 문단에 결론을 두면 읽는 사람이 끝까지 읽는다.", "domain": "글쓰기", "band": "clear"}
+{"semantic_subtype": "교훈", "text": "약을 거르면 효과가 들쭉날쭉하니 같은 시간에 먹는다.", "domain": "건강", "band": "clear"}
+{"semantic_subtype": "교훈", "text": "비슷한 실수를 또 했다면 기록해 둬야 다음에 안 밟는다.", "domain": "일반", "band": "clear"}
+{"semantic_subtype": "교훈", "text": "짧게 끊어 말하는 편이 길게 설명하는 것보다 잘 전달된다.", "domain": "일반", "band": "ambiguous", "alt_subtype": "선호", "note": "일반 규칙/개인 취향 경계"}
+{"semantic_subtype": "교훈", "text": "급할수록 돌아가는 게 결국 빠르다는 걸 또 느꼈다.", "domain": "일반", "band": "ambiguous", "alt_subtype": "판단", "note": "일반화된 깨달음/그때 판단 경계"}
+{"semantic_subtype": "결정", "text": "이번에는 기존 거래처를 먼저 챙기기로 한다.", "domain": "장사", "band": "clear"}
+{"semantic_subtype": "결정", "text": "다음 달부터 운동은 아침으로 옮긴다.", "domain": "건강", "band": "clear"}
+{"semantic_subtype": "결정", "text": "이 기능은 다음 버전에 넣기로 미룬다.", "domain": "코딩", "band": "clear"}
+{"semantic_subtype": "결정", "text": "회의는 주 1회로 줄이고 나머지는 메모로 대신한다.", "domain": "업무", "band": "clear"}
+{"semantic_subtype": "결정", "text": "여행 일정은 이틀 줄이고 한 도시에 더 머문다.", "domain": "여행", "band": "clear"}
+{"semantic_subtype": "결정", "text": "글은 매주 수요일에 올리기로 정한다.", "domain": "글쓰기", "band": "clear"}
+{"semantic_subtype": "결정", "text": "저녁 메뉴는 일주일치를 미리 정해 둔다.", "domain": "요리", "band": "clear"}
+{"semantic_subtype": "결정", "text": "아이 등원은 번갈아 맡기로 한다.", "domain": "육아", "band": "clear"}
+{"semantic_subtype": "결정", "text": "가격은 당분간 올리지 않고 유지한다.", "domain": "장사", "band": "clear"}
+{"semantic_subtype": "결정", "text": "이 거래는 조건이 맞을 때까지 보류한다.", "domain": "일반", "band": "clear"}
+{"semantic_subtype": "결정", "text": "위험이 커서 이 시도는 일단 접는다.", "domain": "일반", "band": "ambiguous", "alt_subtype": "판단", "note": "행동 결정/가치 판단 경계"}
+{"semantic_subtype": "결정", "text": "도구를 바꾸지 않고 지금 것으로 계속 간다.", "domain": "일반", "band": "ambiguous", "alt_subtype": "설계결정", "note": "운영 결정/구조 선택 경계"}
+{"semantic_subtype": "선호", "text": "설명은 길게보다 짧게 핵심만 듣는 걸 좋아한다.", "domain": "일반", "band": "clear"}
+{"semantic_subtype": "선호", "text": "일할 때 음악보다 조용한 환경을 선호한다.", "domain": "일반", "band": "clear"}
+{"semantic_subtype": "선호", "text": "메모는 손글씨보다 디지털로 남기는 편이다.", "domain": "일반", "band": "clear"}
+{"semantic_subtype": "선호", "text": "매운 음식보다 담백한 맛을 좋아한다.", "domain": "요리", "band": "clear"}
+{"semantic_subtype": "선호", "text": "아침형이라 중요한 일은 오전에 한다.", "domain": "일반", "band": "clear"}
+{"semantic_subtype": "선호", "text": "여행은 빡빡한 일정보다 여유로운 쪽을 선호한다.", "domain": "여행", "band": "clear"}
+{"semantic_subtype": "선호", "text": "리뷰는 길게 적힌 것보다 핵심 지적을 좋아한다.", "domain": "코딩", "band": "clear"}
+{"semantic_subtype": "선호", "text": "운동은 실내보다 야외에서 하는 걸 선호한다.", "domain": "건강", "band": "clear"}
+{"semantic_subtype": "선호", "text": "책은 전자책보다 종이책을 좋아한다.", "domain": "일반", "band": "clear"}
+{"semantic_subtype": "선호", "text": "연락은 전화보다 메시지를 선호한다.", "domain": "일반", "band": "clear"}
+{"semantic_subtype": "선호", "text": "고집부리기보다 유연하게 바꾸는 쪽을 높이 친다.", "domain": "일반", "band": "ambiguous", "alt_subtype": "교훈", "note": "개인 가치관/일반 규칙 경계"}
+{"semantic_subtype": "선호", "text": "미리 묻기보다 알아서 처리해 주는 걸 좋아한다.", "domain": "업무", "band": "ambiguous", "alt_subtype": "결정", "note": "취향/업무 방침 경계"}
+{"semantic_subtype": "설계결정", "text": "화면을 단순하게 한 페이지에 모으는 구조로 간다.", "domain": "코딩", "band": "clear"}
+{"semantic_subtype": "설계결정", "text": "가게는 입구에 신상품, 안쪽에 인기상품을 배치한다.", "domain": "장사", "band": "clear"}
+{"semantic_subtype": "설계결정", "text": "공부는 아침 개념·저녁 복습 루틴으로 짠다.", "domain": "공부", "band": "clear"}
+{"semantic_subtype": "설계결정", "text": "문서는 결론·근거·부록 세 층으로 구성한다.", "domain": "글쓰기", "band": "clear"}
+{"semantic_subtype": "설계결정", "text": "주방은 자주 쓰는 도구를 손 닿는 곳에 둔다.", "domain": "요리", "band": "clear"}
+{"semantic_subtype": "설계결정", "text": "받은 일을 먼저 분류하는 단계를 업무 흐름 앞에 둔다.", "domain": "업무", "band": "clear"}
+{"semantic_subtype": "설계결정", "text": "저장은 한 곳에 모으고 백업은 따로 분리한다.", "domain": "코딩", "band": "clear"}
+{"semantic_subtype": "설계결정", "text": "옷장은 계절별로 나눠 자주 입는 걸 앞에 둔다.", "domain": "집안일", "band": "clear"}
+{"semantic_subtype": "설계결정", "text": "일정표는 고정 일정 먼저, 빈 칸에 유동 일정을 채운다.", "domain": "업무", "band": "clear"}
+{"semantic_subtype": "설계결정", "text": "가계부는 수입·고정지출·변동지출로 나눈다.", "domain": "가계", "band": "clear"}
+{"semantic_subtype": "설계결정", "text": "자주 틀리는 부분은 검사 단계를 하나 더 넣는다.", "domain": "일반", "band": "ambiguous", "alt_subtype": "버그패턴", "note": "구조 보강/반복 오류 대응 경계"}
+{"semantic_subtype": "설계결정", "text": "이 부분은 다른 것과 안 섞이게 따로 분리한다.", "domain": "일반", "band": "ambiguous", "alt_subtype": "결정", "note": "구조 선택/방침 경계"}
+{"semantic_subtype": "버그패턴", "text": "같은 파일을 두 곳에서 고치면 충돌이 나서 꼬인다.", "domain": "코딩", "band": "clear"}
+{"semantic_subtype": "버그패턴", "text": "확인 안 하고 보내면 오타가 그대로 나간다.", "domain": "일반", "band": "clear"}
+{"semantic_subtype": "버그패턴", "text": "레시피 단위를 헷갈리면 간이 매번 어긋난다.", "domain": "요리", "band": "clear"}
+{"semantic_subtype": "버그패턴", "text": "재고를 안 세고 주문하면 같은 걸 또 사게 된다.", "domain": "장사", "band": "clear"}
+{"semantic_subtype": "버그패턴", "text": "일정에 여유를 안 두면 하나 밀리면 전부 밀린다.", "domain": "업무", "band": "clear"}
+{"semantic_subtype": "버그패턴", "text": "약속 시간을 머리로만 기억하면 자주 빠뜨린다.", "domain": "일반", "band": "clear"}
+{"semantic_subtype": "버그패턴", "text": "입력칸을 비워 두면 다음 단계에서 막힌다.", "domain": "코딩", "band": "clear"}
+{"semantic_subtype": "버그패턴", "text": "영수증을 그때 안 적으면 가계부가 안 맞는다.", "domain": "가계", "band": "clear"}
+{"semantic_subtype": "버그패턴", "text": "물을 거르는 날이 반복되면 화분이 죽는다.", "domain": "집안일", "band": "clear"}
+{"semantic_subtype": "버그패턴", "text": "회의록을 안 남기면 누가 무엇을 맡았는지 잊는다.", "domain": "업무", "band": "clear"}
+{"semantic_subtype": "버그패턴", "text": "검토 없이 반영하면 다른 게 깨지는 일이 되풀이된다.", "domain": "일반", "band": "ambiguous", "alt_subtype": "교훈", "note": "반복 증상/일반 교훈 경계"}
+{"semantic_subtype": "버그패턴", "text": "사람마다 다르게 알아들어 같은 설명을 또 하게 된다.", "domain": "소통", "band": "ambiguous", "alt_subtype": "설계결정", "note": "반복 문제/절차 보강 경계"}
+{"semantic_subtype": "사실", "text": "단골 거래처는 매주 화요일에 휴무다.", "domain": "장사", "band": "clear"}
+{"semantic_subtype": "사실", "text": "이 식당은 브레이크타임이 3시부터 5시까지다.", "domain": "일반", "band": "clear"}
+{"semantic_subtype": "사실", "text": "분리수거는 매주 목요일 저녁에 내놓는다.", "domain": "집안일", "band": "clear"}
+{"semantic_subtype": "사실", "text": "이 약은 식후 30분에 먹어야 한다.", "domain": "건강", "band": "clear"}
+{"semantic_subtype": "사실", "text": "프린터 토너는 특정 모델만 호환된다.", "domain": "일반", "band": "clear"}
+{"semantic_subtype": "사실", "text": "그 도서관은 월요일에 문을 닫는다.", "domain": "일반", "band": "clear"}
+{"semantic_subtype": "사실", "text": "이 채소는 냉장보다 실온 보관이 오래간다.", "domain": "요리", "band": "clear"}
+{"semantic_subtype": "사실", "text": "계약 갱신일은 매년 3월 말이다.", "domain": "업무", "band": "clear"}
+{"semantic_subtype": "사실", "text": "이 공유기는 30일마다 재시작하면 안정적이다.", "domain": "일반", "band": "clear"}
+{"semantic_subtype": "사실", "text": "그 카페는 콘센트 자리가 창가에만 있다.", "domain": "일반", "band": "clear"}
+{"semantic_subtype": "사실", "text": "이 라이브러리는 특정 버전에서만 동작한다.", "domain": "코딩", "band": "ambiguous", "alt_subtype": "버그패턴", "note": "객관 정보/제약 오류 경계"}
+{"semantic_subtype": "사실", "text": "그 거래처는 현금 결제를 선호한다.", "domain": "장사", "band": "ambiguous", "alt_subtype": "선호", "note": "타인의 선호=나에겐 객관 사실 경계"}

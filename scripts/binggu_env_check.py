@@ -25,9 +25,26 @@ def _ollama_install_cmd(os_name):
     return "curl -fsSL https://ollama.com/install.sh | sh"   # wsl / linux
 
 
-def check_env(os_name=None, ollama_probe=None, node_probe=None, settings_path=None, savegate_probe=None):
+def _seed_resolvable(name="seed_canonical_5.jsonl"):
+    """seed 파일 실존(bool) — 무거운 semantic 모듈 import 없이 경량 조회.
+    ① 설치본/clone: importlib.resources 로 binggupack.data/semantic/<name>
+    ② 폴백: 스크립트 상대 ../tests/fixtures/semantic/<name>(committed 자산 → 결정론)."""
+    try:
+        from importlib.resources import files
+        if files("binggupack.data").joinpath("semantic", name).is_file():
+            return True
+    except Exception:
+        pass
+    here = os.path.dirname(os.path.abspath(__file__))
+    return os.path.exists(os.path.join(here, "..", "tests", "fixtures", "semantic", name))
+
+
+def check_env(os_name=None, ollama_probe=None, node_probe=None, settings_path=None,
+              savegate_probe=None, seed_probe=None):
     """환경 점검 결과 dict. probe= 테스트 주입(실제는 자동 감지). write 0.
-    settings_path 주어지면 save_gate hook 등록 여부도 점검(SAVE n 저장 인식용)."""
+    settings_path 주어지면 save_gate hook 등록 여부도 점검(SAVE n 저장 인식용).
+    semantic 은 Ollama 감지 AND seed 해결가능 이라야 operational(ready)=True — seed 부재는
+    silent drop 대신 render 에서 [WARN] 로 표면화. seed_probe= 결정성 위한 테스트 주입(미주입=실측)."""
     os_name = os_name or P.detect_os()
     py_ok = sys.version_info >= (3, 10)
     if ollama_probe is not None:
@@ -38,6 +55,7 @@ def check_env(os_name=None, ollama_probe=None, node_probe=None, settings_path=No
             oll = C.ollama_available()
         except Exception:
             oll = False
+    seed = seed_probe if seed_probe is not None else _seed_resolvable()
     node = node_probe if node_probe is not None else (shutil.which("node") is not None)
     if savegate_probe is not None:
         sg = savegate_probe
@@ -52,7 +70,7 @@ def check_env(os_name=None, ollama_probe=None, node_probe=None, settings_path=No
     return {
         "os": os_name,
         "python": {"ok": bool(py_ok), "version": "%d.%d" % sys.version_info[:2]},
-        "semantic": {"ready": bool(oll),
+        "semantic": {"ready": bool(oll and seed), "ollama": bool(oll), "seed": bool(seed),
                      "install": _ollama_install_cmd(os_name), "pull": "ollama pull bge-m3"},
         "hosted": {"node": bool(node)},
         "save_gate": {"registered": sg},
@@ -67,6 +85,10 @@ def render_report(res):
     s = res["semantic"]
     if s["ready"]:
         L.append("[ON] 똑똑한 뜻 분류 — Ollama+bge-m3 감지됨, 자동 켜짐")
+    elif s.get("ollama") and not s.get("seed"):
+        # Ollama 는 있는데 seed 누락 → silent drop 대신 표면화(규칙분류로 계속 동작)
+        L.append("[WARN] 똑똑한 뜻 분류 — Ollama 는 감지됐지만 seed 누락 → 규칙분류로 동작")
+        L.append("       seed 파일이 설치본에 빠졌습니다 — 재설치/업데이트 권장(분류는 정규식으로 계속).")
     else:
         L.append("[--] 똑똑한 뜻 분류 — 지금은 정규식만. 켜려면 한 번 설치(선택):")
         L.append("       %s" % s["install"])
@@ -82,7 +104,7 @@ def render_report(res):
         L.append("[ON] 저장 게이트 — 'SAVE n' 발화 인식 hook 등록됨(사람 발화만 저장 통과)")
     elif sg is False:
         L.append("[--] 저장 게이트 — 미설치. 'SAVE n' 으로 직접 저장하려면 한 번 설치(선택):")
-        L.append("       python binggu.py capture install-gate")
+        L.append("       %s capture install-gate" % P.invocation_prefix())
         L.append("     사람 'SAVE n' 발화만 인식 — 자동 저장 아님. (자동 설치는 안 합니다)")
     # sg None(settings 미점검) → 표시 생략
     L.append("-" * 62)
@@ -133,6 +155,13 @@ def run_selftest():
         "install-gate" in render_report(check_env(os_name="windows", ollama_probe=False, node_probe=False, savegate_probe=False)))
     rec("15.settings 미지정 → registered None(표시 생략)",
         check_env(ollama_probe=False)["save_gate"]["registered"] is None)
+    # 16~18. seed 게이트 — silent drop 제거. #2/#8 은 seed_probe 미주입(committed 자산 → hermetic True).
+    r_warn = check_env(os_name="windows", ollama_probe=True, node_probe=False, seed_probe=False)
+    rec("16.Ollama 있고 seed 없으면 ready=False(operational 아님)", r_warn["semantic"]["ready"] is False)
+    rep_warn = render_report(r_warn)
+    rec("17.[WARN] seed 누락 표면화(silent drop 제거)", "[WARN]" in rep_warn and "seed 누락" in rep_warn)
+    rep_op = render_report(check_env(os_name="windows", ollama_probe=True, node_probe=True, seed_probe=True))
+    rec("18.[ON]/자동 켜짐 은 operational(ollama+seed) 일 때만", "[ON]" in rep_op and "자동 켜짐" in rep_op)
 
     print("=" * 62)
     print("binggu_env_check — selftest (환경 점검 + 설치 안내, 자동설치 X)")

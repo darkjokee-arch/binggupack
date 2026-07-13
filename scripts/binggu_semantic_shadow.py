@@ -37,7 +37,47 @@ import binggu_platform as _plat                                       # noqa: E4
 # cross-platform: BINGGU_HOME 우선 · 없으면 OS별 홈/.binggupack (Windows 동작 보존).
 HOME = _plat.binggu_home()
 SEM_DIR = os.path.join(HOME, "semantic")
-SEED_PATH = os.path.join(HERE, "..", "tests", "fixtures", "semantic", "seed_candidates.jsonl")
+
+_SEED_TMP_CACHE = {}
+
+
+def _resolve_seed_path(name):
+    """seed 파일 경로(str) 반환 — 절대 raise 안 함(모듈 import 시점 평가 안전).
+    ① 설치본/clone: importlib.resources 로 binggupack.data/semantic/<name>
+    ② zip/egg 설치: as_file 로 프로세스 수명 임시본 materialize
+    ③ 폴백: 스크립트 상대 ../tests/fixtures/semantic/<name>
+    파일 부재여도 str 을 반환한다(호출측 open 이 실패 처리 — 이 함수는 예외 전파 0)."""
+    try:
+        from importlib.resources import files
+        res = files("binggupack.data").joinpath("semantic", name)
+        try:
+            if res.is_file():
+                return str(res)
+        except Exception:
+            pass
+        try:
+            from importlib.resources import as_file
+            import atexit
+            import tempfile
+            cached = _SEED_TMP_CACHE.get(name)
+            if cached and os.path.exists(cached):
+                return cached
+            with as_file(res) as ap:
+                data = open(ap, "rb").read()
+            fd, tmp = tempfile.mkstemp(prefix="binggu_seed_", suffix="_" + name)
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+            _SEED_TMP_CACHE[name] = tmp
+            atexit.register(lambda p=tmp: os.path.exists(p) and os.remove(p))
+            return tmp
+        except Exception:
+            pass
+    except Exception:
+        pass
+    return os.path.join(HERE, "..", "tests", "fixtures", "semantic", name)
+
+
+SEED_PATH = _resolve_seed_path("seed_candidates.jsonl")
 OLLAMA = "http://127.0.0.1:11434"
 MODEL = "bge-m3"
 SUBTYPES = ["교훈", "결정", "선호", "설계결정", "버그패턴", "사실"]
