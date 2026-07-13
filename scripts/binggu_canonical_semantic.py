@@ -11,7 +11,8 @@
   5) 원문 저장 0(임베딩만, 로그/파일 write 0)  6) 결정론(같은 문장=같은 결과)
 
 검증된 헬퍼 재사용: binggu_semantic_shadow._embed/leak_guard/_l2/_dot/model_digest/BAND.
-seed: tests/fixtures/semantic/seed_canonical_5.jsonl (5종×12, leave-one-out 93%).
+seed: binggupack/data/semantic/seed_canonical_5.jsonl (설치본 동봉·5종×12, leave-one-out 93%).
+      경로 해석 = _resolve_seed_path (importlib.resources → tests/fixtures 폴백·순환 import 안전).
 
 CLI: python binggu_canonical_semantic.py --selftest
 """
@@ -25,8 +26,48 @@ import binggu_semantic_shadow as S  # noqa: E402
 import binggu_platform as _plat  # binggu_home(BINGGU_HOME 존중 · 격리 폴백)  # noqa: E402
 
 KINDS = ["문서", "증거", "개념", "상태", "판단"]
-SEED_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
-                         "tests", "fixtures", "semantic", "seed_canonical_5.jsonl")
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_SEED_TMP_CACHE = {}
+
+
+def _resolve_seed_path(name):
+    """seed 파일 경로(str) 반환 — 절대 raise 안 함(import 시점 평가 안전).
+    S 를 참조하지 않는 standalone (semantic_shadow↔capture_preview 순환 import 하에서도 안전).
+    ① 설치본/clone: importlib.resources 로 binggupack.data/semantic/<name>
+    ② zip/egg 설치: as_file 로 프로세스 수명 임시본 materialize
+    ③ 폴백: 스크립트 상대 ../tests/fixtures/semantic/<name>. 부재여도 str 반환."""
+    try:
+        from importlib.resources import files
+        res = files("binggupack.data").joinpath("semantic", name)
+        try:
+            if res.is_file():
+                return str(res)
+        except Exception:
+            pass
+        try:
+            from importlib.resources import as_file
+            import atexit
+            import tempfile
+            cached = _SEED_TMP_CACHE.get(name)
+            if cached and os.path.exists(cached):
+                return cached
+            with as_file(res) as ap:
+                data = open(ap, "rb").read()
+            fd, tmp = tempfile.mkstemp(prefix="binggu_seed_", suffix="_" + name)
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+            _SEED_TMP_CACHE[name] = tmp
+            atexit.register(lambda p=tmp: os.path.exists(p) and os.remove(p))
+            return tmp
+        except Exception:
+            pass
+    except Exception:
+        pass
+    return os.path.join(_HERE, "..", "tests", "fixtures", "semantic", name)
+
+
+# 설치본/clone 동봉 seed 우선(binggupack.data), 폴백 tests/fixtures. import 시점 평가 안전(raise 0).
+SEED_PATH = _resolve_seed_path("seed_canonical_5.jsonl")
 def _flag_path(home=None):
     # 격리 존중: 모듈 import 시점 고정 대신 런타임 BINGGU_HOME 우선(운영 홈 하드코딩 제거).
     return os.path.join(home or _plat.binggu_home(), "semantic_label_enabled")
@@ -142,20 +183,30 @@ class CanonicalSemantic:
         return {"kind": best, "conf": round(bs, 4), "band": band}
 
 
-_INSTANCE = None
+_INSTANCE = None          # None=미시도 / False=인스턴스화 실패 sentinel / obj=성공
+_SEED_WARN_EMITTED = False
 
 
 def suggest_label_kind(text):
     """opt-in 도장 제안. 반환 {kind,conf,band}(hi/ambiguous) 또는 None(OFF/차단/실패/lo).
-    None이면 호출측은 종결어 규칙(classify_label_kind)으로 fallback."""
+    None이면 호출측은 종결어 규칙(classify_label_kind)으로 fallback.
+    seed 미해결/인스턴스화 실패는 False sentinel 로 캐시해 반복 인스턴스화·크래시(AttributeError)를 막고
+    stderr 1회 경고 후 조용히 None(규칙분류로 fallback)."""
     if not enabled():
         return None
-    global _INSTANCE
+    global _INSTANCE, _SEED_WARN_EMITTED
     if _INSTANCE is None:
         try:
             _INSTANCE = CanonicalSemantic()
         except Exception:
-            return None
+            _INSTANCE = False       # 실패 sentinel(None 유지 시 매 호출 재시도 → 억제)
+            if not _SEED_WARN_EMITTED:
+                sys.stderr.write(
+                    "[binggu_canonical_semantic] enabled 이나 seed 미해결/인스턴스화 실패 "
+                    "→ 규칙분류(classify_label_kind) fallback\n")
+                _SEED_WARN_EMITTED = True
+    if _INSTANCE is False:          # sentinel: .classify_kind 호출 전 반드시 차단(AttributeError 방지)
+        return None
     r = _INSTANCE.classify_kind(text)
     if r and r["band"] in ("hi", "ambiguous"):
         return r
@@ -249,6 +300,22 @@ def run_selftest():
     dist = collections.Counter(r["canonical_kind"] for r in cs.rows)
     rec("9.seed 5종 각 12+ (문서 16 경계보강)",
         set(dist) == set(KINDS) and all(dist[k] >= 12 for k in KINDS) and dist["문서"] == 16)
+
+    # 10. sentinel: enabled=True + 인스턴스화 실패(False) → suggest_label_kind 크래시 없이 None
+    #     (False.classify_kind AttributeError 방지 가드 실측). enabled/_INSTANCE 를 잠시 대체 후 복원.
+    _mod = sys.modules[__name__]
+    _prev_enabled, _prev_inst, _prev_warn = _mod.enabled, _INSTANCE, _SEED_WARN_EMITTED
+    try:
+        _mod.enabled = lambda: True          # OFF 강제 True (flag/ollama 비의존·결정론)
+        globals()["_INSTANCE"] = False        # 인스턴스화 실패 sentinel
+        got = suggest_label_kind("정상 문장이다")
+        rec("10.실패 sentinel(False)에서 크래시 없이 None(AttributeError 0)", got is None)
+    except Exception:
+        rec("10.실패 sentinel(False)에서 크래시 없이 None(AttributeError 0)", False)
+    finally:
+        _mod.enabled = _prev_enabled
+        globals()["_INSTANCE"] = _prev_inst
+        globals()["_SEED_WARN_EMITTED"] = _prev_warn
 
     print("=" * 72)
     print("binggu_canonical_semantic — selftest (도장 semantic 제안, opt-in)")

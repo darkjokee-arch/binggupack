@@ -41,7 +41,7 @@ _DENY = [
                              "localbinggu_production_graph", "user_graph.yaml", "_graph_merge.yaml"]),
 ]
 
-_OWNER_DENY_CACHE = {}
+_OWNER_DENY_CACHE: dict[str, list[str]] = {}
 
 
 def _owner_private_tokens():

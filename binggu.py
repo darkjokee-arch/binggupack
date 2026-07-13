@@ -6,22 +6,22 @@
 새 게이트 로직 0 — 기존 검증 모듈(save/list/deprecate/replace/accept/resolve)을 그대로 호출.
 모든 변경은 confirm 문구를 사용자가 직접 타이핑해야 통과한다(자동 0·confirmed 0·raw 원문 0).
 
-  python binggu.py init                            내 장부 생성 (~/.binggupack/ledger.sqlite)
-  python binggu.py status                          장부 요약
-  python binggu.py preview "<대화/메모 텍스트>"      저장 후보 미리보기 (저장 0)
-  python binggu.py save "<텍스트>" --preview-id <preview가 표시한 id> \
+  binggu init                            내 장부 생성 (~/.binggupack/ledger.sqlite)
+  binggu status                          장부 요약
+  binggu preview "<대화/메모 텍스트>"      저장 후보 미리보기 (저장 0)
+  binggu save "<텍스트>" --preview-id <preview가 표시한 id> \
                    --pick 1,3 --confirm "SAVE 1,3" [--due 2026-07-01]
                    (preview 없이 raw text 직행 저장은 BLOCK — 사람이 보고 고른 것만 저장)
-  python binggu.py list [--status pending|deprecated|resolved] [--kind 판단|상태|개념|문서|증거]
-  python binggu.py deprecate <n> <id8> --reason "..." --confirm "DEPRECATE <n> <id8>"
-  python binggu.py replace <n> <id8> --with "<수정문장>" --reason "..." \
+  binggu list [--status pending|deprecated|resolved] [--kind 판단|상태|개념|문서|증거]
+  binggu deprecate <n> <id8> --reason "..." --confirm "DEPRECATE <n> <id8>"
+  binggu replace <n> <id8> --with "<수정문장>" --reason "..." \
                    --confirm "REPLACE <n> <id8> WITH <수정문장>"
-  python binggu.py accept <n> <id8> --reason "..." --confirm "ACCEPT <n> <id8>"
-  python binggu.py unaccept <n> <id8> --reason "..." --confirm "UNACCEPT <n> <id8>"
-  python binggu.py due <n> <id8> --date 2026-07-01      판단 검증 예정일 등록
-  python binggu.py resolve <n> <id8> --outcome 성공|실패|불확실|판정불가 --reason "..."
-  python binggu.py reminders [--today YYYY-MM-DD]       due 경과 판단 목록
-  python binggu.py --selftest                            temp 장부 풀 사이클 자가검증
+  binggu accept <n> <id8> --reason "..." --confirm "ACCEPT <n> <id8>"
+  binggu unaccept <n> <id8> --reason "..." --confirm "UNACCEPT <n> <id8>"
+  binggu due <n> <id8> --date 2026-07-01      판단 검증 예정일 등록
+  binggu resolve <n> <id8> --outcome 성공|실패|불확실|판정불가 --reason "..."
+  binggu reminders [--today YYYY-MM-DD]       due 경과 판단 목록
+  binggu --selftest                            temp 장부 풀 사이클 자가검증
 
 장부 위치 변경: --ledger <sqlite 경로> (기본 ~/.binggupack/ledger.sqlite)
 """
@@ -61,6 +61,13 @@ DEFAULT_LEDGER = _plat.default_ledger()
 DEFAULT_SETTINGS = _plat.default_settings()
 OUTCOMES = ("성공", "실패", "불확실", "판정불가")
 
+# 사용자 안내에 쓰는 CLI 실행 접두(설치본="binggu" / 소스="python binggu.py"). 모듈 로드 시 1회 계산.
+# 헬퍼 import/판정 실패해도 CLI 가 죽지 않게 폴백(안전 우선).
+try:
+    HINT = _plat.invocation_prefix()
+except Exception:
+    HINT = "python binggu.py"
+
 
 def _hook_command():
     """settings.json 에 등록할 capture hook 실행 명령(repo hooks 절대경로).
@@ -88,7 +95,7 @@ def _open(ledger, must_exist=True):
     ledger, snap_dir = _ledger_paths(ledger)
     if must_exist and not os.path.exists(ledger):
         print("장부가 없습니다: %s" % ledger)
-        print("먼저 만드세요:  python binggu.py init")
+        print(f"먼저 만드세요:  {HINT} init")
         sys.exit(2)
     os.makedirs(snap_dir, exist_ok=True)
     # 손상 장부 내성: sqlite 로 못 여는 장부는 traceback 대신 restore 안내(exit 2 = 장부없음과 일관).
@@ -105,10 +112,10 @@ def _open(ledger, must_exist=True):
         if backs:
             print("백업으로 복구하세요 (최신순 · %s):" % bdir)
             for f in backs[:5]:
-                print('  python binggu.py restore "%s"' % os.path.join(bdir, f))
+                print(f'  {HINT} restore "%s"' % os.path.join(bdir, f))
             print("  (confirm 없이 실행하면 dry-run 검증 + 교체용 --confirm 문구를 안내합니다)")
         else:
-            print("백업 폴더가 비어 있습니다: %s — ledger_*.sqlite 백업을 찾아 python binggu.py restore <백업> 하세요." % bdir)
+            print(f"백업 폴더가 비어 있습니다: %s — ledger_*.sqlite 백업을 찾아 {HINT} restore <백업> 하세요." % bdir)
         sys.exit(2)
 
 
@@ -137,6 +144,42 @@ def _show(r):
     return 1
 
 
+def _install_capture_profile(a, ledger, *, force=False):
+    """capture profile 설치(hook 등록 + scope 생성) — init_profile 재사용 단일 경로.
+
+    force=False(기본) = owner sticky OFF 존중: 사장님이 영구 OFF 해둔 자동수집을 무단
+    재활성하지 않는다(§C-12). scope/hook 만 갱신하고 ON 은 하지 않음. force=True 일 때만
+    sticky OFF 를 해제하고 강제 ON. start(기본)/capture install 양쪽이 이 함수로 위임한다.
+    """
+    home = os.path.dirname(os.path.abspath(ledger))
+    settings = (getattr(a, "capture_settings", None) or getattr(a, "settings", None)
+                or DEFAULT_SETTINGS)
+    cwd = getattr(a, "capture_cwd", None) or os.getcwd()
+    # AGI memory mode = 전역 후보수집(--agi-memory 또는 --global). 플래그 없으면 현재 위치만(privacy).
+    global_scope = bool(getattr(a, "global_scope", False) or getattr(a, "agi_memory", False))
+    r = init_profile(home, cwd, hook_command=_hook_command(),
+                     settings_path=settings, global_scope=global_scope, force_enable=force)
+    scope_desc = "전역(AGI memory — 모든 작업 세션)" if r["global"] else ("현재 위치만 %s (privacy)" % cwd)
+    if not r["enabled"]:
+        # owner sticky OFF — install 이 정책(자동수집 영구 OFF)을 깨지 않음.
+        print("capture 는 owner 가 OFF 로 고정해 두어 켜지 않았습니다(scope/hook 만 갱신).")
+        print(f"정말 켜려면:  {HINT} capture enable   (또는 capture install --force)")
+    else:
+        print("AGI memory capture ON — scope: %s" % scope_desc)
+        # "repaired:<ev>" = 죽은 hook 경로(파일 소실)를 산 경로로 자동 교체한 이벤트 — 신규 등록과 분리 표시.
+        new_ev = [e for e in r["hook_events"] if not e.startswith("repaired:")]
+        rep_ev = [e.split(":", 1)[1] for e in r["hook_events"] if e.startswith("repaired:")]
+        if new_ev:
+            print("hook 등록(settings.json 백업됨): %s" % ", ".join(new_ev))
+        if rep_ev:
+            print("죽은 hook 경로 수리됨: %s (settings.json 백업됨)" % ", ".join(rep_ev))
+        if not r["hook_events"]:
+            print("hook 이미 등록됨 — 그대로 사용")
+        print("자동 후보 수집만 켜집니다. 저장은 preview 후 SAVE n 게이트로만(자동 저장 없음).")
+    print("상태:  capture status   ·   잠깐 끄기:  capture pause   ·   영구 끄기:  capture disable   ·   제거:  capture uninstall")
+    return r
+
+
 def cmd_init(a):
     ledger, snap_dir = _ledger_paths(a.ledger)
     if os.path.exists(ledger):
@@ -147,37 +190,13 @@ def cmd_init(a):
         db = open_accept(ledger)
         db.close()
         print("장부 생성 완료: %s" % ledger)
-    # AGI memory capture profile — 이 profile 이 있어야 자동 후보 수집이 동작(기본 ON).
-    # clone 직후(init 전)에는 profile 이 없어 어떤 세션에서도 수집되지 않는다.
-    if getattr(a, "no_capture", False):
-        print("(capture profile 생략: --no-capture)")
+    # 기본 start = 장부 생성만(settings.json hook 미접촉 — 부작용 분리). 자동 후보 수집은
+    # 명시 옵트인(--with-capture 또는 별도 `capture install`)일 때만 hook 을 건드린다.
+    # --no-capture 는 하위호환 no-op(이제 기본이 곧 no-capture).
+    if getattr(a, "with_capture", False):
+        _install_capture_profile(a, ledger, force=bool(getattr(a, "force_capture", False)))
     else:
-        home = os.path.dirname(os.path.abspath(ledger))
-        settings = getattr(a, "capture_settings", None) or DEFAULT_SETTINGS
-        cwd = getattr(a, "capture_cwd", None) or os.getcwd()
-        # AGI memory mode = 전역 후보수집이 기본 경험(--agi-memory 또는 --global). 플래그 없는 init = 현재 위치만(privacy).
-        global_scope = bool(getattr(a, "global_scope", False) or getattr(a, "agi_memory", False))
-        force_cap = bool(getattr(a, "force_capture", False))
-        r = init_profile(home, cwd, hook_command=_hook_command(),
-                         settings_path=settings, global_scope=global_scope, force_enable=force_cap)
-        scope_desc = "전역(AGI memory — 모든 작업 세션)" if r["global"] else ("현재 위치만 %s (privacy)" % cwd)
-        if not r["enabled"]:
-            # owner sticky OFF — init 이 정책(자동수집 영구 OFF)을 깨지 않음.
-            print("capture 는 owner 가 OFF 로 고정해 두어 켜지 않았습니다(scope/hook 만 갱신).")
-            print("정말 켜려면:  python binggu.py capture enable   (또는 init --force-capture)")
-        else:
-            print("AGI memory capture ON — scope: %s" % scope_desc)
-            # "repaired:<ev>" = 죽은 hook 경로(파일 소실)를 산 경로로 자동 교체한 이벤트 — 신규 등록과 분리 표시.
-            new_ev = [e for e in r["hook_events"] if not e.startswith("repaired:")]
-            rep_ev = [e.split(":", 1)[1] for e in r["hook_events"] if e.startswith("repaired:")]
-            if new_ev:
-                print("hook 등록(settings.json 백업됨): %s" % ", ".join(new_ev))
-            if rep_ev:
-                print("죽은 hook 경로 수리됨: %s (settings.json 백업됨)" % ", ".join(rep_ev))
-            if not r["hook_events"]:
-                print("hook 이미 등록됨 — 그대로 사용")
-            print("자동 후보 수집만 켜집니다. 저장은 preview 후 SAVE n 게이트로만(자동 저장 없음).")
-        print("상태:  capture status   ·   잠깐 끄기:  capture pause   ·   영구 끄기:  capture disable   ·   제거:  capture uninstall")
+        print(f"자동 후보 수집은 꺼져 있습니다. 켜려면:  {HINT} capture install")
     # 환경 점검(옵션1, 4cli 20260615_1900) — 무엇이 켜지고 무엇을 더 깔면 뭐가 생기는지 1회 안내.
     # 점검만 — 자동 설치 안 함(없는 건 명령만 안내). 실패해도 init 흐름엔 영향 0.
     try:
@@ -190,7 +209,7 @@ def cmd_init(a):
         print()
     except Exception:
         pass
-    print("다음:  python binggu.py preview \"오늘 정리하고 싶은 문장들\"")
+    print(f"다음:  {HINT} preview \"오늘 정리하고 싶은 문장들\"")
     return 0
 
 
@@ -199,6 +218,11 @@ def cmd_capture(a):
     settings = getattr(a, "settings", None) or DEFAULT_SETTINGS
     cwd = getattr(a, "capture_cwd", None) or os.getcwd()
     sub = a.capture_cmd
+    if sub == "install":
+        # capture profile 설치(hook 등록 + scope 생성) — start(기본)에서 분리된 명시 옵트인.
+        # owner sticky OFF 존중(무단 재활성 금지). --force 일 때만 강제 ON(force_capture).
+        _install_capture_profile(a, a.ledger, force=bool(getattr(a, "force_capture", False)))
+        return 0
     if sub == "status":
         st = cap_status(home, cwd, settings)
         print("capture: %s%s%s" % ("ON" if st["enabled"] else "OFF",
@@ -211,7 +235,7 @@ def cmd_capture(a):
         return 0
     if sub == "pause":
         cap_pause(home)
-        print("capture 일시중지(pause). 재개:  python binggu.py capture resume")
+        print(f"capture 일시중지(pause). 재개:  {HINT} capture resume")
         return 0
     if sub == "resume":
         cap_resume(home)
@@ -221,7 +245,7 @@ def cmd_capture(a):
         # owner sticky OFF: init 재실행에도 OFF 유지(정책 영구 OFF). pause 와 달리 영구.
         cap_disable(home)
         print("capture 영구 OFF 고정(owner 정책). `binggu init` 재실행해도 켜지지 않습니다.")
-        print("다시 켜기:  python binggu.py capture enable")
+        print(f"다시 켜기:  {HINT} capture enable")
         return 0
     if sub == "enable":
         cap_enable(home)
@@ -258,7 +282,7 @@ def cmd_capture(a):
         else:
             print("저장 게이트 hook 이미 등록됨 — 그대로 사용")
         print("이제 'SAVE n' 발화가 인식되어 선택 저장이 통과합니다(자동 저장 아님 · 사람 발화만).")
-        print("제거:  python binggu.py capture uninstall-gate")
+        print(f"제거:  {HINT} capture uninstall-gate")
         return 0
     if sub == "uninstall-gate":
         removed = unregister_hook(settings, marker=SAVE_GATE_MARKER)
@@ -361,15 +385,15 @@ def cmd_hosted(a):
         sel = getattr(a, "select", None)
         if not sel:
             print("hosted pull = inbox 에서 본 번호를 골라 사람 save-n 으로 ledger 에 저장합니다(전량 자동 없음).")
-            print("  먼저:  python binggu.py hosted inbox                 (대기 intent 번호 확인 · preview 기록)")
-            print("  저장:  python binggu.py hosted pull --select 1,3 --confirm \"SAVE 1,3\"")
+            print(f"  먼저:  {HINT} hosted inbox                 (대기 intent 번호 확인 · preview 기록)")
+            print(f"  저장:  {HINT} hosted pull --select 1,3 --confirm \"SAVE 1,3\"")
             print("  (Claude Code 에선 inbox 확인 후 '세이브 1,3' 발화가 사람 앵커 · 터미널에선 직접 실행이 곧 save n)")
             return 0
         idx = [int(x) for x in sel.split(",") if x.strip()]
         confirm = getattr(a, "confirm", None)
         ledger, snap_dir = _ledger_paths(a.ledger)
         if not os.path.exists(ledger):
-            print("장부 없음: %s (먼저 python binggu.py init)" % ledger)
+            print(f"장부 없음: %s (먼저 {HINT} init)" % ledger)
             return 2
         now_ts = int(_t.time())
         # save-n 참조 바인딩 — inbox 렌더가 영속한 preview 와 동일 빌더로 pref 재계산(1 intent = 1 row).
@@ -469,7 +493,7 @@ def cmd_recall(a):
     import binggu_p1_ranking as RANK
     ledger, _ = _ledger_paths(a.ledger)
     if not os.path.exists(ledger):
-        print("장부가 없습니다(회상할 기억 없음): %s · 먼저 python binggu.py init" % ledger)
+        print(f"장부가 없습니다(회상할 기억 없음): %s · 먼저 {HINT} init" % ledger)
         return 0  # 빈 그래프 graceful
     home = os.path.dirname(ledger)
 
@@ -487,7 +511,7 @@ def cmd_recall(a):
         nodes = hr["relevant_nodes"]
         if not nodes:
             print("Hot 색인에 관련 기억이 없습니다: \"%s\"" % a.query)
-            print("  → 더 넓게 찾기(원본 전체): python binggu.py recall \"%s\" --deep" % a.query)
+            print(f"  → 더 넓게 찾기(원본 전체): {HINT} recall \"%s\" --deep" % a.query)
             return 0  # 자동 Deep 승격 금지 — 사람이 선택
         print("# 회상(Hot 색인 · 상위 %d) — \"%s\" (랭킹순 · candidate · read-only · 원본 스캔 0)"
               % (len(nodes), a.query))
@@ -504,7 +528,7 @@ def cmd_recall(a):
     if node_ids:
         from binggupack.pack import hit_recording as _HR
         _nonce = _HR.recall_nonce(a.query, node_ids)
-        print("  → 맞았으면:  python binggu.py mark-hit \"%s\" --index N --nonce %s" % (a.query, _nonce))
+        print(f"  → 맞았으면:  {HINT} mark-hit \"%s\" --index N --nonce %s" % (a.query, _nonce))
         print("     틀렸으면 mark-miss (N=위 번호). 자동 기록 0 · 사람 확정만.")
     # P1-② use_count++ — --record 명시 시에만(사람의 '유용했다' 신호). 기본 회상은 read-only.
     if getattr(a, "record", False) and node_ids:
@@ -532,7 +556,7 @@ def cmd_index(a):
             print(_j.dumps(st, ensure_ascii=False))
             return 0
         if st["status"] == "MISSING":
-            print("# Local Fresh Index — 없음. 생성: python binggu.py index update")
+            print(f"# Local Fresh Index — 없음. 생성: {HINT} index update")
             return 0
         stale = st["status"] == "STALE"
         print("# Local Fresh Index — %s" % ("갱신 필요(STALE)" if stale else "최신(OK)"))
@@ -545,7 +569,7 @@ def cmd_index(a):
         _paths = FI.allowed_paths(home)
         print("  허용 로컬 경로: %s" % (", ".join(_paths) if _paths else "(없음 · index add-path 로 옵트인)"))
         if stale:
-            print("  → 반영: python binggu.py index update")
+            print(f"  → 반영: {HINT} index update")
         return 0
     if cmd == "update":
         r = FI.index_update(ledger, home=home)
@@ -579,7 +603,7 @@ def cmd_index(a):
     if cmd == "list-paths":
         paths = FI.allowed_paths(home)
         if not paths:
-            print("허용 로컬 경로 없음 (기본 빈 · owner 옵트인). 추가: python binggu.py index add-path <dir>")
+            print(f"허용 로컬 경로 없음 (기본 빈 · owner 옵트인). 추가: {HINT} index add-path <dir>")
         else:
             print("# 허용 로컬 경로 (md/traj 인덱싱 대상)")
             for p in paths:
@@ -598,7 +622,7 @@ def _judgment_trace_show(ledger, node_id):
     """기존 judgment_trace — 판단 노드 근거 사슬(다홉). read-only."""
     import binggu_recall as RC
     if not os.path.exists(ledger):
-        print("장부가 없습니다: %s · 먼저 python binggu.py init" % ledger)
+        print(f"장부가 없습니다: %s · 먼저 {HINT} init" % ledger)
         return 0
     res = RC.judgment_trace(ledger, node_id, home=os.path.dirname(ledger))
     if not res["found"]:
@@ -714,7 +738,7 @@ def cmd_preflight(a):
                               events=("UserPromptSubmit",), marker=PREFLIGHT_MARKER, is_async=True)
         print("preflight 자동주입 hook 등록 완료(settings.json 백업됨): %s" % ", ".join(added)
               if added else "preflight hook 이미 등록됨 — 그대로 사용")
-        print("활성화는 별도:  python binggu.py preflight --enable   (기본 OFF)")
+        print(f"활성화는 별도:  {HINT} preflight --enable   (기본 OFF)")
         return 0
     if getattr(a, "uninstall", False):
         removed = unregister_hook(settings, marker=PREFLIGHT_MARKER)
@@ -725,12 +749,12 @@ def cmd_preflight(a):
         with open(flag, "w", encoding="utf-8") as f:
             f.write("1")
         print("preflight 자동주입 ON. 작업 발화 시 관련 기억이 상단에 표시됩니다(정보만 · 저장 0 · 차단 0).")
-        print("끄기:  python binggu.py preflight --disable")
+        print(f"끄기:  {HINT} preflight --disable")
         return 0
     if getattr(a, "disable", False):
         if os.path.exists(flag):
             os.remove(flag)
-        print("preflight 자동주입 OFF(플래그 삭제). 수동 회상은 `python binggu.py preflight --prompt ...` 로 가능.")
+        print(f"preflight 자동주입 OFF(플래그 삭제). 수동 회상은 `{HINT} preflight --prompt ...` 로 가능.")
         return 0
     if getattr(a, "auto_status", False):
         reg = hook_registered(settings, marker=PREFLIGHT_MARKER)
@@ -808,11 +832,11 @@ def cmd_status(a):
     hh = hook_health(DEFAULT_SETTINGS)
     if hh["dead_paths"]:
         print("⚠ capture hook 죽은 경로 %d건: %s" % (len(hh["dead_paths"]), ", ".join(hh["dead_paths"])))
-        print("  수리: `binggu start` 재실행하면 자동 교체됩니다.")
+        print(f"  수리: {HINT} capture install 실행하면 자동 교체됩니다.")
     elif hh["registered"]:
         print("capture hook: 정상 등록(경로 실존)")
     else:
-        print("capture hook: 미등록 (`binggu start`로 등록)")
+        print(f"capture hook: 미등록 ({HINT} capture install 로 등록)")
     return 0
 
 
@@ -838,7 +862,7 @@ def cmd_preview(a, explicit=False):
     if pv["candidates"]:
         print("⚠ 외부 사실(릴리스 상태·업로드 여부·등급 등)은 실측 확인 전에 저장하지 마세요.")
         _x = " --explicit" if explicit else ""
-        print("저장은 번호를 직접 골라서:  python binggu.py save \"<같은 텍스트>\" --preview-id %s "
+        print(f"저장은 번호를 직접 골라서:  {HINT} save \"<같은 텍스트>\" --preview-id %s "
               "--pick <고른 번호들> --confirm \"SAVE <고른 번호들>\"%s" % (pid, _x))
     return 0
 
@@ -874,7 +898,7 @@ def cmd_reflect(a):
     pid = _preview_id(text)
     print("\npreview_id: %s" % pid)
     if pv["candidates"]:
-        print("이 회고에서 남길 교훈만 골라 도장:  python binggu.py save \"<같은 텍스트>\" "
+        print(f"이 회고에서 남길 교훈만 골라 도장:  {HINT} save \"<같은 텍스트>\" "
               "--preview-id %s --pick <번호들> --confirm \"SAVE <번호들>\"" % pid)
     else:
         print("후보 0 — 회고에서 남길 판단/교훈 문장이 추출되지 않았습니다(시크릿/PII는 자동 제외).")
@@ -975,10 +999,10 @@ def cmd_save(a):
         print(
             "BLOCK: owner_flat_save_forbidden — owner 화자 저장은 pair 를 쓰세요(노드2+엣지1 연결 보존).\n"
             "  · AI 발화에 대한 반응(수용/반박/수정):\n"
-            "      python binggu.py pair \"<owner 원문 그대로>\" \"<ai 발화>\" "
+            f"      {HINT} pair \"<owner 원문 그대로>\" \"<ai 발화>\" "
             "--by owner --relation {accepts|refutes|revises} --confirm \"PAIR owner_<relation> owner:1 ai:1\"\n"
             "  · 순수 단독 직감(ai 없음):\n"
-            "      python binggu.py pair \"<owner 원문 그대로>\" --confirm \"PAIR owner:1\"\n"
+            f"      {HINT} pair \"<owner 원문 그대로>\" --confirm \"PAIR owner:1\"\n"
             "  · save --speaker owner 는 화자 페어 엣지가 빠져 노드가 흩어집니다(2026-06-28 재발 차단)."
         )
         return 1
@@ -1285,7 +1309,7 @@ def cmd_abstraction(a):
     from binggupack.pack import abstraction as ABS
     ledger, _ = _ledger_paths(a.ledger)
     if not os.path.exists(ledger):
-        print("장부가 없습니다: %s · 먼저 python binggu.py init" % ledger)
+        print(f"장부가 없습니다: %s · 먼저 {HINT} init" % ledger)
         return 2
     domain = getattr(a, "domain", None)
     home = os.path.dirname(ledger)
@@ -1357,7 +1381,7 @@ def cmd_mark(a):
     from binggupack.pack import hit_recording as HR
     ledger, _ = _ledger_paths(a.ledger)
     if not os.path.exists(ledger):
-        print("장부가 없습니다(회상 기억 없음): %s · 먼저 python binggu.py init" % ledger)
+        print(f"장부가 없습니다(회상 기억 없음): %s · 먼저 {HINT} init" % ledger)
         return 2
     outcome = "hit" if a.cmd == "mark-hit" else "miss"
     db, _ = _open(ledger)
@@ -1372,7 +1396,7 @@ def cmd_mark(a):
     reason = r.get("reason")
     print("BLOCK: %s" % reason)
     if reason == "stale_recall":
-        print("  회상 결과가 바뀌었습니다. python binggu.py recall \"%s\" 로 nonce 를 다시 받으세요"
+        print(f"  회상 결과가 바뀌었습니다. {HINT} recall \"%s\" 로 nonce 를 다시 받으세요"
               " (기대 nonce=%s)." % (a.query, r.get("expected_nonce")))
     elif reason in ("index_out_of_range",):
         print("  index 가 회상 건수를 벗어났습니다(회상 %s건). recall 로 번호를 확인하세요."
@@ -1400,7 +1424,7 @@ def cmd_learn_consume(a):
                   '(자동확정 0).')
             return 1
         if not os.path.exists(ledger):
-            print("장부가 없습니다: %s · 먼저 python binggu.py init" % ledger)
+            print(f"장부가 없습니다: %s · 먼저 {HINT} init" % ledger)
             return 2
         db, _ = _open(ledger)
         # 소비 승인 actor 판정 = _resolve_human_ctx(save-n 바인딩/cli_command · 에이전트 세션 deny).
@@ -1457,7 +1481,7 @@ def cmd_learn_consume(a):
         reason = r.get("reason")
         print("BLOCK: %s" % reason)
         if reason == "qi_out_of_range":
-            print("  소비 대기 %s건. dry-run(python binggu.py learn-consume) 으로 번호 확인."
+            print(f"  소비 대기 %s건. dry-run({HINT} learn-consume) 으로 번호 확인."
                   % r.get("pending", "?"))
         elif reason == "index_out_of_range":
             mark = r.get("mark") or {}
@@ -1548,13 +1572,13 @@ def cmd_harvest(a):
             print("  재개:  Remove-Item \"%s\"" % HV.harvest_disabled_path(home))
         if not srcs:
             print("등록된 외부 소스가 없습니다(빈 화이트리스트). 수확은 0입니다.")
-            print('  등록:  python binggu.py harvest add --kind arxiv --url "https://arxiv.org/..."')
+            print(f'  등록:  {HINT} harvest add --kind arxiv --url "https://arxiv.org/..."')
             return 0
         print("등록된 외부 소스 %d개:" % len(srcs))
         for i, s in enumerate(srcs, 1):
             print("  %d. [%s] %s%s" % (i, s.get("kind"), s.get("url"),
                                        (" (keyword=%s)" % s["keyword"]) if s.get("keyword") else ""))
-            print("       제거:  python binggu.py harvest remove %s" % s.get("source_id"))
+            print(f"       제거:  {HINT} harvest remove %s" % s.get("source_id"))
         return 0
     if sub == "remove":
         r = HV.remove_source(a.source_id, path=sp)
@@ -1593,12 +1617,12 @@ def cmd_confirm_edges(a):
       - --confirm 게이트 필수(raw 실행 차단) · 운영 ledger write 0(read-only 스냅샷만).
       - apply 가 매트릭스/evidence/secret/dangling 재검증 + 멱등.
 
-      python binggu.py confirm-edges                                   # 후보 목록(report only · 적재 0)
-      python binggu.py confirm-edges --approve 1,3 --confirm "CONFIRM EDGES 1,3"
+      binggu confirm-edges                                   # 후보 목록(report only · 적재 0)
+      binggu confirm-edges --approve 1,3 --confirm "CONFIRM EDGES 1,3"
     """
     ledger, _ = _ledger_paths(a.ledger)
     if not os.path.exists(ledger):
-        print("장부가 없습니다: %s\n먼저 만드세요:  python binggu.py init" % ledger)
+        print(f"장부가 없습니다: %s\n먼저 만드세요:  {HINT} init" % ledger)
         return 2
     # 운영 ledger 는 점검(read-only)만 — write 0. OPERATING_PATHS 신원(owner ledger 원본) 확인.
     # confirm-edges 는 운영 ledger 를 read-only 스냅샷만 한다(write 0) — 경로 무관 안전.
@@ -1639,7 +1663,7 @@ def cmd_confirm_edges(a):
     # 2) --approve 없으면 안내만(적재 0)
     if not a.approve:
         print("\n관계를 도장하려면(사람이 고른 것만):")
-        print('  python binggu.py confirm-edges --approve <번호들> --confirm "CONFIRM EDGES <번호들>"')
+        print(f'  {HINT} confirm-edges --approve <번호들> --confirm "CONFIRM EDGES <번호들>"')
         return 0
 
     # 3) --confirm 게이트(raw 실행 차단) — "CONFIRM EDGES <approve>" 정확히 타이핑
@@ -1682,9 +1706,9 @@ def cmd_confirm_edges(a):
 def cmd_setup_cloud(a):
     """setup-cloud — 흩어진 cloud 셋업 명령을 1개 진입점으로(멱등·실패정지).
     얇은 래퍼 — 실 오케스트레이션은 scripts/binggu_setup_cloud.py(순수함수+selftest).
-      python binggu.py setup-cloud            # 점검만(dry-run · 변경 0)
-      python binggu.py setup-cloud --apply    # kv create/toml 기입/kv put/스케줄러 등록
-      python binggu.py setup-cloud --apply --deploy   # 위 + wrangler deploy(비가역)
+      binggu setup-cloud            # 점검만(dry-run · 변경 0)
+      binggu setup-cloud --apply    # kv create/toml 기입/kv put/스케줄러 등록
+      binggu setup-cloud --apply --deploy   # 위 + wrangler deploy(비가역)
     login(브라우저 OAuth)·deploy 결정은 본인 손 — 스크립트는 점검+안내+멱등 적용만."""
     import binggu_setup_cloud as SC  # scripts/ 는 이미 sys.path 에 있음
     res = SC.run_setup(apply=bool(getattr(a, "apply", False)),
@@ -1696,9 +1720,9 @@ def cmd_setup_cloud(a):
 def cmd_onboard(a):
     """onboard — 신규 사용자 원클릭 셋업: 읽기(setup-cloud) + 저장채널(save_mcp) + auto-pull.
     얇은 래퍼 — 실 오케스트레이션은 binggu_setup_cloud/binggu_setup_save(순수함수+selftest).
-      python binggu.py onboard                  # 점검만(dry-run · 변경 0)
-      python binggu.py onboard --apply          # 키 생성/kv/toml/스케줄러(배포 제외)
-      python binggu.py onboard --apply --deploy # 위 + worker 2종 deploy(비가역)
+      binggu onboard                  # 점검만(dry-run · 변경 0)
+      binggu onboard --apply          # 키 생성/kv/toml/스케줄러(배포 제외)
+      binggu onboard --apply --deploy # 위 + worker 2종 deploy(비가역)
     login(브라우저 OAuth)·deploy 결정·ChatGPT 커넥터 등록은 본인 손 — 대행 0."""
     import binggu_setup_cloud as SC
     import binggu_setup_save as SS
@@ -1737,7 +1761,7 @@ def cmd_restore(a):
             print("현재 장부는 손상 상태(카운트 -1 표기) — 교체 시 손상본은 _backup/pre_restore_corrupt_*.sqlite 로 byte 보존됩니다")
         print("백업: 노드 %d · 엣지 %d  ↔  현재: 노드 %d · 엣지 %d"
               % (res["backup_nodes"], res["backup_edges"], res["current_nodes"], res["current_edges"]))
-        print('교체하려면:  python binggu.py restore "%s" --confirm "%s"'
+        print(f'교체하려면:  {HINT} restore "%s" --confirm "%s"'
               % (res["backup"], res["expected_confirm"]))
         return 0 if st == "DRY_RUN" else 1
     if st == "BUSY":
@@ -1758,11 +1782,11 @@ def cmd_backup(a):
     ledger, _ = _ledger_paths(a.ledger)
     res = AR.backup_ledger(ledger, out_path=getattr(a, "out", None), home=os.path.dirname(ledger))
     if res["status"] == "NO_LEDGER":
-        print("장부가 없습니다: %s · 먼저 python binggu.py init" % ledger)
+        print(f"장부가 없습니다: %s · 먼저 {HINT} init" % ledger)
         return 2
     if res["status"] == "CORRUPT_LEDGER":
         print("장부 파일이 손상됨: %s" % res.get("ledger"))
-        print("python binggu.py doctor 로 확인 후 python binggu.py restore <백업> 으로 복구하세요.")
+        print(f"{HINT} doctor 로 확인 후 {HINT} restore <백업> 으로 복구하세요.")
         return 2
     print("# 백업 완료 → %s" % res["out_path"])
     print("  노드 %d · 엣지 %d · %d bytes · sha256 %s…"
@@ -2179,19 +2203,47 @@ def cmd_approval(a):
     return 2
 
 
+_HELP_EPILOG = """\
+일상 명령 (자주 쓰는 것부터):
+  start        내 장부 생성(장부만 · 자동수집은 capture install 로 별도)
+  home         오늘 할 일 + 상태 한눈에 (인자 없이 binggu 와 동일)
+  inbox        검토함 — 자동수집·원격·승인대기·검토예정 모아보기
+  preview      저장 후보 미리보기 (저장 0)
+  save         preview 후 고른 후보만 도장 (SAVE n 게이트)
+  pair         owner 발화 + ai 요약 페어 저장
+  recall       회상 — 왜 이렇게 판단했나 (read-only)
+  list         후보 목록
+  status       장부 요약 · 건강 진단 (= doctor)
+  reflect      회고 → 지식 후보
+  demo         60초 격리 체험 (운영 장부 미접촉)
+
+고급 명령:
+  studio · capture · explain · forget · preflight · index · deprecate · replace ·
+  accept · unaccept · due · resolve · reminders · mark-hit · mark-miss ·
+  learn-consume · abstraction · trace · hosted · harvest · trust · route ·
+  confirm-edges · setup-cloud · onboard · backup · export · restore ·
+  approvals · approval · app
+
+각 명령 상세:  binggu <command> -h
+"""
+
+
 def main():
     if sys.argv[1:] == ["--selftest"]:
         sys.exit(selftest())
     if not sys.argv[1:]:  # 인자 없이 실행 → 친절한 홈 화면(argparse 에러 대신)
         sys.exit(_home_screen())
-    p = argparse.ArgumentParser(prog="binggu", description="BingguPack 개인 장부 CLI")
+    p = argparse.ArgumentParser(prog="binggu", description="BingguPack 개인 장부 CLI",
+                                epilog=_HELP_EPILOG,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--ledger", default=DEFAULT_LEDGER)
     try:
         from binggupack.__about__ import __version__ as _bgp_ver
     except Exception:
         _bgp_ver = "unknown"
     p.add_argument("--version", action="version", version="binggupack %s" % _bgp_ver)
-    sub = p.add_subparsers(dest="cmd", required=True)
+    # metavar 로 usage 의 거대한 {demo,init,...} 브레이스를 <command> 로 축약(서브파서 로직 불변).
+    sub = p.add_subparsers(dest="cmd", required=True, metavar="<command>")
     # 60초 데모(설치 직후 체험) — 격리 임시 장부·오프라인·운영 장부 미접촉.
     dmp = sub.add_parser("demo")
     dmp.add_argument("--non-interactive", action="store_true", dest="non_interactive")
@@ -2202,8 +2254,9 @@ def main():
     ip = sub.add_parser("init", aliases=["start"])
     ip.add_argument("--agi-memory", action="store_true", dest="agi_memory")  # 명시 별칭(동작 동일)
     ip.add_argument("--global", action="store_true", dest="global_scope")     # 전역 수집(미지정 시 현재 위치만)
-    ip.add_argument("--no-capture", action="store_true", dest="no_capture")   # 장부만, capture profile 생략
-    ip.add_argument("--force-capture", action="store_true", dest="force_capture")  # owner sticky OFF 해제하고 강제 ON
+    ip.add_argument("--with-capture", action="store_true", dest="with_capture")  # 자동 후보 수집 옵트인(hook 등록)
+    ip.add_argument("--no-capture", action="store_true", dest="no_capture")   # 하위호환 no-op(기본이 곧 no-capture)
+    ip.add_argument("--force-capture", action="store_true", dest="force_capture")  # (--with-capture 와) owner sticky OFF 해제 강제 ON
     sub.add_parser("status", aliases=["doctor"])
     hmp = sub.add_parser("home")            # 데일리 콘솔(상태+다음 할 일 · read-only · 인자없는 binggu 와 동일)
     hmp.add_argument("--json", action="store_true")
@@ -2323,6 +2376,9 @@ def main():
     csub = cp.add_subparsers(dest="capture_cmd", required=True)
     for cs in ("status", "pause", "resume", "disable", "enable", "preview", "uninstall", "install-gate", "uninstall-gate"):
         csub.add_parser(cs)
+    # capture install — start(기본)에서 분리한 명시 옵트인 설치(hook+scope). install-gate 와 별개 choice.
+    cap_install = csub.add_parser("install")
+    cap_install.add_argument("--force", action="store_true", dest="force_capture")  # owner sticky OFF 해제 강제 ON
     hp = sub.add_parser("hosted")
     hsub = hp.add_subparsers(dest="hosted_cmd", required=True)
     ibp = hsub.add_parser("inbox")          # 회수(저장0) + read-only 요약

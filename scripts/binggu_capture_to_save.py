@@ -22,6 +22,17 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from openbinggu_conversation_candidate_save import save_selected  # noqa: E402
+try:
+    import binggu_platform as _plat  # noqa: E402
+except Exception:  # pragma: no cover — 폴백
+    _plat = None
+
+
+def _invocation_prefix():
+    try:
+        return _plat.invocation_prefix() if _plat else "python binggu.py"
+    except Exception:
+        return "python binggu.py"
 
 
 def _preview_id(text):
@@ -33,12 +44,13 @@ def build_save_commands(preview, ledger=None):
     """capture preview(buffer.render_preview 결과) → 후보별 저장 명령 안내.
     저장 실행 0 — 명령 문자열만. 사용자가 실행해야 기존 게이트로 저장됨."""
     ledger_opt = f' --ledger "{ledger}"' if ledger else ""
+    prefix = _invocation_prefix()
     rows = []
     for it in preview.get("items", []):
         text = it["text"]
         pid = _preview_id(text)
         # 발화 1건 = 후보. 기존 capture_preview 재실행 시 보통 1번 후보 → --pick 1
-        cmd = (f'python binggu.py save "{text}" --preview-id {pid} '
+        cmd = (f'{prefix} save "{text}" --preview-id {pid} '
                f'--pick 1 --confirm "SAVE 1"{ledger_opt}')
         rows.append({
             "idx": it["idx"],

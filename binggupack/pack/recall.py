@@ -183,7 +183,7 @@ _PREFILL_CHUNK = 64   # 배치 임베드 1왕복당 문장 수(Ollama /api/embed
 
 # model_digest 프로세스 메모(감사 #2) — scorer 빌드마다 /api/tags 왕복 제거.
 # 장수 프로세스에서 모델 교체는 재시작 후 반영(수용된 트레이드오프 — 캐시 GC 도 같은 값 사용).
-_MODEL_DIGEST_MEMO = {}
+_MODEL_DIGEST_MEMO: dict[str, str] = {}
 
 
 def _model_digest_memo(SH):

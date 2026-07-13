@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "binggupack"
-version = "1.20.0"   # v1.20.0 stable — Daily Console · MCP Front Door · Studio(Preview/Memory Explorer/Approval Center). schema/dependency 변경 0. version SSOT = binggupack/__about__.py.
+version = "1.21.0"   # v1.21.0 — Codex 감사 6트랙 수정(seed 패키징·start 분리·명령 구분·mypy·help·CI). schema/dependency 변경 0. version SSOT = binggupack/__about__.py.
 description = "BingguPack — local-first, evidence-backed memory/context pack framework with an installable Claude Code MCP server (stdio JSON-RPC). Python stdlib only."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -51,6 +51,7 @@ include = ["binggupack*", "scripts", "hooks"]   # scripts/hooks 는 CLI 호환�
 scripts = ["hybrid_agi/*.py", "hybrid_agi/README.md"]
 hooks = ["settings.snippet.json"]
 "binggupack.studio" = ["static/*.html", "static/*.js", "static/*.css"]
+"binggupack.data" = ["semantic/*.jsonl"]
 
 # 설치/검증:
 #   pip install binggupack

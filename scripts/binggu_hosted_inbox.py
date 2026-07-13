@@ -35,6 +35,17 @@ if _BASE not in sys.path:
 from openbinggu_conversation_capture_preview import capture_preview  # noqa: E402
 from binggupack.safety.gate_log import (write_last_preview,  # noqa: E402
                                         preview_ref_for_candidates)
+try:
+    import binggu_platform as _plat  # noqa: E402
+except Exception:  # pragma: no cover — 폴백
+    _plat = None
+
+
+def _invocation_prefix():
+    try:
+        return _plat.invocation_prefix() if _plat else "python binggu.py"
+    except Exception:
+        return "python binggu.py"
 
 EXCERPT = 80
 
@@ -147,7 +158,8 @@ def render_summary_md(summ):
     lines.append("")
     lines.append("저장(preview + save n) — 위 번호가 곧 save n 의 n 입니다:")
     lines.append("  · Claude Code: '세이브 <번호들>' 발화 후")
-    lines.append("      python binggu.py hosted pull --select <번호들> --confirm \"SAVE <번호들>\"")
+    lines.append("      %s hosted pull --select <번호들> --confirm \"SAVE <번호들>\""
+                 % _invocation_prefix())
     lines.append("  · 터미널: 위 명령을 직접 입력(그 자체가 save n)")
     lines.append("(전량 자동 적용 없음 · 고른 묶음 전체를 한 번에 ledger 에 확정합니다.)")
     return "\n".join(lines)
