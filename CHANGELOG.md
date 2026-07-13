@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- `backup_ledger` 가 손상 ledger.sqlite 에서 raw traceback 으로 죽던 갭 — `CORRUPT_LEDGER` status 반환 + 빈 산출물 정리 + CLI 복구 안내(restore 의 `INVALID_BACKUP` 방어와 대칭).
+
 ### Fixed — semantic 콜드스타트 배치 선채움: 첫 회상 126.8s → 6.5s (2026-07-13)
 Codex 감사 잔여(콜드 35s — 실측 시점 413노드에서 126.8s로 악화). 원인 = why_search 가 미캐시 노드마다 1회씩 **순차 HTTP embed(N왕복)** 로 영속 캐시를 채우던 비용(모델 로드 아님 · warm 은 종전에도 0.4s).
 - `binggu_semantic_shadow._embed_batch` 신설 — /api/embed input 리스트 1왕복 다건(실패/개수 불일치 → None·호출측 단건 fallback).
