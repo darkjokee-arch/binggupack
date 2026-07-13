@@ -271,6 +271,8 @@ def _build_outcome_candidates(home=None, today=None):
         for qi, entry in LC.load_pending_today(qpath, today=today):
             fb = (entry.get("evidence") or {}).get("feedback") or ""
             items.append({"qi": qi, "outcome": entry.get("outcome"),
+                          "stance": LC.stance_of(entry),
+                          "ai_answer": (entry.get("ai_answer") or "")[:60],
                           "feedback": fb[:60], "ts": entry.get("ts")})
         return {"available": True, "count": len(items), "items": items,
                 "note": "확정은 사람만 — 자동 적재 0 · 번호는 learn-consume dry-run 과 동일"}
@@ -411,12 +413,15 @@ def render_close_md(summary):
     oc = summary.get("outcome_candidates", {}) or {}
     if oc.get("available") and oc.get("count"):
         lines.append("")
-        lines.append("### 4) 당일 owner 지적 후보 — 적중한 것 골라주세요 (자동 확정 0)")
+        lines.append("### 4) 당일 owner 지적 후보 — 맞았는지 확인해 주세요 (자동 확정 0)")
         for it in oc.get("items", []):
-            tag = "적중(hit)" if it.get("outcome") == "hit" else "빗나감(miss)"
-            lines.append("- [%s] %s · 발화: %s" % (it.get("qi"), tag, it.get("feedback") or ""))
+            tag = ("인정(AI 답변 수긍)" if it.get("stance") == "accepts"
+                   else "반박(사용자가 AI 정정)")
+            lines.append("- [%s] %s · 사용자: %s" % (it.get("qi"), tag, it.get("feedback") or ""))
+            if it.get("ai_answer"):
+                lines.append("  - AI 답변: %s" % it["ai_answer"])
         lines.append('- 확정: `binggu learn-consume --confirm "CONSUME <번호>"` '
-                     "(사람 확정만 · 번호는 dry-run 과 동일)")
+                     "(사람 확정만 · 번호는 dry-run 과 동일 · 뒤집힌 건 `--verdict overturned`)")
         lines.append("> %s" % oc.get("note", "확정은 사람만 — 자동 적재 0"))
 
     return "\n".join(lines)
@@ -644,10 +649,10 @@ def _selftest():
               and qp.stat().st_mtime_ns == q_mtime,
               "T18 당일 후보만(전일·consumed 제외)·qi=learn-consume 소비 번호 보존·큐 write 0")
         check("### 4) 당일 owner 지적 후보" in md18
-              and "[1] 빗나감(miss)" in md18 and "너도 제대로 안 읽었는데" in md18
+              and "[1] 반박(사용자가 AI 정정)" in md18 and "너도 제대로 안 읽었는데" in md18
               and 'learn-consume --confirm "CONSUME' in md18
               and "전일 지적 항목" not in md18 and "이미 소비된 당일 항목" not in md18,
-              "T19 섹션4 렌더: 번호+outcome+발화 발췌+CONSUME 안내 · 전일/consumed 미표시")
+              "T19 섹션4 렌더: 번호+stance(교환 축)+발화 발췌+CONSUME 안내 · 전일/consumed 미표시")
         # T20 후보 0건(타 일자) → 섹션 생략(노이즈 금지) · summary 키는 존재(count 0)
         s20 = build_close_summary(home=home, today="2026-07-14")
         md20 = render_close_md(s20)

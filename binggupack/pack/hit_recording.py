@@ -128,7 +128,11 @@ def mark_miss(db, ledger_path, recall_query, index, ctx, nonce=None, domain=None
 
 
 def mark_outcome_uttered(db, feedback, ts, outcome, ctx, domain=None):
-    """★A 재설계(2026-07-10): recall 무관 owner 지적/정정을 **발화 앵커**로 hit/miss 기록.
+    """[SUPERSEDED 2026-07-13 → mark_exchange_uttered] 축 뒤집힘 결함 — 발화 극성(outcome)을
+    speaker=owner 로 직결해 owner 의 옳은 지적("아니지…")이 owner miss 로 기록됐다(정반대).
+    신규 소비 경로는 mark_exchange_uttered(교환 축) 사용. 이 함수는 호환용으로만 유지.
+
+    ★A 재설계(2026-07-10): recall 무관 owner 지적/정정을 **발화 앵커**로 hit/miss 기록.
 
     회상 조언(mark_outcome)이 아닌 owner 실시간 지적("산으로 간다"·"틀렸어" 등)의 적중을 센다.
     owner 가 측정하려는 건 "내 직감/지적이 맞았나"인데, 그 지적 대부분은 recall 결과가 아니라
@@ -166,6 +170,63 @@ def mark_outcome_uttered(db, feedback, ts, outcome, ctx, domain=None):
     db.con.commit()
     return {"recorded": True, "outcome": outcome, "node_id": node_id,
             "decision_id": did, "domain": dom, "anchor": "utterance"}
+
+
+def mark_exchange_uttered(db, feedback, ts, stance, verdict, ctx, domain=None, ai_answer=None):
+    """★교환 축(2026-07-13 owner "사용자 대화 - ai답변 - 맞는지 틀리는지 확인").
+
+    발화 극성은 결과가 아니라 **입장(stance)**이다: refutes=사용자가 AI 답변을 반박,
+    accepts=사용자가 AI 답변을 인정. 누가 맞았는지는 사람이 소비 시점에 **확인(verdict)**한다:
+    upheld=발화 판단이 결과적으로 옳았음(기본) · overturned=나중에 뒤집힘.
+
+    귀속 표(hit_events INSERT):
+      refutes + upheld     → owner(지적, hit)  + ai(답변, miss)   ← 옳은 지적 = owner 적중
+      refutes + overturned → owner(지적, miss) + ai(답변, hit)
+      accepts + upheld     → ai(답변, hit)                        ← 인정 발화는 owner 직감 표본 아님
+      accepts + overturned → ai(답변, miss)
+
+    안전(mark_outcome_uttered 와 동일): 발화 앵커(UserPromptSubmit hook 만 append·AI 위조 불가) ·
+    actor=human 게이트 · 안정 decision_id 로 speaker 별 dup 차단(부분 삽입 없이 all-or-nothing) ·
+    ai_answer 는 반환 표시용으로만 쓰고 DB 미저장(PII 최소).
+    """
+    if (ctx or {}).get("actor", "").strip().lower() != "human":
+        return {"recorded": False, "reason": "G4_no_auto"}
+    if stance not in ("refutes", "accepts"):
+        return {"recorded": False, "reason": "invalid_stance"}
+    if verdict not in ("upheld", "overturned"):
+        return {"recorded": False, "reason": "invalid_verdict"}
+    fb = (feedback or "").strip()
+    if not fb:
+        return {"recorded": False, "reason": "empty_feedback"}
+    anchor_raw = (fb + _UNIT_SEP + str(ts or "")).encode("utf-8", "replace")
+    node_id = "utter:" + hashlib.sha256(anchor_raw).hexdigest()[:16]
+    fb_hash = hashlib.sha256(fb.encode("utf-8", "replace")).hexdigest()[:16]
+    did = HIT._decision_id(node_id, fb_hash)
+    dom = HIT._domain_norm(domain)
+
+    stated = verdict == "upheld"
+    rows = []
+    if stance == "refutes":
+        rows.append(("owner", "지적", "hit" if stated else "miss"))
+        rows.append(("ai", "답변", "miss" if stated else "hit"))
+    else:  # accepts — 판정 대상은 AI 답변뿐(owner 표본 없음)
+        rows.append(("ai", "답변", "hit" if stated else "miss"))
+
+    # dup 는 all-or-nothing — 한 speaker 라도 이미 기록됐으면 전체 skip(부분 삽입 금지).
+    for speaker, _kind, _oc in rows:
+        if HIT._dup_exists(db, did, node_id, speaker):
+            return {"recorded": False, "reason": "dup_decision"}
+    now = HIT._now_iso(ts)
+    for speaker, kind, oc in rows:
+        db.con.execute(
+            "INSERT INTO hit_events(node_id,speaker,kind,outcome,subtype,ts,domain,context_hash,decision_id) "
+            "VALUES(?,?,?,?,?,?,?,?,?)",
+            (node_id, speaker, kind, oc, None, now, dom, None, did))
+    db.con.commit()
+    return {"recorded": True, "stance": stance, "verdict": verdict,
+            "rows": [{"speaker": s, "kind": k, "outcome": oc} for s, k, oc in rows],
+            "node_id": node_id, "decision_id": did, "domain": dom,
+            "anchor": "utterance", "ai_answer": (ai_answer or "")[:70]}
 
 
 # ---------------- selftest (temp DB · 운영 write 0) ----------------
@@ -276,6 +337,49 @@ def _selftest():
         rec(11, "발화 앵커 안전(actor!=human→G4_no_auto·빈발화→empty_feedback·이벤트 0)",
             ru3.get("reason") == "G4_no_auto" and ru4.get("reason") == "empty_feedback"
             and before_u3 == after_u3)
+
+        # T12~T15 ★교환 축(2026-07-13 owner): 사용자 발화 → AI 답변 → 확인(verdict).
+        # T12 refutes+upheld(옳은 지적) → owner hit + ai miss 2행(축 교정의 핵심).
+        b12 = db.con.execute("SELECT count(*) FROM hit_events").fetchone()[0]
+        re1 = mark_exchange_uttered(db, "아니지 그게 아니라 preview 를 먼저 줘야지",
+                                    "2026-07-13T00:00:00Z", "refutes", "upheld",
+                                    {"actor": "human"}, ai_answer="번호는 AI 가 정합니다")
+        a12 = db.con.execute("SELECT count(*) FROM hit_events").fetchone()[0]
+        pair12 = db.con.execute(
+            "SELECT speaker,kind,outcome FROM hit_events WHERE decision_id=? ORDER BY speaker",
+            (re1.get("decision_id"),)).fetchall()
+        rec(12, "교환 refutes+upheld → owner(지적,hit)+ai(답변,miss) 2행(옳은 지적=owner 적중)",
+            re1.get("recorded") and a12 == b12 + 2
+            and pair12 == [("ai", "답변", "miss"), ("owner", "지적", "hit")])
+
+        # T13 교환 dup — 같은 발화+ts 재소비 → dup_decision·INSERT 0(부분 삽입 없음).
+        re2 = mark_exchange_uttered(db, "아니지 그게 아니라 preview 를 먼저 줘야지",
+                                    "2026-07-13T00:00:00Z", "refutes", "upheld", {"actor": "human"})
+        a13 = db.con.execute("SELECT count(*) FROM hit_events").fetchone()[0]
+        rec(13, "교환 이중계상 차단(재소비 → dup_decision·INSERT 0)",
+            (not re2.get("recorded")) and re2.get("reason") == "dup_decision" and a13 == a12)
+
+        # T14 accepts+upheld → ai hit 1행만(인정 발화는 owner 직감 표본 아님) /
+        #     refutes+overturned → owner miss + ai hit(뒤집힌 지적).
+        re3 = mark_exchange_uttered(db, "클로드맞다.", "2026-07-13T01:00:00Z",
+                                    "accepts", "upheld", {"actor": "human"})
+        rows3 = re3.get("rows") or []
+        re4 = mark_exchange_uttered(db, "아니야 그건 다르지", "2026-07-13T02:00:00Z",
+                                    "refutes", "overturned", {"actor": "human"})
+        rows4 = {(r["speaker"], r["outcome"]) for r in (re4.get("rows") or [])}
+        rec(14, "accepts+upheld→ai hit 1행 · refutes+overturned→owner miss+ai hit",
+            re3.get("recorded") and rows3 == [{"speaker": "ai", "kind": "답변", "outcome": "hit"}]
+            and re4.get("recorded") and rows4 == {("owner", "miss"), ("ai", "hit")})
+
+        # T15 교환 게이트 — actor!=human / invalid stance / invalid verdict 전부 기록 0.
+        b15 = db.con.execute("SELECT count(*) FROM hit_events").fetchone()[0]
+        re5 = mark_exchange_uttered(db, "지적", "t", "refutes", "upheld", {"actor": "ai"})
+        re6 = mark_exchange_uttered(db, "지적", "t", "confirms", "upheld", {"actor": "human"})
+        re7 = mark_exchange_uttered(db, "지적", "t", "refutes", "maybe", {"actor": "human"})
+        a15 = db.con.execute("SELECT count(*) FROM hit_events").fetchone()[0]
+        rec(15, "교환 게이트(G4_no_auto·invalid_stance·invalid_verdict → 기록 0)",
+            re5.get("reason") == "G4_no_auto" and re6.get("reason") == "invalid_stance"
+            and re7.get("reason") == "invalid_verdict" and b15 == a15)
 
     finally:
         db.close()
