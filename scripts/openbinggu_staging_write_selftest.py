@@ -35,6 +35,42 @@ def _now_iso(ts=None):
     return ts if ts else datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _pid_alive(pid):
+    """lock 파일 pid 생존 검사(stale lock 판정용). 비양수 pid 는 dead(=stale) 취급.
+
+    ★Windows 에서 os.kill(pid, 0)은 생존 확인이 아니라 TerminateProcess 로
+    프로세스를 죽인다 — 절대 사용 금지. OpenProcess(QUERY_LIMITED) 핸들 획득으로만 판정.
+    """
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        k32 = ctypes.windll.kernel32
+        h = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not h:
+            return False
+        try:
+            # 종료됐어도 누군가 핸들을 쥐고 있으면 OpenProcess 는 성공한다(zombie) —
+            # exit code 로 실행 중(STILL_ACTIVE) 여부까지 확인해야 진짜 생존 판정.
+            code = ctypes.c_ulong()
+            if k32.GetExitCodeProcess(h, ctypes.byref(code)):
+                return code.value == STILL_ACTIVE
+            return True  # 판정 불가 → 보수적으로 alive(fail-closed)
+        finally:
+            k32.CloseHandle(h)
+    try:
+        os.kill(pid, 0)  # POSIX: signal 0 = 존재 확인만(전송 없음)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # 존재하지만 권한 없음 = alive
+    except OSError:
+        return True  # 판정 불가 → 보수적으로 alive(fail-closed: lock 을 지우지 않음)
+    return True
+
+
 class StagingDB:
     """temp 파일 staging SQLite. 운영 경로 거부. WAL + transaction + checksum.
 
@@ -97,23 +133,44 @@ class StagingDB:
 
     @contextmanager
     def write_lock(self):
-        """쓰기 진입 lock 파일(O_EXCL) — 이중 실행 감지 시 명시 에러. 같은 pid 재진입 허용."""
+        """쓰기 진입 lock 파일(O_EXCL) — 이중 실행 감지 시 명시 에러. 같은 pid 재진입 허용.
+
+        죽은 프로세스가 남긴 stale lock(pid 사망·파싱 불가·비양수)은 _pid_alive 검사 후
+        제거하고 O_EXCL 재시도 1회만(자동 복구). 재시도도 충돌이면 두 프로세스가 동시에
+        stale 청소하는 레이스 — fail-closed 유지(명시 에러). 살아있는 타 pid 는 기존대로 차단.
+        """
         lock = self.path + ".lock"
         owner = False
-        try:
-            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.write(fd, str(os.getpid()).encode())
-            os.close(fd)
-            owner = True
-        except FileExistsError:
-            pid = ""
+        for attempt in (0, 1):
             try:
-                with open(lock, "r") as f:
-                    pid = f.read().strip()
-            except OSError:
-                pass
-            if pid != str(os.getpid()):
-                raise RuntimeError("staging_write_locked: concurrent writer detected (%s)" % lock)
+                fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(fd, str(os.getpid()).encode())
+                os.close(fd)
+                owner = True
+                break
+            except FileExistsError:
+                pid_raw = ""
+                try:
+                    with open(lock, "r") as f:
+                        pid_raw = f.read().strip()
+                except OSError:
+                    pass
+                if pid_raw == str(os.getpid()):
+                    break  # 같은 pid 재진입 허용(해제는 바깥 holder 가 — 기존 semantics)
+                try:
+                    pid = int(pid_raw)
+                except ValueError:
+                    pid = -1  # 쓰레기/빈 pid 문자열 → stale 취급
+                if attempt == 0 and not _pid_alive(pid):
+                    try:
+                        os.remove(lock)  # 죽은 프로세스 잔존 lock 자동 정리
+                    except OSError:
+                        pass  # 이미 사라졌으면(정상 해제 레이스) 그대로 재시도
+                    continue
+                raise RuntimeError(
+                    "staging_write_locked: concurrent writer detected (lock=%s, pid=%s) — "
+                    "그 프로세스가 종료되면 자동 해제됩니다. 비정상 잔존 시 %s 를 삭제하세요."
+                    % (lock, pid_raw or "?", lock))
         try:
             yield
         finally:
@@ -360,18 +417,25 @@ def run():
     db.con.execute("INSERT INTO nodes(node_id,node_type,sentence) VALUES('n13x','judgment','audit 우회 직접 쓰기')")
     db.con.commit()
     rec(13,"마지막 after_hash↔실 테이블 대조(우회 쓰기 검출)", ok13 and (not db.verify_tail_state())); db.close()
-    # 14. 쓰기 진입 lock — 타 프로세스 lock 실재 시 명시 에러
+    # 14. 쓰기 진입 lock — '살아있는' 타 프로세스 lock 실재 시 명시 에러.
+    #     죽은 pid lock 은 이제 stale 자동 정리(회복) 대상이라 차단 대상이 아님
+    #     (stale 회복 경로는 tests/test_staging_stale_lock.py 가 커버) → 실제 live 자식 pid 로 검증.
+    import subprocess
     db = StagingDB(os.path.join(tmp,"s14.sqlite"))
-    with open(db.path + ".lock", "w") as f:
-        f.write("999999")
-    locked_err = False
+    child14 = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
     try:
-        staging_apply(db, base_pack(pack_id="p14", content="c14"), {"actor":"human"}, snap_dir)
-    except RuntimeError as e:
-        locked_err = str(e).startswith("staging_write_locked")
+        with open(db.path + ".lock", "w") as f:
+            f.write(str(child14.pid))
+        locked_err = False
+        try:
+            staging_apply(db, base_pack(pack_id="p14", content="c14"), {"actor":"human"}, snap_dir)
+        except RuntimeError as e:
+            locked_err = str(e).startswith("staging_write_locked")
+    finally:
+        child14.kill(); child14.wait()
     os.remove(db.path + ".lock")
     r14 = staging_apply(db, base_pack(pack_id="p14", content="c14"), {"actor":"human"}, snap_dir)
-    rec(14,"이중 실행 lock 감지(명시 에러)→해제 후 정상", locked_err and r14["applied"]); db.close()
+    rec(14,"이중 실행 lock 감지(live 타 pid 명시 에러)→해제 후 정상", locked_err and r14["applied"]); db.close()
     # 15. created_at 기록 + use_count 기본 0 (P1 랭킹 신선도/유용성 축)
     db = StagingDB(os.path.join(tmp,"s15.sqlite"))
     staging_apply(db, base_pack(pack_id="p15", content="c15"), {"actor":"human"}, snap_dir, ts="2026-06-17T00:00:00Z")

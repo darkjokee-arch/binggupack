@@ -176,11 +176,18 @@ def lock_path_for(ledger_path):
 
 
 def lock_conflict_message(ledger_path):
-    """OS 간 동시 실행으로 lock 경합 시 사용자에게 보여줄 안내(fail-closed)."""
+    """OS 간 동시 실행으로 lock 경합 시 사용자에게 보여줄 안내(fail-closed).
+
+    죽은 프로세스가 남긴 stale lock 은 StagingDB.write_lock 이 생존 검사 후 자동
+    정리·재시도하므로, 이 안내가 뜨는 경우는 살아있는 다른 실행이 잡고 있는 상황이다.
+    """
+    lock = lock_path_for(ledger_path)
     return (
         "장부가 다른 실행에서 사용 중입니다(lock): %s\n"
         "OS 간 같은 장부(BINGGU_HOME 공유)는 동시 실행이 금지됩니다 — "
-        "다른 쪽(다른 OS/터미널)을 끝낸 뒤 다시 시도하세요." % lock_path_for(ledger_path)
+        "다른 쪽(다른 OS/터미널)을 끝낸 뒤 다시 시도하세요.\n"
+        "죽은 프로세스가 남긴 lock 은 자동 정리·재시도됩니다. "
+        "비정상 잔존 시 %s 를 직접 삭제하세요." % (lock, lock)
     )
 
 
