@@ -74,9 +74,13 @@ def hmac_id(text, salt=None):
 
 
 # ---------------- #5·#10 embed wrapper (L2=CPU·순차·timeout→None) ----------------
+# 모델 상주 시간(감사 #3) — Ollama 기본 5분 언로드 → 유휴 후 첫 embed 콜드 재발 방지.
+_KEEP_ALIVE = "30m"
+
+
 def _embed(text, timeout=10):
     """모든 임베딩은 이 wrapper 경유(#10). 실패/타임아웃 → None(호출측 rule fallback)."""
-    body = json.dumps({"model": MODEL, "input": text}).encode()
+    body = json.dumps({"model": MODEL, "input": text, "keep_alive": _KEEP_ALIVE}).encode()
     req = urllib.request.Request(OLLAMA + "/api/embed", data=body,
                                  headers={"Content-Type": "application/json"}, method="POST")
     try:
@@ -93,7 +97,8 @@ def _embed_batch(texts, timeout=30):
     실패/개수 불일치 → None(호출측 단건 _embed fallback). 빈 입력 → []."""
     if not texts:
         return []
-    body = json.dumps({"model": MODEL, "input": list(texts)}).encode()
+    body = json.dumps({"model": MODEL, "input": list(texts),
+                       "keep_alive": _KEEP_ALIVE}).encode()
     req = urllib.request.Request(OLLAMA + "/api/embed", data=body,
                                  headers={"Content-Type": "application/json"}, method="POST")
     try:

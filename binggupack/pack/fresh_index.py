@@ -12,8 +12,8 @@ O(N) 스캔에 노출된다. 어휘 경로는 이미 빠르나(≈10ms), semanti
   - 증분 갱신: content_hash 로 신규/변경 노드만 upsert, 사라진 노드 삭제 반영(새 daemon 0).
   - Hot 회상: 색인 메타(작음)에 why_search 와 '동일한' substring relevance → 관련성 저하 0.
     전체 ledger 스캔 0 · 노드 전수 embed 0.
-  - semantic 은 인덱스 시점(변경분만 embed·영속 저장)으로 이동. 조회 시 query 1회만 짧은
-    timeout 으로 embed 하고 실패/지연 시 circuit breaker 로 즉시 어휘 폴백(provider hang 0).
+  - semantic 은 Hot 에 없다(2026-07-13 4cli+적대검증 확정 — 후보 진입이 어휘 매칭 전용이라
+    재랭킹을 완성해도 의미 검색 불가). 의미 회상은 Deep(recall.why_search·배치 선채움) 전담.
 
 불변/안전:
   - ledger 스키마 미변경. 색인은 승인 권한이 아니라 읽기 성능용 파생 데이터.
@@ -28,7 +28,6 @@ from __future__ import annotations
 import hashlib
 import os
 import sqlite3
-import struct
 import sys
 import time
 
@@ -52,13 +51,6 @@ DEFAULT_HOT_WEIGHTS = {"freshness": 1.0, "trust": 1.2, "utility": 0.8, "pin_boos
 _TRUST_SEALED = 1.0
 _TRUST_CANDIDATE = 0.5
 _TRUST_ACCEPT_BONUS = 0.2
-
-# semantic re-rank: query embed 짧은 timeout. 초과/실패 → circuit breaker cooldown 동안 skip.
-DEFAULT_SEMANTIC_TIMEOUT = 1.0
-_CB_COOLDOWN_SEC = 60.0
-# 프로세스 로컬 circuit breaker 상태(제공자 다운 시 반복 probe 비용 차단).
-_CB = {"tripped_until": 0.0}
-
 
 # ─────────────────────────── 경로/토큰 ───────────────────────────
 
@@ -143,8 +135,6 @@ CREATE INDEX IF NOT EXISTS idx_hot_state ON hot_items(state);
 CREATE INDEX IF NOT EXISTS idx_hot_kind ON hot_items(kind);
 CREATE INDEX IF NOT EXISTS idx_hot_project ON hot_items(project_id);
 CREATE INDEX IF NOT EXISTS idx_hot_rank ON hot_items(rank_score);
-CREATE TABLE IF NOT EXISTS embed_vec(
-  item_id TEXT PRIMARY KEY, model TEXT, dim INTEGER, vec BLOB);
 CREATE TABLE IF NOT EXISTS pins(node_id TEXT PRIMARY KEY, ts TEXT);
 -- FTS5 trigram: substring 매칭을 인덱스로(대규모에서 전체행 Python 적재 방지). ≥3자 토큰 전용.
 CREATE VIRTUAL TABLE IF NOT EXISTS hot_fts USING fts5(item_id UNINDEXED, txt, tokenize='trigram');
@@ -663,47 +653,12 @@ def set_pin(node_id, home=None, pinned=True):
     return {"status": "OK", "node_id": node_id, "pinned": pinned}
 
 
-# ─────────────────────────── semantic(선택) ───────────────────────────
-
-def _pack_vec(v):
-    return struct.pack("<%df" % len(v), *v)
-
-
-def _unpack_vec(blob, dim):
-    return list(struct.unpack("<%df" % dim, blob))
-
-
-def _semantic_query_embed(query, timeout):
-    """query 1회 embed(짧은 timeout) + circuit breaker. 실패/트립 → None(어휘 폴백)."""
-    if time.monotonic() < _CB["tripped_until"]:
-        return None, "cb_open"
-    try:
-        import binggu_canonical_semantic as CS
-        if not CS.enabled():
-            return None, "semantic_off"
-        import binggu_semantic_shadow as SH
-        ok, _ = SH.leak_guard(query)
-        if not ok:
-            return None, "leak"
-        v = SH._embed(query, timeout=timeout)
-        if v is None:
-            _CB["tripped_until"] = time.monotonic() + _CB_COOLDOWN_SEC
-            return None, "embed_none"
-        return v, SH.model_digest()
-    except Exception:
-        _CB["tripped_until"] = time.monotonic() + _CB_COOLDOWN_SEC
-        return None, "exc"
-
-
 # ─────────────────────────── Hot 회상(색인 전용) ───────────────────────────
 
-def hot_recall(query, home=None, limit=5, project=None, semantic=False,
-               semantic_timeout=DEFAULT_SEMANTIC_TIMEOUT, include_deprecated=False):
-    """색인 전용 Hot 회상 — 전체 ledger 스캔 0 · 노드 전수 embed 0.
+def hot_recall(query, home=None, limit=5, project=None, include_deprecated=False):
+    """색인 전용 Hot 회상 — 전체 ledger 스캔 0 · embed 0(의미 회상은 Deep 전담).
 
     어휘(why_search 동일 substring relevance) 1차 + rank_score(freshness+trust+pinned) 2차.
-    semantic=True 이고 provider 건강하면 top-K 후보만 저장 vec 로 재랭킹(query 1회 embed·짧은
-    timeout·circuit breaker). provider 다운/느림 → 즉시 어휘 폴백(지연 0).
     반환 {relevant_nodes, summary, confidence, source, scanned, limit}.
     """
     p = index_path(home)
@@ -749,12 +704,12 @@ def hot_recall(query, home=None, limit=5, project=None, semantic=False,
     if ntok == 0:  # 토큰 없는 query → 관련 없음(빈 결과)
         con.close()
         return {"relevant_nodes": [], "summary": "질의어에서 유효 토큰을 찾지 못했습니다.",
-                "confidence": 0.0, "source": "hot", "semantic_used": False,
+                "confidence": 0.0, "source": "hot",
                 "scanned": 0, "candidates": cand_n, "limit": limit, "index_missing": False}
     # 관련성(mc = 매칭 토큰 수) · 정렬 · LIMIT 을 전부 SQL 로 → Python 은 top-K 만 적재(전체행/전체후보 아님).
     #   mc = Σ(instr(lower(title), tok)>0) — _relevance substring 규약 동일(title ⊇ summary).
     rel_expr = "+".join("(instr(lower(h.title),?)>0)" for _ in uniq)
-    fetch_limit = limit if not semantic else max(limit * 8, 40)
+    fetch_limit = limit
     ph = ",".join("?" * len(states))
     sql = ("SELECT h.item_id,h.source_id,h.title,h.summary,h.node_type,h.file_kind,h.rank_score,"
            "h.trust,h.pinned,h.owner_approved,h.created_at,h.state,h.project_id,h.kind,h.rel_path,"
@@ -783,26 +738,6 @@ def hot_recall(query, home=None, limit=5, project=None, semantic=False,
                        "created_at": created, "state": state, "project_id": pid,
                        "candidate": True, "trust_label": "candidate_unverified"})
 
-    # semantic 재랭킹(선택·bounded) — top-K 어휘 후보만.
-    sem_used = False
-    if semantic and scored:
-        scored.sort(key=lambda x: (-x["relevance"], -x["rank_score"], x["item_id"]))
-        topk = scored[: max(limit * 4, 20)]
-        qv, tag = _semantic_query_embed(query, semantic_timeout)
-        if qv is not None:
-            try:
-                import binggu_semantic_shadow as SH
-                model = tag
-                for it in topk:
-                    row = con.execute("SELECT dim, vec FROM embed_vec WHERE item_id=? AND model=?",
-                                      (it["item_id"], model)).fetchone()
-                    if row:
-                        cs = SH._dot(qv, _unpack_vec(row[1], row[0]))
-                        if cs is not None and cs >= 0.55:
-                            it["relevance"] = max(it["relevance"], round(cs, 4))
-                sem_used = True
-            except Exception:
-                sem_used = False
     con.close()
 
     # 정렬: 관련성 1차, rank_score(freshness+trust+pinned) 2차 — why_search 규약 동일.
@@ -820,7 +755,7 @@ def hot_recall(query, home=None, limit=5, project=None, semantic=False,
     summary = ("관련 기억 %d건(Hot 색인·랭킹순). candidate — 사람 확정 전 참고용." % len(top)
                if top else "Hot 색인에서 관련 기억을 찾지 못했습니다(더 넓게: --deep).")
     return {"relevant_nodes": top, "summary": summary, "confidence": conf,
-            "source": "hot", "semantic_used": sem_used,
+            "source": "hot",
             "scanned": len(rows),      # Python 이 실제 적재한 행 수(top-K · 전체행/전체후보 아님)
             "candidates": cand_n,      # 색인이 SQLite 레벨에서 좁힌 후보 수(참고)
             "limit": limit, "index_missing": False}
@@ -928,13 +863,12 @@ def _selftest():
     hrn = hot_recall("q", home=nohome, limit=5)
     ck("색인 부재 hot_recall graceful", hrn.get("index_missing") and hrn["relevant_nodes"] == [])
 
-    # 12) provider 다운 시뮬(semantic=True 여도 지연/에러 0)
-    _CB["tripped_until"] = 0.0
-    t0 = time.perf_counter()
-    hrs = hot_recall("릴리스", home=home, limit=5, semantic=True, semantic_timeout=0.2)
-    dt = (time.perf_counter() - t0) * 1000.0
-    ck("semantic 요청해도 어휘 결과 즉시 반환(provider 무관)", hrs["relevant_nodes"] != [] or True)
-    print("   semantic-path ms=%.1f semantic_used=%s" % (dt, hrs.get("semantic_used")))
+    # 12) semantic 인자/키 완전 제거 확인 — Hot 은 embed 0 (의미 회상은 Deep 전담)
+    import inspect
+    sig = inspect.signature(hot_recall)
+    hr12 = hot_recall("릴리스", home=home, limit=5)
+    ck("semantic 파라미터·semantic_used 키 제거(Hot=어휘 전용)",
+       "semantic" not in sig.parameters and "semantic_used" not in hr12)
 
     import shutil
     shutil.rmtree(tmp, ignore_errors=True)

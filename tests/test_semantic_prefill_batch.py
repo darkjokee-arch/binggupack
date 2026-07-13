@@ -94,7 +94,40 @@ def test_embed_batch_empty_no_network():
 
 
 def test_scorer_prefill_attr_and_fake_embed_noop(tmp_path):
-    """embed_fn 주입 scorer(테스트 경로) — prefill 존재하되 no-op(캐시 우회 유지)."""
+    """embed_fn 주입 scorer(테스트 경로) — prefill/close 존재하되 캐시 우회 유지."""
     scorer = R._semantic_scorer(home=str(tmp_path), embed_fn=lambda t: _vec(1))
     assert scorer is not None and hasattr(scorer, "prefill")
     assert scorer.prefill(["아무 문장"]) == 0
+    assert hasattr(scorer, "close")
+    scorer.close()
+    scorer.close()   # 멱등(이중 close 무해)
+
+
+def test_gc_stale_models(tmp_path):
+    """구모델 행 청소(감사 #4) — 현재 digest 외 행 삭제·현재 행 보존."""
+    cache = _cache(tmp_path)
+    for m in ("old1", "old2", "cur"):
+        cache.execute("INSERT OR REPLACE INTO embed_cache VALUES(?,?,?,?)",
+                      ("sha_" + m, m, 8, R._pack_vec(_vec(1))))
+    cache.commit()
+    R._gc_stale_models(cache, "cur")
+    rows = cache.execute("SELECT model FROM embed_cache").fetchall()
+    assert rows == [("cur",)]
+    cache.close()
+
+
+def test_model_digest_memo(monkeypatch):
+    """model_digest 프로세스 메모(감사 #2) — 2회째 호출은 /api/tags 왕복 0."""
+    import binggu_semantic_shadow as SH
+    calls = {"n": 0}
+
+    def fake_digest():
+        calls["n"] += 1
+        return "digest_x"
+    monkeypatch.setattr(SH, "model_digest", fake_digest)
+    monkeypatch.setitem(R._MODEL_DIGEST_MEMO, "v", None)
+    R._MODEL_DIGEST_MEMO.clear()
+    assert R._model_digest_memo(SH) == "digest_x"
+    assert R._model_digest_memo(SH) == "digest_x"
+    assert calls["n"] == 1
+    R._MODEL_DIGEST_MEMO.clear()   # 다른 테스트 오염 방지

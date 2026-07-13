@@ -200,29 +200,33 @@ def test_hot_does_not_scan_ledger(env):
     assert "n1" in _ids(res)
 
 
-# ── 9) query-time 전수 임베딩 방지 + provider fallback ───────────────────────
-def test_no_query_time_embedding_and_provider_fallback(env, monkeypatch):
+# ── 9) Hot = embed 0 불변 (semantic 분기 삭제 — 2026-07-13 4cli+적대검증 확정) ──
+def test_no_query_time_embedding(env, monkeypatch):
     home, ledger = env
     _mk_ledger(ledger, [_row("n%d" % i, "릴리스 승인 %d" % i) for i in range(6)])
     FI.index_update(ledger, home=home)
-    # semantic=False(기본): embed 절대 호출 안 됨 → recall_embed_cache 미생성
     called = {"embed": 0}
 
     def _boom(*a, **k):
         called["embed"] += 1
-        raise AssertionError("embed must not be called in default Hot recall")
-    # semantic_shadow._embed 를 폭발하도록 — 기본 Hot 은 이를 호출하면 안 됨
+        raise AssertionError("embed must not be called in Hot recall")
+    # semantic_shadow._embed 를 폭발하도록 — Hot 은 어떤 경로로도 이를 호출하면 안 됨
     import binggu_semantic_shadow as SH
     monkeypatch.setattr(SH, "_embed", _boom, raising=False)
-    res = FI.hot_recall("릴리스 승인", home=home, limit=5)  # 기본 semantic=False
+    monkeypatch.setattr(SH, "_embed_batch", _boom, raising=False)
+    res = FI.hot_recall("릴리스 승인", home=home, limit=5)
     assert called["embed"] == 0 and res["relevant_nodes"]
     assert not os.path.exists(os.path.join(home, "recall_embed_cache.sqlite"))
-    # provider 다운(embed None) + semantic=True → circuit breaker → 즉시 어휘 폴백(지연 0)
-    FI._CB["tripped_until"] = 0.0
-    monkeypatch.setattr(SH, "_embed", lambda *a, **k: None, raising=False)
-    monkeypatch.setattr("binggu_canonical_semantic.enabled", lambda: True, raising=False)
-    res2 = FI.hot_recall("릴리스 승인", home=home, limit=5, semantic=True, semantic_timeout=0.1)
-    assert res2["relevant_nodes"] and res2.get("semantic_used") is False
+    # semantic 인자·semantic_used 키·embed_vec 테이블 완전 제거 확인(死코드 재발 방지)
+    import inspect
+    assert "semantic" not in inspect.signature(FI.hot_recall).parameters
+    assert "semantic_used" not in res
+    import sqlite3
+    con = sqlite3.connect(FI.index_path(home))
+    tables = {r[0] for r in con.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'")}
+    con.close()
+    assert "embed_vec" not in tables
 
 
 # ── 10) 색인 손상 후 rebuild ─────────────────────────────────────────────────

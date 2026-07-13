@@ -33,8 +33,9 @@ true` + Ollama 가동 상태라 기본 경로가 semantic 이다.
 - `hot_items(item_id PK, kind, source_id, project_id, node_type, file_kind, size, mtime,
   content_hash, title, summary, created_at, indexed_at, last_seen_at, state, trust,
   owner_approved, pinned, use_count, rank_score)`
-- `embed_vec(item_id PK, model, dim, vec)` — 인덱스 항목만(전 노드 아님)
 - `pins(node_id PK, ts)` — owner 핀(영구 규칙 · ledger 불변)
+- (구 `embed_vec` 는 2026-07-13 삭제 — INSERT 미구현 死스텁이었고, Hot 은 후보 진입이 어휘
+  매칭 전용이라 semantic 재랭킹이 원리적으로 무의미. 의미 회상은 Deep(why_search) 전담.)
 
 ### 증분 갱신 (daemon 0)
 `index_update(ledger, home)`: content_hash 서명 diff — 신규/변경 노드만 upsert, 사라진 노드
