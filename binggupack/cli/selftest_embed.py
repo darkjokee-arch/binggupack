@@ -113,14 +113,14 @@ def _selftest_body():
     cap_settings = os.path.join(tmp, "settings.json")
     cap_cwd = os.path.realpath(tmp)
     cap_home = os.path.dirname(ledger)
-    ck("1c_capture_init", cmd_init(args(no_capture=False, capture_settings=cap_settings,
+    ck("1c_capture_init", cmd_init(args(with_capture=True, capture_settings=cap_settings,
                                         capture_cwd=cap_cwd)) == 0)
     _cst = cap_status(cap_home, cap_cwd, cap_settings)
     ck("1d_capture_ON+hook+scope", _cst["enabled"] and _cst["hook_registered"]
        and _cst["in_current_scope"] and not _cst["global"])
     # --agi-memory = 전역(AGI memory mode) — 임의 cwd 도 수집 대상
     ck("1d2_agi_memory→전역",
-       cmd_init(args(no_capture=False, capture_settings=cap_settings, capture_cwd=cap_cwd, agi_memory=True)) == 0
+       cmd_init(args(with_capture=True, capture_settings=cap_settings, capture_cwd=cap_cwd, agi_memory=True)) == 0
        and cap_status(cap_home, "D:/anywhere/else", cap_settings)["global"]
        and cap_status(cap_home, "D:/anywhere/else", cap_settings)["in_current_scope"])
     ck("1e_pause→OFF", cmd_capture(args(capture_cmd="pause", settings=cap_settings, capture_cwd=cap_cwd)) == 0
@@ -130,13 +130,31 @@ def _selftest_body():
     ck("1f2_disable→sticky OFF", cmd_capture(args(capture_cmd="disable", settings=cap_settings, capture_cwd=cap_cwd)) == 0
        and not cap_status(cap_home, cap_cwd, cap_settings)["enabled"]
        and cap_status(cap_home, cap_cwd, cap_settings)["disabled"])
-    ck("1f3_재init중_sticky OFF 유지", cmd_init(args(no_capture=False, capture_settings=cap_settings, capture_cwd=cap_cwd)) == 0
+    ck("1f3_재init중_sticky OFF 유지", cmd_init(args(with_capture=True, capture_settings=cap_settings, capture_cwd=cap_cwd)) == 0
        and not cap_status(cap_home, cap_cwd, cap_settings)["enabled"])
     ck("1f4_enable→ON 복구", cmd_capture(args(capture_cmd="enable", settings=cap_settings, capture_cwd=cap_cwd)) == 0
        and cap_status(cap_home, cap_cwd, cap_settings)["enabled"])
     ck("1g_preview(저장0)", cmd_capture(args(capture_cmd="preview", settings=cap_settings, capture_cwd=cap_cwd)) == 0)
     ck("1h_uninstall", cmd_capture(args(capture_cmd="uninstall", settings=cap_settings, capture_cwd=cap_cwd)) == 0
        and not cap_status(cap_home, cap_cwd, cap_settings)["enabled"])
+    # ── T3(start 부작용 분리): 기본 start = 장부만(settings.json hook 미접촉) · capture install = 명시 옵트인 등록 ──
+    si_home = os.path.join(tmp, "startinit")
+    si_ledger = os.path.join(si_home, "ledger.sqlite")
+    si_settings = os.path.join(si_home, "settings.json")
+    si_cwd = os.path.realpath(si_home)
+    os.makedirs(si_home, exist_ok=True)
+    # 기본 start(with_capture 미지정) → 장부 생성만 · settings.json 자체가 안 생김(hook 미등록)
+    _rc_si = cmd_init(args(ledger=si_ledger, capture_settings=si_settings, capture_cwd=si_cwd))
+    _hook_after_start = cap_status(si_home, si_cwd, si_settings)["hook_registered"]
+    ck("T3a_start기본_장부만_hook미등록",
+       _rc_si == 0 and os.path.exists(si_ledger)
+       and not os.path.exists(si_settings) and not _hook_after_start)
+    # capture install → hook 등록 + scope 생성(owner sticky OFF 아니므로 ON)
+    _rc_ci = cmd_capture(args(ledger=si_ledger, capture_cmd="install",
+                              settings=si_settings, capture_cwd=si_cwd))
+    _cst_ci = cap_status(si_home, si_cwd, si_settings)
+    ck("T3b_capture_install_hook등록+ON",
+       _rc_ci == 0 and _cst_ci["enabled"] and _cst_ci["hook_registered"])
     # SSOT 후보 게이트(should_capture) 도입 후 — 순수 사실/상태 문장은 제외되므로 판단 3문장으로 구성.
     TEXT = ("이 입찰은 마진이 낮아 보류하기로 결정했다. 백업은 항상 작업 전에 먼저 해 둔다. "
             "이 변경은 회귀 위험이 커서 조심해야 한다.")

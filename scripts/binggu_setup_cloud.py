@@ -135,7 +135,7 @@ def _real_runner(args, cwd=None):
     shell=False subprocess 로 "wrangler" 이름만 호출하면 WinError 2(파일 못 찾음)가 난다.
     autopush(_real_wrangler_runner)와 동일 정책으로 통일(신규 Windows 사용자 회귀 방지).
     """
-    import subprocess  # noqa: 지역 import — 모듈 로드 시 외부명령 의존 0
+    import subprocess  # 지역 import — 모듈 로드 시 외부명령 의존 0
     npx = P.resolve_npx()
     full = [npx, "wrangler"] + list(args)
     proc = subprocess.run(full, cwd=cwd, capture_output=True, text=True)
@@ -159,7 +159,7 @@ def _wrangler_local_path(workers_dir=None):
 
 def _real_npm_runner(args, cwd=None):
     """실 npm 호출 — owner 셸에서만. import 시점 부수효과 0(호출 때만)."""
-    import subprocess  # noqa: 지역 import — 모듈 로드 시 외부명령 의존 0
+    import subprocess  # 지역 import — 모듈 로드 시 외부명령 의존 0
     npm = "npm.cmd" if os.name == "nt" else "npm"
     npm = shutil.which(npm) or npm
     proc = subprocess.run([npm] + list(args), cwd=cwd, capture_output=True, text=True)
@@ -468,7 +468,7 @@ def render_report(result):
     if result["halted_at"] is not None:
         L.append("⛔ [%s] 단계에서 멈춤 — 위 안내대로 본인이 처리 후 다시 실행하세요." % result["halted_at"])
     elif not result["apply"]:
-        L.append("다음: 실제 적용은  python binggu.py setup-cloud --apply")
+        L.append("다음: 실제 적용은  %s setup-cloud --apply" % P.invocation_prefix())
         L.append("      (코드 배포까지: --apply --deploy / login·deploy 는 본인 행위)")
     else:
         L.append("완료 — 첫 SAVE n 을 하면 다음 스케줄러 주기에 자동 KV 갱신(이중게이트).")

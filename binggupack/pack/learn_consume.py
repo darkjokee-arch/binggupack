@@ -31,6 +31,12 @@ import re
 import sys
 import time
 
+try:
+    from binggupack.workspace.platform import invocation_prefix
+except Exception:  # pragma: no cover — 구버전/부분설치 폴백
+    def invocation_prefix(argv0=None):
+        return "python binggu.py"
+
 HERE = os.path.dirname(os.path.abspath(__file__))      # <repo>/binggupack/pack
 ROOT = os.path.dirname(os.path.dirname(HERE))          # <repo>
 _SCRIPTS = os.path.join(ROOT, "scripts")
@@ -174,8 +180,8 @@ def render_preview_md(pv):
     if not n:
         return "학습 큐: 소비 대기 0건. (owner 자연 피드백이 쌓이면 여기 표시됩니다.)"
     out = ["학습 큐 소비 대기 %d건 (dry-run · 저장 0 · 축: 사용자 발화 → AI 답변 → 확인)" % n,
-           "  소비: python binggu.py learn-consume --confirm \"CONSUME <번호>\""
-           " [--verdict overturned] [--index k]", ""]
+           "  소비: %s learn-consume --confirm \"CONSUME <번호>\""
+           " [--verdict overturned] [--index k]" % invocation_prefix(), ""]
     for it in pv["items"]:
         tag = _STANCE_TAG.get(it.get("stance"), "미상(stance 없음)")
         out.append("[%d] %s · 사용자: %s" % (it["qi"], tag, (it.get("feedback") or "")[:60]))
