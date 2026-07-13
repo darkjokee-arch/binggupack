@@ -40,12 +40,41 @@ try:
     )
 except Exception:  # pragma: no cover - 폴백(외부 의존 없이 동일 정의)
     SAVE_TRIGGER_RE = re.compile(
-        r"\s*(?:SAVE|저장|세이브)\s*\d+(\s*,\s*\d+)*\s*", re.IGNORECASE)
+        r"\s*(?:SAVE|저장|세이브)\s*\d+(\s*[-~]\s*\d+)?(\s*,\s*\d+(\s*[-~]\s*\d+)?)*\s*",
+        re.IGNORECASE)
+
+    _RANGE_CAP = 50
+
+    def _expand_indices(text):
+        out, seen = [], set()
+        for part in re.findall(r"\d+(?:\s*[-~]\s*\d+)?", str(text)):
+            nums = [int(x) for x in re.findall(r"\d+", part)]
+            if len(nums) == 2:
+                lo, hi = min(nums), max(nums)
+                if hi - lo + 1 > _RANGE_CAP:
+                    return None
+                span = range(lo, hi + 1)
+            else:
+                span = nums
+            for i in span:
+                if i not in seen:
+                    seen.add(i)
+                    out.append(i)
+        return out or None
 
     def parse_save_indices(prompt):
-        if not SAVE_TRIGGER_RE.fullmatch(str(prompt or "")):
-            return None
-        return [int(x) for x in re.findall(r"\d+", prompt)]
+        p = str(prompt or "")
+        if SAVE_TRIGGER_RE.fullmatch(p):
+            return _expand_indices(p)
+        out, seen = [], set()
+        for line in p.splitlines():
+            if line.strip() and SAVE_TRIGGER_RE.fullmatch(line):
+                idx = _expand_indices(line)
+                for i in idx or []:
+                    if i not in seen:
+                        seen.add(i)
+                        out.append(i)
+        return out or None
 
     def _norm(s):
         return re.sub(r"\s+", " ", str(s)).strip()
