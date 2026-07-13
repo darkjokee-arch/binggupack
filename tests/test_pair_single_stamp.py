@@ -113,7 +113,10 @@ def test_pair_partial_stamp_blocked(tmp_path):
 
 
 def test_learn_consume_stamp_promotes(tmp_path):
-    """dry-run 스테이징 → '세이브 1' 도장 → 에이전트 세션에서 CONSUME 0 소비(발화 앵커)."""
+    """dry-run 스테이징 → '세이브 1' 도장 → 에이전트 세션에서 CONSUME 0 소비(교환 축).
+
+    ★교환 축(2026-07-13): 구큐 outcome=miss → stance=refutes 유도 · upheld 기본 →
+    owner(지적,hit)+ai(답변,miss) 2행 — 옳은 지적이 owner 적중으로 계상(축 뒤집힘 교정)."""
     home, ledger = _make_home(tmp_path)
     env = _env(home)
     _write_queue(home, [{"ts": "2026-07-13T04:00:00Z", "outcome": "miss", "queries": [],
@@ -125,11 +128,12 @@ def test_learn_consume_stamp_promotes(tmp_path):
     assert len(lp["items"]) == 1
     _stamp("세이브 1", env)                                        # qi=0 → 도장 번호 1
     r2 = _run(["--ledger", ledger, "learn-consume", "--confirm", "CONSUME 0"], env)
-    assert r2.returncode == 0 and "OK: miss 소비" in r2.stdout, r2.stdout + r2.stderr
+    assert r2.returncode == 0 and "OK: 교환 소비" in r2.stdout, r2.stdout + r2.stderr
     con = sqlite3.connect("file:%s?mode=ro" % ledger.replace("\\", "/"), uri=True)
-    n = con.execute("SELECT count(*) FROM hit_events WHERE node_id LIKE 'utter:%'").fetchone()[0]
+    rows = con.execute("SELECT speaker, outcome FROM hit_events WHERE node_id LIKE 'utter:%'"
+                       " ORDER BY speaker").fetchall()
     con.close()
-    assert n == 1
+    assert rows == [("ai", "miss"), ("owner", "hit")]
 
 
 def test_learn_consume_without_stamp_blocked(tmp_path):
