@@ -26,7 +26,10 @@ from pathlib import Path
 try:  # 패키지/스크립트 양쪽 import 호환(기존 모듈과 동일 관용)
     from binggu_capture_persist import binggu_home
 except ImportError:  # pragma: no cover
-    import binggu_platform as _plat
+    try:
+        import binggu_platform as _plat
+    except ImportError:  # wheel 설치본 단독 import — scripts 는 top-level 패키지
+        from scripts import binggu_platform as _plat
 
     def binggu_home(home=None):
         if home:

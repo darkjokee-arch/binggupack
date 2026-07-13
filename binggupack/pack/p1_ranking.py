@@ -27,7 +27,10 @@ import sys
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import binggu_p1_config as cfg
+try:  # 진입점(scripts/ sys.path) 경유 bare import — wheel 단독 import 는 scripts 패키지 폴백
+    import binggu_p1_config as cfg
+except ImportError:  # pragma: no cover — wheel 설치본: scripts 는 top-level 패키지
+    from scripts import binggu_p1_config as cfg
 
 # 신선도 반감기(일) — 이 일수가 지나면 freshness 0.5. 설정 아닌 알고리즘 상수(축 형태).
 FRESHNESS_HALFLIFE_DAYS = 90.0
