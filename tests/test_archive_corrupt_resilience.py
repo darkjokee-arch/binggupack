@@ -105,6 +105,18 @@ def test_healthy_ledger_flow_unchanged(ledger, backup):
     assert "pre_restore_corrupt_" not in os.path.basename(res["pre_snapshot"])
 
 
+def test_backup_on_corrupt_ledger_no_crash(ledger):
+    # backup 쪽 잔존 비대칭 — 손상 ledger 도 traceback 없이 CORRUPT_LEDGER (restore INVALID_BACKUP 대칭)
+    _corrupt(ledger)
+    res = archive.backup_ledger(ledger)
+    assert res["status"] == "CORRUPT_LEDGER"
+    assert res["ledger"] == ledger
+    bdir = os.path.join(os.path.dirname(ledger), "_backup")
+    assert not os.path.exists(bdir) or os.listdir(bdir) == []   # 빈 산출물 미잔존
+    with open(ledger, "rb") as f:                 # 원본 무손상(read-only 불변)
+        assert f.read() == GARBAGE
+
+
 def test_corrupt_backup_still_invalid(ledger, tmp_path):
     # 기존 방어(backup 쪽) 절대 불변 — 손상 backup 은 confirm 이 맞아도 교체 0
     bad = str(tmp_path / "badbackup.sqlite")

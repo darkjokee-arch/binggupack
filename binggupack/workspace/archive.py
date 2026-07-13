@@ -79,6 +79,7 @@ def backup_ledger(ledger_path, out_path=None, home=None, ts=None):
     """ledger 를 일관 스냅샷으로 복사(sqlite backup API — WAL 중에도 안전). 운영 ledger write 0.
 
     반환: {status, out_path, sha256, size, nodes, edges}. 파일 부재 → status='NO_LEDGER'.
+    원본 손상(sqlite 아님) → status='CORRUPT_LEDGER' (restore 의 INVALID_BACKUP 과 대칭 · crash 0).
     out_path 미지정 → <home|dirname>/_backup/ledger_<ts>.sqlite (디렉터리 자동 생성).
     """
     if not ledger_path or not os.path.exists(ledger_path):
@@ -96,13 +97,18 @@ def backup_ledger(ledger_path, out_path=None, home=None, ts=None):
     src = _connect_ro(ledger_path)
     dst = sqlite3.connect(out_path)
     try:
-        src.backup(dst)
-        # 단일 파일 스냅샷 — WAL/shm 부산물 제거(백업은 이식·보관용이라 자족적이어야).
-        dst.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        dst.execute("PRAGMA journal_mode=DELETE")
-    finally:
-        dst.close()
-        src.close()
+        try:
+            src.backup(dst)
+            # 단일 파일 스냅샷 — WAL/shm 부산물 제거(백업은 이식·보관용이라 자족적이어야).
+            dst.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            dst.execute("PRAGMA journal_mode=DELETE")
+        finally:
+            dst.close()
+            src.close()
+    except sqlite3.DatabaseError:  # 손상 원본('file is not a database') — 빈 산출물 정리 후 표기
+        if os.path.exists(out_path):
+            os.remove(out_path)
+        return {"status": "CORRUPT_LEDGER", "ledger": ledger_path}
     data = read_all(out_path)
     return {"status": "OK", "out_path": out_path, "sha256": _sha256_file(out_path),
             "size": os.path.getsize(out_path),

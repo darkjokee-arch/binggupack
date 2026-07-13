@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- `backup_ledger` 가 손상 ledger.sqlite 에서 raw traceback 으로 죽던 갭 — `CORRUPT_LEDGER` status 반환 + 빈 산출물 정리 + CLI 복구 안내(restore 의 `INVALID_BACKUP` 방어와 대칭).
+
 ### Changed — pair 결합 번호축(도장 1회) + learn-consume 도장 소비 (2026-07-13)
 owner 지적("같이 프리뷰 주면 해결") — 축별 preview+도장 2회 마찰 제거. 도장=사람 키보드만 원칙·fail-closed 완화 0.
 - **`binggu pair` `--confirm` 생략 = 결합 미리보기 스테이징(저장 0)** — owner+ai 후보를 한 preview(연속 번호: owner 1..N · ai N+1..)로 `write_last_preview`(explicit·ledger 기준 home). 사람 도장 1회(`세이브 o,a`)로 양축이 함께 기록되고, confirm 재실행 시 결합 1-튜플 ref(`(pref(owner+ai), [o, N+a])`)를 우선 대조(기존 축별 2-튜플 폴백 유지 — 구 흐름 무손상).
