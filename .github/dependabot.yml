@@ -1,0 +1,31 @@
+# Dependabot — 주간 의존성 업데이트 PR 자동 생성.
+# owner 승인(2026-07-13)으로 도입. version-updates 는 외부 자동 PR 을 만드므로
+# 머지는 항상 사람 게이트(CI required checks 통과 + owner merge).
+version: 2
+updates:
+  # GitHub Actions 워크플로 액션 버전
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+
+  # hosted/workers Node 의존성 (Cloudflare Workers)
+  - package-ecosystem: "npm"
+    directory: "/hosted/workers"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+
+  # 개발 툴체인 (requirements/dev.txt). 런타임 의존성은 stdlib only 라 0.
+  - package-ecosystem: "pip"
+    directory: "/requirements"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps-dev"
