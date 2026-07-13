@@ -76,6 +76,22 @@ def load_pending(qpath):
     return [(i, o) for (i, o) in _parse(qpath) if o and not o.get("consumed")]
 
 
+def load_pending_today(qpath, today=None):
+    """당일(ts 날짜 prefix 일치) 소비 대기 항목 — [(qi, entry), ...] (read-only · 소비 0).
+
+    ★qi = load_pending 상 인덱스 = learn-consume dry-run 번호 = consume(qi)/CONSUME <번호>
+    와 동일 번호를 보존한다(당일 필터로 재번호 매기면 owner 확정이 다른 항목을 소비 — 금지).
+    ts 는 학습 훅(user-prompt-learn-outcome.js)의 UTC ISO(toISOString) — today 는
+    'YYYY-MM-DD'(UTC) prefix. 미지정 시 현재 UTC 날짜(테스트는 today 주입식 · wall-clock 배제)."""
+    if today is None:
+        today = time.strftime("%Y-%m-%d", time.gmtime())
+    today = str(today).strip()
+    if not today:
+        return []
+    return [(qi, entry) for qi, (_line_idx, entry) in enumerate(load_pending(qpath))
+            if str(entry.get("ts") or "").startswith(today)]
+
+
 def _mark_consumed(qpath, line_idx):
     """지정 라인만 consumed=true 로 원자 재작성(다른 라인 보존)."""
     lines = _load_lines(qpath)
@@ -307,6 +323,27 @@ def _selftest():
         rec(11, "발화 앵커도 reader → G4_no_auto·utter hit_events 불변(fail-closed)",
             (not r11.get("consumed")) and ev11a == ev11b
             and (r11.get("mark") or {}).get("reason") == "G4_no_auto")
+
+        # T12 ★B안(사람 확정): load_pending_today — 당일 prefix 만·consumed 제외·qi(소비 번호) 보존·
+        #     read-only(큐 mtime 불변)·다른 날짜 주입 → 0건. today 주입식(wall-clock 의존 0).
+        write_queue([
+            {"ts": "2026-07-12T22:00:00Z", "outcome": "hit", "queries": [],
+             "evidence": {"feedback": "전일 지적"}, "consumed": False},
+            {"ts": "2026-07-13T01:00:00Z", "outcome": "miss", "queries": [],
+             "evidence": {"feedback": "너도 제대로 안 읽었는데"}, "consumed": False},
+            {"ts": "2026-07-13T02:00:00Z", "outcome": "hit", "queries": [],
+             "evidence": {"feedback": "이미소비(당일)"}, "consumed": True},
+            {"ts": "2026-07-13T03:00:00Z", "outcome": "hit", "queries": [q],
+             "evidence": {"feedback": "오 맞네"}, "consumed": False},
+        ])
+        q12_mtime = os.path.getmtime(qpath)
+        td = load_pending_today(qpath, today="2026-07-13")
+        rec(12, "load_pending_today: 당일 2건(전일·consumed 제외)·qi=소비 번호(1,2) 보존·큐 write 0·타일자 0건",
+            [qi for qi, _ in td] == [1, 2]
+            and td[0][1]["outcome"] == "miss" and td[1][1]["outcome"] == "hit"
+            and all(str(e.get("ts") or "").startswith("2026-07-13") for _, e in td)
+            and load_pending_today(qpath, today="2026-07-14") == []
+            and os.path.getmtime(qpath) == q12_mtime)
 
     finally:
         db.close()
