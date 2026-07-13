@@ -26,6 +26,8 @@ tests/               # pytest 15 + 하니스 7 | docs/ 설계 정본(START_HERE�
 ```
 
 ## 검증 게이트 (커밋 전 이 순서로 — 목표: preflight 1회 통과)
+
+> ⚠ **Windows 이 박스에서 pytest/preflight를 백그라운드로 띄우지 말 것** — python 서브프로세스 트리가 세션 kill로 exit 255 즉사(출력 0·2026-07-13 실측, 순수 sleep은 생존). 동기 실행 + 테스트 파일 2~3청크 분할(청크당 ≤5분). 정본: 전역 박제 `feedback_windows_background_kill_safety`.
 ```bash
 python scripts/ci_local_preflight.py        # CI 전 게이트 로컬 재생(임시 홈 격리·운영홈 미터치) — 정본
 python -m pytest                            # tests/ (scripts·hosted 제외 설정됨)
