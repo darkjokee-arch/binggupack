@@ -38,6 +38,7 @@ GATES = [
     ("autopush",          "binggu_publish_autopush.py",                ["--selftest"], "GATE: GO"),
     ("save_gate",         "binggu_save_gate.py",                       ["--selftest"], "GATE: GO"),
     ("save_gate hook",    os.path.join("..", "hooks", "binggu_save_gate_hook.py"), ["--selftest"], "GATE=GO"),
+    ("save-ref binding",  "binggu_save_ref_binding_selftest.py",       ["--selftest"], "GATE=GO"),
     ("realpack build",    "binggu_realpack_build.py",                  ["--selftest"], "GATE: GO"),
     ("p1 ranking",        "binggu_p1_ranking.py",                      ["--selftest"], "GATE: GO"),
     ("p1 config",         "binggu_p1_config.py",                       [], "GATE=GO"),

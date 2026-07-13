@@ -9,7 +9,8 @@
 대상 GAP:
   - A2/E1b : c2_check reader 명시차단 + save_selected actor allowlist(정규화/변형 전수) → G4 약화 0
   - B5     : staging_apply INSERT 예외 주입 → ROLLBACK(partial write 0)
-  - F2~F4  : _maybe_promote_actor_by_gate fail-closed 4분기(승격/미승격/예외)
+  - F1~F4  : _maybe_promote_actor_by_gate fail-closed 분기(save-n 참조 바인딩: human 유지/미기록
+             승격0/sh-only 승격0/ref 기록 시 actor_promoted_by=='save_gate_ref'/예외 fail-closed)
   - D11    : sqlite integrity_check=ok 공통 사후단언(save/차단 이후)
   - B-low  : H4/H5/J3/K4(deprecate_g3 가드) + L2/N2/O3/O4(save_gate read/validation) early-return
   - C-high : A4/A6/A10(c2_check) + B9/B10(staging_apply) + C2/C3(tombstone) + D3/D9/D10(StagingDB)
@@ -36,6 +37,11 @@ from openbinggu_conversation_capture_preview import capture_preview
 from openbinggu_deprecate_and_remind_g3 import (
     open_g3, deprecate_item, resolve_review, classify_harvest_item)
 from binggu_save_gate import gate_record, write_last_preview, gate_record_from_prompt
+
+
+# SSOT should_capture 게이트 이후 CONVO(사실/상태문 위주)는 explicit=False 후보 0 — 후보 실재가
+# 필요한 분기(F/D11/E6/E7)는 판단 문장 텍스트로 검증한다(현재 동작 pin 원칙 유지 · 구현 변경 0).
+GTEXT = "이 입찰은 마진이 낮아 보류하기로 결정했다. 백업은 항상 작업 전에 먼저 해 둔다."
 
 
 def _integrity_ok(db):
@@ -131,22 +137,30 @@ def run():
         # 격리 gate 기록장(BINGGU_HOME temp 이미 설정 — gate_path() 가 그 아래)
         # F1: actor 이미 human → ctx 그대로(승격 무관·키 미부여)
         ctx_h = {"actor": "human", "x": 1}
-        out_h = _maybe_promote_actor_by_gate(CONVO, [1], ctx_h)
+        out_h = _maybe_promote_actor_by_gate(GTEXT, [1], ctx_h)
         rec("F1", "actor=human → ctx 그대로(promoted_by 없음)",
             out_h.get("actor") == "human" and "actor_promoted_by" not in out_h)
 
         # F3: 비human + 게이트 미기록 → 승격 0(원 actor 유지)
-        out_f3 = _maybe_promote_actor_by_gate(CONVO, [1], {"actor": "auto"})
+        out_f3 = _maybe_promote_actor_by_gate(GTEXT, [1], {"actor": "auto"})
         rec("F3", "비human + 게이트 미기록 → 승격 0(actor=auto 유지)",
             out_f3.get("actor") == "auto" and "actor_promoted_by" not in out_f3)
 
-        # F2: 비human + 해당 문장이 사람 SAVE 발화로 기록됨 → human 승격 + 표식
-        cands = capture_preview(CONVO)["candidates"]
+        # F3b: 레거시 sh 행만 있으면 승격 0 — 승격 정본은 ref 대조(구 내용-hash 약점 봉인 · 스펙 ④)
+        cands = capture_preview(GTEXT)["candidates"]
         sent1 = cands[0]["sentence"]
-        sgate.gate_record([sent1], path=sgate.gate_path())  # 사람 발화 기록(temp home)
-        out_f2 = _maybe_promote_actor_by_gate(CONVO, [1], {"actor": "auto"})
-        rec("F2", "비human + 사람 SAVE 기록 존재 → human 승격(actor_promoted_by=save_gate)",
-            out_f2.get("actor") == "human" and out_f2.get("actor_promoted_by") == "save_gate")
+        sgate.gate_record([sent1], path=sgate.gate_path())  # 구 sh 앵커만(temp home)
+        out_f3b = _maybe_promote_actor_by_gate(GTEXT, [1], {"actor": "auto"})
+        rec("F3b", "비human + sh-only 기록 → 승격 0(ref 대조가 정본)",
+            len(cands) >= 2
+            and out_f3b.get("actor") == "auto" and "actor_promoted_by" not in out_f3b)
+
+        # F2: 비human + 해당 (preview_ref, idx) 가 사람 save-n 발화로 기록됨 → human 승격 + 표식
+        pref_f2 = sgate.preview_ref_for_candidates(cands)
+        sgate.gate_record_ref(pref_f2, [1], path=sgate.gate_path())  # 사람 발화 ref 기록(temp home)
+        out_f2 = _maybe_promote_actor_by_gate(GTEXT, [1], {"actor": "auto"})
+        rec("F2", "비human + 사람 save-n ref 기록 존재 → human 승격(actor_promoted_by=save_gate_ref)",
+            out_f2.get("actor") == "human" and out_f2.get("actor_promoted_by") == "save_gate_ref")
 
         # F4: sgate import 시 예외 → except pass → 원 ctx(default-deny). sys.modules 치환.
         saved_mod = sys.modules.get("binggu_save_gate")
@@ -155,9 +169,12 @@ def run():
         def _raise(*a, **k):
             raise RuntimeError("sgate boom")
         broken.gate_human_for = _raise
+        broken.gate_human_for_ref = _raise
+        broken.preview_ref_for_candidates = _raise
+        broken.last_preview_path = _raise
         sys.modules["binggu_save_gate"] = broken
         try:
-            out_f4 = _maybe_promote_actor_by_gate(CONVO, [1], {"actor": "auto"})
+            out_f4 = _maybe_promote_actor_by_gate(GTEXT, [1], {"actor": "auto"})
         finally:
             if saved_mod is not None:
                 sys.modules["binggu_save_gate"] = saved_mod
@@ -167,14 +184,14 @@ def run():
             out_f4.get("actor") == "auto" and "actor_promoted_by" not in out_f4)
 
         # ============ D11 — integrity_check=ok 공통 사후단언 ============
-        # 대상별: save 이후 + 차단 이후 모두 sqlite 무결.
+        # 대상별: save 이후 + 차단 이후 모두 sqlite 무결. (후보 실재 필요 → GTEXT)
         d_db = open_g3(os.path.join(tmp, "d11.sqlite"))
         # save 이후
-        save_selected(d_db, CONVO, [1, 5], {"actor": "human", "confirm": "SAVE 1,5"},
+        save_selected(d_db, GTEXT, [1, 2], {"actor": "human", "confirm": "SAVE 1,2"},
                       snap_dir, due_date="2026-06-20")
         rec("D11-1", "candidate save 이후 integrity_check=ok", _integrity_ok(d_db))
         # 차단 이후(confirm 불일치)
-        save_selected(d_db, CONVO, [2], {"actor": "human", "confirm": "SAVE 9"}, snap_dir)
+        save_selected(d_db, GTEXT, [2], {"actor": "human", "confirm": "SAVE 9"}, snap_dir)
         rec("D11-2", "save 차단(confirm 불일치) 이후 integrity_check=ok", _integrity_ok(d_db))
         # deprecate 이후
         nid = d_db.con.execute("SELECT node_id FROM nodes LIMIT 1").fetchone()[0]
@@ -231,9 +248,12 @@ def run():
         # L2: gate_record 빈/공백 문장 skip → 유효 1건만 기록
         nL2 = gate_record(["  ", "", "유효한 사람 발화 문장"], path=gp_bl)
         rec("L2", "gate_record 빈/공백 skip → 유효 1건만 기록", nL2 == 1)
-        # N2: write_last_preview 빈 sentence 후보 skip → rows 제외
+        # N2: write_last_preview 빈 sentence 후보 skip → rows 제외 (+pref/explicit 필드 영속 확인)
         nN2 = write_last_preview([{"sentence": ""}, {"sentence": "후보 문장 가나다"}], path=lp_bl)
-        rec("N2", "write_last_preview 빈 sentence skip → rows 1", nN2 == 1)
+        with open(lp_bl, encoding="utf-8") as f:
+            pv_n2 = _json.load(f)
+        rec("N2", "write_last_preview 빈 sentence skip → rows 1 (+pref 16자·explicit 기록)",
+            nN2 == 1 and len(pv_n2.get("pref") or "") == 16 and pv_n2.get("explicit") is False)
         # O3: gate_record_from_prompt preview 파일 부재 → 0 / 파싱 실패 → 0
         o3a = gate_record_from_prompt("SAVE 1", preview_path=os.path.join(tmp, "no_such.json"), gate_path=gp_bl)
         broken_pv = os.path.join(tmp, "broken_preview.json")
@@ -380,7 +400,7 @@ def run():
         _orig_classify = a0mod.classify_node
         a0mod.classify_node = lambda node, status=None: {"verdict": "REVIEW"}
         try:
-            rE6 = save_selected(e6_db, CONVO, [1], {"actor": "human", "confirm": "SAVE 1"}, snap_dir)
+            rE6 = save_selected(e6_db, GTEXT, [1], {"actor": "human", "confirm": "SAVE 1"}, snap_dir)
         finally:
             a0mod.classify_node = _orig_classify
         rec("E6", "A0 REVIEW & not allow_review → a0_review_needs_explicit_allow",
@@ -392,7 +412,7 @@ def run():
         _orig_scan = cs_mod.scan_residual_pii
         cs_mod.scan_residual_pii = lambda s: ["FAKE_PII_HIT"]
         try:
-            rE7 = save_selected(e7_db, CONVO, [1], {"actor": "human", "confirm": "SAVE 1"}, snap_dir)
+            rE7 = save_selected(e7_db, GTEXT, [1], {"actor": "human", "confirm": "SAVE 1"}, snap_dir)
         finally:
             cs_mod.scan_residual_pii = _orig_scan
         rec("E7", "PII/secret 재스캔 hit → pii_or_secret",

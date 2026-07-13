@@ -3,19 +3,23 @@
 
 목적: 개별 파일 selftest(binggu_hosted_bundle · hag_sync_adapter · hosted_inbox · save_intent
 runner · binggu.py CLI)가 각자 커버하는 항목을 재실행하지 않고, **여러 mutation 표면을 관통하는
-공유 불변식**만 통합 검증한다. 즉 "같은 trusted-approval 프리미티브(binding_fields→digest→request_id
-→verify_event→reserve/finalize)가 P1-B 의 모든 write 표면에서 동일하게 강제되는가"를 한 자리에서 증명.
+공유 불변식**만 통합 검증한다. save-n 참조 바인딩 개정(스펙 ③) 이후 표면별 게이트:
+  · hosted_bundle 저장 표면 = **사람 저장 게이트**(ctx.actor=='human' + confirm 'SAVE <idx[,idx]>'
+    정확일치 — approval mint/consume 배선 없음)
+  · hag import_edges(비-저장 mutation) 표면 = trusted-approval 프리미티브(binding_fields→digest→
+    request_id→verify_event→reserve/finalize) **존치**
 
 통합 관점(개별 selftest 와 중복 금지):
-  A. 5-op binding digest 행렬 — P1-B Track A 5개 op(accept/unaccept/due/resolve/confirm_edges)에 대해
-     (1) digest 결정성, (2) 바인딩 필드 1개만 바꿔도 request_id 변화(위조→무효), (3) op 프리픽스로
+  A. 5-op binding digest 행렬 — 비-저장 mutation 5개 op(accept/unaccept/due/resolve/confirm_edges)에
+     대해 (1) digest 결정성, (2) 바인딩 필드 1개만 바꿔도 request_id 변화(위조→무효), (3) op 프리픽스로
      같은 payload 라도 op 다르면 digest 다름(accept 승인을 unaccept 로 재사용 불가). — 순수 속성 테스트.
-  B. 비대화형/env/문자열 우회의 **표면 간 균일성** — 동일한 env·confirm 문자열 우회가 hosted_bundle
-     저장 표면과 hag import_edges 표면 **양쪽에서 동일하게** BLOCK 됨(우회가 한 곳만 막히지 않음).
-  C. 표면 간 end-to-end 계약 균일성 — 두 독립 표면(bundle·import)이 공통으로
-     request-only(write 0)→owner 승인→atomic 1회 write→재시도 second write 0 을 지킴.
+  B. 비대화형/env/문자열 우회의 **표면 간 균일성** — 동일한 env 우회가 bundle(사람 게이트)과
+     import(approval) 양쪽에서 동일하게 BLOCK 됨(우회가 한 곳만 막히지 않음).
+  C. 표면 간 end-to-end 계약 균일성 — 두 독립 표면이 공통으로 게이트 미통과 write 0 → 통과 시
+     atomic 1회 write → 재시도 second write 0 을 지킴(bundle 재시도 = applied_registry 멱등 +
+     archive 수렴 · import 재시도 = 소비 승인 재사용 불가).
   D. anti-forge 2종 — (import) evidence 위조 → digest 변화 → binding_mismatch·write 0(C1),
-     (bundle) 승인 후 집합 팽창(membership +1) → digest 변화 → 기존 승인 무효·write 0(계약 2·3).
+     (bundle) 선택 집합 팽창 → confirm-idx 바인딩 파괴 → confirm_phrase_mismatch·write 0(계약 2·3·4).
 
 정직 경계: 로컬 승인 assurance=L1(SECURITY.md). 전부 temp 격리 · 운영 ~/.binggupack 미접촉.
 CLI: python scripts/binggu_p1b_mutation_closure_selftest.py [--selftest]   (temp 전용)
@@ -48,6 +52,18 @@ try:
     from openbinggu_save_intent_outbox_runner import OPERATING_PATHS
 except Exception:  # noqa
     OPERATING_PATHS = []
+
+# bundle 표면(사람 저장 게이트)용 ctx — commit_bundle 은 호출자가 판정한 actor 를 받는다(계약 11).
+HUMAN = {"actor": "human", "actor_source": "cli_command"}
+READER = {"actor": "reader", "actor_source": "agent_session_unanchored"}
+
+
+def _apr_count(dbx):
+    """approval_requests 무증가 단정용(테이블 부재=0) — 저장 표면의 approval 배선 제거 증명."""
+    try:
+        return dbx.con.execute("SELECT count(*) FROM approval_requests").fetchone()[0]
+    except Exception:
+        return 0
 
 
 # ── A. 5-op binding digest 행렬 (순수 속성) ────────────────────────────────────────
@@ -182,21 +198,22 @@ def _hag_request_rid(scc, ledp, home, request_now, approved_at):
 
 # ── B. env/문자열 우회의 표면 간 균일성 ─────────────────────────────────────────────
 def _run_uniform_bypass(ck, root):
-    # 승인 미제시 경로(provider 미구성 · 승인 없음 · confirm 문자열=binding_mismatch)만 검증하므로
-    # verify_event 는 approved_at 비교 전에 차단된다 → 단일 논리 시각으로 충분(wall clock 재읽기 0).
+    # bundle 표면 = 사람 저장 게이트(ctx/confirm — env read 0) · import 표면 = approval(승인 미제시
+    # 경로만 검증 → verify_event 는 approved_at 비교 전에 차단 → 단일 논리 시각으로 충분).
     now = int(time.time())
-    # env 로 truthy 를 잔뜩 세팅해도 provider 는 파일 신호로만 발견(양 표면 공통).
+    # env 로 truthy 를 잔뜩 세팅해도 bundle 은 ctx 판정만 · import provider 는 파일 신호로만 발견.
     keep = {k: os.environ.get(k) for k in
             ("BINGGU_TRUSTED_APPROVAL", "BINGGU_APPROVAL_TOKEN", "BINGGU_TRUSTED_CLI",
-             "BINGGU_STRICT_HUMAN_GATE")}
+             "BINGGU_STRICT_HUMAN_GATE", "CLAUDECODE")}
     try:
         os.environ.update({"BINGGU_TRUSTED_APPROVAL": "1", "BINGGU_APPROVAL_TOKEN": "x",
-                           "BINGGU_TRUSTED_CLI": "1", "BINGGU_STRICT_HUMAN_GATE": "1"})
-        # ---- B1: provider 미구성(config 없음) → 양 표면 fail-closed(env 무효) ----
+                           "BINGGU_TRUSTED_CLI": "1", "BINGGU_STRICT_HUMAN_GATE": "1",
+                           "CLAUDECODE": "1"})
+        # ---- B1: env truthy 로도 사람/승인 승격 불가 → 양 표면 fail-closed ----
         b_home = os.path.join(root, "b_noprov_home")
         os.makedirs(b_home, exist_ok=True)
         ck("B1_env_does_not_configure_provider", ta.provider_for(b_home) is None)
-        # bundle 표면
+        # bundle 표면 — 비-human ctx(에이전트 세션 판정)는 env 무관 human_save_required
         bh = os.path.join(root, "b_bundle_noprov")
         staging = os.path.join(bh, "hosted_inbox")
         snap = os.path.join(bh, "snapshots")
@@ -204,10 +221,10 @@ def _run_uniform_bypass(ck, root):
         os.makedirs(snap, exist_ok=True)
         dbb = open_g3(os.path.join(bh, "ledger.sqlite"))
         i1 = _mk_intent(staging, "이 방식을 확정한다.", [1], now)
-        r = commit_bundle(dbb, b_home, staging, [i1], None, snap, now)
-        ck("B1_bundle_env_no_provider_write0",
-           r["write"] == 0 and r["reason"] == "provider_not_configured"
-           and os.path.isfile(os.path.join(staging, i1 + ".json")))
+        r = commit_bundle(dbb, b_home, staging, [i1], READER, "SAVE 1", snap, now)
+        ck("B1_bundle_env_cannot_grant_human_write0",
+           r["write"] == 0 and r["reason"] == "human_save_required"
+           and os.path.isfile(os.path.join(staging, i1 + ".json")) and _apr_count(dbb) == 0)
         dbb.close()
         # import 표면 — 같은 env, provider 미구성
         ledp, scc, ek = _fresh_hag(root, "b_hag_noprov")
@@ -221,7 +238,7 @@ def _run_uniform_bypass(ck, root):
         scc.close()
         ck("B1_import_env_no_provider_write0", blk and _edge_count(ledp) == 0)
 
-        # ---- B2: provider 활성 · 승인 미제시 → 양 표면 approval_required(env 무효) ----
+        # ---- B2: 사람 근거 미제시 → 양 표면 게이트 BLOCK(env 무효) ----
         p_home = os.path.join(root, "b_prov_home")
         _enable_provider(p_home)
         bh2 = os.path.join(root, "b_bundle_prov")
@@ -231,9 +248,11 @@ def _run_uniform_bypass(ck, root):
         os.makedirs(snap2, exist_ok=True)
         dbb2 = open_g3(os.path.join(bh2, "ledger.sqlite"))
         j1 = _mk_intent(staging2, "이 캐시 전략을 유지한다.", [1], now)
-        r2 = commit_bundle(dbb2, p_home, staging2, [j1], None, snap2, now)
-        ck("B2_bundle_provider_noapproval_pending_write0",
-           r2["write"] == 0 and r2["reason"] == "approval_required" and r2["request_id"])
+        # ctx 자체가 없으면(전달 실패/위조 dict 아님) fail-closed — request/approval mint 0
+        r2 = commit_bundle(dbb2, p_home, staging2, [j1], None, "SAVE 1", snap2, now)
+        ck("B2_bundle_no_human_ctx_write0_no_request",
+           r2["write"] == 0 and r2["reason"] == "human_save_required"
+           and not r2.get("request_id") and _apr_count(dbb2) == 0)
         dbb2.close()
         ledp2, scc2, ek2 = _fresh_hag(root, "b_hag_prov")
         blk2, rid_seen = False, None
@@ -246,7 +265,7 @@ def _run_uniform_bypass(ck, root):
         ck("B2_import_provider_noapproval_pending_write0",
            blk2 and bool(rid_seen) and _edge_count(ledp2) == 0)
 
-        # ---- B3: confirm 문자열을 approval_id 로 → 양 표면 binding_mismatch(문자열 승인 아님) ----
+        # ---- B3: 문자열 우회 → bundle=confirm 정확일치 위반 · import=문자열은 승인 아님 ----
         bh3 = os.path.join(root, "b_bundle_confirm")
         staging3 = os.path.join(bh3, "hosted_inbox")
         snap3 = os.path.join(bh3, "snapshots")
@@ -254,9 +273,9 @@ def _run_uniform_bypass(ck, root):
         os.makedirs(snap3, exist_ok=True)
         dbb3 = open_g3(os.path.join(bh3, "ledger.sqlite"))
         k1 = _mk_intent(staging3, "이 배포는 백업 후 진행한다.", [1], now)
-        r3 = commit_bundle(dbb3, p_home, staging3, [k1], "SAVE 1", snap3, now)
-        ck("B3_bundle_confirm_string_not_approval_write0",
-           r3["write"] == 0 and r3["reason"] in ("binding_mismatch:request_id", "approval_required")
+        r3 = commit_bundle(dbb3, p_home, staging3, [k1], HUMAN, "SAVE 999", snap3, now)
+        ck("B3_bundle_confirm_mismatch_write0",
+           r3["write"] == 0 and r3["reason"] == "confirm_phrase_mismatch"
            and os.path.isfile(os.path.join(staging3, k1 + ".json")))
         dbb3.close()
         ledp3, scc3, ek3 = _fresh_hag(root, "b_hag_confirm")
@@ -276,15 +295,11 @@ def _run_uniform_bypass(ck, root):
                 os.environ[k] = v
 
 
-# ── C. 표면 간 end-to-end 계약 균일성(request-only→승인→atomic→replay 0) ──────────
+# ── C. 표면 간 end-to-end 계약 균일성(게이트 미통과 write0→통과 atomic→replay 0) ──
 def _run_cross_surface_lifecycle(ck, root):
-    # 명시 논리 시계(단일 base 1회 캡처 · 이후 오프셋 고정) — request <= approval <= verify < replay < expiry.
-    # ★ bundle 표면(commit_bundle → approval_gate.authorize)은 verify 에 **실제 time.time()** 을 쓰므로
-    #   approved_at 은 반드시 wall now 보다 **과거**여야 한다(미래면 time.time() < approved_at →
-    #   approval_time_invalid · 환경 속도에 따라 비결정). import 표면은 verify 에 now 파라미터를 쓴다.
-    #   양 표면을 approved_at=base-5(과거) 로 통일하면 bundle wall-verify(time.time() >= base-5)와
-    #   import param-verify(verify_now >= approved_at) 가 시나리오 경과·CI 부하와 무관하게 결정적 통과한다.
-    #   (clock 역행/만료 방어는 E 시나리오가 별도로 검증 — 여기서 완화 아님.)
+    # bundle 표면 = 사람 저장 게이트 — approval verify 가 없으므로 순수 논리 시계(고정 미래값)로
+    # 충분(wall clock 재읽기 0). import 표면은 결정적 시계 패턴(base 1회 캡처·오프셋 고정 ·
+    # request <= approval <= verify < replay < expiry) 그대로 존치 — PR#12 정본.
     base = int(time.time())
     approved_at = base - 5
     request_now = base - 6
@@ -293,31 +308,40 @@ def _run_cross_surface_lifecycle(ck, root):
     home = os.path.join(root, "c_home")
     _enable_provider(home)
 
-    # bundle 표면
+    # bundle 표면 — 사람 게이트 미통과 write 0 → 통과 atomic 1회 → 재시도 멱등(★재시도 semantics)
+    NOWB = 2_000_000_000   # 고정 논리 시각(사람 게이트는 approval clock 없음)
     bh = os.path.join(root, "c_bundle")
     staging = os.path.join(bh, "hosted_inbox")
     snap = os.path.join(bh, "snapshots")
     os.makedirs(staging, exist_ok=True)
     os.makedirs(snap, exist_ok=True)
     db = open_g3(os.path.join(bh, "ledger.sqlite"))
-    i1 = _mk_intent(staging, "이 입찰은 마진이 낮아 보류하기로 결정했다.", [1], request_now)
-    r_req = commit_bundle(db, home, staging, [i1], None, snap, request_now)
-    rid = r_req["request_id"]
+    i1 = _mk_intent(staging, "이 입찰은 마진이 낮아 보류하기로 결정했다.", [1], NOWB)
+    r_req = commit_bundle(db, home, staging, [i1], READER, "SAVE 1", snap, NOWB)
     n0 = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
-    ck("C_bundle_request_only_write0_returns_request_id",
-       r_req["write"] == 0 and rid and n0 == 0
+    ck("C_bundle_nonhuman_gate_write0_no_request",
+       r_req["write"] == 0 and r_req["reason"] == "human_save_required"
+       and not r_req.get("request_id") and n0 == 0 and _apr_count(db) == 0
        and os.path.isfile(os.path.join(staging, i1 + ".json")))
-    _approve(db.con, home, rid, approved_at)
-    r_commit = commit_bundle(db, home, staging, [i1], rid, snap, verify_now)
+    r_commit = commit_bundle(db, home, staging, [i1], HUMAN, "SAVE 1", snap, NOWB)
     n1 = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
-    ck("C_bundle_approved_atomic_exactly_one_write", r_commit["write"] == 1 and n1 == 1)
-    # 재시도(같은 rid) → second write 0(계약 8)
-    r_replay = commit_bundle(db, home, staging, [i1], rid, snap, replay_now)
+    ck("C_bundle_human_confirm_atomic_exactly_one_write",
+       r_commit["write"] == 1 and n1 == 1 and _apr_count(db) == 0)
+    # 재시도 semantics(MUST_FIX 4): archive 완료 후 재시도 = intent_not_found quarantine(write 0 ·
+    # 원문은 archive 보존) · 동일 intent 재적재 후 재시도 = applied_registry 멱등(idempotent · 재insert 0)
+    r_replay = commit_bundle(db, home, staging, [i1], HUMAN, "SAVE 1", snap, NOWB + 1)
     n2 = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
-    ck("C_bundle_replay_second_write_0", r_replay["write"] == 0 and n2 == n1)
+    i1b = _mk_intent(staging, "이 입찰은 마진이 낮아 보류하기로 결정했다.", [1], NOWB)
+    r_replay2 = commit_bundle(db, home, staging, [i1b], HUMAN, "SAVE 1", snap, NOWB + 2)
+    n3 = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
+    ck("C_bundle_replay_second_write_0",
+       r_replay["write"] == 0 and r_replay["reason"] == "bundle_prevalidation_failed"
+       and all(q["reason"] == "intent_not_found" for q in r_replay["quarantined"])
+       and r_replay2["write"] == 0 and r_replay2["reason"] == "idempotent_already_applied"
+       and n2 == n1 and n3 == n1)
     db.close()
 
-    # import 표면 — 동일 생명주기
+    # import 표면 — approval 생명주기(존치)
     ledp, scc, ek = _fresh_hag(root, "c_hag")
     rid_h = _hag_request_rid(scc, ledp, home, request_now, approved_at)
     ck("C_import_request_only_write0_returns_request_id",
@@ -334,9 +358,9 @@ def _run_cross_surface_lifecycle(ck, root):
     scc.close()
 
 
-# ── D. anti-forge 2종 (evidence 위조 · membership 팽창) ─────────────────────────────
+# ── D. anti-forge 2종 (evidence 위조 · 선택 집합 팽창) ─────────────────────────────
 def _run_anti_forge(ck, root):
-    # bundle 표면(D2)은 wall-clock authorize 이므로 approved_at 은 과거(base-5)로 통일(C 와 동일 근거).
+    # import 표면(D1)만 approval clock 사용 — 결정적 시계 패턴(approved_at=base-5 과거) 존치.
     base = int(time.time())
     approved_at = base - 5
     request_now = base - 6
@@ -360,27 +384,24 @@ def _run_anti_forge(ck, root):
     scc.close()
     ck("D_import_evidence_forge_binding_mismatch_write0", blk and _edge_count(ledp) == 0)
 
-    # D2: bundle membership 팽창 — {i1} 로 승인 후 {i1,i2} 로 저장 시도 → digest 변화 →
-    #     기존 승인 무효 · write 0(계약 2·3).
+    # D2: bundle 선택 집합 팽창 — 'SAVE 1'(선택 [i1])의 confirm 으로 {i1,i2} 저장 시도 →
+    #     confirm-idx 정확 바인딩 파괴 → confirm_phrase_mismatch · write 0(계약 2·3·4).
+    NOWB = 2_000_000_000
     bh = os.path.join(root, "d_bundle")
     staging = os.path.join(bh, "hosted_inbox")
     snap = os.path.join(bh, "snapshots")
     os.makedirs(staging, exist_ok=True)
     os.makedirs(snap, exist_ok=True)
     db = open_g3(os.path.join(bh, "ledger.sqlite"))
-    i1 = _mk_intent(staging, "이 방식을 채택한다.", [1], request_now)
-    i2 = _mk_intent(staging, "이 계약은 조건이 불리해 포기한다.", [1], request_now)
-    r_req = commit_bundle(db, home, staging, [i1], None, snap, request_now)   # {i1} 만 승인 요청
-    rid_a = r_req["request_id"]
-    _approve(db.con, home, rid_a, approved_at)
+    i1 = _mk_intent(staging, "이 방식을 채택한다.", [1], NOWB)
+    i2 = _mk_intent(staging, "이 계약은 조건이 불리해 포기한다.", [1], NOWB)
     n_before = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
-    r_expand = commit_bundle(db, home, staging, [i1, i2], rid_a, snap, verify_now)  # 집합 팽창
+    r_expand = commit_bundle(db, home, staging, [i1, i2], HUMAN, "SAVE 1", snap, NOWB)  # 집합 팽창
     n_after = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
     both_preserved = all(os.path.isfile(os.path.join(staging, x + ".json")) for x in (i1, i2))
-    ck("D_bundle_membership_expansion_invalidates_approval_write0",
-       r_expand["write"] == 0
-       and r_expand["reason"] in ("binding_mismatch:request_id", "approval_required")
-       and n_after == n_before and both_preserved)
+    ck("D_bundle_selection_expansion_breaks_confirm_binding_write0",
+       r_expand["write"] == 0 and r_expand["reason"] == "confirm_phrase_mismatch"
+       and n_after == n_before and both_preserved and _apr_count(db) == 0)
     db.close()
 
 

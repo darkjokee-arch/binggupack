@@ -61,7 +61,7 @@ binggu studio --no-open  # 브라우저를 열지 않음(headless/원격)
 - **Home + unified Inbox** — 활성 기억·자동 수집 후보·원격 저장 의도·승인 요청·검토 예정을 카드/탭으로. 각 항목의 버튼은 CLI 명령을 클립보드에 복사만 합니다.
 - **Memories** — 저장된 기억을 브라우저에서 탐색합니다. active/deprecated·종류·subtype 필터, 문장 검색, **읽기 전용 lexical 회상**(의미 검색 설정·캐시를 만들지 않습니다), 기억 상세와 근거 사슬(evidence 발췌·관계·owner 승인 요약)을 봅니다. 카드/상세의 버튼은 `binggu explain <id>`·`binggu recall "<질문>"` 명령을 클립보드에 복사만 하며, **저장·폐기·교체·승인 같은 mutation 은 아직 Studio 에서 실행하지 않습니다**(기존 CLI 와 owner 승인 경계를 사용).
 - **Approvals** — 승인 요청의 exact 내용·operation/payload/ledger binding·상태·이력(timeline)·소비 결과(receipt)를 봅니다. effective 상태(pending/approved/consuming/consumed/rejected/revoked/expired)를 기존 verifier·consumption 으로 read-only 해석하고, review 파일은 무결성(operation/payload_digest 일치)을 검증해 표시합니다. **Studio 는 승인을 실행하지 않습니다** — owner 가 별도 로컬 터미널에서 실행할 `binggu approval show/approve/reject/revoke <request-id>` 명령을 복사만 제공하는 **read-only handoff UI** 입니다(approval nonce·private path·provider config 미노출).
-- 저장·승인 등 **mutation 은 기존 CLI 와 owner approval 경계를 그대로 사용**합니다 — Studio 자체는 승인을 실행하지 않습니다.
+- **mutation 은 전부 기존 CLI 경계를 그대로 사용**합니다 — 저장은 preview + 사람의 `SAVE n` 입력, 승인 mutation 은 owner approval 경계. Studio 자체는 저장·승인을 실행하지 않습니다.
 
 ## 1 · 왜 만들었나
 
@@ -90,7 +90,7 @@ AI와 오래 일하다 보면 이런 일이 반복됩니다.
 
 <p align="center"><img src="assets/flow.svg" width="880" alt="대화 → 미리보기 → SAVE 승인 → 내 PC 기억 장부 → 자동 회상 · 지식 그래프 → 전문가 팩"></p>
 
-**Core(pip) vs Bridge(원격 통로).** 로컬 CLI·stdio MCP·장부·회상·설명은 `pip install` 만으로 **오프라인** 동작합니다(=Core). 폰·웹·ChatGPT에서 표시한 저장 **의도**를 받아오는 원격 통로(hosted worker)는 별도이며(=Bridge), **데이터 정본은 언제나 로컬** — 원격은 의도만 전달하고, 장부 확정은 PC의 묶음 승인 뒤에만 일어납니다(원격의 장부 write 0). 자세히는 [안전 모델](#4--왜-믿을-만한가)·[6 · 어디서나 씁니다](#6--어디서나-씁니다).
+**Core(pip) vs Bridge(원격 통로).** 로컬 CLI·stdio MCP·장부·회상·설명은 `pip install` 만으로 **오프라인** 동작합니다(=Core). 폰·웹·ChatGPT에서 표시한 저장 **의도**를 받아오는 원격 통로(hosted worker)는 별도이며(=Bridge), **데이터 정본은 언제나 로컬** — 원격은 의도만 전달하고, 장부 확정은 PC 에서 미리보기를 보고 사람이 `SAVE n` 을 입력한 뒤에만 일어납니다(원격의 장부 write 0). 자세히는 [안전 모델](#4--왜-믿을-만한가)·[6 · 어디서나 씁니다](#6--어디서나-씁니다).
 
 ## 3 · 무엇을 해주나
 
@@ -194,7 +194,7 @@ AI와 오래 일하다 보면 이런 일이 반복됩니다.
 <p align="center"><img src="assets/channels.svg" width="880" alt="Claude Code·ChatGPT·웹 커넥터 → 내 PC 장부 → 오픈크랩 전문가 팩"></p>
 
 - 🌐 **웹/앱 커넥터(HTTP 모드)** — 로컬 MCP 서버를 HTTP 모드(`--http`)로 열고 Cloudflare Tunnel 뒤에 두면, Claude 웹/앱 커넥터에서도 같은 MCP 도구를 그대로 씁니다. 접근은 경로 토큰으로 보호돼요. *(quick tunnel은 재시작마다 주소가 바뀌므로, 고정 주소가 필요하면 named tunnel — [INSTALL](INSTALL.md#webapp-connector--http-모드-optional) 참조.)*
-- 💬 **ChatGPT/폰 저장 채널** — 폰·웹에서 `SAVE n`으로 표시한 건 **저장 승인이 아니라 저장 "의도"**예요. 그 의도만 클라우드 inbox에 잠깐 담기고, 내 PC가 서명키로 가져와(pull) 화면에 묶음으로 보여줘요. **실제 로컬 장부 확정은 PC에서 그 묶음을 통째로 한 번 승인(exact-bound)해야** 일어나고, 전부 저장되거나 전부 안 되거나(all-or-nothing)예요. 폰이 직접 내 장부에 쓰는 경로는 없어요.
+- 💬 **ChatGPT/폰 저장 채널** — 폰·웹에서 `SAVE n`으로 표시한 건 **저장 승인이 아니라 저장 "의도"**예요. 그 의도만 클라우드 inbox에 잠깐 담기고, 내 PC가 서명키로 가져와(pull) 화면에 묶음으로 보여줘요. **실제 로컬 장부 확정은 PC에서 그 묶음의 미리보기를 보고 내가 직접 `SAVE n` 을 입력해야** 일어나고, 전부 저장되거나 전부 안 되거나(all-or-nothing)예요. 폰이 직접 내 장부에 쓰는 경로는 없어요.
 - ☁️ **클라우드 읽기 도구** — `cloud_recall`/`cloud_packs`로 오픈크랩의 지식·팩을 조회만 해요 *(읽기 전용 · 민감정보 마스킹)*.
 
 ## 7 · 시작하기
@@ -255,7 +255,7 @@ python binggu.py doctor
 - **그래프·팩(graph/pack)**: 기억을 근거로 연결해 그래프·팩으로 묶어 내보냅니다(근거 2층·3층·5층).
 - **클라우드 팩**: 묶은 그래프·팩을 오픈크랩(ExpertPlan)에 전문가 지식 팩으로 자동 생성합니다.
 - **Claude Code 연결(hook·MCP)**: 캡처/회상 hook과 MCP 도구(stdio + HTTP 모드)로 붙습니다.
-- **폰·웹·ChatGPT 동기화(hosted)**: 다른 기기에서 표시한 저장 **의도**를 받아와, PC에서 묶음 단위 exact-bound 승인으로만 로컬 장부에 확정합니다(폰 직접 write 없음 · all-or-nothing).
+- **폰·웹·ChatGPT 동기화(hosted)**: 다른 기기에서 표시한 저장 **의도**를 받아와, PC에서 미리보기를 보고 사람이 `SAVE n` 을 입력해야만 로컬 장부에 확정합니다(폰 직접 write 없음 · all-or-nothing).
 - **안전장치(governance/selftest)**: PII·secret 차단, 사람 승인 경계, 자체 검증.
 
 | 영역 | 들어 있는 기능 |

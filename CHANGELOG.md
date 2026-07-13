@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Changed — 저장 게이트 개정: preview + 사람의 `SAVE n` 입력 단일 원칙 (2026-07-12)
+저장 경로(save/pair·hosted 커밋)의 사람 증명을 단일 원칙으로 개정. approval core(비-저장 mutation·`binggu approval` 채널·Approval Center·trusted_approval verifier·MCP fail-closed)는 무손상.
+- **① Claude Code 환경** — UserPromptSubmit 훅이 기록한 "세이브 n" 발화가 유일한 사람 앵커. AI 는 훅을 거치지 못하므로 confirm 문구를 재현해도 승격 0(위조 불가 성질 유지) · `actor_source=save_gate_ref`.
+- **② 터미널** — 사용자가 명령을 직접 입력한 것 자체가 save n. `sys.stdin.isatty()` 를 사람 앵커에서 삭제(isatty 는 사람 증명과 무관 · 파이프/리다이렉트 무관) · `actor_source=cli_command`.
+- **③ 저장 경로의 approval 배선 삭제** — hosted pull → `commit_bundle` 의 approval mint/consume 기계 제거(CLI save/pair 는 원래 approval 배선 0). hosted 확정 = inbox preview + 사람의 `SAVE n`(confirm `SAVE <n[,n]>` 정확일치). crash-atomic 단일 COMMIT all-or-nothing·사전검증 전체차단·post-commit archive 계약은 보존. approval core 자산(accept/unaccept/due/resolve `--approval-id`·hag import-edges·MCP mutation fail-closed)은 1바이트도 무변.
+- **④ 내용문장 hash 대조 → save-n 참조 바인딩** — 앵커 대조를 `preview_ref`(후보 집합+순서에서 결정론 파생) + 선택 idx 로 교체. 같은 정규화 문장이 **다른 preview** 에서 신선도 창 내 재사용되던 replay 면적 축소. gate log 는 ref 레코드 + 레거시 sh 행 이중기록(구 소비자 무수정 호환 · 마이그레이션 없음).
+- **에이전트 세션 가드** — `CLAUDECODE` env 존재 + 훅 앵커 부재 → `reader`(`actor_source=agent_session_unanchored`). 이 env 는 승인을 부여하지 않고 **거부만** 합니다(env 로 fail-open 불가). 정직 한계: deny 전용이라 env 를 제어하는 에이전트·`CLAUDECODE` 부재 환경의 스크립트에는 하드 통제가 아님 — write 성사는 여전히 confirm 정확일치·preview·PII/secret 게이트 통과 필요.
+
+#### Breaking / behavior changes
+- **비대화형 스크립트 저장의 완화(loosening)** — 구 isatty 게이트가 차단하던 터미널 비대화형(pipe/redirect/cron) 실행이 이제 `CLAUDECODE` 부재 시 터미널 명령 경로(human · `cli_command`)로 통과한다. 자동화 스크립트가 정확한 confirm 문구를 제시하면 저장이 성사될 수 있다(사후 감사는 `actor_source` 로).
+- hosted `pull` 의 `--approval-id` 인자 삭제 · `--confirm` 활성화 — 기존 approval 3단(요청→`approval approve`→`--approval-id`) hosted 자동화는 preview + `SAVE n` 흐름으로 변경 필요. 미소진 hosted approval request 는 owner 가 `binggu approval reject <rid>` 로 정리(자동 reject 없음 · 방치 시 expired 표시 무해).
+- `BINGGU_STRICT_HUMAN_GATE` deprecated no-op 안내·`BINGGU_TRUSTED_CLI` 무시는 그대로.
+
+#### Fixed
+- `scripts/binggu_save_gate.py` 폴백 `gate_human_for` 에 정본의 미래-ts(age<0) 거부가 누락돼 있던 drift 를 정본과 재동기(ride-along 버그픽스 1건).
+
 ### Added
 - **Transport-independent read-only Pack Service Core (v1.21-A)** — 미래 HTTPS MCP / `@BingguPack` 앱이 호출할 순수 core(`binggupack/app/read_core.py`). HTTP/MCP/OAuth/cloud/ledger 미의존.
 - **Five App Path read tools** — `list_packs`·`get_pack_summary`·`search_evidence`(deterministic lexical-only)·`lookup_node_edges`(exact node_id / ambiguous keyword)·`build_handoff_context`(Phase 3 handoff guide 단일 정본). 기존 pack contract(`validate_pack`)·canonical layout(manifest + graph/nodes.jsonl + graph/edges.jsonl + evidence/index.jsonl) 재사용(신규 schema 0).

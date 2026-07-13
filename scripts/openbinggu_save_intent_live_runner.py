@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""openbinggu_save_intent_live_runner.py — 라이브 worker HMAC pull → 로컬 staging → 승인 요청(request-only).
+"""openbinggu_save_intent_live_runner.py — 라이브 worker HMAC pull → 로컬 staging 보존(회수 전용·write 0).
 
-★A3(P1-B) 재배선: worker drain 으로 회수한 intent 원문을 영속 staging 으로 보존(비파괴)한 뒤,
-binggu_hosted_bundle.commit_bundle(approval_id=None)로 **PENDING 승인 요청만** 만든다. 옛
-process_outbox(actor=human) direct write 경로는 폐지됐다 — 이 러너는 어떤 경우에도 직접 write 0
-(fail-closed). 실제 저장은 owner 가 로컬에서 승인한 뒤 `binggu hosted pull --select … --approval-id …`
-가 exact-bound atomic 으로만 확정한다. 1회용 worker(non-retention)+temp outbox 로 인한 원문 소실을
+★A3(P1-B)+save-n 참조 바인딩(2026-07-12): worker drain 으로 회수한 intent 원문을 영속 staging 으로
+보존(비파괴)한다. 이 러너는 사람 저장 게이트를 절대 통과하지 못한다(ctx.actor='reader' 고정) —
+commit_bundle 은 human_save_required 로 write 0(fail-closed). 옛 process_outbox(actor=human)
+direct write·approval mint/consume 배선은 폐지됐다. 실제 저장은 owner 가 inbox preview 확인 후
+`binggu hosted pull --select … --confirm "SAVE <번호들>"` (Claude Code 에선 '세이브 n' 발화 선행)
+로만 확정한다. 1회용 worker(non-retention)+temp outbox 로 인한 원문 소실을
 막기 위해, pull 직후 원문을 영속 staging(home/hosted_inbox)으로 이전한다(계약 5·9·11·14).
 
 기본은 **dry-run/temp**. 실 장부 접근은 반드시 명시 옵션이 있어야만 한다:
@@ -17,7 +18,7 @@ process_outbox(actor=human) direct write 경로는 폐지됐다 — 이 러너�
   - --real-ledger 없으면 실 ledger 접근 0 / backup 0 / enable 0
   - 실 모드는 confirm 정확 일치 없으면 enable·pull·write 0
   - 실행 전 ledger 백업, finally 로 inbox disable 보장(중간 실패에도)
-  - direct write 0 — commit_bundle 은 approval_id 없이 PENDING 요청만 생성(승인 이벤트 이후에만 저장)
+  - direct write 0 — commit_bundle 은 actor='reader' 로 human_save_required BLOCK(사람 save n 이후에만 저장)
   - 회수한 intent 원문은 영속 staging 으로 보존(worker/temp 소실 방지) — 자동 삭제 0
   - secret/token/URL/원문 전문 출력 0 — hash8/len/count/reason_code 만
   - live admin/pull 은 owner 별도 GO 하에서만(본 모듈은 호출 수단 제공, --selftest 는 mock)
@@ -145,16 +146,16 @@ def _preserve_pulled(outbox_dir, staging_dir):
 
 # ---------------- core run (게이트·백업·원문 보존·승인 요청·finally disable) ----------------
 def run(*, ledger_path, outbox_dir, snap_dir, pull_fn, admin_fn, now,
-        real=False, confirm=None, inject_fn=None, poll_secs=0, staging_dir=None, approval_id=None):
+        real=False, confirm=None, inject_fn=None, poll_secs=0, staging_dir=None):
     """enable → (inject) → pull(+폴링) → 원문 보존(영속 staging) → commit_bundle → finally disable.
     단일 try/finally 로 disable 보장. poll_secs>0 이면 intent 도착까지 최대 poll_secs 초 폴링(1초 간격,
-    도착 즉시 종료 = enable 창 최소화). ★direct write 0: approval_id 없으면 commit_bundle 은 PENDING
-    승인 요청만 만든다(request-only/fail-closed). 실제 저장은 owner 로컬 승인 이벤트 이후 CLI 로만.
-    real=True 일 때만 백업 + confirm 게이트."""
+    도착 즉시 종료 = enable 창 최소화). ★direct write 0: 러너는 actor='reader' 고정이라 commit_bundle
+    사람 저장 게이트가 human_save_required 로 BLOCK(fail-closed·원문 보존). 실제 저장은 owner 가
+    inbox preview 확인 후 save n(CLI --confirm)으로만. real=True 일 때만 백업 + confirm 게이트."""
     if real and confirm != REAL_CONFIRM:
         return {"ok": False, "reason": "confirm_required", "write": 0, "enabled": False,
                 "disabled": False, "disable_err": None, "backup": False, "real": True,
-                "injected": None, "request_id": None, "applied": 0}
+                "injected": None, "applied": 0}
     backup = _backup_ledger(ledger_path) if real else None
     home = os.path.dirname(os.path.abspath(ledger_path))
     if staging_dir is None:
@@ -182,8 +183,10 @@ def run(*, ledger_path, outbox_dir, snap_dir, pull_fn, admin_fn, now,
         preserved = _preserve_pulled(outbox_dir, staging_dir)
         db = open_g3(ledger_path)
         try:
-            # ★direct write 0. approval_id 없으면 PENDING 승인 요청만(request-only/fail-closed).
-            res = commit_bundle(db, home, staging_dir, preserved, approval_id, snap_dir, now)
+            # ★direct write 0. actor='reader' 고정 → 사람 저장 게이트 BLOCK(human_save_required).
+            res = commit_bundle(db, home, staging_dir, preserved,
+                                {"actor": "reader", "actor_source": "live_runner"}, None,
+                                snap_dir, now)
         finally:
             db.close()
     except Exception as e:
@@ -200,7 +203,7 @@ def run(*, ledger_path, outbox_dir, snap_dir, pull_fn, admin_fn, now,
     return {"ok": err is None, "err": err, "reason": r.get("reason"), "enabled": enabled,
             "disabled": disabled, "disable_err": disable_err, "injected": injected,
             "pull_count": pull_count, "write": r.get("write", 0), "applied": r.get("applied", 0),
-            "request_id": r.get("request_id"), "backup": bool(backup), "real": real}
+            "guidance": r.get("guidance"), "backup": bool(backup), "real": real}
 
 
 # ---------------- 셀프테스트 (temp 전용 · 라이브/실 ledger 미접촉 · mock) ----------------
@@ -212,7 +215,6 @@ def _selftest():
         ok = ok and bool(c)
         print("  [%s] %s" % ("PASS" if c else "FAIL", m))
 
-    from binggupack.safety import trusted_approval as ta
     SYN = "빙구팩 실저장 리허설용 합성 판단 문장이다. 자동 저장은 금지된다."
     NOW = 1_900_000_000
 
@@ -221,9 +223,6 @@ def _selftest():
         ob = os.path.join(tmp, "outbox"); os.makedirs(ob)
         snap = os.path.join(tmp, "snap"); os.makedirs(snap)
         ledger = os.path.join(tmp, "ledger.sqlite")
-        # home(=tmp) 에 owner 로컬 승인 provider 활성화 → request-only 시 approval_required 로 응답.
-        with open(ta.config_path(tmp), "w", encoding="utf-8") as _f:
-            json.dump({"enabled": True}, _f)
         calls = []
 
         def admin(en):
@@ -244,14 +243,14 @@ def _selftest():
         pf = {"ok": pull_ok, "bad": pull_bad, "raise": pull_raise, "zero": pull_zero}[pull]
         return tmp, ob, snap, ledger, calls, admin, pf
 
-    # T1 ★A3: 기본 temp → direct write 0 · PENDING 승인 요청만(request-only) · 원문 영속 staging 보존
+    # T1 ★A3: 기본 temp → direct write 0 · 사람 게이트 BLOCK(human_save_required) · 원문 영속 staging 보존
     tmp, ob, snap, ledger, calls, admin, pf = fresh()
     r1 = run(ledger_path=ledger, outbox_dir=ob, snap_dir=snap, pull_fn=pf, admin_fn=admin, now=NOW)
     staged = os.path.join(tmp, "hosted_inbox")
     src_preserved = any(f.endswith(".json") for f in os.listdir(staged)) if os.path.isdir(staged) else False
-    ck(r1["ok"] and r1["write"] == 0 and r1["applied"] == 0 and r1["reason"] == "approval_required"
-       and r1["request_id"] and not r1["real"] and src_preserved,
-       "T1 request-only → write 0 · approval_required · request_id · 원문 보존")
+    ck(r1["ok"] and r1["write"] == 0 and r1["applied"] == 0 and r1["reason"] == "human_save_required"
+       and r1["guidance"] and not r1["real"] and src_preserved,
+       "T1 회수 전용 → write 0 · human_save_required · guidance · 원문 보존")
     db = open_g3(ledger)
     bad = db.con.execute("select count(*) from nodes where candidate!=1 or promotion_allowed!=0").fetchone()[0]
     n1 = db.con.execute("select count(*) from nodes").fetchone()[0]
@@ -265,14 +264,14 @@ def _selftest():
     ck(not r1["backup"], "T2 real 아님 → backup/실ledger 접근 0")
     shutil.rmtree(tmp, ignore_errors=True)
 
-    # T3 malformed(schema_ver=9) → exact membership BLOCK · write 0 · 노드 0
-    #   ★P1-B.1: 선택 intent 중 하나라도 prevalidation 실패 → bundle_prevalidation_failed(H1 봉인).
+    # T3 malformed(schema_ver=9)도 러너에선 동일 — 사람 게이트가 진입부 최우선 BLOCK · write 0 · 노드 0
+    #   (H1 exact membership prevalidation 은 bundle/inbox selftest 가 human ctx 로 검증.)
     tmp, ob, snap, ledger, calls, admin, pf = fresh(pull="bad")
     r3 = run(ledger_path=ledger, outbox_dir=ob, snap_dir=snap, pull_fn=pf, admin_fn=admin, now=NOW)
     db = open_g3(ledger); n = db.con.execute("select count(*) from nodes").fetchone()[0]; db.close()
     ck(r3["write"] == 0 and r3["applied"] == 0 and n == 0
-       and r3["reason"] == "bundle_prevalidation_failed",
-       "T3 malformed pull → bundle_prevalidation_failed · write 0 · 노드 0")
+       and r3["reason"] == "human_save_required",
+       "T3 malformed pull → human_save_required(게이트 최우선) · write 0 · 노드 0")
     shutil.rmtree(tmp, ignore_errors=True)
 
     # T4 pull 예외 → disable 보장
@@ -290,8 +289,9 @@ def _selftest():
        "T9a real + confirm 불일치 → enable/pull/write 0")
     rO = run(ledger_path=ledger, outbox_dir=ob, snap_dir=snap, pull_fn=pf, admin_fn=admin,
              now=NOW + 1, real=True, confirm=REAL_CONFIRM)
-    ck(rO["backup"] and rO["write"] == 0 and rO["request_id"] and calls == [True, False],
-       "T9b real + confirm 일치 → backup + request-only(write 0·승인 요청) + disable")
+    ck(rO["backup"] and rO["write"] == 0 and rO["reason"] == "human_save_required"
+       and calls == [True, False],
+       "T9b real + confirm 일치 → backup + 회수만(write 0·human_save_required) + disable")
     bak_exists = any(x.startswith("ledger.sqlite.bak_rehearsal_") for x in os.listdir(tmp))
     ck(bak_exists, "T9c rollback 백업 파일 생성")
     shutil.rmtree(tmp, ignore_errors=True)
@@ -307,8 +307,9 @@ def _selftest():
     tmp, ob, snap, ledger, calls, admin, pf = fresh(pull="ok")
     r = run(ledger_path=ledger, outbox_dir=ob, snap_dir=snap, pull_fn=pf, admin_fn=admin,
             now=NOW, inject_fn=_inj_ok)
-    ck(r["ok"] and r["injected"] and r["write"] == 0 and r["request_id"] and calls == [True, False],
-       "TI1 enable→inject→pull→원문보존→승인요청(write 0)→disable 정상 순서")
+    ck(r["ok"] and r["injected"] and r["write"] == 0 and r["reason"] == "human_save_required"
+       and calls == [True, False],
+       "TI1 enable→inject→pull→원문보존→사람게이트 BLOCK(write 0)→disable 정상 순서")
     ck(set((r["injected"] or {}).keys()) <= {"isError", "id_h8"},
        "TI6 inject 반환에 text/secret 미포함(id_h8/isError 만)")
     shutil.rmtree(tmp, ignore_errors=True)
@@ -419,15 +420,14 @@ def main():
               pull_fn=pull_fn, admin_fn=admin_fn, now=int(time.time()),
               real=True, confirm=a.confirm, inject_fn=inject_fn)
     shutil.rmtree(outbox, ignore_errors=True)
-    # secret/URL/원문 미출력 — count/flag/reason/request_id 만. write=0 (승인 이벤트 이후에만 저장).
+    # secret/URL/원문 미출력 — count/flag/reason 만. write=0 (사람 save n 이후에만 저장).
     print(json.dumps({k: res.get(k) for k in
                       ("ok", "reason", "enabled", "disabled", "pull_count", "write", "applied",
-                       "request_id", "backup")},
+                       "backup")},
                      ensure_ascii=False))
-    if res.get("request_id"):
-        print('승인 후 저장:  binggu approval approve %s  →  '
-              'binggu hosted pull --select <번호들> --approval-id %s'
-              % (res["request_id"], res["request_id"]))
+    if res.get("reason") == "human_save_required":
+        print("저장:  binggu hosted inbox 로 preview 확인 → Claude Code 에선 '세이브 n' 발화, "
+              '터미널에선  binggu hosted pull --select <번호들> --confirm "SAVE <번호들>" 직접 실행')
     sys.exit(0 if res.get("ok") else 1)
 
 

@@ -37,6 +37,10 @@ binggu recall "<질의>"          # 회상 동작 확인
 
 ## 2. 동작 변화 (MCP 저장 흐름)
 
+> ⚠ superseded by 저장 게이트 개정(2026-07-12 사장님 룰 · CHANGELOG [Unreleased]): 저장(save/pair/hosted pull)의
+> 사람 증명은 "preview + 사람의 save n 입력" 단일 원칙으로 바뀌었고 hosted 저장의 `--approval-id` 절차는 제거됐다.
+> 아래 서술은 v1.19 당시 기준 기록이다(MCP fail-closed·비저장 mutation approval 은 현행 유지).
+
 - 업그레이드 후 **MCP mutation 도구는 기본 fail-closed** 다(`write_available: false`,
   `reason: trusted_approval_event_required`). 실제 저장이 되려면:
   1. owner 가 승인 provider 를 구성(`~/.binggupack/trusted_approval.json` 등)하고,

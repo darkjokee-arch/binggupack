@@ -18,6 +18,10 @@ v1.12.0 S4-1: write/판정 4함수(gate_record·gate_human_for·write_last_previ
 및 의존 helper(_resolve_home/gate_home/gate_path/last_preview_path/_gate_path/GATE_WINDOW_SEC/_load)
 정본은 binggupack.safety.gate_log (byte-identical relocation·semantic change 0). 본 파일은 import/
 re-export wrapper + 동일 정의 폴백으로 유지된다. has_trigger_token/TRIGGER_TOKENS 는 미이관(잔류).
+
+save-n 참조 바인딩(스펙 ①·④): 승격 정본 = preview_ref(pref)+선택 idx 바인딩(gate_record_ref·
+gate_human_for_ref·preview_ref_for_candidates/rows) — gate_log 정본을 re-export + 동일 정의 폴백.
+폴백 gate_human_for 에 정본의 미래-ts(age<0) 거부 재동기(ride-along 수리 — 폴백 drift 봉인).
 """
 import hashlib
 import json
@@ -68,7 +72,9 @@ try:
     from binggupack.safety.gate_log import (  # noqa: E402,F401
         _resolve_home, gate_home, gate_path, last_preview_path, _gate_path,
         GATE_WINDOW_SEC, _load, gate_record, gate_human_for,
-        write_last_preview, gate_record_from_prompt)
+        write_last_preview, gate_record_from_prompt,
+        _preview_rows, preview_ref_for_rows, preview_ref_for_candidates,
+        gate_record_ref, _load_refs, gate_human_for_ref)
 except Exception:  # pragma: no cover - 폴백(외부 의존 없이 동일 정의)
     def _resolve_home():
         """장부 루트 = home 단일 resolver. binggu_platform.binggu_home() 우선,
@@ -134,7 +140,8 @@ except Exception:  # pragma: no cover - 폴백(외부 의존 없이 동일 정�
 
     def gate_human_for(sentences, path=None, now=None):
         """저장할 문장들이 모두 사람 SAVE 발화로 기록됐고(신선도 창 이내) 비어있지 않으면 True.
-        하나라도 미기록/stale 이면 False(=기존 actor 게이트 유지)."""
+        하나라도 미기록/stale 이면 False(=기존 actor 게이트 유지).
+        존치(strangler selftest·기존 seed 소비자) — 승격 정본은 gate_human_for_ref 로 이관."""
         now = now if now is not None else time.time()
         sents = [s for s in (sentences or []) if _norm(s)]
         if not sents:
@@ -144,26 +151,107 @@ except Exception:  # pragma: no cover - 폴백(외부 의존 없이 동일 정�
             ts = rec.get(sent_hash(s))
             if ts is None:
                 return False
-            if GATE_WINDOW_SEC and (now - ts) > GATE_WINDOW_SEC:
+            # P1-A TAE-P2-08: 미래 ts(now-ts<0)는 "영원히 fresh" 가 아니라 무효(clock 역행/future-date
+            # 앵커로 TTL 우회 차단). freshness window 초과도 무효.
+            age = now - ts
+            if age < 0:
+                return False
+            if GATE_WINDOW_SEC and age > GATE_WINDOW_SEC:
                 return False
         return True
 
-    def write_last_preview(candidates, path=None):
+    def _preview_rows(candidates):
+        """capture_preview 후보 → [{"idx","sh"}] rows — write_last_preview/preview_ref 공유 단일 빌더."""
+        return [{"idx": j + 1, "sh": sent_hash(c.get("sentence", ""))}
+                for j, c in enumerate(candidates or []) if _norm(c.get("sentence", ""))]
+
+    def preview_ref_for_rows(rows):
+        """preview rows([{"idx","sh"}]) → 결정론적 preview_ref(sha256 of 'idx:sh' join, 16자).
+        후보 집합+순서에서 파생 — raw text 정규화 이슈 원천 회피(CLI/MCP 어디서 재계산해도 동일값)."""
+        joined = "\n".join("%s:%s" % (r.get("idx"), r.get("sh")) for r in (rows or []))
+        return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:16]
+
+    def preview_ref_for_candidates(candidates):
+        """capture_preview 후보 리스트 → preview_ref (rows 재도출 후 preview_ref_for_rows)."""
+        return preview_ref_for_rows(_preview_rows(candidates))
+
+    def write_last_preview(candidates, path=None, explicit=False):
         """capture_preview 후보 → idx+sentence_hash 영속(원문 미저장, hash만). SAVE hook 이 대조용으로 읽음.
-        매 preview 마다 덮어씀(직전 1건만 유효)."""
+        매 preview 마다 덮어씀(직전 1건만 유효). pref=save-n 참조 바인딩용 preview_ref,
+        explicit=후보 재도출 모드 — save/pair/core 재승격이 기록된 모드로 동일 재계산(pref 패리티)."""
         path = path or last_preview_path()
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        rows = [{"idx": j + 1, "sh": sent_hash(c.get("sentence", ""))}
-                for j, c in enumerate(candidates or []) if _norm(c.get("sentence", ""))]
+        rows = _preview_rows(candidates)
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({"ts": time.time(), "items": rows}, f, ensure_ascii=False)
+            json.dump({"ts": time.time(), "pref": preview_ref_for_rows(rows),
+                       "explicit": bool(explicit), "items": rows}, f, ensure_ascii=False)
         os.replace(tmp, path)  # atomic
         return len(rows)
 
+    def gate_record_ref(pref, idxs, ts=None, source="user_prompt", path=None):
+        """save-n 참조 바인딩 레코드 1행 append — {"pref","idxs","ts","source"} (승격 정본).
+        반환 기록 행 수(0=pref/idxs 없음). 파일 부재 시 생성."""
+        idxs = [int(i) for i in (idxs or [])]
+        if not pref or not idxs:
+            return 0
+        path = path or gate_path()
+        ts = ts if ts is not None else time.time()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"pref": pref, "idxs": idxs, "ts": ts, "source": source},
+                               ensure_ascii=False) + "\n")
+        return 1
+
+    def _load_refs(path=None, now=None):
+        """기록장 → {(pref, idx): 최신ts}. ref 레코드({"pref","idxs"})만 적재 — 레거시 sh 행은 _load 몫."""
+        path = path or gate_path()
+        out = {}
+        if not os.path.exists(path):
+            return out
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    d = json.loads(line)
+                except Exception:
+                    continue
+                pref, ts = d.get("pref"), d.get("ts", 0)
+                if not pref:
+                    continue
+                for i in (d.get("idxs") or []):
+                    k = (pref, i)
+                    if k not in out or ts > out[k]:
+                        out[k] = ts
+        return out
+
+    def gate_human_for_ref(pref, idxs, path=None, now=None):
+        """요청 (pref, idxs) 전부가 사람 save-n 발화로 기록됐고 신선도 창 이내면 True — 승격 정본.
+        하나라도 미기록/stale/미래ts(age<0 무효·clock 역행 TTL 우회 차단) 이면 False(fail-closed).
+        같은 pref 의 복수 발화는 (pref,idx) 단위 합산 허용(각 idx 가 개별로 사람 선택됨)."""
+        now = now if now is not None else time.time()
+        idxs = [int(i) for i in (idxs or [])]
+        if not pref or not idxs:
+            return False
+        rec = _load_refs(path, now)
+        for i in idxs:
+            ts = rec.get((pref, i))
+            if ts is None:
+                return False
+            age = now - ts
+            if age < 0:
+                return False
+            if GATE_WINDOW_SEC and age > GATE_WINDOW_SEC:
+                return False
+        return True
+
     def gate_record_from_prompt(prompt, preview_path=None, gate_path=None, ts=None):
-        """SAVE hook 진입점 — 발화가 'SAVE n' 정확형이면 직전 preview 의 해당 idx hash 를 게이트에 기록.
-        반환 기록 건수(0=SAVE 발화 아님/후보 없음/매칭 0). 원문 미접근(hash 만)."""
+        """SAVE hook 진입점 — 발화가 'SAVE n' 정확형이면 직전 preview 의 해당 idx 를 게이트에 기록.
+        신형 preview(pref 有)는 ref 레코드 1행 + 레거시 sh 행 병기 append(구 소비자 무수정 호환),
+        구형(pref 無)은 레거시 sh 행만(현행 동일 동작). 반환 레거시 기록 건수(0=SAVE 발화 아님/
+        후보 없음/매칭 0). 원문 미접근(hash 만)."""
         idxs = parse_save_indices(prompt)
         if not idxs:
             return 0
@@ -176,13 +264,18 @@ except Exception:  # pragma: no cover - 폴백(외부 의존 없이 동일 정�
         except Exception:
             return 0
         by_idx = {r.get("idx"): r.get("sh") for r in pv.get("items", [])}
-        hashes = [by_idx[i] for i in idxs if by_idx.get(i)]
+        matched = [i for i in idxs if by_idx.get(i)]
+        hashes = [by_idx[i] for i in matched]
         if not hashes:
             return 0
         gp = gate_path or _gate_path()
         ts = ts if ts is not None else time.time()
         os.makedirs(os.path.dirname(gp), exist_ok=True)
+        pref = pv.get("pref")
         with open(gp, "a", encoding="utf-8") as f:
+            if pref:
+                f.write(json.dumps({"pref": pref, "idxs": matched, "ts": ts,
+                                    "source": "user_prompt"}, ensure_ascii=False) + "\n")
             for h in hashes:
                 f.write(json.dumps({"sh": h, "ts": ts, "source": "user_prompt"}, ensure_ascii=False) + "\n")
         return len(hashes)
@@ -303,6 +396,46 @@ def _selftest():
             os.environ.pop("BINGGU_HOME", None)
         else:
             os.environ["BINGGU_HOME"] = h0
+
+    # T19~T26 save-n 참조 바인딩(ref) — 승격 정본. ts/now 명시 주입(wall-clock 경과 가정 0).
+    gp4 = os.path.join(work, "g4.jsonl")
+    pp2 = os.path.join(work, "lp2.json")
+    write_last_preview([{"sentence": SA}, {"sentence": SB}], path=pp2)
+    with open(pp2, encoding="utf-8") as f:
+        pv2 = json.load(f)
+    pref = pv2.get("pref")
+    chk("T19 preview pref == 후보 재계산 ref(결정론)",
+        bool(pref) and pref == preview_ref_for_candidates([{"sentence": SA}, {"sentence": SB}])
+        and pv2.get("explicit") is False)
+    base = 1_700_000_000.0
+    chk("T20 'SAVE 1,2' → 레거시 2건(이중기록 반환값 유지)",
+        gate_record_from_prompt("SAVE 1,2", preview_path=pp2, gate_path=gp4, ts=base) == 2)
+    chk("T20b ref 대조 통과(기록→대조)", gate_human_for_ref(pref, [1, 2], path=gp4, now=base + 10) is True)
+    chk("T20c 레거시 sh 병기(구 소비자 호환)", gate_human_for([SA, SB], path=gp4, now=base + 10) is True)
+    chk("T21 타 pref 불일치 → False", gate_human_for_ref("0" * 16, [1], path=gp4, now=base + 10) is False)
+    chk("T22 idx subset 통과 / superset 차단",
+        gate_human_for_ref(pref, [1], path=gp4, now=base + 10) is True
+        and gate_human_for_ref(pref, [1, 2, 3], path=gp4, now=base + 10) is False)
+    chk("T23 stale(창 밖) → False",
+        gate_human_for_ref(pref, [1], path=gp4, now=base + GATE_WINDOW_SEC + 100) is False)
+    chk("T24 미래 ts → False(ref·레거시 폴백 재동기)",
+        gate_human_for_ref(pref, [1], path=gp4, now=base - 100) is False
+        and gate_human_for([SA], path=gp4, now=base - 100) is False)
+    # T25 구형 preview(pref 없음) → 레거시 sh 행만(ref 0행·무해)
+    pp3 = os.path.join(work, "lp3.json")
+    with open(pp3, "w", encoding="utf-8") as f:
+        json.dump({"ts": base, "items": [{"idx": 1, "sh": sent_hash(SA)}]}, f, ensure_ascii=False)
+    gp5 = os.path.join(work, "g5.jsonl")
+    chk("T25 구형 preview → 레거시 1건",
+        gate_record_from_prompt("SAVE 1", preview_path=pp3, gate_path=gp5, ts=base) == 1)
+    chk("T25b ref 레코드 0(구형 무해)", _load_refs(path=gp5) == {}
+        and gate_human_for([SA], path=gp5, now=base + 10) is True)
+    # T26 gate_record_ref 직접 기록 → 대조
+    gp6 = os.path.join(work, "g6.jsonl")
+    chk("T26 gate_record_ref 직접 기록 → 대조 통과",
+        gate_record_ref(pref, [1, 3], ts=base, path=gp6) == 1
+        and gate_human_for_ref(pref, [1, 3], path=gp6, now=base + 10) is True
+        and gate_human_for_ref(pref, [2], path=gp6, now=base + 10) is False)
 
     print(f"\nRESULT: {ok}/{tot} " + ("PASS" if ok == tot else "FAIL"))
     print("GATE: " + ("GO" if ok == tot else "BLOCK"))

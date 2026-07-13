@@ -32,20 +32,28 @@ def _sent_hash(s):
 
 
 def _maybe_promote_actor_by_gate(text, indices, ctx, explicit=False):
-    """사람-발화 게이트(binggu_save_gate): actor 비human 이어도 선택 문장이 사람 SAVE 발화로
-    기록됐으면 human 승격(0-A 해법, 4cli REFINE). 게이트 실패/미기록 → 승격 0(fail-closed).
-    explicit: 명시 저장 경로면 preview 후보 추출도 explicit(저장 본체와 index 정합)."""
+    """사람-발화 게이트(binggu_save_gate): actor 비human 이어도 선택 (preview_ref, idx) 가 사람
+    save-n 발화로 기록됐으면 human 승격(save-n 참조 바인딩 정본). 게이트 실패/미기록 → 승격 0(fail-closed).
+    explicit: last_preview 에 기록된 모드가 있으면 그 모드로 후보 재도출(pref 패리티) — 부재 시 이 인자."""
     if ctx.get("actor", "").strip().lower() == "human":
         return ctx
     try:
         import binggu_save_gate as sgate
-        cands = capture_preview(text, explicit=explicit)["candidates"]
-        sents = [cands[i - 1]["sentence"] for i in indices
-                 if isinstance(i, int) and 1 <= i <= len(cands)]
-        if sents and sgate.gate_human_for(sents):
+        import json as _json
+        mode = bool(explicit)
+        try:
+            with open(sgate.last_preview_path(), "r", encoding="utf-8") as f:
+                mode = bool(_json.load(f).get("explicit", mode))
+        except Exception:
+            pass
+        cands = capture_preview(text, explicit=mode)["candidates"]
+        pref = sgate.preview_ref_for_candidates(cands)
+        idxs = [i for i in indices
+                if isinstance(i, int) and 1 <= i <= len(cands)]
+        if idxs and sgate.gate_human_for_ref(pref, idxs):
             ctx = dict(ctx)
             ctx["actor"] = "human"
-            ctx["actor_promoted_by"] = "save_gate"  # 사후감사 표식
+            ctx["actor_promoted_by"] = "save_gate_ref"  # 사후감사 표식
     except Exception:
         pass  # 게이트 부재/오류 → 기존 actor 게이트 유지(default-deny)
     return ctx

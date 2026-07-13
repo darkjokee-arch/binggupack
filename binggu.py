@@ -274,11 +274,24 @@ def cmd_hosted(a):
       pull --select: inbox 에서 본 번호만 ledger 로 commit. 전량 자동 적용 없음 · 사람 confirm 게이트.
     no daemon · no autopull · no autosave — 두 명령 모두 사람이 직접 실행해야만 동작."""
     sub = getattr(a, "hosted_cmd", None)
+    import json as _json
     import time as _t
     from binggu_hosted_inbox import (  # noqa: E402
         staging_dir_for, fetch_to_staging, summarize, render_summary_md, commit_selected)
     home = os.path.dirname(os.path.abspath(a.ledger))
     staging = staging_dir_for(home)
+
+    def _staged_cands(now_ts):
+        """staged intent 원문 → save-n preview 후보(1 intent = 1 row · 전체 idx 순서 고정 · 해시만 영속).
+        inbox 렌더의 write_last_preview 와 pull 의 pref 재계산이 같은 빌더를 공유(pref 패리티)."""
+        cands = []
+        for it in summarize(staging, now_ts)["items"]:
+            try:
+                with open(it["_path"], "r", encoding="utf-8") as f:
+                    cands.append({"sentence": _json.load(f).get("text") or ""})
+            except Exception:
+                cands.append({"sentence": ""})
+        return cands
 
     if sub == "inbox":
         no_fetch = bool(getattr(a, "no_fetch", False))
@@ -299,35 +312,50 @@ def cmd_hosted(a):
                 tail = "" if fr["disabled"] else (" ⚠disable_err=%s" % fr["disable_err"])
                 print("회수: fetched=%s enabled=%s disabled=%s%s"
                       % (fr["fetched"], fr["enabled"], fr["disabled"], tail))
-        summ = summarize(staging, int(_t.time()), since_days=_parse_days(getattr(a, "since", None)))
+        _now = int(_t.time())
+        summ = summarize(staging, _now, since_days=_parse_days(getattr(a, "since", None)))
         if summ.get("total", summ["count"]) > summ["count"]:
             print("(--since 로 %d건 중 %d건만 표시 · 번호는 전체 기준 고정)"
                   % (summ["total"], summ["count"]))
         print(render_summary_md(summ))
+        # save-n 참조 바인딩 앵커 — inbox 렌더 시 staged 원문을 last_preview 에 영속(해시만·원문 미저장).
+        # 사람이 'SAVE n'(세이브 n) 발화하면 hook 이 이 preview_ref 로 ref 레코드를 기록한다.
+        try:
+            import binggu_save_gate as _sg
+            _sg.write_last_preview(_staged_cands(_now))
+        except Exception:
+            pass
         return 0
 
     if sub == "pull":
-        # ★A3(P1-B): hosted 저장의 유일 경로 = 로컬 exact-bound 승인 이벤트(commit_bundle).
-        #   ① --select 만 → PENDING 승인 요청 생성(직접 write 0·원문 보존)
-        #   ② owner 가 `binggu approval approve <요청ID>` 로 로컬 승인
-        #   ③ --select … --approval-id <요청ID> → 묶음 전체 exact-bound atomic 저장
+        # 저장 게이트 = 사람 save-n(preview_ref 바인딩) + confirm 정확일치(스펙 ③ — approval 배선 없음).
         sel = getattr(a, "select", None)
         if not sel:
-            print("hosted pull = inbox 에서 본 번호를 골라 owner 로컬 승인 후 ledger 에 저장합니다(전량 자동 없음).")
-            print("  먼저:  python binggu.py hosted inbox                 (대기 intent 번호 확인)")
-            print("  ① 승인 요청:  python binggu.py hosted pull --select 1,3")
-            print("  ② 로컬 승인:  binggu approval approve <요청ID>")
-            print("  ③ 저장 확정:  python binggu.py hosted pull --select 1,3 --approval-id <요청ID>")
+            print("hosted pull = inbox 에서 본 번호를 골라 사람 save-n 으로 ledger 에 저장합니다(전량 자동 없음).")
+            print("  먼저:  python binggu.py hosted inbox                 (대기 intent 번호 확인 · preview 기록)")
+            print("  저장:  python binggu.py hosted pull --select 1,3 --confirm \"SAVE 1,3\"")
+            print("  (Claude Code 에선 inbox 확인 후 '세이브 1,3' 발화가 사람 앵커 · 터미널에선 직접 실행이 곧 save n)")
             return 0
         idx = [int(x) for x in sel.split(",") if x.strip()]
-        approval_id = getattr(a, "approval_id", None)
+        confirm = getattr(a, "confirm", None)
         ledger, snap_dir = _ledger_paths(a.ledger)
         if not os.path.exists(ledger):
             print("장부 없음: %s (먼저 python binggu.py init)" % ledger)
             return 2
+        now_ts = int(_t.time())
+        # save-n 참조 바인딩 — inbox 렌더가 영속한 preview 와 동일 빌더로 pref 재계산(1 intent = 1 row).
+        _refs = None
+        try:
+            import binggu_save_gate as _sg
+            _cands = _staged_cands(now_ts)
+            if _cands:
+                _refs = [(_sg.preview_ref_for_candidates(_cands), idx)]
+        except Exception:
+            _refs = None
         db, _ = _open(ledger)
         before = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
-        res = commit_selected(db, home, staging, idx, approval_id, snap_dir, int(_t.time()))
+        ctx = _resolve_human_ctx(a.ledger, _refs, confirm)
+        res = commit_selected(db, home, staging, idx, ctx, confirm, snap_dir, now_ts)
         after = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
         chain = db.verify_chain()
         db.close()
@@ -336,40 +364,23 @@ def cmd_hosted(a):
             extra = (" (없는 번호: %s)" % res["bad_idx"]) if res.get("bad_idx") else ""
             print("BLOCK: %s%s" % (res["reason"], extra))
             return 1
-        rid = res.get("request_id")
-        if not approval_id:
-            # ① request-only — PENDING 승인 요청만(직접 write 0·원문 보존)
-            if res.get("reason") == "provider_not_configured":
-                from binggupack.safety import trusted_approval as _ta
-                print("BLOCK: 승인 provider 미구성 — 활성화: %s 에 {\"enabled\": true}"
-                      % _ta.config_path(home))
-                return 1
-            if not rid:
-                print("BLOCK: %s" % res.get("reason"))
-                return 1
-            print("승인 요청 생성: request_id=%s · 선택 %d건 · 직접 저장 0(원문 보존)"
-                  % (rid, res["selected"]))
-            print("  검토:  binggu approval show %s" % rid)
-            print("  승인:  binggu approval approve %s" % rid)
-            print("  저장:  python binggu.py hosted pull --select %s --approval-id %s"
-                  % (",".join(str(i) for i in idx), rid))
-            if res.get("quarantined"):
-                print("  ⚠quarantine %d건(모호/변조 — write 0·원문 보존)" % len(res["quarantined"]))
-            return 0
-        # ③ 승인 제시 — exact-bound atomic 저장 결과
         if res.get("write"):
-            print("hosted pull 저장: 묶음 %d건 확정(atomic) · request_id=%s"
-                  % (res["applied"], rid))
+            print("hosted pull 저장: 묶음 %d건 확정(atomic)" % res["applied"])
             print("  candidate(active) %d -> %d (+%d) · audit chain %s"
                   % (before, after, after - before, "INTACT" if chain else "BROKEN"))
             return 0
-        # 저장 실패(승인 불일치·만료·all-or-nothing 차단 등) — write 0·원문 보존
+        # 저장 실패(사람 앵커 없음·confirm 불일치·all-or-nothing 차단 등) — write 0·원문 보존
         rc = res.get("reason") or "not_written"
         print("BLOCK: %s · write 0(원문 보존)" % rc)
+        if rc == "human_save_required":
+            print("  inbox preview 확인 → Claude Code 에선 '세이브 %s' 발화, 터미널에선 직접 실행."
+                  % ",".join(str(i) for i in idx))
+        if res.get("guidance"):
+            print("  %s" % res["guidance"])
         if res.get("fail"):
             print("  실패 intent: %s (%s)" % (res["fail"].get("intent_id"), res["fail"].get("reason")))
         if res.get("receipt"):
-            print("  기존 receipt 반환(재저장 0·계약 8)")
+            print("  기존 receipt 반환(재저장 0·멱등)")
         return 1
     return 1
 
@@ -768,9 +779,10 @@ def cmd_preview(a, explicit=False):
     print(pv["preview_markdown"])
     # SAVE 게이트 대조용 — 직전 preview 후보를 last_preview 에 영속(hook 이 사람 'SAVE n' 발화 시 이걸 읽어 도장).
     # 이 연결이 없으면 CLI preview→save 흐름이 save_gate_log 와 분리돼 autopush 이중게이트가 영구 BLOCK.
+    # explicit 모드도 함께 기록 — save/pair/core 재승격이 동일 모드로 pref 재계산(MUST_FIX 2).
     try:
         import binggu_save_gate as _sg
-        _sg.write_last_preview(pv.get("candidates") or [])
+        _sg.write_last_preview(pv.get("candidates") or [], explicit=explicit)
     except Exception:
         pass
     pid = _preview_id(a.text)
@@ -805,9 +817,10 @@ def cmd_reflect(a):
     pv = capture_preview(text)
     print(pv["preview_markdown"])
     # preview 와 동일하게 last_preview 영속 → 사람 'SAVE n' 발화 시 save_gate 가 도장(autopush 호환).
+    # reflect 후보 재도출은 기본 모드 — explicit=False 기록(save pref 재계산 패리티 · MUST_FIX 2).
     try:
         import binggu_save_gate as _sg
-        _sg.write_last_preview(pv.get("candidates") or [])
+        _sg.write_last_preview(pv.get("candidates") or [], explicit=False)
     except Exception:
         pass
     pid = _preview_id(text)
@@ -829,47 +842,52 @@ def _gate_log_for_ledger(ledger):
                         os.path.basename(_sg.gate_path()))
 
 
-def _resolve_human_ctx(ledger, sents, confirm=None):
-    """운영 write 의 'human' 승격 = 실제 사람 근거가 있을 때만(fail-closed 기본 · P1-A.1).
+def _resolve_human_ctx(ledger, save_refs=None, confirm=None):
+    """운영 write 의 'human' 승격 — 사람 증명 = "preview + 사람의 save n 입력" 단일 원칙.
 
-    환경변수(BINGGU_TRUSTED_CLI)·비대화형 자동화는 사람 승인이 아니다(RFC §6: env var/isatty !=
-    human approval). 사람 근거 2가지만:
-      1) save_gate 앵커 — 사장님이 키보드로 친 SAVE 발화를 UserPromptSubmit hook 이 기록(AI 위조 불가).
-      2) 대화형 TTY — 사장님이 직접 터미널에서 실행. **isatty 는 pipe/자동화를 거르는 UX 경계**일 뿐
-         암호학적 사람증명이 아니다(셸/파일 도구가 붙은 호스트에선 하드 통제 아님 · SECURITY.md).
-    그 외(비대화형·앵커없음) → actor='reader' → 모든 core 게이트가 BLOCK(fail-closed). 환경변수로 우회
-    불가. BINGGU_STRICT_HUMAN_GATE 는 **deprecated no-op**(strict 가 기본 · 0/false 로 fail-open 안 됨).
+    save_refs: list[(preview_ref: str, indices: list[int])] | None — save-n 참조 바인딩 대조 대상.
+    confirm 은 검증 없는 passthrough(정확문구 검증은 core 몫). 판정 3분기(기본 reader · fail-closed):
+      1) save-n 참조 바인딩 — 사람이 preview 를 보고 발화한 "세이브 n" 을 UserPromptSubmit hook 이
+         (preview_ref, idx) 로 기록(AI 는 UserPromptSubmit 를 못 거쳐 위조 불가). save_refs 전 튜플이
+         gate_human_for_ref 를 통과(all-or-nothing·신선도 창·미래ts 무효)할 때만 human/'save_gate_ref'.
+      2) 에이전트 세션 가드 — CLAUDECODE env truthy → reader/'agent_session_unanchored'. Claude Code
+         세션 안에서 명령 실행 주체는 AI 일 수 있으므로 훅 기록(1)만이 사람 증명. 이 env 는 승인을
+         부여하지 않고 **거부만** 한다(deny 전용 — "env 는 승인 아님" 원칙과 정합·fail-open 없음).
+         ★한계 정직 명시: CLAUDECODE 는 프로세스가 env unset 으로 지울 수 있는 소프트 신호다(위조
+         =제거 가능) — 하드 통제가 아니라 행동규칙 + audit(actor_source 저널)이 잔여 방어이고,
+         write 성사는 여전히 core 의 confirm 정확일치·preview 게이트를 통과해야 한다.
+      3) 터미널 = 명령 직접 입력 — 그 외 → human/'cli_command'. 사용자가 명령(번호+confirm)을 직접
+         타이핑한 것이 곧 save n 입력(스펙 ②). isatty 검사는 삭제 — pipe/redirect 여부는 사람 증명과
+         무관하다.
+    BINGGU_TRUSTED_CLI 는 무시(env fail-open 불가) · BINGGU_STRICT_HUMAN_GATE 는 **deprecated no-op**
+    (strict 가 기본 · 0/false 로 fail-open 안 됨).
 
-    (비대화형 owner 의 제3 경로 = exact-bound approval event(P1-B A2): `binggu approval approve <rid>` 로
-     대화형 TTY 에서 mint 한 뒤 mutation 에 `--approval-id <rid>` 제시 → approval_gate.authorize 가
-     (protocol,operation,payload digest,ledger) 정확 바인딩 검증 + one-time consume. 이 함수는 대화형/앵커
-     전용이고, approval event 경로는 cmd_* 가 approval_id 제시 시 _mutation_via_approval 로 분기한다.)
+    (비-저장 mutation(accept/unaccept/due/resolve)의 exact-bound approval event 경로는 별도 자산 —
+     approval_id 제시 시 cmd_* 가 _mutation_via_approval 로 분기하며 이 함수와 배타.)
     """
     ctx = {"actor": "reader"}                    # 기본 fail-closed (reader 는 denylist·allowlist 게이트 모두 BLOCK)
     if confirm is not None:
         ctx["confirm"] = confirm
     if os.environ.get("BINGGU_STRICT_HUMAN_GATE", "").strip():
         print("NOTE: BINGGU_STRICT_HUMAN_GATE 는 deprecated no-op 입니다(strict 가 기본 · fail-open 불가).")
-    # 1) 위조방지 기록장 대조 (hook 이 쓴 사람 SAVE 발화 hash — AI 는 UserPromptSubmit 를 못 거쳐 위조 불가)
+    # 1) save-n 참조 바인딩 (hook 이 쓴 (preview_ref, idx) — AI 는 UserPromptSubmit 를 못 거쳐 위조 불가)
     try:
         import binggu_save_gate as _sg
-        if sents and _sg.gate_human_for(sents, path=_gate_log_for_ledger(ledger)):
+        if save_refs and all(
+                _sg.gate_human_for_ref(pref, idxs, path=_gate_log_for_ledger(ledger))
+                for pref, idxs in save_refs):
             ctx["actor"] = "human"
-            ctx["actor_source"] = "save_gate"
+            ctx["actor_source"] = "save_gate_ref"
             return ctx
     except Exception:
-        pass  # 게이트 부재/오류 → 아래 신뢰 신호로 판단(fail-closed 유지)
-    # 2) 대화형 TTY(사장님 직접 실행) — UX 경계. 비대화형(pipe/redirect/자동화)은 사람 증명 아님.
-    try:
-        interactive = sys.stdin.isatty()
-    except Exception:
-        interactive = False
-    if interactive:
-        ctx["actor"] = "human"
-        ctx["actor_source"] = "tty"
+        pass  # 게이트 부재/오류 → 승격 0(fail-closed 유지)
+    # 2) 에이전트 세션 가드 — Claude Code 세션 내부는 훅 앵커(1)만 사람 증명(deny 전용·승격 없음).
+    if os.environ.get("CLAUDECODE"):
+        ctx["actor_source"] = "agent_session_unanchored"
         return ctx
-    # 3) 비대화형 + 앵커없음 = 사람 미검증 → fail-closed(reader). 환경변수 우회 없음.
-    ctx["actor_source"] = "unverified_noninteractive"
+    # 3) 터미널 — 사용자가 명령을 직접 입력한 것이 곧 save n(스펙 ②·isatty 무관).
+    ctx["actor"] = "human"
+    ctx["actor_source"] = "cli_command"
     return ctx
 
 
@@ -878,7 +896,7 @@ def _mutation_via_approval(a, db, operation, bind, core_call):
 
     approval_gate.authorize 컨텍스트로 (protocol,operation,payload digest,ledger) 바인딩 검증 +
     one-time consume(reserve/finalize). provider 미구성/미승인/바인딩 불일치 → auth.actor='reader'
-    → core 게이트 fail-closed(G4). 대화형 TTY/앵커 경로(_resolve_human_ctx)와 배타.
+    → core 게이트 fail-closed(G4). save-n 바인딩/cli_command 경로(_resolve_human_ctx)와 배타.
     core_call(ctx) 은 ctx={"actor","confirm"} 를 받아 core mutation 을 실행하고 결과 dict 를 반환한다.
     """
     from binggupack.mcp import approval_gate
@@ -930,14 +948,23 @@ def cmd_save(a):
     db, snap_dir = _open(a.ledger)
     idx = [int(x) for x in a.pick.split(",") if x.strip()]
     _explicit = getattr(a, "explicit", False)
-    # 저장될 문장(선택 후보) = 위조방지 게이트 대조 대상. save_selected 내부 재실행과 동일 인덱싱.
+    # save-n 참조 바인딩 — last_preview 에 기록된 explicit 모드로 후보를 재도출해 preview_ref 를
+    # 재계산(pref 패리티 · MUST_FIX 2). hook 이 기록한 (pref, idx) 와 전 튜플 대조된다.
+    _refs = None
     try:
-        _cands = capture_preview(a.text, explicit=_explicit)["candidates"]
-        _sents = [_cands[i - 1]["sentence"] for i in idx
-                  if isinstance(i, int) and 1 <= i <= len(_cands)]
+        import binggu_save_gate as _sg
+        import json as _json
+        _mode = _explicit
+        try:
+            with open(_sg.last_preview_path(), "r", encoding="utf-8") as _f:
+                _mode = bool(_json.load(_f).get("explicit", _mode))
+        except Exception:
+            pass
+        _cands = capture_preview(a.text, explicit=_mode)["candidates"]
+        _refs = [(_sg.preview_ref_for_candidates(_cands), idx)]
     except Exception:
-        _sents = []
-    ctx = _resolve_human_ctx(a.ledger, _sents, a.confirm)
+        _refs = None
+    ctx = _resolve_human_ctx(a.ledger, _refs, a.confirm)
     r = save_selected(db, a.text, idx, ctx,
                       snap_dir, due_date=a.due, speaker=getattr(a, "speaker", None),
                       explicit=_explicit)
@@ -962,19 +989,26 @@ def cmd_pair(a):
     from binggupack.storage import save_paired   # 트랙 C: storage facade 경유
     db, snap_dir = _open(a.ledger)
     rel = getattr(a, "by", "ai") + "_" + a.relation  # 반응 주체: ai(AI가 사용자 발화를) / owner(사용자가 AI 발화를)
-    # 저장될 문장(owner/ai pick) = 위조방지 게이트 대조 대상(_pick_one_node 와 동일 explicit 인덱싱).
-    _psents = []
+    # save-n 참조 바인딩 — owner/ai 각 preview 의 (pref, pick) 2-튜플 대조. explicit 모드는
+    # last_preview 기록 모드로 동일 재계산(pref 패리티 · MUST_FIX 2 — 기본은 _pick_one_node 와 동일 True).
+    _refs = None
     try:
-        _oc = capture_preview(a.owner_text, explicit=True)["candidates"]
-        if isinstance(a.owner_pick, int) and 1 <= a.owner_pick <= len(_oc):
-            _psents.append(_oc[a.owner_pick - 1]["sentence"])
+        import binggu_save_gate as _sg
+        import json as _json
+        _mode = True
+        try:
+            with open(_sg.last_preview_path(), "r", encoding="utf-8") as _f:
+                _mode = bool(_json.load(_f).get("explicit", _mode))
+        except Exception:
+            pass
+        _oc = capture_preview(a.owner_text, explicit=_mode)["candidates"]
+        _refs = [(_sg.preview_ref_for_candidates(_oc), [a.owner_pick])]
         if a.ai_text:
-            _ac = capture_preview(a.ai_text, explicit=True)["candidates"]
-            if isinstance(a.ai_pick, int) and 1 <= a.ai_pick <= len(_ac):
-                _psents.append(_ac[a.ai_pick - 1]["sentence"])
+            _ac = capture_preview(a.ai_text, explicit=_mode)["candidates"]
+            _refs.append((_sg.preview_ref_for_candidates(_ac), [a.ai_pick]))
     except Exception:
-        _psents = []
-    ctx = _resolve_human_ctx(a.ledger, _psents, a.confirm)
+        _refs = None
+    ctx = _resolve_human_ctx(a.ledger, _refs, a.confirm)
     r = save_paired(db, a.owner_text, a.ai_text, ctx,
                     snap_dir, relation_kind=rel, owner_pick=a.owner_pick, ai_pick=a.ai_pick, due_date=a.due)
     acc_note = ""
@@ -1055,7 +1089,7 @@ def cmd_list(a):
 
 def cmd_deprecate(a):
     db, snap_dir = _open(a.ledger)
-    # P1-A.1: actor 는 사람 근거(save_gate 앵커/대화형 TTY)로만 human. 비대화형/env → reader → fail-closed.
+    # actor 판정 = _resolve_human_ctx(save-n 참조 바인딩/cli_command · 에이전트 세션은 deny). env fail-open 없음.
     ctx = _resolve_human_ctx(a.ledger, None, a.confirm)
     r = deprecate_from_list(db, a.n, a.id8, a.reason, ctx, snap_dir)
     db.close()
@@ -1080,7 +1114,7 @@ def cmd_accept(a):
             a, db, "accept",
             {"index": a.n, "id8": a.id8, "reason": a.reason, "approval_id": _aid},
             lambda ctx: accept_from_list(db, a.n, a.id8, a.reason, ctx))
-    else:                 # 대화형 TTY / save_gate 앵커 (기존)
+    else:                 # save-n 참조 바인딩 / cli_command (_resolve_human_ctx 판정)
         r = accept_from_list(db, a.n, a.id8, a.reason, _resolve_human_ctx(a.ledger, None, a.confirm))
     db.close()
     return _show(r)
@@ -1201,9 +1235,16 @@ def cmd_abstraction(a):
               '--confirm "SAVE <번호>" --explicit' % spec["text"])
         return 1
 
-    # write: 기존 save 경로 재사용 — actor 판정은 _resolve_human_ctx(위조방지 게이트/TTY) 그대로.
+    # write: 기존 save 경로 재사용 — actor 판정은 _resolve_human_ctx(save-n 참조 바인딩/터미널) 그대로.
     db, snap_dir = _open(a.ledger)
-    ctx = _resolve_human_ctx(a.ledger, [spec["text"]], spec["save_confirm"])
+    _refs = None
+    try:
+        import binggu_save_gate as _sg
+        _cands = capture_preview(spec["text"], explicit=True)["candidates"]
+        _refs = [(_sg.preview_ref_for_candidates(_cands), spec["save_indices"])]
+    except Exception:
+        _refs = None
+    ctx = _resolve_human_ctx(a.ledger, _refs, spec["save_confirm"])
     r = save_selected(db, spec["text"], spec["save_indices"], ctx, snap_dir, explicit=True)
     db.close()
     if r.get("applied") and r.get("saved") == 1:
@@ -1271,8 +1312,8 @@ def cmd_learn_consume(a):
             print("장부가 없습니다: %s · 먼저 python binggu.py init" % ledger)
             return 2
         db, _ = _open(ledger)
-        # P1-A.1: 소비 승인 actor 는 사람 근거(save_gate 앵커/대화형 TTY)로만 human. 비대화형/env → reader
-        #   → mark_outcome G4_no_auto(fail-closed). CONSUME <n> 문구 단독으로 human 승격 금지(AOB-3 동종).
+        # 소비 승인 actor 판정 = _resolve_human_ctx(save-n 바인딩/cli_command · 에이전트 세션 deny).
+        #   env fail-open 없음. CONSUME <n> 문구 단독으로 human 승격 금지(AOB-3 동종).
         _ctx = _resolve_human_ctx(a.ledger, None)
         r = LC.consume(db, ledger, qpath, qi, index=a.index, home=os.path.dirname(ledger), ctx=_ctx)
         db.close()
@@ -1725,13 +1766,14 @@ def _demo_body(a, demo_home, keep, created_tmp, op_home):
         picks = [i for i in picks if 1 <= i <= len(cands)] or [1]
         print()
 
-    sents = [cands[i - 1]["sentence"] for i in picks]
     rejected = [c["sentence"] for j, c in enumerate(cands, 1) if j not in picks]
 
-    # 3) 승인 앵커(격리 홈·source="demo") → 저장. save_selected 가 앵커를 소비해 승격·저장.
-    #    운영 홈이 아니라 데모 홈의 save_gate_log 에만 기록된다(운영 승인 우회 아님).
-    sgate.gate_record(sents, source="demo")
+    # 3) 승인 앵커(격리 홈) → 저장 — 실흐름 재현: preview 영속 + 사람 'SAVE n' 발화 기록(ref 바인딩).
+    #    save_selected 의 core 재승격이 (preview_ref, idx) 를 소비해 승격·저장한다.
+    #    운영 홈이 아니라 데모 홈의 last_preview/save_gate_log 에만 기록된다(운영 승인 우회 아님).
     confirm = "SAVE " + ",".join(str(i) for i in picks)
+    sgate.write_last_preview(cands)
+    sgate.gate_record_from_prompt(confirm)
     db = open_g3(ledger)
     r = save_selected(db, DEMO_CONVO, picks, {"actor": "reader", "confirm": confirm}, snap_dir)
     active_after = db.con.execute("SELECT COUNT(*) FROM nodes WHERE state='active'").fetchone()[0]
@@ -2122,10 +2164,9 @@ def main():
     ibp.add_argument("--wait", type=int, default=0)
     ibp.add_argument("--variant", choices=["save_mcp", "save_v2"], default="save_mcp")
     ibp.add_argument("--workers-port", dest="wp", default=None)
-    pp = hsub.add_parser("pull")            # 선택 묶음 → 승인 요청 / 승인 후 저장 (전량 자동 없음)
+    pp = hsub.add_parser("pull")            # 선택 묶음 → 사람 save-n + confirm 저장 (전량 자동 없음)
     pp.add_argument("--select", default=None)            # 'inbox' 에서 본 번호들 (예: 1,3)
-    pp.add_argument("--confirm", default=None)           # (레거시·미사용) — 저장 게이트는 승인 이벤트
-    pp.add_argument("--approval-id", dest="approval_id", default=None)  # owner 로컬 승인 요청ID → atomic 저장
+    pp.add_argument("--confirm", default=None)           # "SAVE <n[,n]>" 정확 일치(사람 save-n 게이트)
     hv = sub.add_parser("harvest")          # 외부 수확(P1 ③) — 등록 소스만·후보로만·영구는 사람 SAVE
     hvsub = hv.add_subparsers(dest="harvest_cmd", required=True)
     ha = hvsub.add_parser("add")            # 소스 화이트리스트 등록(사람 행위)

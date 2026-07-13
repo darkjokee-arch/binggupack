@@ -140,8 +140,8 @@ def render_preview_md(pv):
 def consume(db, ledger_path, qpath, qi, index=1, home=None, ctx=None):
     """qi 번째 소비 대기 항목을 mark_outcome 으로 적재하고 consumed=true 마킹.
 
-    P1-A.1: actor 는 하드코딩 'human' 이 아니라 호출자가 넘긴 `ctx` (owner 근거로만 human). binggu CLI
-    는 `_resolve_human_ctx`(save_gate 앵커·대화형 TTY 만 human · 비대화형/env → reader) 를 넘긴다. ctx
+    actor 는 하드코딩 'human' 이 아니라 호출자가 넘긴 `ctx`. binggu CLI 는 `_resolve_human_ctx`
+    (판정 정본은 그 docstring — save-n 참조 바인딩/cli_command · 에이전트 세션 deny) 를 넘긴다. ctx
     미지정 시 fail-closed 기본(reader) → mark_outcome/mark_outcome_uttered 의 actor=human 게이트가 BLOCK.
 
     반환: {consumed, reason?, outcome?, node_claim?, decision_id?, query?, index?, mark?}.

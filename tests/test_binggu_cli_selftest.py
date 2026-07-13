@@ -2,9 +2,13 @@
 # -*- coding: utf-8 -*-
 """binggu CLI 임베드 selftest 분리본 (God-file #4 분리).
 
-기존 binggu.py 안에 있던 255줄 임베드 selftest 를 그대로 옮긴 것.
-케이스 로직은 변경 0 — binggu.py --selftest 는 이 모듈의 selftest() 를 호출한다.
-pytest 도 test_binggu_cli_selftest() 로 이 게이트를 수집한다(GATE=GO → exit 0).
+기존 binggu.py 안에 있던 임베드 selftest 를 옮긴 것 — binggu.py --selftest 는 이 모듈의
+selftest() 를 호출한다. pytest 도 test_binggu_cli_selftest() 로 이 게이트를 수집한다(GATE=GO → exit 0).
+
+save-n 참조 바인딩 개정(스펙 ①~④) 반영: 사람 증명 = "preview + 사람의 save n 입력" 단일 원칙.
+  · 터미널 시뮬 = CLAUDECODE env pop(스펙 ② — 명령 직접 입력이 곧 save n · isatty 시뮬 폐기)
+  · 에이전트 세션 시뮬 = CLAUDECODE=1 주입(훅 ref 앵커만 human · FE 블록)
+  · 결정성: CLAUDECODE/BINGGU_TRUSTED_CLI/BINGGU_STRICT_HUMAN_GATE 명시 set/pop + BINGGU_HOME temp 격리
 """
 import os
 import shutil
@@ -45,36 +49,39 @@ from binggu import (  # noqa: E402
     _gate_log_for_ledger,
 )
 
+_ENV_KEYS = ("CLAUDECODE", "BINGGU_HOME", "BINGGU_TRUSTED_CLI", "BINGGU_STRICT_HUMAN_GATE")
 
-class _FakeTTY:
-    """대화형 owner 터미널 시뮬 — P1-A.1: index-op(deprecate/replace/mark 등)는 sentence 앵커가 없어
-    사람 근거로 '대화형 TTY'만 가능. binggu.py --selftest·pytest 양 진입점 모두 비대화형이므로 여기서
-    owner-interactive 를 시뮬한다. FE 블록은 내부에서 StringIO(isatty False)로 fail-closed 경로를 별도
-    검증(스스로 stdin 저장·복원)."""
-    def isatty(self):
-        return True
 
-    def readline(self, *a):
-        return "\n"
-
-    def read(self, *a):
-        return ""
-
-    def fileno(self):
-        return 0
+def _restore_env(keep):
+    for k, v in keep.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
 
 
 def selftest():
-    # P1-A.1: 양 진입점(binggu.py --selftest · pytest 래퍼) 모두 비대화형 stdin 이므로 여기서 owner
-    #         대화형 TTY 를 시뮬한다(아래 FE 블록만 StringIO 로 fail-closed 경로를 별도 검증). 정상 경로에서
-    #         복원하고, 예외 누수 대비는 pytest 래퍼의 try/finally 가 담당한다.
-    _real_stdin = sys.stdin
-    sys.stdin = _FakeTTY()
+    # 결정성: 전 케이스가 env 를 명시 제어(Claude Code 세션의 CLAUDECODE=1 상속 · CI 부재 이중 결과 차단).
+    # 기본 = 터미널 시뮬(CLAUDECODE pop → 스펙 ② cli_command human). FE/hosted 블록이 국소적으로
+    # CLAUDECODE=1(에이전트 세션)을 주입·복원한다.
+    keep = {k: os.environ.get(k) for k in _ENV_KEYS}
+    os.environ.pop("CLAUDECODE", None)
+    os.environ.pop("BINGGU_TRUSTED_CLI", None)
+    os.environ.pop("BINGGU_STRICT_HUMAN_GATE", None)
+    try:
+        return _selftest_body()
+    finally:
+        _restore_env(keep)
+
+
+def _selftest_body():
     print("=" * 74)
     print("binggu CLI — temp 장부 풀 사이클 selftest (영속 장부·운영 store 접근 0)")
     print("=" * 74)
     op_before = {p: (os.path.getmtime(p) if os.path.exists(p) else None) for p in OPERATING_PATHS}
     tmp = tempfile.mkdtemp(prefix="bgp_cli_")
+    # last_preview/save_gate_log 격리 — preview/hosted inbox 가 gate_home() 에 쓰므로 운영 홈 미접촉.
+    os.environ["BINGGU_HOME"] = tmp
     ledger = os.path.join(tmp, "ledger.sqlite")
     checks = []
 
@@ -134,11 +141,8 @@ def selftest():
     ck("2b_preview없는_save_BLOCK", cmd_save(args(text=TEXT, preview_id="deadbeef",
                                                   pick="1,2,3", confirm="SAVE 1,2,3",
                                                   due=None)) == 1)
-    # P1-A.1: 비대화형(pytest·isatty False)에선 save 가 fail-closed(reader). 사장님 SAVE 시뮬로
-    #         선택 문장의 save_gate 앵커를 seed(정당 사람 근거 · env 백도어 아님) → 저장 성공.
-    import binggu_save_gate as _sg3
-    _c3 = capture_preview(TEXT, explicit=False)["candidates"]
-    _sg3.gate_record([c["sentence"] for c in _c3], path=_gate_log_for_ledger(ledger))
+    # 스펙 ②: CLAUDECODE 부재(터미널 시뮬) → 명령 직접 입력이 곧 save n(cli_command human) →
+    #         confirm 정확일치로 저장 성공(별도 앵커 seed 불요 — 훅 앵커 경로는 FE2 가 검증).
     ck("3_save", cmd_save(args(text=TEXT, preview_id=_preview_id(TEXT),
                                pick="1,2,3", confirm="SAVE 1,2,3",
                                due="2099-12-31")) == 0)
@@ -147,18 +151,15 @@ def selftest():
     db.close()
     ck("4_list_3건", len(rows) == 3 and cmd_list(args(status=None, kind=None)) == 0)
 
-    # ---- Fix E / P1-A.1: CLI 'human' 승격 = 사람 근거(save_gate 앵커 or 대화형 TTY)로만 ----
-    # P1-A.1: fail-closed 가 기본이다. 비대화형 + 앵커없음 → reader → BLOCK(환경변수 우회 불가·
-    # BINGGU_TRUSTED_CLI 는 사람 승인이 아님·BINGGU_STRICT_HUMAN_GATE 는 deprecated no-op).
-    # 결정성 위해 sys.stdin 을 비-TTY 로 치환(실제 실행 터미널 TTY 여부와 무관).
-    import io as _io
+    # ---- Fix E / save-n 참조 바인딩: 'human' 승격 = 훅 ref 앵커 or 터미널(cli_command) 만 ----
+    # 에이전트 세션(CLAUDECODE=1) 내부에서는 훅이 기록한 (preview_ref, idx) 만 사람 증명 —
+    # confirm 문구 복제·환경변수는 승격 불가(deny 전용 가드 · fail-closed).
     fe_ledger = os.path.join(tmp, "fixE.sqlite")
     cmd_init(args(ledger=fe_ledger))
     FE_TEXT = "다음 배포는 회귀 위험이 커서 반드시 백업 후 진행하기로 결정했다."
     FE_TEXT2 = "이 거래처는 납기 지연 이력이 있어 다음부터 우선순위를 낮추기로 했다."
-    fe_gate = _gate_log_for_ledger(fe_ledger)
-    _env_keep = {k: os.environ.get(k) for k in ("BINGGU_STRICT_HUMAN_GATE", "BINGGU_TRUSTED_CLI")}
-    _stdin_keep = sys.stdin
+    _env_keep = {k: os.environ.get(k) for k in ("CLAUDECODE", "BINGGU_TRUSTED_CLI",
+                                                "BINGGU_STRICT_HUMAN_GATE")}
 
     def _fe_nodes():
         _d, _ = _open(fe_ledger)
@@ -166,40 +167,42 @@ def selftest():
         _d.close()
         return _n
     try:
-        sys.stdin = _io.StringIO()  # 비대화형 강제(결정적)
         os.environ.pop("BINGGU_TRUSTED_CLI", None)
-        # FE1: strict + 게이트 기록 없음 → 비-human 강등 → G4_no_auto BLOCK(저장 0·코드 강제)
-        os.environ["BINGGU_STRICT_HUMAN_GATE"] = "1"
+        os.environ.pop("BINGGU_STRICT_HUMAN_GATE", None)
+        os.environ["CLAUDECODE"] = "1"   # 에이전트 세션 시뮬(결정적)
+        # FE1: 에이전트 세션 + 훅 앵커 없음 → reader 강등 → G4_no_auto BLOCK(저장 0·코드 강제)
         _feA = cmd_save(args(ledger=fe_ledger, text=FE_TEXT, preview_id=_preview_id(FE_TEXT),
                              pick="1", confirm="SAVE 1", due=None))
-        ck("FE1_strict+게이트없음→BLOCK(저장0)", _feA == 1 and _fe_nodes() == 0)
-        # FE2: strict + 사람 SAVE 발화 게이트 기록 존재 → human 확정 → 저장 성공(게이트 실제 소비)
+        ck("FE1_CLAUDECODE=1+앵커없음→BLOCK(저장0)", _feA == 1 and _fe_nodes() == 0)
+        # FE2: 에이전트 세션 + 사람 '세이브 1' 훅 ref 앵커 → save_gate_ref 승격 → 저장 성공
         import binggu_save_gate as _sgfe
         _fc = capture_preview(FE_TEXT, explicit=False)["candidates"]
-        _sgfe.gate_record([_fc[0]["sentence"]], path=fe_gate)
+        _sgfe.write_last_preview(_fc)                       # BINGGU_HOME=tmp 격리 preview
+        _sgfe.gate_record_from_prompt("세이브 1")           # 훅 기록 시뮬(ref+sh 이중기록)
         _feB = cmd_save(args(ledger=fe_ledger, text=FE_TEXT, preview_id=_preview_id(FE_TEXT),
                              pick="1", confirm="SAVE 1", due=None))
-        ck("FE2_strict+게이트기록→저장성공(gate 소비)", _feB == 0 and _fe_nodes() == 1)
-        # FE3: 기본(비-strict) + 비대화형 + 게이트 없음 → **BLOCK(저장 0)** — P1-A.1 fail-closed 기본.
-        #      (종전엔 오버블록회피로 저장됐으나 환경변수/비대화형은 사람 승인이 아니다 · RFC §6.)
-        os.environ.pop("BINGGU_STRICT_HUMAN_GATE", None)
+        ck("FE2_CLAUDECODE=1+ref앵커→저장성공(save_gate_ref)", _feB == 0 and _fe_nodes() == 1)
+        # FE3: 에이전트 세션 + 새 텍스트(앵커 없음) → 여전히 BLOCK — fail-closed 기본.
         _feC = cmd_save(args(ledger=fe_ledger, text=FE_TEXT2, preview_id=_preview_id(FE_TEXT2),
                              pick="1", confirm="SAVE 1", due=None))
-        ck("FE3_기본_비대화형_앵커없음→BLOCK(fail-closed)", _feC == 1 and _fe_nodes() == 1)
-        # FE4: BINGGU_TRUSTED_CLI 환경변수는 사람 승인이 아니다 → 비대화형이면 여전히 BLOCK(env 백도어 봉인).
+        ck("FE3_CLAUDECODE=1_앵커없음→BLOCK(fail-closed)", _feC == 1 and _fe_nodes() == 1)
+        # FE4: BINGGU_TRUSTED_CLI/STRICT env 는 사람 승인이 아니다 → 에이전트 세션이면 여전히 BLOCK.
         os.environ["BINGGU_STRICT_HUMAN_GATE"] = "1"   # deprecated no-op
         os.environ["BINGGU_TRUSTED_CLI"] = "1"
         FE_TEXT3 = "이 계약은 조건이 불리해서 이번에는 포기하기로 결정했다."
         _feD = cmd_save(args(ledger=fe_ledger, text=FE_TEXT3, preview_id=_preview_id(FE_TEXT3),
                              pick="1", confirm="SAVE 1", due=None))
-        ck("FE4_env_TRUSTED_CLI→비대화형이면_BLOCK(env는승인아님)", _feD == 1 and _fe_nodes() == 1)
+        ck("FE4_env_TRUSTED_CLI→에이전트세션이면_BLOCK(env는승인아님)", _feD == 1 and _fe_nodes() == 1)
+        # FE5: CLAUDECODE 부재(터미널) → 명령 직접 입력 = save n(cli_command) → 저장 성공(스펙 ②).
+        os.environ.pop("CLAUDECODE", None)
+        os.environ.pop("BINGGU_TRUSTED_CLI", None)
+        os.environ.pop("BINGGU_STRICT_HUMAN_GATE", None)
+        _feE = cmd_save(args(ledger=fe_ledger, text=FE_TEXT2, preview_id=_preview_id(FE_TEXT2),
+                             pick="1", confirm="SAVE 1", due=None))
+        ck("FE5_CLAUDECODE부재→cli_command_human_저장성공", _feE == 0 and _fe_nodes() == 2)
     finally:
-        sys.stdin = _stdin_keep
-        for _k, _v in _env_keep.items():
-            if _v is None:
-                os.environ.pop(_k, None)
-            else:
-                os.environ[_k] = _v
+        _restore_env(_env_keep)
+        os.environ.pop("CLAUDECODE", None)   # 본체 기본 = 터미널 시뮬 유지
 
     # ---- 회상(L4~L6 · read-only) — recall/trace/preflight CLI 래퍼 + use_count++ ----
     # 빈 그래프(미존재 ledger) graceful — 에러 0
@@ -236,6 +239,7 @@ def selftest():
         is not None for r in rows)
     db.close()
     ck("R5_회상_도장문장_불변(read-only)", _stamp_intact)
+    # index-op(deprecate/replace/accept/…)는 터미널 시뮬(CLAUDECODE 부재) = cli_command human(스펙 ②).
     # SSOT 게이트 후 후보가 모두 '판단' 도장일 수 있어 '상태' 미존재 시 첫 후보로 fallback(흐름 검증용).
     i_state = next((i for i, r in enumerate(rows, 1) if r["kind"] == "상태"), 1)
     h_state = rows[i_state - 1]["id8"]
@@ -283,12 +287,12 @@ def selftest():
     ck("10b_show_실패이유_노출(BLOCK+skip)",
        _rc == 1 and "BLOCK" in _out and "skip" in _out)
 
-    # ---- hosted: collect broad, commit narrow — ★A3 로컬 승인 이벤트 경유(worker 미접촉·별도 temp) ----
+    # ---- hosted: collect broad, commit narrow — ★save-n 참조 바인딩(preview + save n · approval 배선 0) ----
     import time as _time
     import json as _json
-    from binggu_hosted_inbox import staging_dir_for as _sdir
+    from binggu_hosted_inbox import staging_dir_for as _sdir, inbox_preview_candidates as _ipc
     from openbinggu_save_intent_outbox_runner import intent_hash as _ih, SCHEMA_VER as _SV
-    from binggupack.safety import trusted_approval as _ta
+    import binggu_save_gate as _sgh
     h_tmp = tempfile.mkdtemp(prefix="bgp_cli_hosted_")
     h_home = os.path.join(h_tmp, ".binggupack")
     h_staging = _sdir(h_home)
@@ -296,8 +300,16 @@ def selftest():
     h_ledger = os.path.join(h_home, "ledger.sqlite")
     os.makedirs(os.path.join(h_home, "snapshots"))
     open_accept(h_ledger).close()
-    with open(_ta.config_path(h_home), "w", encoding="utf-8") as f:
-        _json.dump({"enabled": True}, f)   # owner 로컬 승인 provider 활성
+
+    def _h_apr():
+        """approval_requests 무증가(테이블 부재=0) — 저장 경로 approval 배선 제거 증명."""
+        _d = open_accept(h_ledger)
+        try:
+            return _d.con.execute("SELECT count(*) FROM approval_requests").fetchone()[0]
+        except Exception:
+            return 0
+        finally:
+            _d.close()
 
     def _mk(text, idxs):
         c = "SAVE " + ",".join(str(i) for i in idxs)
@@ -307,57 +319,49 @@ def selftest():
         with open(os.path.join(h_staging, it["intent_id"] + ".json"), "w", encoding="utf-8") as f:
             _json.dump(it, f, ensure_ascii=False)
 
+    def _h_active():
+        _d = open_accept(h_ledger)
+        try:
+            return _d.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
+        finally:
+            _d.close()
+
     _mk("이 입찰은 마진이 낮아 보류하기로 결정했다.", [1])
     _mk("백업은 항상 작업 전에 먼저 해 둔다.", [1])
-    ck("13_hosted_inbox_요약(저장0·worker미접촉)",
+    ck("13_hosted_inbox_요약(저장0·worker미접촉·preview 기록)",
        cmd_hosted(args(ledger=h_ledger, hosted_cmd="inbox", no_fetch=True, since=None)) == 0)
     ck("14_hosted_pull_select없음_안내(실행0)",
-       cmd_hosted(args(ledger=h_ledger, hosted_cmd="pull", select=None, confirm=None,
-                       approval_id=None)) == 0)
-    # ① 승인 요청(request-only) — 직접 write 0 · 원문 보존
-    n_stg_before = len([f for f in os.listdir(h_staging) if f.endswith(".json")])
-    rc_req = cmd_hosted(args(ledger=h_ledger, hosted_cmd="pull", select="1", confirm=None,
-                            approval_id=None))
-    db_h = open_accept(h_ledger)
-    n_act_req = db_h.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
-    reqs = _ta.list_requests(db_h.con)
-    db_h.close()
-    n_stg_req = len([f for f in os.listdir(h_staging) if f.endswith(".json")])
-    ck("15_hosted_pull_request_only(직접write 0·원문 보존·PENDING 요청)",
-       rc_req == 0 and n_act_req == 0 and n_stg_req == n_stg_before and len(reqs) >= 1)
-    # ② owner 로컬 승인 → ③ 저장 확정(atomic·commit narrow)
-    rid_h = reqs[0]["request_id"]
-    dbx = open_accept(h_ledger)
+       cmd_hosted(args(ledger=h_ledger, hosted_cmd="pull", select=None, confirm=None)) == 0)
+    _h_env = {k: os.environ.get(k) for k in ("CLAUDECODE",)}
     try:
-        _ta.mint_approval(h_home, _ta.get_request(dbx.con, rid_h), 900, _time.time())
+        # ① 에이전트 세션(CLAUDECODE=1) + 훅 앵커 없음 → human_save_required · write 0 · 원문 보존
+        os.environ["CLAUDECODE"] = "1"
+        n_stg_before = len([f for f in os.listdir(h_staging) if f.endswith(".json")])
+        rc15 = cmd_hosted(args(ledger=h_ledger, hosted_cmd="pull", select="1", confirm="SAVE 1"))
+        n_stg_15 = len([f for f in os.listdir(h_staging) if f.endswith(".json")])
+        ck("15_hosted_pull_에이전트세션_무앵커→BLOCK(write 0·원문 보존·approval 0)",
+           rc15 == 1 and _h_active() == 0 and n_stg_15 == n_stg_before and _h_apr() == 0)
+        # ② 사람 '세이브 1' 발화(훅 시뮬 — inbox preview 의 ref 로 기록) → save_gate_ref 승격 저장
+        _h_pref = _sgh.preview_ref_for_candidates(_ipc(h_staging, int(_time.time())))
+        _sgh.gate_record_ref(_h_pref, [1],
+                             path=_gate_log_for_ledger(h_ledger))
+        rc15b = cmd_hosted(args(ledger=h_ledger, hosted_cmd="pull", select="1", confirm="SAVE 1"))
+        n_stg_after = len([f for f in os.listdir(h_staging) if f.endswith(".json")])
+        ck("15b_hosted_pull_훅앵커→atomic저장(선택1건·commit narrow·나머지잔류)",
+           rc15b == 0 and _h_active() == 1 and n_stg_after == n_stg_before - 1 and _h_apr() == 0)
+        # ③ 에이전트 세션 + 새 선택(앵커 없음 — staged 집합 변경으로 pref 도 변경) → 여전히 BLOCK
+        n_act_pre16 = _h_active()
+        rc16 = cmd_hosted(args(ledger=h_ledger, hosted_cmd="pull", select="1", confirm="SAVE 1"))
+        ck("16_hosted_pull_에이전트세션_새선택_무앵커_BLOCK(write 0)",
+           rc16 == 1 and _h_active() == n_act_pre16)
+        # ④ 터미널(CLAUDECODE 부재) = 명령 직접 입력이 곧 save n → 저장 성공(스펙 ②)
+        os.environ.pop("CLAUDECODE", None)
+        rc16b = cmd_hosted(args(ledger=h_ledger, hosted_cmd="pull", select="1", confirm="SAVE 1"))
+        ck("16b_hosted_pull_터미널_cli_command→저장성공",
+           rc16b == 0 and _h_active() == n_act_pre16 + 1 and _h_apr() == 0)
     finally:
-        dbx.close()
-    rc_commit = cmd_hosted(args(ledger=h_ledger, hosted_cmd="pull", select="1", confirm=None,
-                                approval_id=rid_h))
-    db_h2 = open_accept(h_ledger)
-    n_act_h = db_h2.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
-    db_h2.close()
-    n_stg_after = len([f for f in os.listdir(h_staging) if f.endswith(".json")])
-    ck("15b_hosted_pull_승인후_atomic저장(선택1건·commit narrow·나머지잔류)",
-       rc_commit == 0 and n_act_h == 1 and n_stg_after == n_stg_before - 1)
-    # 잘못된 approval-id → binding mismatch BLOCK · write 0 (남은 intent 는 idx 1 로 재번호)
-    n_act_pre16 = n_act_h
-    rc16 = cmd_hosted(args(ledger=h_ledger, hosted_cmd="pull", select="1", confirm=None,
-                           approval_id="deadbeefbadapprovalid"))
-    db_h3 = open_accept(h_ledger)
-    n_act_16 = db_h3.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
-    db_h3.close()
-    ck("16_hosted_pull_승인불일치_BLOCK(write 0)",
-       rc16 == 1 and n_act_16 == n_act_pre16)
-    # 16b. 재시도 second write 0 — 이미 소비된(15b) rid_h 를 재선택 집합에 다시 제시해도
-    #      재계산 request_id 불일치 → binding_mismatch → 2차 write 0(소비 승인 재사용 불가·계약 8).
-    rc16b = cmd_hosted(args(ledger=h_ledger, hosted_cmd="pull", select="1", confirm=None,
-                            approval_id=rid_h))
-    db_h4 = open_accept(h_ledger)
-    n_act_16b = db_h4.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
-    db_h4.close()
-    ck("16b_hosted_pull_소비승인_재시도_second_write_0",
-       rc16b == 1 and n_act_16b == n_act_pre16)
+        _restore_env(_h_env)
+        os.environ.pop("CLAUDECODE", None)
     shutil.rmtree(h_tmp, ignore_errors=True)
 
     op_after = {p: (os.path.getmtime(p) if os.path.exists(p) else None) for p in OPERATING_PATHS}
@@ -365,7 +369,6 @@ def selftest():
     shutil.rmtree(tmp, ignore_errors=True)
     ck("12_temp_정리", not os.path.exists(tmp))
 
-    sys.stdin = _real_stdin   # P1-A.1: 대화형 owner 시뮬 종료(정상 경로 복원)
     ok = all(checks)
     print("-" * 74)
     print("RESULT: %d/%d PASS" % (sum(checks), len(checks)))
@@ -376,10 +379,10 @@ def selftest():
 def test_binggu_cli_selftest():
     """pytest 수집용 얇은 래퍼 — 임베드 selftest 전 케이스 GATE=GO(exit 0).
 
-    stdin 대화형 시뮬은 selftest() 본체에서 수행(양 진입점 공통). 여기 try/finally 는 selftest 가
-    예외로 중단돼도 다른 pytest 케이스에 stdin 오염이 새지 않도록 하는 안전망이다."""
-    _real = sys.stdin
+    env 명시 제어는 selftest() 본체에서 수행(양 진입점 공통). 여기 try/finally 는 selftest 가
+    예외로 중단돼도 다른 pytest 케이스에 env 오염이 새지 않도록 하는 안전망이다."""
+    _keep = {k: os.environ.get(k) for k in _ENV_KEYS}
     try:
         assert selftest() == 0
     finally:
-        sys.stdin = _real
+        _restore_env(_keep)

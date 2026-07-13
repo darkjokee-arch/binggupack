@@ -4,18 +4,19 @@
 
 정본 설계: docs/BINGGUPACK_TRUSTED_APPROVAL_EVENT_RFC.md §6(승인 기원 계약).
 
-불변식(전부 코드로 강제):
-  · 환경변수(BINGGU_TRUSTED_CLI) · CLI arg · actor 문자열 · stdin pipe · confirm 문구 ·
-    bare isatty 는 **사람 승인이 아니다**. 사람 근거는 out-of-band 2가지뿐:
-      (1) save_gate 앵커(사장님 키보드 SAVE 를 hook 이 기록 · AI 위조 불가)
-      (2) 대화형 TTY(사장님 직접 실행) — pipe/자동화를 거르는 UX 경계
-  · 비대화형 `approval approve` → 항상 no-write · exit≠0(env·strict 로 우회 불가).
-  · 비대화형 save/pair(앵커 없음) → write 0(fail-closed 기본). 앵커 있으면 write 성공.
+불변식(전부 코드로 강제 · save-n 참조 바인딩 개정 반영):
+  · 환경변수(BINGGU_TRUSTED_CLI) · CLI arg · actor 문자열 · confirm 문구는 **사람 승인이 아니다**.
+    사람 증명 = "preview + 사람의 save n 입력" 단일 원칙:
+      (1) 에이전트 세션(CLAUDECODE=1) 안에서는 save_gate ref 앵커(사장님 '세이브 n' 발화를
+          UserPromptSubmit hook 이 (preview_ref, idx) 로 기록 · AI 위조 불가)만 human
+      (2) 터미널(CLAUDECODE 부재) = 명령 직접 입력이 곧 save n(cli_command) — isatty 검사 삭제
+  · 비대화형 `approval approve` → 항상 no-write · exit≠0(env·strict 로 우회 불가 — 승인 채널 별도 자산).
+  · 에이전트 세션 save/pair(앵커 없음) → write 0(fail-closed). ref 앵커 있으면 write 성공.
   · BINGGU_STRICT_HUMAN_GATE 는 deprecated no-op — 0/false/off/'' 로 fail-open 안 됨.
   · production wheel(binggu.py·binggupack·scripts·hooks)에 test 백도어 0 —
     test_double 채널 리터럴 0 · 환경변수 승인 read 0.
   · actor="human" 직접생성 인벤토리 — **binggu.py CLI 진입점** 잔존 리터럴 write 0(전부 _resolve_human_ctx
-    경유). CLI-도달 hosted 커밋 경로(P1-B STILL-OPEN)는 명시 제외로 매 실행 출력(숨김 0 · §D "explicitly exclude").
+    경유). CLI-도달 hosted 커밋 경로는 commit_bundle 사람 저장 게이트로 봉인(매 실행 출력 · 숨김 0).
 
 전부 temp home 격리 · 운영 ~/.binggupack 미접촉(sentinel). CLI: --selftest
 """
@@ -34,12 +35,14 @@ sys.path.insert(0, os.path.join(REPO, "scripts"))
 
 
 def _cli(home, ledger, args, env_extra=None, stdin_text=""):
-    """비대화형 subprocess — stdin=PIPE 이므로 isatty() False 결정적(env 로 사람 승격 불가 확인)."""
+    """subprocess env 전부 명시 제어 — CLAUDECODE 는 기본 pop(터미널 시뮬 · CI/로컬 어디서 돌아도
+    결정적), 에이전트 세션 케이스만 env_extra 로 CLAUDECODE=1 주입. stdin=PIPE(approve 비대화형)."""
     e = dict(os.environ)
     e["BINGGU_HOME"] = home
     e["PYTHONUTF8"] = "1"
     e.pop("BINGGU_TRUSTED_CLI", None)
     e.pop("BINGGU_STRICT_HUMAN_GATE", None)
+    e.pop("CLAUDECODE", None)
     if env_extra:
         e.update(env_extra)
     return subprocess.run([sys.executable, BINGGU, "--ledger", ledger] + args,
@@ -129,42 +132,58 @@ def run():
                 strict_no_open = False
         ck("C1_strict_flag_false_cannot_fail_open(approve)", strict_no_open and approve_events() == 0)
 
-        # ── D) noninteractive_save_without_gate_blocked ───────────────────────────
+        # ── D) agent_session_save_without_anchor_blocked ──────────────────────────
+        # 에이전트 세션(CLAUDECODE=1) 안에서는 훅 ref 앵커만 사람 증명 — 앵커 없으면 write 0.
         txt = "이 계약은 조건이 불리해서 이번에는 포기하기로 결정했다."
         pv = _cli(home, ledger, ["preview", txt])
         m = re.search(r"preview_id: ([0-9a-f]+)", pv.stdout)
         pid = m.group(1) if m else ""
         n0 = node_count()
         r = _cli(home, ledger, ["save", txt, "--preview-id", pid, "--pick", "1", "--confirm", "SAVE 1"],
-                 stdin_text="")
-        ck("D1_noninteractive_save_no_gate → write0(fail-closed)",
+                 env_extra={"CLAUDECODE": "1"}, stdin_text="")
+        ck("D1_agent_session_save_no_anchor → write0(fail-closed)",
            "'saved': 1" not in r.stdout and node_count() == n0)
 
-        # STRICT=false 로도 save fail-open 안 됨.
+        # STRICT=false 로도 에이전트 세션 save fail-open 안 됨.
         r = _cli(home, ledger, ["save", txt, "--preview-id", pid, "--pick", "1", "--confirm", "SAVE 1"],
-                 env_extra={"BINGGU_STRICT_HUMAN_GATE": "false"}, stdin_text="")
+                 env_extra={"CLAUDECODE": "1", "BINGGU_STRICT_HUMAN_GATE": "false"}, stdin_text="")
         ck("C2_strict_flag_false_cannot_fail_open(save)", node_count() == n0)
 
-        # pair 비대화형·앵커없음 → 노드 0.
+        # pair 에이전트 세션·앵커없음 → 노드 0.
         n1 = node_count()
         r = _cli(home, ledger, ["pair", "이건 내 직감으로 판단한 거다", "AI 가 제안한 방향",
                                 "--by", "owner", "--relation", "refutes",
-                                "--confirm", "PAIR owner_refutes owner:1 ai:1"], stdin_text="")
-        ck("D2_noninteractive_pair_no_gate → write0(fail-closed)", node_count() == n1)
+                                "--confirm", "PAIR owner_refutes owner:1 ai:1"],
+                 env_extra={"CLAUDECODE": "1"}, stdin_text="")
+        ck("D2_agent_session_pair_no_anchor → write0(fail-closed)", node_count() == n1)
 
-        # ── E) 대조군: save + save_gate 앵커 → write 성공(게이트가 막기만 하는 게 아님을 증명) ──
+        # D3) 터미널(CLAUDECODE 부재) = 명령 직접 입력이 곧 save n → 저장 성공(스펙 ②).
+        txt2 = "이 방침은 다음 분기에 재검토하기로 결정했다."
+        pv2 = _cli(home, ledger, ["preview", txt2])
+        m2 = re.search(r"preview_id: ([0-9a-f]+)", pv2.stdout)
+        pid2 = m2.group(1) if m2 else ""
+        r = _cli(home, ledger, ["save", txt2, "--preview-id", pid2, "--pick", "1",
+                                "--confirm", "SAVE 1"], stdin_text="")
+        ck("D3_terminal_no_CLAUDECODE_save → write 성공(cli_command)",
+           "'saved': 1" in r.stdout and node_count() == n1 + 1)
+
+        # ── E) 대조군: 에이전트 세션 + save_gate ref 앵커 → write 성공(게이트가 막기만 하는 게 아님) ──
         from binggupack.capture import preview as cvp
         from binggu import _gate_log_for_ledger
         import binggu_save_gate as sg
+        n2 = node_count()
         cands = cvp.capture_preview(txt, explicit=False).get("candidates", [])
         if cands:
-            sg.gate_record([cands[0]["sentence"]], path=_gate_log_for_ledger(ledger))
+            # 훅 시뮬: preview 후보의 (preview_ref, idx=1) ref 레코드 — 사장님 '세이브 1' 발화 기록.
+            sg.gate_record_ref(sg.preview_ref_for_candidates(cands), [1],
+                               path=_gate_log_for_ledger(ledger))
             r = _cli(home, ledger, ["save", txt, "--preview-id", pid, "--pick", "1",
-                                    "--confirm", "SAVE 1"], stdin_text="")
-            ck("E_save_WITH_gate_anchor → write 성공(사람 근거 정상 경로)",
-               "'saved': 1" in r.stdout and node_count() == n1 + 1)
+                                    "--confirm", "SAVE 1"],
+                     env_extra={"CLAUDECODE": "1"}, stdin_text="")
+            ck("E_save_WITH_ref_anchor → write 성공(save_gate_ref 정상 경로)",
+               "'saved': 1" in r.stdout and node_count() == n2 + 1)
         else:
-            ck("E_save_WITH_gate_anchor(후보 0·explicit=False 필터 · skip)", True)
+            ck("E_save_WITH_ref_anchor(후보 0·explicit=False 필터 · skip)", True)
 
         # ── F) test_provider_not_packaged (ship-guard) ────────────────────────────
         ck("F_test_backdoor_not_packaged(test_double 채널·env 승인 read 0)", _ship_guard())
@@ -239,17 +258,18 @@ def _ship_guard():
 def _inventory_binggu_py():
     """actor='human' 직접생성 인벤토리 — **스코프: binggu.py CLI 진입점**.
 
-    의미있는 불변식: 모든 CLI 서브커맨드의 운영 write 는 `_resolve_human_ctx`(save_gate 앵커/대화형 TTY
-    만 human)로 actor 를 해소한다 — binggu.py 에 human 을 부여하는 리터럴 dict/kwarg 가 0 이어야 한다.
+    의미있는 불변식: 모든 CLI 서브커맨드의 운영 write 는 `_resolve_human_ctx`(save-n 참조 바인딩/
+    cli_command · 에이전트 세션 deny)로 actor 를 해소한다 — binggu.py 에 human 을 부여하는 리터럴
+    dict/kwarg 가 0 이어야 한다.
     (하위 구현 함수·*_selftest 는 전달받은 ctx 또는 owner-승인 시뮬 픽스처이므로 독립 우회가 아니다 —
     패키지 전체에 ~200개의 {"actor":"human"} 리터럴이 있으나 대부분 이 두 부류다. 이 함수는 그 노이즈를
     스캔하지 않고, 사용자 입력이 들어오는 CLI 진입점만 강제한다.)
 
-    **CLI-도달 hosted 커밋 경로(P1-B 봉인 완료 · RFC §19.1②/§23):** hosted save-intent 커밋 3파일은
-    P1-B 에서 commit_bundle exact-bound 승인 경유로 봉인됐다 — transported confirm(`LIVE SAVE n`)으로
-    literal human 을 찍던 direct save_selected 경로가 제거됐다. 아래 출력은 파일 정적 존재 확인일 뿐이며
-    (숨김 0 · 내용 재스캔 아님), direct write 회귀는 각 러너의 behavioral selftest(write 0 단언)가 잡는다.
-    여기서는 '숨기지 않고 명시'가 정직성 계약이다.
+    **CLI-도달 hosted 커밋 경로(봉인 유지):** hosted save-intent 커밋 3파일은 commit_bundle 의
+    사람 저장 게이트(ctx.actor=='human' + confirm 정확일치 — save-n 참조 바인딩 개정) 경유로 봉인돼
+    있다 — transported confirm(`LIVE SAVE n`)으로 literal human 을 찍던 direct save_selected 경로가
+    제거됐다. 아래 출력은 파일 정적 존재 확인일 뿐이며(숨김 0 · 내용 재스캔 아님), direct write 회귀는
+    각 러너의 behavioral selftest(write 0 단언)가 잡는다. 여기서는 '숨기지 않고 명시'가 정직성 계약이다.
     """
     import ast
     KNOWN_P1B_HOSTED = (   # CLI-도달하지만 P1-B 로 이연된 literal-human write(문서화된 예외)
@@ -285,7 +305,7 @@ def _inventory_binggu_py():
     # 투명성: hosted 3파일은 P1-B 에서 commit_bundle exact-bound 경유로 봉인됨(direct human write 제거).
     # 매 실행 봉인 상태를 명시(숨김 0). 존재/미존재 모두 정보만(실패 아님).
     for p in KNOWN_P1B_HOSTED:
-        state = "P1-B 봉인(commit_bundle 경유·direct human write 제거)" if os.path.exists(p) else "부재"
+        state = "봉인(commit_bundle 사람 저장 게이트 경유·direct human write 제거)" if os.path.exists(p) else "부재"
         print("      [inventory · P1-B SEALED] %s — %s" % (os.path.relpath(p, REPO), state))
     return not offenders
 
