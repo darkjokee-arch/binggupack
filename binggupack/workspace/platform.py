@@ -111,6 +111,27 @@ def python_cmd(os_name=None):
     return "py" if (os_name or detect_os()) == "windows" else "python3"
 
 
+def invocation_prefix(argv0=None):
+    """사용자 안내 문자열에 쓸 CLI 실행 접두 — 설치본이면 "binggu", 소스 clone 이면
+    "python binggu.py".
+
+    판정: os.path.basename(argv0) 가 ".py" 로 끝나면 소스(파이썬 스크립트로 직접 실행),
+    아니면 설치본(entry-point 콘솔 스크립트). argv0 이 비었거나 판정 불가 시 소스로
+    폴백(clone 사용자 안내가 더 안전 — 설치본 사용자는 "binggu" 로도 "python binggu.py"
+    로도 동작하지만, clone 사용자에게 "binggu" 만 안내하면 실행 불가하기 때문).
+
+    순수 함수·raise 절대 없음(어디서 import 되든 안전). argv0 미지정 시 sys.argv[0] 사용.
+    """
+    try:
+        raw = argv0 if argv0 is not None else (sys.argv[0] if sys.argv else "")
+        base = os.path.basename(raw or "")
+        if base and not base.lower().endswith(".py"):
+            return "binggu"
+    except Exception:
+        pass
+    return "python binggu.py"
+
+
 def resolve_npx(os_name=None):
     """npx 실행파일을 PATH 에서 실제로 해결한다(외부 명령 호출 정책 단일원천).
 

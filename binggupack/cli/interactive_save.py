@@ -20,6 +20,12 @@ usage:
 import argparse
 import sys
 
+try:
+    from binggupack.workspace.platform import invocation_prefix
+except Exception:  # pragma: no cover — 구버전/부분설치 폴백
+    def invocation_prefix(argv0=None):
+        return "python binggu.py"
+
 _VALID_ACTIONS = ("SAVE", "DEPRECATE", "REPLACE", "ACCEPT", "UNACCEPT")
 
 
@@ -55,7 +61,8 @@ def _require_tty():
     if not _is_tty():
         print("[interactive] TTY 환경에서만 동작합니다(fail-closed).")
         print("  비대화형(CI/pipe/AI)에서는 기존 explicit confirm 방식을 쓰세요:")
-        print('  python binggu.py save "<text>" --preview-id <id> --pick 1 --confirm "SAVE 1"')
+        print('  %s save "<text>" --preview-id <id> --pick 1 --confirm "SAVE 1"'
+              % invocation_prefix())
         sys.exit(2)
 
 
@@ -85,8 +92,8 @@ def interactive_main():
 
     print("\n[다음 단계] 마지막 human confirmation 은 기존 게이트에서 유지됩니다.")
     print("아래 명령으로 실제 저장하세요(interactive 는 ledger 에 직접 쓰지 않습니다):")
-    print('  python binggu.py save "<같은 텍스트>" --preview-id <id> --pick %s --confirm "%s"'
-          % (",".join(str(i) for i in indices), phrase))
+    print('  %s save "<같은 텍스트>" --preview-id <id> --pick %s --confirm "%s"'
+          % (invocation_prefix(), ",".join(str(i) for i in indices), phrase))
     return 0
 
 

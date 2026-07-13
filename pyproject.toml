@@ -51,6 +51,7 @@ include = ["binggupack*", "scripts", "hooks"]   # scripts/hooks 는 CLI 호환�
 scripts = ["hybrid_agi/*.py", "hybrid_agi/README.md"]
 hooks = ["settings.snippet.json"]
 "binggupack.studio" = ["static/*.html", "static/*.js", "static/*.css"]
+"binggupack.data" = ["semantic/*.jsonl"]
 
 # 설치/검증:
 #   pip install binggupack

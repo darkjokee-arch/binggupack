@@ -359,7 +359,7 @@ def register_opencrab_mcp(url, apply=False, claude_json_path=None, now_fn=None):
     if not url:
         return step("s10", INFO, "OpenCrab Expert URL 미제공 — 팩 자동생성 채널 미연결",
                     "Expert 가입:  https://opencrab.sh  (Expert 티어 → 내 전용 MCP URL 발급)\n"
-                    "  발급 후:  python binggu.py onboard --opencrab-url <내 전용 URL>")
+                    "  발급 후:  %s onboard --opencrab-url <내 전용 URL>" % P.invocation_prefix())
     if not _OPENCRAB_URL_RE.match(url):
         return step("s10", STOP, "OpenCrab URL 형식 오류 — https://…opencrab.…/api/mcp/<token> 만 허용",
                     "입력값(마스킹): %s" % mask_opencrab_url(url))
@@ -563,7 +563,7 @@ def render_report(result):
     if result["halted_at"] is not None:
         L.append("⛔ [%s] 단계에서 멈춤 — 위 안내대로 본인이 처리 후 다시 실행하세요." % result["halted_at"])
     elif not result["apply"]:
-        L.append("다음: 실제 적용은  python binggu.py onboard --apply")
+        L.append("다음: 실제 적용은  %s onboard --apply" % P.invocation_prefix())
         L.append("      (worker 배포까지: --apply --deploy / login·deploy 는 본인 행위)")
     else:
         L.append("완료 — ChatGPT 에서 저장하면 5분 내 auto-pull 이 로컬 장부에 반영합니다.")

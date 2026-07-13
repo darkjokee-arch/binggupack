@@ -38,6 +38,22 @@ from binggupack.workspace.platform import (  # noqa: E402,F401  (전체 명시 r
     _joiner,
 )
 
+# invocation_prefix 는 위 star-import 로도 들어오지만, 구버전 platform.py(심볼 부재)에서도
+# 안전하도록 try/except 로 명시 재export 후 실패 시 동일 계약의 자체 폴백을 정의한다.
+try:  # noqa: SIM105
+    from binggupack.workspace.platform import invocation_prefix  # noqa: E402,F401
+except ImportError:
+    def invocation_prefix(argv0=None):  # type: ignore[misc]
+        """설치본="binggu" / 소스=".py"→"python binggu.py" (자체 폴백·raise 없음)."""
+        try:
+            raw = argv0 if argv0 is not None else (sys.argv[0] if sys.argv else "")
+            base = os.path.basename(raw or "")
+            if base and not base.lower().endswith(".py"):
+                return "binggu"
+        except Exception:
+            pass
+        return "python binggu.py"
+
 if __name__ == "__main__":
     import json
     print(json.dumps(platform_summary(), ensure_ascii=False, indent=2))
