@@ -265,7 +265,7 @@ python binggu.py doctor
 | **작업 전 회상** | `ask/recall/why`, `preflight`, `trace`, 회상 근거·효용 기록 |
 | **기억 정리** | `deprecate`, `replace`, `accept/unaccept`, `due`, `reminders`, `resolve`, `route` |
 | **내 말 vs AI 말** | `pair`, `trust`, owner/ai 화자 분리, 수용·반박·수정 관계, 직감 적중률 |
-| **Claude Code·커넥터 연결** | `capture`/`preflight`/save-gate hook, stdio MCP 서버(Claude Code·Codex), HTTP 모드(`--http`), MCP 도구 — **조회**(read-only) · **미리보기**(dry-run/preview) · **사람 앵커 기반 저장**(`save_candidate` — 키보드 `SAVE n` 앵커 또는 trusted approval 이 있을 때만 확정) · **trusted approval mutation**(`pair`/`deprecate`/`replace`/`mark`/`harvest` — 요청→owner `binggu approval approve`(대화형 TTY)→`approval_id` 로 **정확 1회** 실행. 미승인/provider 미구성 시 fail-closed. 배포 형태 의존 경계는 [SECURITY.md](SECURITY.md) 위협모델 참조) |
+| **Claude Code·커넥터 연결** | `capture`/`preflight`/save-gate hook, stdio MCP 서버(Claude Code·Codex), HTTP 모드(`--http`), MCP 도구 — **조회**(read-only) · **미리보기**(dry-run/preview) · **사람 앵커 기반 저장**(`save_candidate` — 키보드 `SAVE n` 앵커가 있을 때만 확정). `pair`/`deprecate`/`replace`/`mark`/`harvest` 는 MCP 로는 미리보기만 가능하고 실행은 항상 fail-closed 입니다(2026-07-13 MCP approval 소비 배선 제거 — `approval_id` 무효·실제 mutation 은 owner 로컬 CLI). 배포 형태 의존 경계는 [SECURITY.md](SECURITY.md) 위협모델 참조 |
 | **폰·웹·클라우드 보조** | `hosted inbox/pull`, `setup-cloud`, ChatGPT 저장 채널(inbox→서명키 pull), `cloud_recall`/`cloud_packs`, TTL/HMAC/purge 경계 |
 | **외부 소스·그래프·팩** | `harvest`, `confirm-edges`, graph schema, pack contract, local ingest, watcher 계열 |
 | **안전·개발자 도구** | path safety, match policy, classifier, governance, selftest, publish/export |

@@ -32,7 +32,7 @@ from binggupack.mcp import handle_tool, TOOLS, _FORBIDDEN  # noqa: E402
 CORE_TOOLS = frozenset({
     # Read
     "status", "recall", "why", "trace_show", "preflight", "list", "reminders", "capture_preview",
-    # Consent-gated mutation (write-gated · dry-run 기본 · owner 승인 이벤트)
+    # Consent-gated mutation (write-gated · dry-run 기본 · 확정은 사람 save-n 앵커/owner 로컬 CLI)
     "save_candidate", "pair", "deprecate", "replace",
 })
 _PROFILES = ("core", "advanced")
@@ -79,9 +79,9 @@ _TOOL_DESC = {
     "status": "장부 요약 — active/deprecated/검증예정/수용/audit chain(read)",
     "list": "저장 후보 목록(status/kind 필터·read)",
     "reminders": "due 경과 판단 리마인더(read)",
-    "pair": "owner+ai 페어 저장. dry-run=미리보기. 실행은 trusted approval 필요: dry_run=false 로 요청→approval_required+request_id, owner 가 'binggu approval approve <id>'(대화형 TTY) 후 approval_id 로 재호출→정확 1회 저장. provider 미구성/승인 없으면 fail-closed",
-    "deprecate": "목록 1건 기각. dry-run=미리보기. 실행은 trusted approval 필요(요청→owner 'binggu approval approve <id>'→approval_id 로 재호출·정확 1회). 승인 없으면 fail-closed",
-    "replace": "목록 1건 교체. dry-run=미리보기. 실행은 trusted approval 필요(요청→owner 'binggu approval approve <id>'→approval_id 로 재호출·정확 1회). 승인 없으면 fail-closed",
+    "pair": "owner+ai 페어 저장. dry-run=미리보기만 — MCP 로는 실행 불가(fail-closed·사람 앵커 없음·approval_id 무효). 실제 저장은 owner 로컬 CLI: binggu pair",
+    "deprecate": "목록 1건 기각. dry-run=미리보기만 — MCP 로는 실행 불가(fail-closed·approval_id 무효). 실제 기각은 owner 로컬 CLI: binggu deprecate",
+    "replace": "목록 1건 교체. dry-run=미리보기만 — MCP 로는 실행 불가(fail-closed·approval_id 무효). 실제 교체는 owner 로컬 CLI: binggu replace",
     "reflect": "회고·자가평가 → 지식 후보 preview(read·저장 0)",
     "harvest_list": "등록된 외부 수확 소스 목록(read)",
     "harvest_add": "외부 소스 등록(dry-run 기본·HARVEST_ADD <kind> <url> confirm·URL 안전검증)",
@@ -92,8 +92,8 @@ _TOOL_DESC = {
     "why": "판단 근거 회상 — 과거 결정의 이유·근거 사슬 조회(read·node_id 미노출·PII 마스킹)",
     "contrast": "제안 신호 ↔ 강제조항 대비표(read·양쪽 원문 인용·자동결정 0·write 0)",
     "abstraction": "반복 판단 → 규칙 후보 제안(read·proposal_id=content hash·자동확정 0·write 0)",
-    "mark_hit": "회상 적중 기록(node_id 미노출). dry-run=미리보기. 실행은 trusted approval 필요(요청→owner 'binggu approval approve <id>'→approval_id 로 재호출·정확 1회). 승인 없으면 fail-closed",
-    "mark_miss": "회상 빗나감 기록(node_id 미노출). dry-run=미리보기. 실행은 trusted approval 필요(요청→owner 'binggu approval approve <id>'→approval_id 로 재호출·정확 1회). 승인 없으면 fail-closed",
+    "mark_hit": "회상 적중 기록(node_id 미노출). dry-run=미리보기만 — MCP 로는 기록 불가(fail-closed·approval_id 무효). 실제 기록은 owner 로컬 CLI: binggu mark-hit",
+    "mark_miss": "회상 빗나감 기록(node_id 미노출). dry-run=미리보기만 — MCP 로는 기록 불가(fail-closed·approval_id 무효). 실제 기록은 owner 로컬 CLI: binggu mark-miss",
 }
 
 
@@ -123,12 +123,8 @@ def _list_tools(profile="advanced"):
         if extra:
             props.update(extra.get("properties", {}))
             req += [r for r in extra.get("required", []) if r not in req]
-        # P1-A: write-gated 도구는 trusted approval 소비용 approval_id(optional) 를 표준 노출 —
-        # dry_run=false 요청이 준 request_id 를 owner 승인 후 그대로 넘겨 정확 1회 실행(CC-2).
-        if spec["mode"] == "write-gated":
-            props.setdefault("approval_id",
-                             {"type": "string",
-                              "description": "trusted approval event id (owner 'binggu approval approve' 후 정확 1회 실행)"})
+        # 구 P1-A approval_id(optional) 표준 노출은 제거(2026-07-13) — MCP write-gated 도구는
+        # approval_id 로 승격되지 않는다(fail-closed). 제시돼도 무시(approval_id_ignored 응답).
         # MCP 표준 tool 필드만(name/description/inputSchema). mode/path_params 는 서버 내부용이라
         # 최상위 노출 금지 — Codex/Rust(rmcp) 등 엄격 클라이언트가 unknown field 로 파싱 실패(도구 캐시
         # 생성 0·연결 무력화). mode 는 위 필터(라인 69)에서만, path_params 는 inputSchema 에 이미 반영됨.

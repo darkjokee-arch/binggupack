@@ -9,6 +9,11 @@ scope: project:binggupack
 
 # BingguPack Trusted Approval Event — RFC (P1-A · v2)
 
+> ⚠ **부분 superseded (2026-07-13, owner 결정)**: 이 RFC 의 **MCP tool surface 소비 배선**(§18 —
+> MCP write 핸들러의 `approval_gate.authorize` 경유·`approval_id` 승격)은 저장 게이트 단일 원칙
+> ("preview + 사람의 save n 입력") 후속으로 **제거**됐다 — 정본: CHANGELOG [Unreleased] "MCP save
+> approval 제거". approval core·owner CLI(`binggu approval`/`--approval-id`)·HAG import 경로 서술은 유효.
+
 > "AI가 기억해도, 결정권은 나에게." — 제품 원칙
 >
 > **정의.** *Trusted approval event* 는, **구성된 위협 모델 안에서**, MCP/model 의 tool

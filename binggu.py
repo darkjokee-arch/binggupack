@@ -2007,7 +2007,8 @@ def cmd_approval(a):
         cfg = ta.load_config(home) or {}
         ttl = int(cfg.get("ttl_seconds", ta.DEFAULT_TTL_SECONDS))
         ta.mint_approval(home, req, ttl, _t.time(), channel="cli_tty")   # isatty 검증 후에만 = 정직한 라벨
-        print("승인 발행 완료: %s (만료 %ds). MCP/앱에서 이 작업이 정확히 1회 실행됩니다." % (rid, ttl))
+        print("승인 발행 완료: %s (만료 %ds). owner CLI 의 --approval-id 경로에서 이 작업이 "
+              "정확히 1회 실행됩니다(MCP 표면은 approval 소비 불가·2026-07-13 제거)." % (rid, ttl))
         return 0
 
     if action in ("reject", "revoke"):

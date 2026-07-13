@@ -97,11 +97,10 @@ def run_smoke(home=None):
     r = handle_tool("save_candidate",
                     {"text": KO, "indices": [1], "dry_run": False, "confirm": "SAVE 1"}, allow_root)
     tr = r.get("tool_result") or {}
-    # P1-A: save_candidate 가 approval_gate.authorize 를 거치며, provider 미구성 시 응답 reason 이
-    #       G4_no_auto(core) → provider_not_configured(승인 게이트)로 이동. write 0(fail-closed)은 불변.
+    # MCP save approval 배선 제거(2026-07-13): 방어선은 core 의 G4_no_auto 단일(사람 save-n 앵커 없으면
+    # actor=reader 유지). write 0(fail-closed)은 불변.
     chk("9b.confirm_alone_BLOCKED(no_human_anchor)",
-        tr.get("executed_write") is False
-        and tr.get("reason") in ("G4_no_auto", "provider_not_configured", "trusted_approval_event_required"))
+        tr.get("executed_write") is False and tr.get("reason") == "G4_no_auto")
 
     # 9c. 사장님이 실제 'SAVE 1' 을 키보드 입력하면 save_gate hook 이 앵커를 남긴다(여기선 그 앵커를 직접
     #     기록해 시뮬). save-n 참조 바인딩: 훅은 (preview_ref, idx) ref 레코드 1행 + 레거시 sh 행을
