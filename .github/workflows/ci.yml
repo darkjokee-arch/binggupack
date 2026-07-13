@@ -148,3 +148,37 @@ jobs:
           cp scripts/wheel_import_sweep.py "$RUNNER_TEMP/wheel_import_sweep.py"
           cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/venv/bin/python" wheel_import_sweep.py
+
+  typecheck-python:
+    # mypy 정적 타입 게이트(2026-07-13) — binggupack + binggu.py 회귀 방지. 로컬 0 errors 후 게이트화.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install mypy
+        run: pip install "mypy==1.13.0"
+
+      - name: mypy (binggupack + binggu.py · 0 errors required)
+        run: python -m mypy binggupack binggu.py
+
+  npm-audit:
+    # 의존성 취약점 참고 스캔(2026-07-13) — 별도 잡 + continue-on-error 로 머지 게이트와 분리한다.
+    # 상류 advisory 로 무관 PR 이 red 되어 비결정 머지 차단되는 것 방지(게이팅 아님 · 신호만).
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - name: npm audit (hosted/workers · high 이상 · 비게이팅)
+        working-directory: hosted/workers
+        run: npm audit --audit-level=high || true

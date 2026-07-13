@@ -17,11 +17,13 @@ import sys
 import urllib.parse
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any, Callable, Optional
 
 from binggupack.cli import daily
 from binggupack.studio import read_model
 from binggupack.studio import approval_view
 
+_res_files: Optional[Callable[..., Any]]
 try:
     from importlib.resources import files as _res_files
 except Exception:   # pragma: no cover — 방어(패키지 최소 3.10)
