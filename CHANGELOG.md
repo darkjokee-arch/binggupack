@@ -10,6 +10,12 @@
 - **타입/린트/help/CI** — mypy 3건(recall·path_safety·studio/server)·ruff invalid-noqa 2건 정리·path_safety 벤더 재동기. help 일상/고급 2블록 그룹. CI: `typecheck-python`(mypy 게이트)·`npm-audit`(비게이팅)·dependabot 주간(github-actions/npm/pip).
 - 검증: pytest 253 · run_all 53/53 · ci_local_preflight 17/17 · wheel 클린설치 smoke(저장소 밖 seed 로드+분류 실동작) · 운영홈 ledger 불변. 저장소 보안 강화 병행(secret scanning · push protection · branch protection 필수검사 3→13 · PyPI env admin bypass 차단).
 
+### Changed — 도장 줄 단위 인정 + 범위 + learn-consume 일괄 소비 (2026-07-13 owner "도장개선고")
+owner 실사용 마찰 2건 해소(도장 3연속 실패·소비마다 재도장): ① 정확형(fullmatch)이 "지시 여러 개를 한 메시지에 묶는" owner 스타일과 충돌 ② 소비 1건마다 pending 재편 → pref 변경 → 재도장.
+- **줄 단위 도장**(`gate_text.parse_save_indices` + gate_log/save_gate 폴백 3사본 동기): 메시지의 **한 줄 전체**가 '세이브 n' 정확형이면 도장 인정 — 문장 속 언급("도장은 세이브1 왜 실패")은 줄 일부라 여전히 무시(오도장 차단 계약 유지). **범위 '세이브 1-5'** 지원(_RANGE_CAP 50 — 오타 폭주 무효).
+- **`learn-consume` 일괄 소비**: `--confirm "CONSUME 0,1,4"` — `consume_many` 가 **단일 pending 스냅샷의 line_idx** 로 소비해 번호 재편·재도장 문제 원천 소멸. 범위 밖 혼입 → all-or-nothing 전체 거부. actor=human 게이트·발화 앵커·dup 차단 불변.
+- 검증: save_gate selftest 44/44(줄/범위/오도장 5케이스 신규) · learn_consume 15/15(일괄 T15) · 훅 경유 E2E pytest 7(줄 도장 일괄 3건·문장 속 언급 차단) · anywhere 벤더 재동기화(byte-identical).
+
 ### Removed/Fixed — Hot semantic 死스텁 삭제 + 임베딩 위생 5건 (2026-07-13 · 4cli+Fable5 적대검증 owner GO)
 결정 근거: Hot 은 후보 진입이 어휘 매칭 전용이라 semantic 재랭킹을 완성해도 의미 검색이 원리적으로 불가(순서만 조정) — (a) 구현 REFUTED · (b) 삭제 SURVIVES. 의미 회상은 Deep(why_search·배치 선채움) 전담 확정. debate 세션 `20260713_1819_hot_semantic_dead_code`.
 - **삭제**: `fresh_index` embed_vec 테이블(INSERT 미구현 死스텁)·`_semantic_query_embed`·circuit breaker·`hot_recall` semantic/semantic_timeout 인자·`semantic_used` 키. docs/tests/selftest 연쇄 정리(§12). sem_used 거짓 플래그·0.55 리터럴 중복은 삭제로 소멸.

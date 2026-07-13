@@ -136,6 +136,44 @@ def test_learn_consume_stamp_promotes(tmp_path):
     assert rows == [("ai", "miss"), ("owner", "hit")]
 
 
+def test_learn_consume_line_stamp_batch(tmp_path):
+    """★줄 도장 + 일괄 소비(2026-07-13 owner GO) — 여러 지시가 섞인 메시지의 '세이브 1-3' 줄
+    한 번으로 3건 소비(번호 재편 재도장 불필요). 실제 훅 경유 E2E."""
+    home, ledger = _make_home(tmp_path)
+    env = _env(home)
+    _write_queue(home, [
+        {"ts": "2026-07-13T21:00:00Z", "stance": "refutes", "queries": [],
+         "evidence": {"feedback": "일괄 지적 하나"}, "consumed": False},
+        {"ts": "2026-07-13T21:01:00Z", "stance": "accepts", "queries": [],
+         "evidence": {"feedback": "일괄 인정 둘"}, "consumed": False},
+        {"ts": "2026-07-13T21:02:00Z", "stance": "refutes", "queries": [],
+         "evidence": {"feedback": "일괄 지적 셋"}, "consumed": False},
+    ])
+    r = _run(["--ledger", ledger, "learn-consume"], env)           # dry-run = 스테이징
+    assert r.returncode == 0, r.stdout + r.stderr
+    # 사장님 스타일 그대로: 다른 지시들 사이에 도장이 한 줄
+    _stamp("머지해. 그리고 조사도 해줘\n세이브 1-3\n다음 작업 고", env)
+    r2 = _run(["--ledger", ledger, "learn-consume", "--confirm", "CONSUME 0,1,2"], env)
+    assert r2.returncode == 0, r2.stdout + r2.stderr
+    assert r2.stdout.count("OK: 교환 소비") == 3, r2.stdout
+    con = sqlite3.connect("file:%s?mode=ro" % ledger.replace("\\", "/"), uri=True)
+    n = con.execute("SELECT count(*) FROM hit_events WHERE node_id LIKE 'utter:%'").fetchone()[0]
+    con.close()
+    assert n == 5   # refutes 2건×2행 + accepts 1건×1행
+
+
+def test_learn_consume_inline_mention_still_blocked(tmp_path):
+    """문장 속 '세이브1' 언급(줄 일부)은 여전히 도장 아님 — 오도장 차단 계약 유지."""
+    home, ledger = _make_home(tmp_path)
+    env = _env(home)
+    _write_queue(home, [{"ts": "2026-07-13T22:00:00Z", "stance": "refutes", "queries": [],
+                         "evidence": {"feedback": "지적"}, "consumed": False}])
+    _run(["--ledger", ledger, "learn-consume"], env)
+    _stamp("도장은 세이브1 - 이건 왜 자꾸 실패하는거지?", env)     # 줄 일부 → 무시돼야
+    r = _run(["--ledger", ledger, "learn-consume", "--confirm", "CONSUME 0"], env)
+    assert "BLOCK: G4_no_auto" in r.stdout, r.stdout
+
+
 def test_learn_consume_without_stamp_blocked(tmp_path):
     """도장 없는 에이전트 세션 learn-consume = G4 차단 불변(fail-closed)."""
     home, ledger = _make_home(tmp_path)

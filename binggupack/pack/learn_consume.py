@@ -48,7 +48,8 @@ from binggupack.pack import recall as RECALL           # why_search(read-only)  
 from binggupack.pack import hit_recording as HR         # mark_outcome(안전 write)        # noqa: E402
 
 QUEUE_NAME = "learn_outcome_queue.jsonl"
-CONFIRM_RE = re.compile(r"^CONSUME\s+(\d+)$")
+# 'CONSUME 0' 단건 + 'CONSUME 0,1,4' 일괄(2026-07-13 owner GO — 도장 1회 다건 소비)
+CONFIRM_RE = re.compile(r"^CONSUME\s+(\d+(?:\s*,\s*\d+)*)$")
 
 
 # ── 경로: learn-outcome.js 와 동일 규칙(BINGGU_HOME/state 우선, 없으면 ~/.claude/state) ──
@@ -222,6 +223,36 @@ def consume(db, ledger_path, qpath, qi, index=1, home=None, ctx=None, verdict="u
     if not isinstance(qi, int) or qi < 0 or qi >= len(pend):
         return {"consumed": False, "reason": "qi_out_of_range", "pending": len(pend)}
     line_idx, entry = pend[qi]
+    return _consume_entry(db, ledger_path, qpath, line_idx, entry,
+                          index=index, home=home, ctx=ctx, verdict=verdict)
+
+
+def consume_many(db, ledger_path, qpath, qis, index=1, home=None, ctx=None, verdict="upheld"):
+    """★일괄 소비(2026-07-13 owner GO) — 도장 1회로 여러 건. 단일 pending 스냅샷의 line_idx
+    로 소비하므로 항목 간 번호 재편 문제가 없다(재도장 불필요). 범위 검증은 all-or-nothing
+    (하나라도 벗어나면 전체 거부 — 부분 오소비 방지). 항목별 결과 리스트 반환."""
+    ctx = ctx if ctx is not None else {"actor": "reader"}   # fail-closed 기본
+    if verdict not in ("upheld", "overturned"):
+        return {"consumed_any": False, "reason": "invalid_verdict", "results": []}
+    pend = load_pending(qpath)
+    qis = sorted({int(q) for q in (qis or [])})
+    if not qis or any(q < 0 or q >= len(pend) for q in qis):
+        return {"consumed_any": False, "reason": "qi_out_of_range",
+                "pending": len(pend), "results": []}
+    results = []
+    for qi in qis:
+        line_idx, entry = pend[qi]   # 스냅샷 line_idx — 소비 순서와 무관하게 안정
+        r = _consume_entry(db, ledger_path, qpath, line_idx, entry,
+                           index=index, home=home, ctx=ctx, verdict=verdict)
+        r["qi"] = qi
+        results.append(r)
+    return {"consumed_any": any(r.get("consumed") for r in results),
+            "all_consumed": all(r.get("consumed") for r in results),
+            "results": results}
+
+
+def _consume_entry(db, ledger_path, qpath, line_idx, entry, index, home, ctx, verdict):
+    """단일 큐 항목 소비(교환 축) — consume/consume_many 공용 본체."""
     stance = stance_of(entry)
     if stance is None:
         return {"consumed": False, "reason": "invalid_stance"}
@@ -259,11 +290,15 @@ def consume(db, ledger_path, qpath, qi, index=1, home=None, ctx=None, verdict="u
 
 
 def parse_confirm(confirm):
-    """--confirm 문자열 → qi(int) 또는 None(형식 불일치)."""
+    """--confirm 문자열 → qi 리스트 또는 None(형식 불일치).
+
+    'CONSUME 0' → [0] · 'CONSUME 0,1,4' → [0,1,4](중복 제거·정렬). 정확형만(자동확정 0)."""
     if not confirm:
         return None
     m = CONFIRM_RE.match(confirm.strip())
-    return int(m.group(1)) if m else None
+    if not m:
+        return None
+    return sorted({int(x) for x in re.findall(r"\d+", m.group(1))})
 
 
 # ---------------- selftest (temp 큐 + temp DB · 운영 write 0) ----------------
@@ -348,10 +383,10 @@ def _selftest():
             pv6["pending"] == 0 and (not r6.get("consumed"))
             and r6.get("reason") == "qi_out_of_range")
 
-        # T7 parse_confirm — 정확 문구만.
-        rec(7, "parse_confirm: 'CONSUME 3'→3 · 'consume 3'/빈값→None",
-            parse_confirm("CONSUME 3") == 3 and parse_confirm("consume 3") is None
-            and parse_confirm(None) is None)
+        # T7 parse_confirm — 정확 문구만(단건 리스트 + 일괄 콤마).
+        rec(7, "parse_confirm: 'CONSUME 3'→[3] · 'CONSUME 0,2,1'→[0,1,2] · 비정확형→None",
+            parse_confirm("CONSUME 3") == [3] and parse_confirm("CONSUME 0,2,1") == [0, 1, 2]
+            and parse_confirm("consume 3") is None and parse_confirm(None) is None)
 
         # T8 query 빈 + 발화 근거도 없음 → empty_feedback graceful(기록 0).
         write_queue([{"ts": "x", "outcome": "hit", "queries": [], "consumed": False}])
@@ -435,6 +470,24 @@ def _selftest():
         rec(14, "교환 소비(refutes+overturned → owner miss+ai hit · invalid verdict → 소비 0)",
             (not r14bad.get("consumed")) and r14bad.get("reason") == "invalid_verdict"
             and r14.get("consumed") and rows14 == {("owner", "miss"), ("ai", "hit")})
+
+        # T15 ★일괄 소비(도장 1회) — 단일 스냅샷 line_idx 로 번호 재편 없이 3건 소비 ·
+        #     범위 밖 포함 시 all-or-nothing 전체 거부.
+        write_queue([
+            {"ts": "2026-07-13T20:00:00Z", "stance": "refutes", "queries": [],
+             "evidence": {"feedback": "일괄 지적 A"}, "consumed": False},
+            {"ts": "2026-07-13T20:01:00Z", "stance": "accepts", "queries": [],
+             "evidence": {"feedback": "일괄 인정 B"}, "consumed": False},
+            {"ts": "2026-07-13T20:02:00Z", "stance": "refutes", "queries": [],
+             "evidence": {"feedback": "일괄 지적 C"}, "consumed": False},
+        ])
+        bad = consume_many(db, ledger, qpath, [0, 1, 9], home=tmp, ctx={"actor": "human"})
+        mr = consume_many(db, ledger, qpath, [0, 1, 2], home=tmp, ctx={"actor": "human"})
+        pend15 = load_pending(qpath)
+        rec(15, "일괄 소비(3건 1도장·all_consumed·대기 0) · 범위 밖 혼입 → 전체 거부",
+            (not bad.get("consumed_any")) and bad.get("reason") == "qi_out_of_range"
+            and mr.get("all_consumed") and len(mr.get("results")) == 3
+            and len(pend15) == 0)
 
     finally:
         db.close()
