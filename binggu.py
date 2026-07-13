@@ -1725,6 +1725,10 @@ def cmd_backup(a):
     if res["status"] == "NO_LEDGER":
         print("장부가 없습니다: %s · 먼저 python binggu.py init" % ledger)
         return 2
+    if res["status"] == "CORRUPT_LEDGER":
+        print("장부 파일이 손상됨: %s" % res.get("ledger"))
+        print("python binggu.py doctor 로 확인 후 python binggu.py restore <백업> 으로 복구하세요.")
+        return 2
     print("# 백업 완료 → %s" % res["out_path"])
     print("  노드 %d · 엣지 %d · %d bytes · sha256 %s…"
           % (res["nodes"], res["edges"], res["size"], res["sha256"][:16]))

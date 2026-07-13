@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- `backup_ledger` 가 손상 ledger.sqlite 에서 raw traceback 으로 죽던 갭 — `CORRUPT_LEDGER` status 반환 + 빈 산출물 정리 + CLI 복구 안내(restore 의 `INVALID_BACKUP` 방어와 대칭).
+
 ### Fixed — learn-outcome 축 교정: 발화 극성 → 교환(사용자 발화·AI 답변·확인) (2026-07-13)
 owner 지적("사용자 대화 - ai답변 - 맞는지 틀리는지 확인 이렇게 가야 축이 맞지") — 구축은 발화 극성(hit/miss)을 speaker=owner 로 직결해 **옳은 지적("아니지…")이 owner 빗나감으로 계상되는 축 뒤집힘**이었다.
 - **훅**(`hooks/user-prompt-learn-outcome.js`): 극성 = 결과가 아니라 입장 — `stance`(refutes 반박/accepts 인정) + 직전 AI 답변 발췌(`ai_answer`, 200자 절단) 큐 기록. `outcome` 은 legacy alias 유지. 구큐 항목은 outcome 극성에서 stance 유도(하위호환).
