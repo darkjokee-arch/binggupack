@@ -13,6 +13,7 @@ profile = capture_enabled 플래그 + capture_scope.json + (선택) settings.jso
 settings.json 실편집은 호출자(binggu.py)가 실제 경로를 줄 때만. 셀프테스트는 temp 경로 전용.
 """
 import json
+import re
 from pathlib import Path
 
 from binggu_capture_persist import CaptureScope, PersistentCaptureBuffer, binggu_home
@@ -37,9 +38,33 @@ def _group_has_marker(group, marker):
     return any(marker in (h.get("command") or "") for h in group.get("hooks", []))
 
 
+_HOOK_PATH_RE = re.compile(r'"([^"]+\.py)"')
+
+
+def _hook_target_path(command):
+    """command 문자열에서 따옴표로 감싼 첫 .py 경로 추출('py "<path>"' 형식 — binggu.py _hook_command).
+    추출 실패 시 None (남의 hook 형식은 건드리지 않기 위한 보수적 파싱)."""
+    m = _HOOK_PATH_RE.search(command or "")
+    return m.group(1) if m else None
+
+
+def _hook_entry_dead(entry, marker=HOOK_MARKER):
+    """binggu entry 의 대상 .py 파일이 사라졌으면 True(죽은 경로 — pip uninstall/repo 이동 후 잔존).
+    marker 없거나 경로 추출 불가면 False — false positive 로 남의 hook 형식을 깨지 않는다."""
+    cmd = entry.get("command") or ""
+    if marker not in cmd:
+        return False
+    path = _hook_target_path(cmd)
+    if path is None:
+        return False
+    return not Path(path).exists()
+
+
 def register_hook(settings_path, command, events=("UserPromptSubmit", "Stop"), marker=HOOK_MARKER, is_async=True):
     """settings.json 의 각 이벤트에 binggu hook 그룹 추가(백업·idempotent).
-    이미 marker 가 있으면 skip. 반환 = 새로 추가된 이벤트 목록.
+    이미 marker 가 있으면 skip — 단 그 entry 의 대상 파일이 사라진 죽은 경로면 command 를
+    새 것으로 교체(자가치유)하고 "repaired:<이벤트>" 로 표기. 반환 = 새로 추가/수리된 이벤트 목록
+    (신규 등록은 "<이벤트>" 그대로 — 기존 호출부 하위호환).
     is_async=False 면 async 키 생략(sync) — save_gate 처럼 저장 전 완료 보장 필요한 hook 용(레이스 회피)."""
     sp = Path(settings_path)
     data = json.loads(sp.read_text(encoding="utf-8")) if sp.exists() else {}
@@ -51,7 +76,17 @@ def register_hook(settings_path, command, events=("UserPromptSubmit", "Stop"), m
     added = []
     for ev in events:
         groups = hooks.setdefault(ev, [])
-        if any(_group_has_marker(g, marker) for g in groups):
+        marker_groups = [g for g in groups if _group_has_marker(g, marker)]
+        if marker_groups:
+            # 이미 등록됨 — 죽은 경로만 새 command 로 교체(중복 그룹 생성 0)
+            repaired = False
+            for g in marker_groups:
+                for h in g.get("hooks", []):
+                    if _hook_entry_dead(h, marker):
+                        h["command"] = command
+                        repaired = True
+            if repaired:
+                added.append("repaired:%s" % ev)
             continue  # idempotent
         entry = {"type": "command", "command": command}
         if is_async:
@@ -95,18 +130,40 @@ def unregister_hook(settings_path, marker=HOOK_MARKER):
     return removed
 
 
-def hook_registered(settings_path, marker=HOOK_MARKER):
+def hook_health(settings_path, marker=HOOK_MARKER):
+    """hook 등록 + 대상 파일 실존 여부 진단.
+    반환 {"registered": bool, "dead_paths": [죽은 .py 경로들],
+          "events": {이벤트: "ok"(살아있음) | "dead"(파일 소실) | "missing"(marker 없음)}}.
+    settings 파일이 없거나 파싱 실패면 전부 빈/False."""
+    result = {"registered": False, "dead_paths": [], "events": {}}
     sp = Path(settings_path)
     if not sp.exists():
-        return False
+        return result
     try:
         data = json.loads(sp.read_text(encoding="utf-8"))
     except Exception:
-        return False
-    for groups in data.get("hooks", {}).values():
-        if any(_group_has_marker(g, marker) for g in groups):
-            return True
-    return False
+        return result
+    for ev, groups in data.get("hooks", {}).items():
+        state = "missing"
+        for g in groups:
+            for h in g.get("hooks", []):
+                cmd = h.get("command") or ""
+                if marker not in cmd:
+                    continue
+                result["registered"] = True
+                if _hook_entry_dead(h, marker):
+                    state = "dead"
+                    path = _hook_target_path(cmd)
+                    if path and path not in result["dead_paths"]:
+                        result["dead_paths"].append(path)
+                elif state != "dead":
+                    state = "ok"
+        result["events"][ev] = state
+    return result
+
+
+def hook_registered(settings_path, marker=HOOK_MARKER):
+    return hook_health(settings_path, marker)["registered"]
 
 
 def init_profile(home, cwd, hook_command=None, settings_path=None, global_scope=False, force_enable=False):
