@@ -1394,9 +1394,10 @@ def cmd_learn_consume(a):
     ledger, _ = _ledger_paths(a.ledger)
     qpath = LC.queue_path()
     if a.confirm:
-        qi = LC.parse_confirm(a.confirm)
-        if qi is None:
-            print('BLOCK: --confirm 는 정확히 "CONSUME <번호>" 여야 합니다(자동확정 0).')
+        qis = LC.parse_confirm(a.confirm)
+        if qis is None:
+            print('BLOCK: --confirm 는 정확히 "CONSUME <번호>" 또는 "CONSUME 0,1,4" 여야 합니다'
+                  '(자동확정 0).')
             return 1
         if not os.path.exists(ledger):
             print("장부가 없습니다: %s · 먼저 python binggu.py init" % ledger)
@@ -1404,22 +1405,20 @@ def cmd_learn_consume(a):
         db, _ = _open(ledger)
         # 소비 승인 actor 판정 = _resolve_human_ctx(save-n 바인딩/cli_command · 에이전트 세션 deny).
         #   env fail-open 없음. CONSUME <n> 문구 단독으로 human 승격 금지(AOB-3 동종).
-        #   dry-run 이 스테이징한 큐 preview(발화 원문 축·번호=qi+1)에 사람이 '세이브 qi+1' 도장을
-        #   찍었으면 ref 바인딩으로 human 승격 — 에이전트 세션에서도 소비 가능(도장=사람 키보드만).
+        #   dry-run 이 스테이징한 큐 preview(발화 원문 축·번호=qi+1)에 사람이 '세이브 qi+1'
+        #   (일괄은 '세이브 1-5'/줄 도장) 도장을 찍었으면 ref 바인딩으로 human 승격.
         _refs = None
         try:
             import binggu_save_gate as _sg
             _cands = [{"sentence": ((e.get("evidence") or {}).get("feedback") or "")}
                       for _li, e in LC.load_pending(qpath)]
             if _cands:
-                _refs = [(_sg.preview_ref_for_candidates(_cands), [qi + 1])]
+                _refs = [(_sg.preview_ref_for_candidates(_cands), [q + 1 for q in qis])]
         except Exception:
             _refs = None
         _ctx = _resolve_human_ctx(a.ledger, _refs)
-        r = LC.consume(db, ledger, qpath, qi, index=a.index, home=os.path.dirname(ledger),
-                       ctx=_ctx, verdict=a.verdict)
-        db.close()
-        if r.get("consumed"):
+
+        def _print_ok(r):
             if r.get("rows"):
                 attribution = " · ".join(
                     "%s %s" % (row["speaker"], "적중" if row["outcome"] == "hit" else "빗나감")
@@ -1431,6 +1430,29 @@ def cmd_learn_consume(a):
                       % (r.get("outcome"), r.get("index") or 0, r.get("node_claim") or ""))
             print("    decision=%s · 큐 consumed=true · 사람 확정(actor=human·자동 0)"
                   % r.get("decision_id"))
+
+        if len(qis) > 1:
+            # ★일괄 소비(도장 1회·단일 스냅샷 — 번호 재편 재도장 불필요)
+            mr = LC.consume_many(db, ledger, qpath, qis, index=a.index,
+                                 home=os.path.dirname(ledger), ctx=_ctx, verdict=a.verdict)
+            db.close()
+            if not mr.get("results"):
+                print("BLOCK: %s" % mr.get("reason"))
+                if mr.get("reason") == "qi_out_of_range":
+                    print("  소비 대기 %s건. dry-run 으로 번호 확인(하나라도 범위 밖이면 전체 거부)."
+                          % mr.get("pending", "?"))
+                return 1
+            for r in mr["results"]:
+                if r.get("consumed"):
+                    _print_ok(r)
+                else:
+                    print("BLOCK: [%s] %s" % (r.get("qi"), r.get("reason")))
+            return 0 if mr.get("all_consumed") else 1
+        r = LC.consume(db, ledger, qpath, qis[0], index=a.index, home=os.path.dirname(ledger),
+                       ctx=_ctx, verdict=a.verdict)
+        db.close()
+        if r.get("consumed"):
+            _print_ok(r)
             return 0
         reason = r.get("reason")
         print("BLOCK: %s" % reason)
@@ -1469,6 +1491,9 @@ def cmd_learn_consume(a):
                                                      "last_preview_candidates.json"))
             print('\n도장(사람 키보드): 표의 [N]번 소비 = "세이브 N+1" 입력 → '
                   '--confirm "CONSUME N" 재실행'
+                  '\n  일괄: "세이브 1-6" 또는 "세이브 1,3,5" 한 줄 → --confirm "CONSUME 0,2,4"'
+                  ' (도장 1회·재도장 불필요)'
+                  '\n  도장은 메시지 전체 또는 **한 줄 전체**가 도장뿐이어야 인식(문장 속 언급 무시).'
                   '\n  확인(교환 축): 기본 = 발화대로(upheld). 나중에 뒤집힌 건이면 '
                   '--verdict overturned 추가.')
     except Exception:

@@ -50,12 +50,41 @@ try:
         parse_save_indices, SAVE_TRIGGER_RE, _norm, sent_hash)
 except Exception:  # pragma: no cover - 폴백(외부 의존 없이 동일 정의)
     SAVE_TRIGGER_RE = re.compile(
-        r"\s*(?:SAVE|저장|세이브)\s*\d+(\s*,\s*\d+)*\s*", re.IGNORECASE)
+        r"\s*(?:SAVE|저장|세이브)\s*\d+(\s*[-~]\s*\d+)?(\s*,\s*\d+(\s*[-~]\s*\d+)?)*\s*",
+        re.IGNORECASE)
+
+    _RANGE_CAP = 50
+
+    def _expand_indices(text):
+        out, seen = [], set()
+        for part in re.findall(r"\d+(?:\s*[-~]\s*\d+)?", str(text)):
+            nums = [int(x) for x in re.findall(r"\d+", part)]
+            if len(nums) == 2:
+                lo, hi = min(nums), max(nums)
+                if hi - lo + 1 > _RANGE_CAP:
+                    return None
+                span = range(lo, hi + 1)
+            else:
+                span = nums
+            for i in span:
+                if i not in seen:
+                    seen.add(i)
+                    out.append(i)
+        return out or None
 
     def parse_save_indices(prompt):
-        if not SAVE_TRIGGER_RE.fullmatch(str(prompt or "")):
-            return None
-        return [int(x) for x in re.findall(r"\d+", prompt)]
+        p = str(prompt or "")
+        if SAVE_TRIGGER_RE.fullmatch(p):
+            return _expand_indices(p)
+        out, seen = [], set()
+        for line in p.splitlines():
+            if line.strip() and SAVE_TRIGGER_RE.fullmatch(line):
+                idx = _expand_indices(line)
+                for i in idx or []:
+                    if i not in seen:
+                        seen.add(i)
+                        out.append(i)
+        return out or None
 
     def _norm(s):
         return re.sub(r"\s+", " ", str(s)).strip()
@@ -344,6 +373,13 @@ def _selftest():
     chk("T2i 한글 부정문 무시", parse_save_indices("저장 하지마") is None)
     chk("T2j 딴얘기 속 '저장 7' 무시", parse_save_indices("그거 저장 7 어쩌고") is None)
     chk("T2k has_trigger_token 한글 감지", has_trigger_token("저장 1") and has_trigger_token("세이브 2"))
+    # T2l~T2p ★줄 단위 도장 + 범위(2026-07-13 owner GO — 다지시 메시지 대응)
+    chk("T2l 여러 지시 + 도장 줄", parse_save_indices("머지해. 조사도 해줘\n세이브 1\n고고") == [1])
+    chk("T2m 문장 속 언급은 여전히 무시(줄 일부)",
+        parse_save_indices("도장은 세이브1 - 이건 왜 실패하지?") is None)
+    chk("T2n 범위 '세이브 1-3'", parse_save_indices("세이브 1-3") == [1, 2, 3])
+    chk("T2o 범위+콤마 혼합 '저장 1,3-5'", parse_save_indices("저장 1,3-5") == [1, 3, 4, 5])
+    chk("T2p 범위 폭주 무효(상한 50)", parse_save_indices("세이브 1-9999") is None)
     # T3 기록 후 통과
     gate_record([S1], path=gp)
     chk("T3 기록된 문장 → True", gate_human_for([S1], path=gp) is True)
