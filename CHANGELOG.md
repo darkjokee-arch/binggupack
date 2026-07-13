@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed — semantic 콜드스타트 배치 선채움: 첫 회상 126.8s → 6.5s (2026-07-13)
+Codex 감사 잔여(콜드 35s — 실측 시점 413노드에서 126.8s로 악화). 원인 = why_search 가 미캐시 노드마다 1회씩 **순차 HTTP embed(N왕복)** 로 영속 캐시를 채우던 비용(모델 로드 아님 · warm 은 종전에도 0.4s).
+- `binggu_semantic_shadow._embed_batch` 신설 — /api/embed input 리스트 1왕복 다건(실패/개수 불일치 → None·호출측 단건 fallback).
+- `recall._prefill_cache` + scorer `prefill` 부착 + `why_search` 노드 루프 전 배선 — 미캐시분만 64개 청크 배치 선적재(413노드 = 7왕복). leak_guard 패리티(거부 문장은 요청 자체 제외)·멱등(재호출 왕복 0)·배치 실패 시 단건 경로 graceful.
+- 실측(격리 홈·ledger 사본·Ollama bge-m3): 콜드 **126.8s → 6.5s(19.5×)** · 웜 0.37s 동급 · top-5 무회귀. Hot 경로(fresh_index)·기본 semantic OFF 불변(embed 0 회귀 기준 유지).
+- 검증: 신규 pytest 6 + fresh_index 26 passed · recall/semantic_shadow selftest GATE=GO · 벤더 drift 0.
+
 ### Changed — pair 결합 번호축(도장 1회) + learn-consume 도장 소비 (2026-07-13)
 owner 지적("같이 프리뷰 주면 해결") — 축별 preview+도장 2회 마찰 제거. 도장=사람 키보드만 원칙·fail-closed 완화 0.
 - **`binggu pair` `--confirm` 생략 = 결합 미리보기 스테이징(저장 0)** — owner+ai 후보를 한 preview(연속 번호: owner 1..N · ai N+1..)로 `write_last_preview`(explicit·ledger 기준 home). 사람 도장 1회(`세이브 o,a`)로 양축이 함께 기록되고, confirm 재실행 시 결합 1-튜플 ref(`(pref(owner+ai), [o, N+a])`)를 우선 대조(기존 축별 2-튜플 폴백 유지 — 구 흐름 무손상).
