@@ -9,6 +9,14 @@ Codex 감사 잔여(콜드 35s — 실측 시점 413노드에서 126.8s로 악�
 - 실측(격리 홈·ledger 사본·Ollama bge-m3): 콜드 **126.8s → 6.5s(19.5×)** · 웜 0.37s 동급 · top-5 무회귀. Hot 경로(fresh_index)·기본 semantic OFF 불변(embed 0 회귀 기준 유지).
 - 검증: 신규 pytest 6 + fresh_index 26 passed · recall/semantic_shadow selftest GATE=GO · 벤더 drift 0.
 
+### Fixed — learn-outcome 축 교정: 발화 극성 → 교환(사용자 발화·AI 답변·확인) (2026-07-13)
+owner 지적("사용자 대화 - ai답변 - 맞는지 틀리는지 확인 이렇게 가야 축이 맞지") — 구축은 발화 극성(hit/miss)을 speaker=owner 로 직결해 **옳은 지적("아니지…")이 owner 빗나감으로 계상되는 축 뒤집힘**이었다.
+- **훅**(`hooks/user-prompt-learn-outcome.js`): 극성 = 결과가 아니라 입장 — `stance`(refutes 반박/accepts 인정) + 직전 AI 답변 발췌(`ai_answer`, 200자 절단) 큐 기록. `outcome` 은 legacy alias 유지. 구큐 항목은 outcome 극성에서 stance 유도(하위호환).
+- **`hit_recording.mark_exchange_uttered` 신설**: stance × verdict(사람 확인: upheld 발화대로/overturned 뒤집힘) 귀속 — 반박+upheld → **owner hit + ai miss**(2행) · 반박+overturned → owner miss + ai hit · 인정 → ai 행만. dup 는 all-or-nothing(부분 삽입 0). 기존 `mark_outcome_uttered` 는 SUPERSEDED 표기(호환용 유지).
+- **`learn-consume`**: `--verdict {upheld,overturned}`(기본 upheld). recall 연결 항목은 회상 조언 노드 귀속(`_node_outcome` — 그 조언이 맞았나) 유지 + 재현 0 이면 발화 교환 축 폴백(소비 가능 유지). preview/세션 마무리 표시를 교환 축(반박/인정 + AI 답변)으로 전환.
+- 안전 불변: actor=human 게이트·발화 앵커(UserPromptSubmit hook 만 append)·안정 decision_id dup 차단·자동 확정 0 전부 유지. ai_answer 는 DB 미저장(표시 전용·PII 최소).
+- 검증: hit_recording selftest 15/15 · learn_consume 14/14 · session_close GO · 실큐 6건 dry-run 축 정확 분류.
+
 ### Changed — pair 결합 번호축(도장 1회) + learn-consume 도장 소비 (2026-07-13)
 owner 지적("같이 프리뷰 주면 해결") — 축별 preview+도장 2회 마찰 제거. 도장=사람 키보드만 원칙·fail-closed 완화 0.
 - **`binggu pair` `--confirm` 생략 = 결합 미리보기 스테이징(저장 0)** — owner+ai 후보를 한 preview(연속 번호: owner 1..N · ai N+1..)로 `write_last_preview`(explicit·ledger 기준 home). 사람 도장 1회(`세이브 o,a`)로 양축이 함께 기록되고, confirm 재실행 시 결합 1-튜플 ref(`(pref(owner+ai), [o, N+a])`)를 우선 대조(기존 축별 2-튜플 폴백 유지 — 구 흐름 무손상).

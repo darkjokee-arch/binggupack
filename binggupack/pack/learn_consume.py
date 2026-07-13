@@ -1,8 +1,14 @@
 # -*- coding: utf-8 -*-
-"""binggu_learn_consume — 학습 큐(hit/miss 후보) → hit_recording 안전 소비.
+"""binggu_learn_consume — 학습 큐(교환 후보) → hit_recording 안전 소비.
 
 user-prompt-learn-outcome.js 가 owner 자연 피드백("맞네"/"틀렸어")을 감지해 append 하는
 learn_outcome_queue.jsonl(append-only)을 **사람 승인**으로 소비해 hit_events 에 적재한다.
+
+★교환 축(2026-07-13 owner "사용자 대화 - ai답변 - 맞는지 틀리는지 확인"):
+  발화 극성은 결과가 아니라 입장(stance: refutes 반박 / accepts 인정)이다. 누가 맞았는지는
+  소비 시점에 사람이 확인(verdict: upheld 발화대로 / overturned 뒤집힘)한다. 구축(발화 극성
+  → speaker=owner 직결)은 옳은 지적을 owner miss 로 계상하는 축 뒤집힘이라 폐기 —
+  mark_exchange_uttered 로 귀속(반박 적중 = owner hit + ai miss).
 
 ★설계 근거(회상으로 확정 · owner 판단 정합):
   - 스케줄러 자동 소비 배제: owner_refutes "안전장치를 Agent 경유로 우회해 자동 반복" ·
@@ -76,6 +82,30 @@ def load_pending(qpath):
     return [(i, o) for (i, o) in _parse(qpath) if o and not o.get("consumed")]
 
 
+def stance_of(entry):
+    """교환 축 입장 — 신큐는 stance 필드, 구큐(2026-07-13 이전)는 outcome 극성에서 유도.
+
+    구큐 유도 근거: 훅의 구 outcome 은 발화 극성 그대로였다(부정어→'miss'·긍정어→'hit')
+    → 부정어 발화 = AI 답변 반박(refutes) · 긍정어 발화 = AI 답변 인정(accepts)."""
+    s = (entry or {}).get("stance")
+    if s in ("refutes", "accepts"):
+        return s
+    oc = (entry or {}).get("outcome")
+    if oc == "miss":
+        return "refutes"
+    if oc == "hit":
+        return "accepts"
+    return None
+
+
+def _node_outcome(stance, verdict):
+    """recall 연결 항목의 회상 조언 노드 귀속 — '그 조언이 맞았나'.
+
+    반박이 유지(upheld)됐거나 인정이 뒤집혔으면(overturned) 조언은 빗나간 것(miss)."""
+    advice_wrong = (stance == "refutes") == (verdict == "upheld")
+    return "miss" if advice_wrong else "hit"
+
+
 def load_pending_today(qpath, today=None):
     """당일(ts 날짜 prefix 일치) 소비 대기 항목 — [(qi, entry), ...] (read-only · 소비 0).
 
@@ -125,7 +155,9 @@ def preview(ledger_path, qpath, home=None, top=3):
                 pass
         items.append({
             "qi": qi,
-            "outcome": entry.get("outcome"),
+            "outcome": entry.get("outcome"),           # legacy 표시용(신규 축은 stance)
+            "stance": stance_of(entry),
+            "ai_answer": (entry.get("ai_answer") or "")[:70],
             "feedback": (entry.get("evidence") or {}).get("feedback"),
             "queries": queries,
             "ts": entry.get("ts"),
@@ -134,63 +166,90 @@ def preview(ledger_path, qpath, home=None, top=3):
     return {"pending": len(pend), "items": items}
 
 
+_STANCE_TAG = {"refutes": "반박(사용자가 AI 를 정정)", "accepts": "인정(AI 답변 수긍)"}
+
+
 def render_preview_md(pv):
     n = pv.get("pending", 0)
     if not n:
         return "학습 큐: 소비 대기 0건. (owner 자연 피드백이 쌓이면 여기 표시됩니다.)"
-    out = ["학습 큐 소비 대기 %d건 (dry-run · 저장 0)" % n,
-           "  소비: python binggu.py learn-consume --confirm \"CONSUME <번호>\" [--index k]", ""]
+    out = ["학습 큐 소비 대기 %d건 (dry-run · 저장 0 · 축: 사용자 발화 → AI 답변 → 확인)" % n,
+           "  소비: python binggu.py learn-consume --confirm \"CONSUME <번호>\""
+           " [--verdict overturned] [--index k]", ""]
     for it in pv["items"]:
-        tag = "적중(hit)" if it["outcome"] == "hit" else "빗나감(miss)"
-        out.append("[%d] %s · 발화: %s" % (it["qi"], tag, (it.get("feedback") or "")[:60]))
+        tag = _STANCE_TAG.get(it.get("stance"), "미상(stance 없음)")
+        out.append("[%d] %s · 사용자: %s" % (it["qi"], tag, (it.get("feedback") or "")[:60]))
+        out.append("    AI 답변: %s" % (it["ai_answer"] if it.get("ai_answer")
+                                        else "(미기록 — 구큐 항목)"))
         if it.get("queries"):
             out.append("    회상 query: %s" % it["queries"][0][:70])
         for rt in it.get("recall_top") or []:
             out.append("      %d) %s" % (rt["index"], (rt.get("claim") or "")[:70]))
-        if not it.get("recall_top"):
-            out.append("      (회상 재현 0 — query 로 회상되는 판단 없음/장부 변경)")
+        if it.get("queries") and not it.get("recall_top"):
+            out.append("      (회상 재현 0 — 소비 시 발화 교환 축으로 폴백)")
+    out.append("")
+    out.append("확인(verdict) 기본 = 발화대로(upheld): 반박이 옳았음 → owner 적중 + ai 빗나감 · "
+               "인정 → ai 적중. 나중에 뒤집힌 건이면 --verdict overturned.")
     return "\n".join(out)
 
 
-# ── consume — owner 승인 소비(mark_outcome actor=human) ───────────────────────────
-def consume(db, ledger_path, qpath, qi, index=1, home=None, ctx=None):
-    """qi 번째 소비 대기 항목을 mark_outcome 으로 적재하고 consumed=true 마킹.
+# ── consume — owner 승인 소비(교환 축 · actor=human) ───────────────────────────
+def consume(db, ledger_path, qpath, qi, index=1, home=None, ctx=None, verdict="upheld"):
+    """qi 번째 소비 대기 항목을 교환 축으로 적재하고 consumed=true 마킹.
+
+    ★교환 축: stance(반박/인정) × verdict(사람 확인 upheld/overturned) 로 귀속 —
+      반박+upheld → owner hit + ai miss · 반박+overturned → owner miss + ai hit ·
+      인정 → ai 행만(hit/miss). recall 연결 항목은 회상 조언 노드에도 귀속(mark_outcome ·
+      '그 조언이 맞았나' 축은 원래 정합)하고, 회상 재현 0 이면 발화 교환 축으로 폴백.
 
     actor 는 하드코딩 'human' 이 아니라 호출자가 넘긴 `ctx`. binggu CLI 는 `_resolve_human_ctx`
     (판정 정본은 그 docstring — save-n 참조 바인딩/cli_command · 에이전트 세션 deny) 를 넘긴다. ctx
-    미지정 시 fail-closed 기본(reader) → mark_outcome/mark_outcome_uttered 의 actor=human 게이트가 BLOCK.
+    미지정 시 fail-closed 기본(reader) → mark_outcome/mark_exchange_uttered 의 actor=human 게이트가 BLOCK.
 
-    반환: {consumed, reason?, outcome?, node_claim?, decision_id?, query?, index?, mark?}.
+    반환: {consumed, reason?, stance?, verdict?, rows?, outcome?, node_claim?, decision_id?,
+           query?, index?, mark?}.
     """
     ctx = ctx if ctx is not None else {"actor": "reader"}   # fail-closed 기본
+    if verdict not in ("upheld", "overturned"):
+        return {"consumed": False, "reason": "invalid_verdict"}
     pend = load_pending(qpath)
     if not isinstance(qi, int) or qi < 0 or qi >= len(pend):
         return {"consumed": False, "reason": "qi_out_of_range", "pending": len(pend)}
     line_idx, entry = pend[qi]
-    outcome = entry.get("outcome")
+    stance = stance_of(entry)
+    if stance is None:
+        return {"consumed": False, "reason": "invalid_stance"}
     queries = entry.get("queries") or []
-    if not queries:
-        # ★A 재설계(2026-07-10): recall 무관 owner 지적(recall_linked=false) — 발화 앵커로 직접
-        #   hit/miss 기록. hit_events 는 speaker 별 outcome 개수만 세므로 노드에 안 묶어도 owner
-        #   적중률에 반영된다. 위조 차단은 발화 앵커(UserPromptSubmit hook)+owner 승인(human)이 보장.
-        fb = (entry.get("evidence") or {}).get("feedback") or ""
-        r = HR.mark_outcome_uttered(db, fb, entry.get("ts"), outcome,
-                                    ctx, domain=entry.get("domain"))
+    fb = (entry.get("evidence") or {}).get("feedback") or ""
+
+    def _exchange():
+        # 발화 앵커 교환 기록 — 위조 차단은 발화 앵커(UserPromptSubmit hook)+owner 승인(human).
+        r = HR.mark_exchange_uttered(db, fb, entry.get("ts"), stance, verdict, ctx,
+                                     domain=entry.get("domain"),
+                                     ai_answer=entry.get("ai_answer"))
         if not r.get("recorded"):
             return {"consumed": False, "reason": r.get("reason"), "mark": r}
         _mark_consumed(qpath, line_idx)
-        return {"consumed": True, "outcome": outcome, "index": index,
+        return {"consumed": True, "stance": stance, "verdict": verdict,
+                "rows": r.get("rows"), "index": index,
                 "node_claim": fb[:70], "query": None, "anchor": "utterance",
                 "node_id": r.get("node_id"), "decision_id": r.get("decision_id")}
+
+    if not queries:
+        return _exchange()
     query = queries[0]
-    # mark_outcome 이 actor=human 게이트·D-1·D-2·nonce(None=stale skip) 을 그대로 강제.
-    r = HR.mark_outcome(db, ledger_path, query, index, outcome, ctx,
+    # recall 연결 — 회상 조언 노드 귀속. mark_outcome 이 actor=human·D-1·D-2 를 그대로 강제.
+    node_outcome = _node_outcome(stance, verdict)
+    r = HR.mark_outcome(db, ledger_path, query, index, node_outcome, ctx,
                         nonce=None, domain=entry.get("domain"), home=home)
     if not r.get("recorded"):
+        if r.get("reason") in ("no_recall", "no_ledger") and fb.strip():
+            return _exchange()   # 장부 변경으로 회상 재현 0 → 발화 교환 축 폴백(소비 가능 유지)
         return {"consumed": False, "reason": r.get("reason"), "mark": r}
     _mark_consumed(qpath, line_idx)
-    return {"consumed": True, "outcome": outcome, "node_claim": r.get("node_claim"),
-            "decision_id": r.get("decision_id"), "query": query, "index": index}
+    return {"consumed": True, "outcome": node_outcome, "stance": stance, "verdict": verdict,
+            "node_claim": r.get("node_claim"), "decision_id": r.get("decision_id"),
+            "query": query, "index": index}
 
 
 def parse_confirm(confirm):
@@ -294,16 +353,19 @@ def _selftest():
         rec(8, "query 빈+발화없음 → empty_feedback graceful(consumed False·에러 0)",
             (not r8.get("consumed")) and r8.get("reason") == "empty_feedback")
 
-        # T9 ★A 재설계: recall 무관 owner 지적(query 빈·feedback 있음) → 발화 앵커로 hit/miss 소비.
+        # T9 ★교환 축: recall 무관 owner 지적(구큐 outcome=miss → stance=refutes 유도) →
+        #    upheld 기본으로 owner(지적,hit)+ai(답변,miss) 2행 — 옳은 지적이 owner 적중으로.
         ev_b = db.con.execute("SELECT count(*) FROM hit_events WHERE node_id LIKE 'utter:%'").fetchone()[0]
         write_queue([{"ts": "2026-07-10T09:00:00Z", "outcome": "miss", "queries": [],
                       "recall_linked": False, "evidence": {"feedback": "산으로 간다"}, "consumed": False}])
         r9 = consume(db, ledger, qpath, 0, index=1, home=tmp, ctx={"actor": "human"})
         ev_a = db.con.execute("SELECT count(*) FROM hit_events WHERE node_id LIKE 'utter:%'").fetchone()[0]
+        rows9 = {(r["speaker"], r["outcome"]) for r in (r9.get("rows") or [])}
         pend9 = load_pending(qpath)
-        rec(9, "발화 앵커 소비(recall 무관 owner 지적 → recorded·anchor=utterance·hit_events +1·consumed)",
+        rec(9, "교환 소비(구큐 지적 → refutes+upheld → owner hit+ai miss 2행·anchor=utterance·consumed)",
             r9.get("consumed") and r9.get("anchor") == "utterance"
-            and ev_a == ev_b + 1 and len(pend9) == 0)
+            and r9.get("stance") == "refutes" and rows9 == {("owner", "hit"), ("ai", "miss")}
+            and ev_a == ev_b + 2 and len(pend9) == 0)
 
         # T10 ★P1-A.1 fail-closed: ctx 미지정(기본 reader)·recall 큐 → mark_outcome G4_no_auto·소비 0.
         write_queue([{"ts": "z", "outcome": "hit", "queries": ["이 입찰 보류"], "consumed": False}])
@@ -344,6 +406,29 @@ def _selftest():
             and all(str(e.get("ts") or "").startswith("2026-07-13") for _, e in td)
             and load_pending_today(qpath, today="2026-07-14") == []
             and os.path.getmtime(qpath) == q12_mtime)
+
+        # T13 ★교환 축: 신큐 stance=accepts(인정) 소비 → ai 행만(hit) · owner 표본 0.
+        write_queue([{"ts": "2026-07-13T10:00:00Z", "stance": "accepts", "queries": [],
+                      "ai_answer": "그건 클로드가 맞습니다", "evidence": {"feedback": "클로드맞다."},
+                      "consumed": False}])
+        r13 = consume(db, ledger, qpath, 0, index=1, home=tmp, ctx={"actor": "human"})
+        rows13 = [(r["speaker"], r["outcome"]) for r in (r13.get("rows") or [])]
+        rec(13, "교환 소비(accepts+upheld → ai hit 1행만·owner 표본 0)",
+            r13.get("consumed") and r13.get("stance") == "accepts"
+            and rows13 == [("ai", "hit")])
+
+        # T14 ★교환 축: verdict=overturned(뒤집힌 지적) → owner miss + ai hit ·
+        #     invalid verdict → 소비 0(fail-closed).
+        write_queue([{"ts": "2026-07-13T11:00:00Z", "stance": "refutes", "queries": [],
+                      "evidence": {"feedback": "아니지 그건 다르다"}, "consumed": False}])
+        r14bad = consume(db, ledger, qpath, 0, index=1, home=tmp,
+                         ctx={"actor": "human"}, verdict="maybe")
+        r14 = consume(db, ledger, qpath, 0, index=1, home=tmp,
+                      ctx={"actor": "human"}, verdict="overturned")
+        rows14 = {(r["speaker"], r["outcome"]) for r in (r14.get("rows") or [])}
+        rec(14, "교환 소비(refutes+overturned → owner miss+ai hit · invalid verdict → 소비 0)",
+            (not r14bad.get("consumed")) and r14bad.get("reason") == "invalid_verdict"
+            and r14.get("consumed") and rows14 == {("owner", "miss"), ("ai", "hit")})
 
     finally:
         db.close()

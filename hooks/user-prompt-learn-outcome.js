@@ -3,8 +3,10 @@
  * user-prompt-learn-outcome.js — 빙구팩 학습 채널 "결과 기록" (UserPromptSubmit · SYNC)
  *
  * owner 자연 발화("맞네"/"정확해"/"아니야"/"틀렸어" 등 긍정·부정 피드백)를 감지해,
- * 직전 assistant turn 에 recall/cloud_recall/why tool_use 가 있었으면 그 회상 결과를
- * hit(긍정)/miss(부정) 후보로 append-only 큐(~/.claude/state/learn_outcome_queue.jsonl)에 남긴다.
+ * 직전 AI 답변 발췌와 함께 교환(exchange) 후보로 append-only 큐
+ * (~/.claude/state/learn_outcome_queue.jsonl)에 남긴다.
+ * ★축(2026-07-13): 극성 = 결과가 아니라 입장(stance: refutes/accepts). 누가 맞았는지는
+ *   소비 시점(learn-consume)에 사람이 확정 — "사용자 대화 → AI 답변 → 확인" 순서.
  *
  * ★설계 근거(위조 불가 앵커):
  *   - UserPromptSubmit = 사람만 발생하는 이벤트(AI 는 이 이벤트를 못 거침 → 위조 불가).
@@ -38,6 +40,7 @@ const DISABLED = path.join(STATE, 'learn_outcome_disabled');  // kill switch(존
 const QUEUE_MAX = 500;     // 큐 라인 상한(폭주 방지 — 초과 시 무기록)
 const QUERY_MAX = 120;     // query 추정 절단(PII 최소)
 const SCAN_TAIL = 400;     // transcript 꼬리 스캔 상한(성능)
+const AI_ANSWER_MAX = 200; // 직전 AI 답변 발췌 절단(교환 축 근거·PII 최소)
 
 // 회상으로 인정하는 도구(로컬 recall/why + 오픈크랩 cloud_recall/search/query). 부분매칭.
 const RECALL_RE = /recall|cloud_recall|opencrab_(search|query)|__why(\b|"|$)/i;
@@ -111,7 +114,7 @@ function extractText(c) {
 }
 
 function scanRecall(transcriptPath, currentPrompt) {
-  const out = { found: false, queries: [] };
+  const out = { found: false, queries: [], aiAnswer: '' };
   if (!transcriptPath || !fs.existsSync(transcriptPath)) return out;
   let lines;
   try {
@@ -149,8 +152,17 @@ function scanRecall(transcriptPath, currentPrompt) {
   for (let i = start; i < lines.length; i++) {
     let o;
     try { o = JSON.parse(lines[i]); } catch { continue; }
+    const role = o.type || o.role;
     const c = (o.message || o).content;
     if (!Array.isArray(c)) continue;
+    // ★교환 축(2026-07-13 owner): 사용자가 반응한 대상 = 직전 turn 의 마지막 assistant text.
+    //   창 안의 assistant text 를 갱신 유지 → 루프 종료 시 마지막 것이 남는다(발췌 절단).
+    if (role === 'assistant') {
+      const t = c
+        .map((x) => (x && x.type === 'text' ? (x.text || '') : ''))
+        .join('').trim();
+      if (t) out.aiAnswer = t.slice(0, AI_ANSWER_MAX);
+    }
     for (const it of c) {
       if (it && it.type === 'tool_use' && it.name && RECALL_RE.test(it.name)) {
         out.found = true;
@@ -197,9 +209,16 @@ function main(rawData) {
     return;
   }
 
+  // ★교환 축(2026-07-13 owner "사용자 대화 - ai답변 - 맞는지 틀리는지 확인"):
+  //   발화 극성은 결과(hit/miss)가 아니라 입장(stance)이다 — 부정어("아니지")=AI 답변 반박(refutes),
+  //   긍정어("맞다")=AI 답변 인정(accepts). 누가 맞았는지(확인)는 소비 시점에 사람이 확정한다.
+  //   outcome 필드는 구독자 호환용 legacy alias 로만 유지(신규 소비자는 stance 사용).
+  const stance = outcome === 'miss' ? 'refutes' : 'accepts';
   const entry = {
     ts: new Date().toISOString(),
-    outcome,                                   // 'hit' | 'miss'
+    outcome,                                   // legacy alias('hit'|'miss') — 신규 축은 stance
+    stance,                                    // 'refutes'(반박) | 'accepts'(인정) — 교환 축
+    ai_answer: scan.aiAnswer || '',            // 사용자가 반응한 직전 AI 답변 발췌(절단)
     recall_linked: recallLinked,               // ★recall 연결 여부(true=회상결과 피드백 / false=일반 작업 지적)
     queries: scan.queries,                     // recall input.query 추정(recall_linked 시만 채워짐·중복 제거)
     evidence: {
