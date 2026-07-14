@@ -54,7 +54,7 @@ jobs:
 
     steps:
       - name: Checkout (tag ref 체크아웃)
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0   # tag/commit 검증을 위해 전체 히스토리
 
