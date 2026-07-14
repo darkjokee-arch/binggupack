@@ -4,10 +4,12 @@
 
 # BingguPack
 
-**AI memory under your control.**
-Record the judgments, preferences and lessons you build up while working with AI — but **only what you approve becomes active memory.**
+### Git for AI memory
 
-_Git-like review and commit for what an AI remembers about you._
+**Your AI can propose memories. Only you decide what becomes active.**
+Every memory starts as a reviewable proposal — and **only what you approve** becomes active memory.
+
+> *"Git for AI memory" is a metaphor for a **Git-like review-and-commit workflow** — it does not implement an actual Git repository or Pull Request protocol.*
 
 [![PyPI](https://img.shields.io/pypi/v/binggupack?color=3775A9&logo=pypi&logoColor=white&label=PyPI)](https://pypi.org/project/binggupack/)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://pypi.org/project/binggupack/)
@@ -21,7 +23,7 @@ _Git-like review and commit for what an AI remembers about you._
 
 ---
 
-> This is a concise English entry point. The full documentation is Korean-first — see [README.md](README.md).
+> Maintained English translation of the Korean-first docs — see [README.md](README.md) for the full documentation. Safety boundaries have a single source of truth in [SECURITY.md](SECURITY.md) (this page summarizes; it does not redefine them). In sync as of **v1.21.0**.
 
 ## ⚡ 60-second demo
 
@@ -36,16 +38,26 @@ For CI/automation: `binggu demo --non-interactive` — approval is simulated **o
 
 ## 🧭 How it works
 
+**Memory PR** — one sentence: *"Every memory starts as a reviewable proposal (a Memory PR); only what you approve becomes active memory."* "Memory PR" is an explanatory **alias** for this flow — internal commands and the data model are unchanged.
+
+|  | Your AI | You | Result |
+|---|---|---|---|
+| 🟡 **Memory PR** | proposes a candidate from the conversation | — | not active memory yet |
+| ✅ **Human commit** | — | approve the exact candidate with `SAVE n` | committed to the local ledger |
+| 🔎 **Recall** | — | recall an approved memory from a fresh process / session | back, with provenance |
+
 BingguPack is **not** a tool that hoovers up every conversation. It turns durable judgments, preferences and lessons into *candidates*, and **only what you approve** becomes active memory.
 
-| Stage | What | How |
+| Git | BingguPack | Command |
 |---|---|---|
-| **Candidate** | A memorable line becomes a candidate (auto-collected, *not* saved) | *(automatic)* · `binggu preview "<text>"` |
-| **Review** | Look at the candidates | `binggu inbox` |
-| **Commit** | Only the ones you pick land in the local ledger (human approval required) | `SAVE n` in chat · `binggu save` |
-| **Recall** | Bring relevant memories back for the next task | `binggu recall "question"` |
-| **Explain** | Why this memory, and its history | `binggu explain <memory-id>` |
-| **Replace** | Swap out or retire a memory that's now wrong | `binggu replace` · `binggu forget <id>` |
+| Pull Request | a memory candidate (Memory PR) | *(automatic)* · `binggu preview "<text>"` |
+| Review | review the candidates | `binggu inbox` |
+| Approve & Merge | you type `SAVE n` → commit as active memory | `SAVE n` in chat · `binggu save` |
+| Commit history | approval / replace / retire history | `binggu explain <memory-id>` |
+| Blame / provenance | who said it and on what evidence | `binggu explain <memory-id>` |
+| Revert / supersede | swap out or retire a memory that's now wrong | `binggu replace` · `binggu forget <id>` |
+
+> Unlike Git, there is no actual merge, branch or diff protocol — the mapping is a **conceptual metaphor**, and the commit gate is a single human-typed `SAVE n`.
 
 **Core (pip) vs Bridge (remote relay).** The local CLI, stdio MCP, ledger, recall and explain all work offline from `pip install` alone (Core). A separate remote relay (the hosted Cloudflare Worker) lets you **mark save intents** from your phone / web / ChatGPT and pull them home (Bridge) — the intent alone never writes; a candidate becomes **active** memory only after you review the pulled bundle's preview on your PC and type `SAVE n` yourself. **Your local machine is always the source of truth**; the relay only forwards (it writes nothing to the ledger).
 

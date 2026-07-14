@@ -4,10 +4,12 @@
 
 # BingguPack
 
-**AI가 기억해도, 결정권은 나에게.**
-AI와 일하며 쌓이는 내 판단·취향·교훈을 내 PC에 기록하되, **활성 기억은 내가 승인한 것만.**
+### Git for AI memory
 
-_AI memory under your control — Git처럼 검토하고 커밋하는 개인 AI 기억._
+**AI는 기억을 *제안*하고, 무엇을 활성 기억으로 *확정*할지는 내가 정합니다.**
+모든 기억은 먼저 검토 요청이 되고, **내가 승인한 것만** 활성 기억이 됩니다.
+
+> *"Git for AI memory" 는 **Git 같은 검토·커밋 워크플로**를 뜻하는 비유입니다 — 실제 Git 저장소나 Pull Request 프로토콜을 구현한 것은 아닙니다.*
 
 [![PyPI](https://img.shields.io/pypi/v/binggupack?color=3775A9&logo=pypi&logoColor=white&label=PyPI)](https://pypi.org/project/binggupack/)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://pypi.org/project/binggupack/)
@@ -47,7 +49,8 @@ binggu explain <id>    # 그 기억의 근거·이력
 
 `binggu`·`binggu inbox` 는 **읽기 전용**입니다 — 상태만 보여줄 뿐 저장/승인/교체는 기존 명령과 owner 승인 경계를 그대로 씁니다. `binggu inbox` 는 기본적으로 네트워크를 건드리지 않고 로컬 스냅샷만 보여주며, 원격 저장 의도를 새로 가져오려면 `binggu hosted inbox` 를 씁니다.
 
-### `binggu studio` — 로컬 브라우저 UI
+<details>
+<summary><b>🖥 <code>binggu studio</code> — 로컬 브라우저 UI (읽기 전용 preview · 펼치기)</b></summary>
 
 Home + 통합 Inbox 를 브라우저에서 봅니다. Daily Console(`binggu home/inbox --json` schema v1)을 그대로 재사용하는 **읽기 전용 preview** 입니다.
 
@@ -63,6 +66,8 @@ binggu studio --no-open  # 브라우저를 열지 않음(headless/원격)
 - **Approvals** — 승인 요청의 exact 내용·operation/payload/ledger binding·상태·이력(timeline)·소비 결과(receipt)를 봅니다. effective 상태(pending/approved/consuming/consumed/rejected/revoked/expired)를 기존 verifier·consumption 으로 read-only 해석하고, review 파일은 무결성(operation/payload_digest 일치)을 검증해 표시합니다. **Studio 는 승인을 실행하지 않습니다** — owner 가 별도 로컬 터미널에서 실행할 `binggu approval show/approve/reject/revoke <request-id>` 명령을 복사만 제공하는 **read-only handoff UI** 입니다(approval nonce·private path·provider config 미노출).
 - **mutation 은 전부 기존 CLI 경계를 그대로 사용**합니다 — 저장은 preview + 사람의 `SAVE n` 입력, 승인 mutation 은 owner approval 경계. Studio 자체는 저장·승인을 실행하지 않습니다.
 
+</details>
+
 ## 1 · 왜 만들었나
 
 AI와 오래 일하다 보면 이런 일이 반복됩니다.
@@ -77,16 +82,27 @@ AI와 오래 일하다 보면 이런 일이 반복됩니다.
 
 ## 🧭 작동 방식
 
-빙구팩은 **모든 대화를 긁어모으는 메모리 도구가 아닙니다.** 오래 써먹을 판단·선호·교훈만 후보로 만들고, **내가 승인한 것만** 활성 기억이 됩니다. 전체 흐름은 다섯 단계입니다.
+**Memory PR** — 빙구팩의 한 문장: **"모든 기억은 먼저 검토 요청(Memory PR)이 되고, 내가 승인한 것만 활성 기억이 된다."**
+*"Memory PR"은 이 흐름을 Git 개발자에게 설명하기 위한 **별칭**입니다 — 내부 명령·데이터 모델은 그대로입니다.*
 
-| 단계 | 무엇 | 이렇게 |
+|  | AI가 하는 일 | 내가 하는 일 | 결과 |
+|---|---|---|---|
+| 🟡 **Memory PR** | 대화에서 기억 후보를 *검토 요청*으로 제안 | — | 아직 활성 기억 아님 |
+| ✅ **Human commit** | — | 내가 본 정확한 후보만 `SAVE n` | 로컬 장부에 확정 |
+| 🔎 **Recall** | — | 승인한 기억을 새 프로세스·세션에서 회상 | 근거와 함께 다시 |
+
+**Git ↔ BingguPack**
+
+| Git | BingguPack | 명령 |
 |---|---|---|
-| **Candidate** · 후보 | 기억할 만한 말을 후보로 (자동 수집 가능 · 저장 아님) | *(자동)* · `binggu preview "<텍스트>"` |
-| **Review** · 검토 | 후보를 눈으로 확인 | `binggu inbox` |
-| **Commit** · 확정 | 고른 것만 로컬 장부에 (사람 승인 필요) | 채팅 중 `SAVE n` · `binggu save` |
-| **Recall** · 회상 | 다음 작업 때 관련 기억을 다시 | `binggu recall "질문"` |
-| **Explain** · 근거 | 왜 그 기억인지 · 이력 | `binggu explain <memory-id>` |
-| **Replace** · 교체 | 틀려진 기억을 교체·폐기 | `binggu replace` · `binggu forget <id>` |
+| Pull Request | 기억 후보 (Memory PR) | *(자동)* · `binggu preview "<텍스트>"` |
+| Review | 후보 검토 | `binggu inbox` |
+| Approve & Merge | 사람이 `SAVE n` → 활성 기억 확정 | 채팅 `SAVE n` · `binggu save` |
+| Commit history | 승인·교체·폐기 이력 | `binggu explain <memory-id>` |
+| Blame / provenance | 누가 말했고 어떤 근거인지 | `binggu explain <memory-id>` |
+| Revert / supersede | 틀려진 기억 교체·폐기 | `binggu replace` · `binggu forget <id>` |
+
+> Git 과 달리 실제 병합(merge)·분기(branch)·diff 프로토콜은 없습니다. 위 대응은 **개념 비유**이고, 확정 게이트는 사람이 입력하는 `SAVE n` 하나입니다.
 
 <p align="center"><img src="assets/flow.svg" width="880" alt="대화 → 미리보기 → SAVE 승인 → 내 PC 기억 장부 → 자동 회상 · 지식 그래프 → 전문가 팩"></p>
 
