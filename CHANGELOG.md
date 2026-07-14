@@ -1,5 +1,14 @@
 # Changelog — BingguPack
 
+## [Unreleased]
+
+### Fixed — learn-outcome 반문형·완곡 지적 감지 복구 + silent-death (2026-07-14 · 4cli 토론)
+owner 지적 상당수인 반문형("너 안 읽었지?")·완곡 교정("제대로 안 읽었네")이 훅에서 통째 배제돼 학습 큐에 유입되지 않던 핵심 구멍(7/12 이후 큐 신규 0건). 4cli 토론(both_reject → 실질 수렴: hook 단독 정규식은 반문질책=진짜질문 동일 표면이라 원리적 불가 → aiAnswer 게이트 채택). debate 세션 `20260714_1605_learn_outcome_detection`.
+- **훅**(`hooks/user-prompt-learn-outcome.js`): ① 물음표 통짜 배제(`/[?？]\s*$/` return null) 제거 — 반문질책 놓침의 직접 원인. 구두점 제거 후 순수 의문어미만 배제("가능한거 아닌가?"는 유지 배제 · "안 읽었지?"는 통과). ② `NEG_RE` 완곡 교정 확장("제대로 안"·"안 읽"·"확인 안"·"놓쳤"·"빠뜨" 등 좁게). ③ **aiAnswer 존재 게이트** — 직전 AI 답변이 있는 발화만 후보(냉시작·AI turn 없는 발화 자연 배제). 반문질책 vs 진짜질문을 정규식이 못 가르는 문제를 "평가할 교환(직전 AI 주장)이 존재하는가" 필요조건으로 우회. ④ `QUEUE_MAX` = 미소비(consumed=false) 건수로 계산 — 소비(`_mark_consumed`)가 라인을 in-place 재작성만 하고 삭제 안 해 consumed 누적 시 상한 도달 → 신규 지적 영구차단(silent-death) 해소.
+- 안전 불변: 운영 ledger write 0 · 자동 hit 확정 0 · learn-consume actor=human · stdout 침묵 · exit 0 전부 유지. 오탐은 세션마무리 preview 사람 확정이 흡수(좁게 잡고 실 큐 로그 튜닝 · §13-9).
+- 신규 **`hooks/tests/test-learn-outcome.js`**(블랙박스 7케이스): 반문 캡처 복구 · 순수질문 배제 · 의문어미 배제 · aiAnswer 게이트 · silent-death · POS 무회귀 · 긴문장 우연매칭 방어. 실제 훅을 child_process 로 spawn + BINGGU_HOME 격리(운영홈 미접촉). **7/7 PASS**.
+- scope 세션분리(대화형 vs 무인)는 스키마 변경 수반이라 별도 트랙으로 defer(D 반박 반영 · 실 로그 관찰 후 판단).
+
 ## [1.21.0] - 2026-07-13
 
 ### Fixed — Codex 재감사 6트랙 수정 (main 77/REFINE · PyPI 1.20.0 52/BLOCK → 해소)

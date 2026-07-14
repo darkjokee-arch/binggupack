@@ -55,7 +55,9 @@ const POS_RE = /(정확해|정확하(네|다)|맞(네|아|았|다|어|지)|맞�
 // ★A 재설계(2026-07-10): owner 실제 지적/정정 스타일 확장 — "산으로 간다"·"그대로다"·"다시 봐"·
 //   "안 고쳐졌"·"왜 안" 등. 기존은 "아니야/틀렸어" 명시 리액션만 잡아 owner 실사용 지적 0건 매칭이었다.
 //   SHORT_LEN/HEAD_WINDOW 게이트가 긴 문장 중간 우연 매칭을 방어(과대포착은 큐→owner 승인 소비가 최종 차단).
-const NEG_RE = /(아니(야|다|네|지|에요|예요|었어|었다|긴)|아닌(데|가|것)|틀렸|틀린|그게\s*아니|그거\s*아니|잘못(됐|짚|알)|아냐|노노|반대야|산으로|다시\s*(봐|보자|확인)|안\s*(고쳐|됐|돼|바뀌)|그대로(다|네|잖|인데)|왜\s*안)/;
+// ★완곡 교정 확장(2026-07-14 4cli): owner 부드러운 지적("제대로 안 읽었네"·"확인 안 했지") 포착.
+//   좁게 유지 — 잔여 오탐은 aiAnswer 게이트 + 사람확정 preview 가 흡수(실 큐 로그 보고 튜닝·§13-9).
+const NEG_RE = /(아니(야|다|네|지|에요|예요|었어|었다|긴)|아닌(데|가|것)|틀렸|틀린|그게\s*아니|그거\s*아니|잘못(됐|짚|알)|아냐|노노|반대야|산으로|다시\s*(봐|보자|확인)|안\s*(고쳐|됐|돼|바뀌)|그대로(다|네|잖|인데)|왜\s*안|안\s*읽|읽지\s*않|제대로\s*(안|못)|안\s*봤|안\s*보고|확인\s*(안|못)|놓쳤|빠뜨|누락)/;
 
 // 우연 매칭 방지: 발화가 짧거나(대략 피드백성) 앞머리에서 매칭돼야 채택.
 // 긴 서술문 중간에 "맞아" 가 우연히 섞인 경우(예: "일정 맞춰서 진행해줘")를 배제.
@@ -81,10 +83,11 @@ async function readStdin() {
 function classifyFeedback(prompt) {
   const p = (prompt || '').trim();
   if (!p) return null;
-  // ★질문형 배제 — 반문·확인 질문은 피드백 아님. 음절 기반(자모 리터럴 ㄴ가/ㄹ까 는
-  //   조합형 한글에 절대 매칭 안 되던 死코드였음 · Fable5). 물음표 or 의문 어미면 제외.
-  if (/[?？]\s*$/.test(p)) return null;
-  if (/(냐$|나요$|는가$|은가$|인가$|아닌가$|을까$|는지$|되는거\s*아|하면\s*되|어때$|어떨까$)/.test(p)) return null;
+  // ★질문형 배제(2026-07-14 4cli 개정) — 물음표 통짜 배제 제거(반문질책 "안 읽었지?" 놓침의
+  //   직접 원인). 구두점 제거 후 순수 의문어미만 배제: "가능한거 아닌가?"는 유지 배제,
+  //   "안 읽었지?"는 통과. 반문질책 vs 진짜질문 최종 분리는 정규식이 아니라 aiAnswer 게이트(main)가 담당.
+  const pq = p.replace(/[?？!！.。\s]+$/u, '');
+  if (/(냐$|나요$|는가$|은가$|인가$|아닌가$|을까$|는지$|되는거\s*아|하면\s*되|어때$|어떨까$)/.test(pq)) return null;
   // ★극성 반전 방어(Fable5): "안 맞", "못 맞", "맞지/맞는 않" = 부정(miss) — POS 매칭보다 우선.
   const NEG_POS = /(안\s*맞|못\s*맞|맞(지|는)\s*않)/;
   const negated = NEG_POS.test(p);
@@ -178,9 +181,14 @@ function scanRecall(transcriptPath, currentPrompt) {
   return out;
 }
 
+// ★미소비 카운트(2026-07-14 4cli): 이름 유지·의미=consumed=false 만 셈. 소비(_mark_consumed)는
+//   라인을 in-place 재작성만 하고 삭제 안 해 consumed 라인이 영구 누적 → 전체줄 카운트는 상한
+//   도달 시 신규 지적 영구차단(silent-death). 미소비만 세면 owner 가 소비하는 한 상한 미도달.
 function queueLineCount() {
   try {
-    return fs.readFileSync(QUEUE, 'utf-8').split('\n').filter((l) => l.trim()).length;
+    return fs.readFileSync(QUEUE, 'utf-8').split('\n')
+      .filter((l) => l.trim())
+      .reduce((n, l) => { try { return n + (JSON.parse(l).consumed ? 0 : 1); } catch { return n + 1; } }, 0);
   } catch { return 0; }
 }
 
@@ -197,6 +205,11 @@ function main(rawData) {
   // transcript_path: stdin JSON 에 오면 사용(없으면 무기록=안전 실패, 표본만 덜 쌓임).
   let tp = data.transcript_path || '';
   const scan = scanRecall(tp, prompt);
+  // ★aiAnswer 존재 게이트(2026-07-14 4cli): 직전 AI 답변이 있는 발화만 후보(냉시작 첫 발화·
+  //   AI turn 없는 발화 자연 배제). 반문질책 vs 진짜질문을 정규식이 못 가르는 문제를
+  //   "평가할 교환(직전 AI 주장)이 존재하는가" 필요조건으로 우회. 부작용(수용): transcript 부재·
+  //   직전 AI turn 이 도구뿐이면 무기록=표본만 덜 쌓임(기존 안전실패 정합·정직 트레이드오프).
+  if (!scan.aiAnswer || !scan.aiAnswer.trim()) { log('SKIP no_ai_answer'); return; }
   // ★A 재설계(2026-07-10): recall 커플링 제거. owner 지적/정정 대부분은 recall 무관(AI 작업
   //   피드백)이라 scan.found 필수 게이트가 owner 실사용 피드백을 구조적으로 0건 만들었다
   //   (hit_events n=1 근본원인). recall 있으면 query 연결, 없으면 recall_linked=false 로 큐에 남긴다.
