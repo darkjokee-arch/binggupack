@@ -70,7 +70,7 @@ jobs:
 
       - name: Ruff static gate (binggupack/ F-rules 0 — 7/3 달성 상태 고정)
         run: |
-          pip install "ruff==0.15.20"
+          pip install -r requirements/dev.txt
           python -m ruff check binggupack/ scripts/ --select F
 
       - name: Anywhere vendor sync drift gate (vendored read core == source)
@@ -78,7 +78,7 @@ jobs:
 
       - name: Anywhere targeted tests (snapshot/service/upload · synthetic)
         run: |
-          pip install "pytest>=8"
+          pip install -r requirements/dev.txt
           python -m pytest tests/test_anywhere_snapshot.py tests/test_anywhere_service.py tests/test_anywhere_upload.py -q
 
       - name: Cross-platform policy selftest (40/40, GATE=GO)
@@ -89,7 +89,7 @@ jobs:
 
       - name: Local Fresh Index — selftest + full pytest (신규 기능 · 3.14 포함)
         run: |
-          pip install "pytest>=8"
+          pip install -r requirements/dev.txt
           python -m binggupack.pack.fresh_index --selftest
           python -m pytest tests/test_fresh_index.py -q
 
@@ -110,7 +110,7 @@ jobs:
 
       - name: Demo regression (60초 데모 · 격리·오프라인·승인분만 저장·운영 장부 미접촉)
         run: |
-          pip install "pytest>=8"
+          pip install -r requirements/dev.txt
           python -m pytest tests/test_demo.py -q
 
       - name: Public tree secret/PII scan (verdict=CLEAN required)
@@ -161,8 +161,8 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install mypy
-        run: pip install "mypy==1.13.0"
+      - name: Install dev toolchain (requirements/dev.txt · mypy 포함)
+        run: pip install -r requirements/dev.txt
 
       - name: mypy (binggupack + binggu.py · 0 errors required)
         run: python -m mypy binggupack binggu.py
