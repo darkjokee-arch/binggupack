@@ -1813,12 +1813,19 @@ def cmd_export(a):
 # ==================== 60초 데모 (binggu demo) ====================
 # 결정론 예제(오프라인·네트워크 0·API 키 0). 격리 임시 장부에서 후보→검토→승인→저장→회상→근거
 # 전 과정을 한 번에 보여준다. 운영 장부는 절대 건드리지 않는다.
-DEMO_CONVO = (
-    "저는 앞으로 답변을 한국어로 받는 걸 선호합니다. "
-    "매주 금요일 오후에는 주간 회고를 하기로 정했어요. "
-    "참고로 점심은 아무거나 괜찮아요."
-)
-DEMO_QUERY = "한국어로 답변"
+# 데모 시나리오 SSOT — 데모와 tests/test_demo.py 가 같은 상수를 읽는다(승인 대상·질의 단일 진실).
+# 분류기 실측(결정적 3후보 · 3회 동일): '선호합니다 / 하기로 정했어요 / 하기로 했어요' 어미가 후보로 포착.
+#   후보1(판단)=결론 우선 선호 · 후보2(증거)=금요일 회고 · 후보3(판단)=배포 전 스테이징 검증.
+# 승인은 번호가 아니라 approve_marker(내용)로 선택 → 분류기 순서 변동에 강건(취약한 '정확히 N개' 전제 없음).
+DEMO_SCENARIO = {
+    "input": (
+        "저는 앞으로 답변을 결론부터 짧게 받는 걸 선호합니다. "
+        "매주 금요일 오후에는 주간 회고를 하기로 정했어요. "
+        "결제 배포 전에는 스테이징에서 먼저 검증하기로 했어요."
+    ),
+    "approve_marker": "스테이징",          # 승인할 후보를 식별하는 고유 부분문자열
+    "query": "결제 배포 스테이징 검증",     # 승인한 기억을 새 프로세스에서 회상할 질의
+}
 
 
 def _operating_home():
@@ -1904,22 +1911,31 @@ def cmd_demo(a):
 
 
 def _demo_body(a, demo_home, keep, created_tmp, op_home):
-    """cmd_demo 본체(후보→승인→저장→회상→근거). 정리/BINGGU_HOME 복구는 호출부 finally 담당."""
+    """cmd_demo 본체(후보→승인→저장→새 프로세스 회상→근거). 정리/BINGGU_HOME 복구는 호출부 finally 담당.
+
+    회상 검증(2026-07 하드닝 · 4cli 반영): 새 프로세스(자식) 회상만 신뢰한다. same-process fallback 없음
+    — 자식 프로세스가 실패하면 데모 전체를 실패(return 1)로 종료한다. 통과 기준은 '회상'이라는 문자열이
+    아니라, 승인한 기억의 content 가 자식 회상 출력에 정확히 존재하고 + 비승인 후보는 존재하지 않는 것이다.
+    """
+    import hashlib
     import subprocess
     from openbinggu_deprecate_and_remind_g3 import open_g3
     import binggu_save_gate as sgate
-    import binggu_recall as RC
 
     non_interactive = bool(getattr(a, "non_interactive", False))
     ledger = os.path.join(demo_home, "ledger.sqlite")
     snap_dir = os.path.join(demo_home, "snapshots")
     os.makedirs(snap_dir, exist_ok=True)
 
+    convo = DEMO_SCENARIO["input"]
+    marker = DEMO_SCENARIO["approve_marker"]
+    query = DEMO_SCENARIO["query"]
+
     print("=" * 60)
     print("BingguPack 데모 — AI가 기억해도, 결정권은 나에게")
     print("=" * 60)
     print("격리 데모 장부: %s" % ledger)
-    print("(운영 장부 홈 %s 은(는) 건드리지 않습니다)\n" % op_home)
+    print("(운영 장부·기억 데이터에는 쓰지 않습니다 · 운영 홈: %s)\n" % op_home)
 
     # 빈 격리 장부 생성 + 승인 전 활성 기억 수 확인.
     db = open_g3(ledger)
@@ -1927,30 +1943,41 @@ def _demo_body(a, demo_home, keep, created_tmp, op_home):
     db.close()
 
     # 1) 후보 발견 (write 0)
-    pv = capture_preview(DEMO_CONVO)
+    pv = capture_preview(convo)
     cands = pv["candidates"]
     print("[1] 대화에서 기억 후보를 발견했습니다 (아직 저장 안 함):")
-    print("    입력: \"%s\"\n" % DEMO_CONVO)
+    print("    입력: \"%s\"\n" % convo)
     for j, c in enumerate(cands, 1):
         print("    [%d] (%s) %s" % (j, c.get("label_kind"), c["sentence"]))
     print("\n    현재 활성 기억: %d개 — 승인 전에는 아무것도 확정되지 않습니다.\n" % active_before)
 
-    # 2) 검토·승인
+    # 시나리오 계약: 승인 후보 정확히 1개 + 비승인 후보 최소 1개(개수 하드코딩 대신 구조 보장).
+    #   승인 대상은 approve_marker(내용)로 식별 → 분류기 순서 변동에 강건.
+    approve_idx = [j for j, c in enumerate(cands, 1) if marker in c["sentence"]]
+    reject_idx = [j for j, c in enumerate(cands, 1) if j not in approve_idx]
+    if len(approve_idx) != 1 or len(reject_idx) < 1:
+        print("데모 시나리오 계약 위반: 승인 후보 %d개·비승인 %d개 (기대: 승인 1 · 비승인 ≥1)"
+              % (len(approve_idx), len(reject_idx)))
+        return 1
+
+    # 2) 검토·승인 — 승인 대상은 번호가 아니라 내용(approve_marker)으로 결정.
     if non_interactive:
-        picks = [1]
-        print("[2] (비대화형) 후보 [1] 을 승인합니다 — 데모 격리 홈에서만 시뮬레이션.\n")
+        picks = list(approve_idx)
+        print("[2] (비대화형) '%s' 이(가) 든 후보 [%d] 만 승인합니다 — 데모 격리 홈에서만 시뮬레이션.\n"
+              % (marker, approve_idx[0]))
     else:
+        default = ",".join(str(i) for i in approve_idx)
         try:
-            raw = input("[2] 저장할 후보 번호를 고르세요 (쉼표로 여러 개 · 기본 1): ").strip()
+            raw = input("[2] 저장할 후보 번호를 고르세요 (쉼표로 여러 개 · 기본 %s): " % default).strip()
         except (EOFError, KeyboardInterrupt):
             raw = ""
             print()
-        raw = raw or "1"
+        raw = raw or default
         try:
             picks = [int(x) for x in raw.split(",") if x.strip()]
         except ValueError:
-            picks = [1]
-        picks = [i for i in picks if 1 <= i <= len(cands)] or [1]
+            picks = list(approve_idx)
+        picks = [i for i in picks if 1 <= i <= len(cands)] or list(approve_idx)
         print()
 
     rejected = [c["sentence"] for j, c in enumerate(cands, 1) if j not in picks]
@@ -1962,7 +1989,7 @@ def _demo_body(a, demo_home, keep, created_tmp, op_home):
     sgate.write_last_preview(cands)
     sgate.gate_record_from_prompt(confirm)
     db = open_g3(ledger)
-    r = save_selected(db, DEMO_CONVO, picks, {"actor": "reader", "confirm": confirm}, snap_dir)
+    r = save_selected(db, convo, picks, {"actor": "reader", "confirm": confirm}, snap_dir)
     active_after = db.con.execute("SELECT COUNT(*) FROM nodes WHERE state='active'").fetchone()[0]
     stored = [row[0] for row in db.con.execute("SELECT sentence FROM nodes WHERE state='active'")]
     db.close()
@@ -1979,37 +2006,53 @@ def _demo_body(a, demo_home, keep, created_tmp, op_home):
         print("    ✗ 고르지 않은 후보는 저장되지 않음: %s" % s)
     print()
 
-    # 4) 새 프로세스에서 회상 (cross-process 증명; 실패 시 디스크 재오픈 폴백)
-    print("[4] 새 프로세스에서 회상 — \"%s\"" % DEMO_QUERY)
-    recalled = False
+    # 승인·저장된 기억(정확히 1건) + content digest — 새 프로세스 회상 결과와 대조할 기준.
+    approved_sentence = stored[0] if stored else cands[picks[0] - 1]["sentence"]
+    approved_digest = hashlib.sha256(approved_sentence.encode("utf-8")).hexdigest()
+
+    # 4) 새 프로세스에서 회상 — 자식 프로세스만 신뢰(same-process fallback 없음 · 조용한 우회 제거).
+    print("[4] 새 프로세스에서 회상 — \"%s\"" % query)
+    print("    (자식: python -m binggu recall · same-process fallback 없음)")
+    child_ok, child_stdout, child_reason = False, "", ""
     try:
         env = dict(os.environ)
         env["BINGGU_HOME"] = demo_home
         out = subprocess.run(
-            [sys.executable, "-m", "binggu", "--ledger", ledger, "recall", DEMO_QUERY],
+            [sys.executable, "-m", "binggu", "--ledger", ledger, "recall", query],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             env=env, timeout=90)
-        if out.returncode == 0 and "관련 기억이 없습니다" not in out.stdout and "회상" in out.stdout:
-            print("    (새 프로세스: python -m binggu recall)")
-            for line in out.stdout.splitlines():
-                if line.strip() and not line.strip().startswith("→") and "mark-" not in line:
-                    print("    " + line)
-            recalled = True
-    except Exception:
-        recalled = False
-    if not recalled:
-        # 폴백: 디스크에서 새로 로드(실제 재오픈 — 새 객체 아님, 파일에서 재적재)
-        res = RC.why_search(ledger, DEMO_QUERY, home=demo_home)
-        if res["relevant_nodes"]:
-            print("    (디스크 재오픈 회상)")
-            for i, n in enumerate(res["relevant_nodes"], 1):
-                print("    %d. (%s) %s" % (i, n["node_type"], n["claim"]))
-            recalled = True
-    if not recalled:
-        print("    (회상 결과 없음)")
+        child_stdout = out.stdout or ""
+        if out.returncode != 0:
+            child_reason = "자식 프로세스 실패(returncode=%s)" % out.returncode
+        else:
+            child_ok = True
+    except Exception as e:  # subprocess 실행 불가 → 데모 실패(same-process 로 우회하지 않음)
+        child_reason = "자식 프로세스 예외: %s" % e
+
+    # 구조화 판정: 자식 성공 + 승인 content 정확 포함 + 비승인 content 부재.
+    recall_has_approved = approved_sentence in child_stdout
+    recall_has_rejected = any(s in child_stdout for s in rejected)
+    if not (child_ok and recall_has_approved and not recall_has_rejected):
+        print("    ✗ 새 프로세스 회상 검증 실패 — 데모를 실패로 종료합니다.")
+        if child_reason:
+            print("      사유: %s" % child_reason)
+        elif not recall_has_approved:
+            print("      사유: 승인한 기억이 새 프로세스 회상 결과에 없음")
+        else:
+            print("      사유: 승인하지 않은 후보가 회상 결과에 나타남")
+        return 1
+
+    print("    ✓ 새 프로세스가 승인한 기억을 회상 — content digest 일치")
+    print("      memory-digest(sha256) = %s" % approved_digest)
+    for line in child_stdout.splitlines():
+        ls = line.strip()
+        if ls and not ls.startswith("→") and "mark-" not in ls:
+            print("      " + line)
+    print("    ✓ 승인하지 않은 후보 %d건은 회상 결과에 없음" % len(rejected))
     print()
 
     # 5) 근거/이력 확인 (provenance)
+    import binggu_recall as RC
     node_id = (r.get("node_ids") or [None])[0]
     if node_id:
         print("[5] 이 기억이 무엇에 근거하는지 확인 (provenance):")
