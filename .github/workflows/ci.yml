@@ -87,6 +87,14 @@ jobs:
       - name: binggu core selftest (27/27, GATE=GO)
         run: python binggu.py --selftest
 
+      - name: Protected Writer L2 signing selftest (Ed25519 순수 stdlib KAT + keychain backend + fail-closed)
+        # 순수 stdlib(런타임 의존 0)·크로스플랫폼: win DPAPI 실경로·mac security·headless linux L0 fail-closed.
+        # negative KAT(변조/malleable/전부-0/wrong pk) 전부 reject·fail-open 0. 운영 keychain 미접촉(fake seam).
+        run: |
+          python -m binggupack.safety.signing_provider --selftest
+          python -m binggupack.safety.keychain_backend --selftest
+          python scripts/check_ed25519_vectors.py
+
       - name: Local Fresh Index — selftest + full pytest (신규 기능 · 3.14 포함)
         run: |
           pip install -r requirements/dev.txt
