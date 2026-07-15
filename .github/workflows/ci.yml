@@ -182,3 +182,20 @@ jobs:
       - name: npm audit (hosted/workers · high 이상 · 비게이팅)
         working-directory: hosted/workers
         run: npm audit --audit-level=high || true
+
+  mgb-benchmark:
+    # Memory Governance Benchmark v0.1 (2026-07-15) — black-box 공개 CLI 프로필.
+    # benchmark 자체 unit tests + toy(conforming/failing) 이식성 + BingguPack 12 시나리오
+    # (MGB-10 UNSUPPORTED · 운영 ledger 불변). 코어 무변경 · 벤치마크는 공개 CLI 만 관찰.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install dev toolchain (requirements/dev.txt)
+        run: pip install -r requirements/dev.txt
+      - name: MGB benchmark tests (result model · toy 이식성 · runner 독립판정 · BingguPack 12)
+        run: python -m pytest benchmark/tests/ -q
