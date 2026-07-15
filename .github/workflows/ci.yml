@@ -211,5 +211,7 @@ jobs:
           python-version: "3.12"
       - name: Install dev toolchain (requirements/dev.txt)
         run: pip install -r requirements/dev.txt
+      - name: Memory PR KAT drift gate (canonicalization 순수함수 재계산 == vectors/kat · exit0=GO)
+        run: python docs/memory-pr/tools/check_vectors.py
       - name: MGB benchmark tests (result model · toy 이식성 · runner 독립판정 · BingguPack 12)
         run: python -m pytest benchmark/tests/ -q

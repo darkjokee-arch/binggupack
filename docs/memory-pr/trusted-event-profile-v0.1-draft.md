@@ -2,7 +2,7 @@
 
 > **상태: v0.1-draft (프로젝트 초안).**
 > 이 문서는 BingguPack 저장소의 **현재 코드 실측**을 공개 문서화한 초안이다. 표준·범용·vendor-neutral·타 프로젝트 채택·digest 호환을 주장하지 않는다. 독립 구현이 없으며 표준 단체 산출물이 아니다. 코어/CLI/DB 변경 0 — 서술만 한다.
-> 상위 문서: `core-model-v0.1-draft.md` (공통 의미 어휘). 자매 프로필: `interactive-save-profile-v0.1-draft.md` · `hosted-relay-profile-v0.1-draft.md`.
+> 상위 문서: `core-model-and-boundaries-v0.1-draft.md` (공통 의미 어휘). 자매 프로필: `interactive-save-profile-v0.1-draft.md` · `hosted-relay-profile-v0.1-draft.md`.
 
 ---
 
