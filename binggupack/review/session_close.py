@@ -362,7 +362,7 @@ def build_close_summary(home=None, cwd=None, ledger_path=None, session_id=None, 
         "governance": _build_governance(home, cwd, ledger_path),
         "save_action": {
             "auto_save": False,
-            "how": "저장은 사람이 직접 — preview 를 보고 `SAVE n`(정확한 번호) 타이핑 시 기존 save_gate 로만 진행. 빙구팩 자동저장 0.",
+            "how": "저장은 사람이 직접 — preview 번호(1번/2번)를 보고 **이 세션 채팅에** `SAVE n`(정확한 번호) 발화 시 앵커 생성→저장. 로컬 터미널 별도 실행 안내 금지(이 세션에서 SAVE n 으로 완결)·빙구팩 자동저장 0.",
         },
     }
 
