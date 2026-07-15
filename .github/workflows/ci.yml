@@ -113,6 +113,15 @@ jobs:
           pip install -r requirements/dev.txt
           python -m pytest tests/test_demo.py -q
 
+      - name: Semantic seed SSOT (issue #52 · canonical·byte-identity·hosted seed_hash · Windows LF 결정성)
+        # selftest 잡은 Windows 포함 매트릭스 — Windows checkout(autocrlf) 에서도 .gitattributes eol=lf
+        # 로 working tree 가 LF 인지, source↔fixture byte-identical·source canonical·hosted seed_hash
+        # 정합인지 실측(sync --check 는 CR 바이트·BOM·final-LF 도 검사). write mode 는 CI 에서 실행 0.
+        run: |
+          pip install -r requirements/dev.txt
+          python scripts/sync_semantic_seed.py --check --check-hosted
+          python -m pytest tests/test_semantic_seed_resolver.py tests/test_semantic_seed_sync.py -q
+
       - name: Public tree secret/PII scan (verdict=CLEAN required)
         run: python scripts/openbinggu_public_tree_scan.py --tree . --public
 
@@ -148,6 +157,11 @@ jobs:
           cp scripts/wheel_import_sweep.py "$RUNNER_TEMP/wheel_import_sweep.py"
           cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/venv/bin/python" wheel_import_sweep.py
+
+      - name: Semantic seed wheel resource == package data (issue #52 · canonical LF)
+        # wheel archive 내부 seed bytes == fresh-installed importlib.resources == repo package data.
+        # fixture fallback 이 아니라 배포 정본 package resource 를 repo 밖 fresh python 으로 검증.
+        run: python scripts/wheel_semantic_seed_check.py "$RUNNER_TEMP"/dist/binggupack-*.whl "$RUNNER_TEMP/venv/bin/python"
 
   typecheck-python:
     # mypy 정적 타입 게이트(2026-07-13) — binggupack + binggu.py 회귀 방지. 로컬 0 errors 후 게이트화.
