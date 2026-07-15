@@ -1,0 +1,11 @@
+# Semantic seed byte determinism (issue #52) — 정확히 4개 파일만 LF 고정.
+# 전체 *.jsonl 로 확대 금지: 다른 synthetic fixture 다수가 working tree CRLF 라 광범위 적용 시
+# 무관 파일 대량 EOL 변환·오염을 유발한다. 아래 4개만 명시적으로 못박는다.
+#
+# 배경: git blob 은 이미 LF·byte-identical(c8d67de1/839f0284) 였으나, .gitattributes 부재 +
+# Windows core.autocrlf=true 가 package data working tree 만 CRLF 로 변환 → 로컬 byte-identity
+# 실패·wheel EOL 비결정. eol=lf 로 모든 OS 에서 working tree bytes 를 LF 로 고정한다.
+binggupack/data/semantic/seed_canonical_5.jsonl text eol=lf
+binggupack/data/semantic/seed_candidates.jsonl text eol=lf
+tests/fixtures/semantic/seed_canonical_5.jsonl text eol=lf
+tests/fixtures/semantic/seed_candidates.jsonl text eol=lf

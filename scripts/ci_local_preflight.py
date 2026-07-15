@@ -40,6 +40,7 @@ STEPS = [
     ("run_all 회귀",       [PY, "scripts/binggu_publish_run_all_selftests.py"], "rc0"),
     ("e2e lifecycle",     [PY, "scripts/binggu_e2e_lifecycle_selftest.py"], "rc0"),
     ("pytest tests/",     [PY, "-m", "pytest", "tests/", "-q"], "rc0"),
+    ("semantic seed SSOT", [PY, "scripts/sync_semantic_seed.py", "--check", "--check-hosted"], "rc0"),
     ("publish workflow",  [PY, "scripts/publish_workflow_selftest.py"], "rc0"),
     ("private path scan", [PY, "scripts/private_path_scan.py", "--source"], "rc0"),
     ("tree scan",         [PY, "scripts/openbinggu_public_tree_scan.py", "--tree", ".", "--public"], "contains:verdict=CLEAN"),
