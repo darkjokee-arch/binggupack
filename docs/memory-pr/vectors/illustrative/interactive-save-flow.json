@@ -1,0 +1,15 @@
+{
+  "doc_profile": "interactive-save",
+  "kind": "illustrative-only",
+  "unsupported_reason": "정상 SAVE n → active commit 은 UserPromptSubmit hook(사람 키보드 발화) 기록이 필요하다. CLAUDECODE 세션·CI 는 hook 위조 불가로 재현할 수 없고, plain 터미널 cli_command 로만 수동 재현된다. 따라서 고정 KAT 이 아니라 재현 가이드로만 제공한다.",
+  "flow": [
+    { "step": 1, "action": "binggu preview \"<합성 문장>\"", "result": "preview 후보 + preview_id 출력 + last_preview_candidates.json(pref, items) 생성" },
+    { "step": 2, "action": "사람이 \"SAVE 1\" 발화 (UserPromptSubmit hook)", "result": "save_gate_log.jsonl 에 (preview_ref, idx) ref 레코드 기록 = 사람 증명" },
+    { "step": 3, "action": "binggu save \"<문장>\" --preview-id <pid> --pick 1 --confirm \"SAVE 1\"", "result": "_resolve_human_ctx actor=human → apply_pack_in_txn → nodes(candidate=1, promotion_allowed=0, state='active')" }
+  ],
+  "negative": [
+    { "case": "preview_id/문장 불일치", "expected": "preview_required_mismatch (return 1)" },
+    { "case": "CLAUDECODE 세션에서 hook 미기록", "expected": "G4_no_auto (write 0)" },
+    { "case": "confirm 문구 불일치", "expected": "confirm_phrase_mismatch" }
+  ]
+}

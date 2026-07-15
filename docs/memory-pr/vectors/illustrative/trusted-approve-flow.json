@@ -1,0 +1,15 @@
+{
+  "doc_profile": "trusted-event",
+  "kind": "illustrative-only",
+  "unsupported_reason": "approve 이벤트 발행은 대화형 TTY 전용(비대화형 exit 2 · Unix PTY 테스트만 · Windows PTY 미지원 skip · test_double 채널은 배포 wheel 에서 제거). 공개 CLI/CI 로 approve 이벤트를 스크립트로 만들 수 없다.",
+  "flow": [
+    { "step": 1, "action": "binggu accept 1 <id8> --reason \"...\" --approval-id \"\"", "result": "approval_requests PENDING 1행 + reason=approval_required (write 0)" },
+    { "step": 2, "action": "binggu approval approve <rid8>  (TTY 에서 \"APPROVE <rid8>\" 정확 타이핑)", "result": "approvals.jsonl 에 approve 이벤트(approval_nonce 128bit, expires_at=now+900) append" },
+    { "step": 3, "action": "binggu accept 1 <id8> --approval-id <rid>", "result": "verify_event → reserve(nonce PK) → finalize_consumed → receipt{request_id,operation,node_ids,decision_id} (nonce 제외)" }
+  ],
+  "negative": [
+    { "case": "2회 소비(replay)", "expected": "approval_already_consumed (2차 write 0)" },
+    { "case": "payload 변조 후 소비", "expected": "binding_mismatch:request_id" },
+    { "case": "만료 후 소비", "expected": "approval_expired  (UNSUPPORTED: --now 플래그 없어 wall-clock 900s 실대기 필요)" }
+  ]
+}

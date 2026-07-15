@@ -1,0 +1,22 @@
+{
+  "doc_profile": "interactive-save",
+  "kind": "kat",
+  "base_commit": "9f5cac9",
+  "note": "PII 없는 합성 문장. expected 는 실제 binggupack 함수 출력(2026-07-15 계산). check_vectors.py 가 재계산 대조.",
+  "vectors": [
+    {
+      "id": "interactive-preview_ref-01",
+      "func": "preview_ref",
+      "impl": "binggupack.safety.gate_log.preview_ref_for_candidates",
+      "input": { "candidates": [ { "sentence": "이 입찰은 마진이 낮아 보류한다" } ] },
+      "expected": "f1693c675eaac497"
+    },
+    {
+      "id": "interactive-node_id-01",
+      "func": "node_id",
+      "impl": "'node:CONV:' + openbinggu_conversation_candidate_save._sent_hash",
+      "input": { "sentence": "이 입찰은 마진이 낮아 보류한다" },
+      "expected": "node:CONV:ee394455"
+    }
+  ]
+}

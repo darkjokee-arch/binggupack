@@ -1,0 +1,15 @@
+{
+  "doc_profile": "hosted-relay",
+  "kind": "kat",
+  "base_commit": "9f5cac9",
+  "note": "wire version schema_ver=1. intent_id 는 speaker 를 해시 재료에 포함하지 않는다(TS intentHash ≡ Python intent_hash 바이트 동일).",
+  "vectors": [
+    {
+      "id": "hosted-intent_id-01",
+      "func": "intent_hash",
+      "impl": "openbinggu_save_intent_outbox_runner.intent_hash",
+      "input": { "text": "다음 분기 계획은 보류로 결정", "indices": [ 1, 2 ], "confirm": "SAVE 1,2" },
+      "expected": "40b097abdae25ff4"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "doc_profile": "trusted-event",
+  "kind": "kat",
+  "base_commit": "9f5cac9",
+  "note": "wire version tae-1. payload_digest 는 전체 64hex, request_id 는 24hex. ledger_identity 는 합성 핀(재현 필수).",
+  "vectors": [
+    {
+      "id": "trusted-payload_digest-accept-01",
+      "func": "canonical_payload_digest",
+      "impl": "binggupack.safety.trusted_approval.canonical_payload_digest",
+      "input": { "operation": "accept", "payload": { "index": 1, "id8": "abcd1234", "reason": "오판이라 기각" } },
+      "expected": "875f39dfbd92ca50e84643885b7ea1712e6fff967f29f50f5ff069c93cf74779"
+    },
+    {
+      "id": "trusted-request_id-accept-01",
+      "func": "compute_request_id",
+      "impl": "binggupack.safety.trusted_approval.compute_request_id",
+      "input": {
+        "operation": "accept",
+        "payload_digest": "875f39dfbd92ca50e84643885b7ea1712e6fff967f29f50f5ff069c93cf74779",
+        "ledger_identity": "ledger-synthetic-0001"
+      },
+      "expected": "2641cbccb8214e2c876ee340"
+    }
+  ]
+}
