@@ -1,0 +1,12 @@
+{
+  "doc_profile": "hosted-relay",
+  "kind": "illustrative-only",
+  "unsupported_reason": "실 worker HMAC 왕복·DO drain non-retention 은 배포된 Cloudflare Worker + 페어링 키(repo 밖)가 필요하다. 로컬 selftest(mock worker)로만 결정적 재현이 가능하다.",
+  "flow": [
+    { "step": 1, "action": "remote intent 생성 (ChatGPT/웹 → POST /mcp2/<경로키>)", "result": "intent{schema_ver=1, intent_id, text, indices, confirm, source='hosted', speaker?}" },
+    { "step": 2, "action": "binggu hosted inbox  (로컬 PC 에서 HMAC 서명 pull)", "result": "worker /drain(read+delete atomic) → hosted_inbox/<intent_id>.json 회수 (ledger write 0)" },
+    { "step": 3, "action": "binggu hosted pull --select 1 --confirm \"SAVE 1\"", "result": "commit_bundle(actor=human) → nodes(candidate=1) + 원문 _archive/<intent_id>.processed.json 영구보존" }
+  ],
+  "local_sim": "tests/hosted_boundary_e2e.py 셀프테스트 (mock worker · 고정 NOW · local write 0 · actor=reader→human_save_required 검증)",
+  "note": "intent_id 는 speaker 를 해시 재료에 넣지 않는다. 고정 KAT(intent_id)은 vectors/kat/hosted-relay.json 참조."
+}

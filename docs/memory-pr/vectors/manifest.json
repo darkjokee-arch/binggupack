@@ -1,0 +1,15 @@
+{
+  "spec": "Memory Pull Request Specification v0.1-draft",
+  "base_commit": "9f5cac9",
+  "note": "kat = canonicalization digest 순수함수 KAT (CI 에서 tools/check_vectors.py 가 실제 함수로 재계산해 drift 감지). illustrative = 사람기원(SAVE n hook·approve TTY)·실서비스 의존 흐름으로 CI 재현 불가(UNSUPPORTED) — 재현 가이드만 제공.",
+  "kat": [
+    "kat/interactive-save.json",
+    "kat/trusted-event.json",
+    "kat/hosted-relay.json"
+  ],
+  "illustrative": [
+    "illustrative/interactive-save-flow.json",
+    "illustrative/trusted-approve-flow.json",
+    "illustrative/hosted-relay-flow.json"
+  ]
+}
