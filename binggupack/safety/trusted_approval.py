@@ -85,6 +85,7 @@ def load_config(home):
         return None
     return {
         "enabled": True,
+        "kind": cfg.get("kind", "local_owner"),   # kind 없는 기존 config = local_owner(L1 하위호환·무회귀)
         "ttl_seconds": int(cfg.get("ttl_seconds", DEFAULT_TTL_SECONDS)),
         "pending_cap": int(cfg.get("pending_cap", DEFAULT_PENDING_CAP)),
     }
@@ -112,11 +113,28 @@ class HostedProvider:  # pragma: no cover - placeholder interface only(P1-B)
 
 
 def provider_for(home):
-    """구성된 provider 반환 or None(미구성 = fail-closed). 모델이 못 바꾸는 파일 신호로만 발견."""
+    """구성된 provider 반환 or None(미구성 = fail-closed). 모델이 못 바꾸는 파일 신호로만 발견.
+
+    kind 분기:
+      - config 부재/disabled → None (호출부 provider_for is None 의존 · 오늘과 동일).
+      - kind ∈ {local_owner, absent} → LocalOwnerProvider (byte-identical · 서명 계층 미개입).
+      - kind ∈ SIGNING_KINDS(keychain 등) → signing_provider(Core1) 위임:
+          backend 가용 → KeychainProvider · 미가용 → _UnavailableSigningProvider(fail-closed 스텁·None/raise 아님).
+      - 그 외 미지정 kind → LocalOwnerProvider (kind 는 모델-writable 평문이라 신뢰 경계 밖 · §6).
+
+    ★정직(§6): config 의 kind 는 owner 머신에서 모델-writable 평문이라 kind:local_owner 한 줄로 서명
+      검증을 통째 skip 시킬 수 있다. L2(keychain)의 실질 값은 hosted/locked 배포에서만 나온다 — 여기
+      서명 계층은 로컬 위조를 막지 못한다(같은 머신 키 = 보안 연극)."""
     cfg = load_config(home)
     if cfg is None:
         return None
-    return LocalOwnerProvider(home, cfg)
+    kind = cfg.get("kind", "local_owner")
+    if kind in ("local_owner", "absent"):
+        return LocalOwnerProvider(home, cfg)
+    from binggupack.safety import signing_provider as _sp   # lazy(Core1 · import-time 부작용 0)
+    if kind in _sp.SIGNING_KINDS:
+        return _sp.signing_provider_for(home)               # Keychain | Unavailable(이 분기서 None 불가)
+    return LocalOwnerProvider(home, cfg)                    # 미지정 kind → local(untrusted 평문 · §6)
 
 
 # ── canonical digest (§9) ────────────────────────────────────────────────────────
@@ -480,11 +498,21 @@ def mint_approval(home, request, ttl_seconds, now, channel="unverified_direct"):
     channel 은 호출부가 검증 후 명시 전달한다(CLI TTY = 'cli_tty', 테스트 = 'test_double'). 기본값은
     'unverified_direct' — 직접 import 등 미검증 발행이 'cli_tty' 로 거짓 라벨되지 않게(P1-A.1 · AOB-1)."""
     nonce = secrets.token_hex(16)  # 128-bit
+    # ★ float time.time() → int 고정(must_fix 2 · 서명 canonicalization 결정성 · float repr 의존 0).
+    #   이 정수 값으로만 record 구성·서명·저장한다. verify_event 는 float() 로 파싱하므로 int/float 무관 정합.
+    approved_at = int(now)
+    expires_at = int(now) + int(ttl_seconds)
     record = {"request_id": request["request_id"], "protocol_version": request["protocol_version"],
               "operation": request["operation"], "payload_digest": request["payload_digest"],
               "ledger_id": request["ledger_id"], "approval_nonce": nonce,
-              "approved_at": now, "expires_at": now + ttl_seconds,
+              "approved_at": approved_at, "expires_at": expires_at,
               "approver_channel": channel, "record_type": "approve"}
+    # 서명 계층(keychain 등) 구성 시 record 서명(sig 부여). local_owner/None 은 sig 키 미부여 = byte-identical(무회귀).
+    prov = provider_for(home)
+    if prov is not None:
+        from binggupack.safety.signing_provider import SIGNING_KINDS as _SIGNING_KINDS
+        if getattr(prov, "kind", None) in _SIGNING_KINDS:
+            record = prov.sign_record(record)   # Keychain: Ed25519 sig(hex). Unavailable: raise(fail-closed·무서명 append 0).
     append_event(home, record)
     return record
 
@@ -516,6 +544,15 @@ def verify_event(home, request_id, operation, payload_digest, ledger_identity, n
         return {"ok": False, "reason": "binding_mismatch:ledger"}
     if appr.get("protocol_version") != protocol_version:
         return {"ok": False, "reason": "binding_mismatch:protocol"}
+    # 서명 계층(keychain 등) 구성 시에만 approve EVENT 서명 검증. local_owner/None 은 skip(byte-identical·무회귀).
+    # ★정직(§6): config kind 는 모델-writable 평문이라 kind:local_owner 한 줄로 이 분기가 통째 skip 된다
+    #   (R-B6·P1-B2 out-of-scope). L2 실질 값은 hosted/locked 배포에서만 — 로컬 위조 차단 아님.
+    prov = provider_for(home)
+    if prov is not None:
+        from binggupack.safety.signing_provider import SIGNING_KINDS as _SIGNING_KINDS
+        if getattr(prov, "kind", None) in _SIGNING_KINDS:
+            if not prov.verify_signed(appr).get("ok"):
+                return {"ok": False, "reason": "binding_mismatch:signature"}   # fail-closed(Unavailable 도 여기로)
     try:
         approved_at = float(appr.get("approved_at"))
         expires_at = float(appr.get("expires_at"))
