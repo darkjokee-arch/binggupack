@@ -27,19 +27,19 @@ Git 의 Pull Request 가 "제안 → 검토 → 승인 → 병합" 단계를 코
 ## 문서 구조 (4층)
 
 ```
-Memory PR Core Model            ← 공통 의미 어휘 (같은 바이트 산식을 주장하지 않음)
+Memory PR Core Model & Boundaries  ← 공통 의미 어휘 + 정직한 한계 + MGB Crosswalk (같은 바이트 산식을 주장하지 않음)
 ├── Interactive Save Profile    ← 대표 흐름 · 사람 SAVE n
 ├── Trusted Event Profile       ← 비저장 mutation · owner approve 이벤트
 └── Hosted Relay Profile        ← 원격 intent 전달 → Interactive 로 수렴
 ```
 
-- [core-model-v0.1-draft.md](./core-model-v0.1-draft.md) — 공통 어휘·불변식·Request/Event·상태
+- [core-model-and-boundaries-v0.1-draft.md](./core-model-and-boundaries-v0.1-draft.md#memory-pr-core-model--v01-draft) — 공통 어휘·불변식·Request/Event·상태
 - [interactive-save-profile-v0.1-draft.md](./interactive-save-profile-v0.1-draft.md)
 - [trusted-event-profile-v0.1-draft.md](./trusted-event-profile-v0.1-draft.md)
 - [hosted-relay-profile-v0.1-draft.md](./hosted-relay-profile-v0.1-draft.md)
 - [implementation-mapping.md](./implementation-mapping.md) — 규격 조항 ↔ 실제 심볼·commit SHA
-- [security-limitations.md](./security-limitations.md) — 정직한 한계
-- [mgb-crosswalk.md](./mgb-crosswalk.md) — MGB(행위 검증) ↔ Spec(필드 정의) 대응
+- [core-model-and-boundaries-v0.1-draft.md#security](./core-model-and-boundaries-v0.1-draft.md#memory-pr--security--limitations--v01-draft) — 정직한 한계
+- [core-model-and-boundaries-v0.1-draft.md#mgb-crosswalk](./core-model-and-boundaries-v0.1-draft.md#memory-pr--mgb-crosswalk--v01-draft) — MGB(행위 검증) ↔ Spec(필드 정의) 대응
 - [vectors/](./vectors/) — 재현용 test vector (고정 KAT + illustrative)
 - [tools/check_vectors.py](./tools/check_vectors.py) — 고정 KAT drift 검증 도구
 
@@ -60,7 +60,7 @@ Memory PR Core Model            ← 공통 의미 어휘 (같은 바이트 산�
 3. fail-closed 기본값 `actor=reader`.
 4. 사람 승인(모드별 상이)만이 write 를 만든다.
 
-## 정직한 경계 (상세: [security-limitations.md](./security-limitations.md))
+## 정직한 경계 (상세: [core-model-and-boundaries-v0.1-draft.md#security](./core-model-and-boundaries-v0.1-draft.md#memory-pr--security--limitations--v01-draft))
 
 - **same-host attacker 위협모델 밖** — Filesystem/Bash MCP 를 동반한 호스트에서는 하드 보장 아님.
 - **tamper-proof 아님** — 서명/HMAC 미도입(같은 머신 키 = 보안 연극).
