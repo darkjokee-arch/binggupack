@@ -2184,6 +2184,51 @@ def cmd_approval(a):
     action, rid = a.action, a.request_id
     home = _approval_home(a)
     os.makedirs(home, exist_ok=True)   # 신규/부재 home 도 graceful(open_g3 는 부모 dir 필요)
+
+    if action == "keychain-init":
+        # ★ AI 대행 절대 금지(승인 대행과 동급 · owner 전용):
+        #   이 명령은 Ed25519 서명키(sk)를 OS keychain 에 생성/앵커한다. AI(모델 tool surface)가 이
+        #   경로로 키를 만들면 '같은 머신 키 = 보안 연극'을 owner 이름으로 세우는 것이라 금지한다.
+        #   비대화형 stdin·환경변수·자동화는 owner 권한이 아니다 → isatty 하드 게이트(approve 와 동일).
+        try:
+            interactive = sys.stdin.isatty()
+        except Exception:
+            interactive = False
+        if not interactive:
+            print("BLOCK: keychain-init 는 대화형 터미널에서만 가능합니다(비대화형 stdin·환경변수 거부·no-write).")
+            print("  사장님이 직접 터미널에서 'binggu approval keychain-init' 를 실행하세요(AI 대행 금지).")
+            return 2
+        from binggupack.safety import keychain_backend as kb
+        from binggupack.safety import signing_provider as sp
+        backend = kb.get_backend()   # 실 OS keychain(inject 없음 = 운영 백엔드)
+        if not backend.available():
+            print("BLOCK: 이 플랫폼/환경에서 OS keychain 서명 백엔드 미가용(headless/미지원) — 키 생성 불가.")
+            print("  fail-closed: L1 평문으로 자동 강등하지 않습니다(안 써짐이 최악보다 낫다).")
+            return 1
+        key_id = sp.KeychainProvider._DEFAULT_KEY_ID
+        existed = backend.peek_key_present(key_id)
+        try:
+            sk, pk = backend.load_or_create_signing_key(key_id)   # 부재→생성·put / 존재→로드(idempotent)
+        except kb.KeychainError as e:
+            print("BLOCK: keychain 서명키 생성/로드 실패 (%s)." % e)
+            return 1
+        pin = sp.describe_secret(pk)   # 공개키 핀(sha256 hash8 + 길이)만 — sk 평문 0
+        del sk                          # sk 참조 즉시 제거(노출/로깅 0)
+        print("keychain 서명키 %s" % ("확인(기존 존재)" if existed else "생성 완료"))
+        print("  key_id     : %s" % key_id)
+        print("  public key : sha256=%s  len=%d  (핀 — sk/공개키 원문 미출력)"
+              % (pin["sha256_hash8"], pin["length"]))
+        print("\n활성화: %s 에 {\"enabled\": true, \"kind\": \"keychain\"} 설정 시 approve EVENT 가 "
+              "Ed25519 로 서명·검증됩니다." % ta.config_path(home))
+        print("정직 경계(§6): 같은 머신 셸이 keychain sk 를 로드하면 유효 서명이 가능하다(=보안 연극).")
+        print("  config kind 는 모델-writable 평문이라 kind:local_owner 한 줄로 서명 검증이 skip 된다.")
+        print("  L2 의 실질 값은 hosted/locked 배포(모델이 셸/keychain/config 미접촉)에서만 나온다.")
+        return 0
+
+    if rid is None:
+        print("요청ID 를 지정하세요: binggu approval %s <요청ID>" % action)
+        return 2
+
     db = open_g3(a.ledger)
     try:
         req = ta.get_request(db.con, rid)
@@ -2467,8 +2512,8 @@ def main():
     # P1-A trusted approval event — owner 검토·승인 채널(MCP tool surface 밖).
     sub.add_parser("approvals")                          # 대기 승인 요청 목록(조회)
     apv = sub.add_parser("approval")
-    apv.add_argument("action", choices=["show", "approve", "reject", "revoke"])
-    apv.add_argument("request_id")
+    apv.add_argument("action", choices=["show", "approve", "reject", "revoke", "keychain-init"])
+    apv.add_argument("request_id", nargs="?", default=None)   # keychain-init 은 request_id 불요
     # Binggu Anywhere — owner-only pack upload (admin plane client; MCP data plane never uploads).
     appp = sub.add_parser("app")
     appsub = appp.add_subparsers(dest="app_cmd", required=True)
