@@ -48,8 +48,12 @@ def _sha(b: bytes) -> str:
 
 
 def canonical_violations(b: bytes) -> list[str]:
-    """canonical byte 규칙 위반 목록. 빈 리스트 = canonical."""
+    """canonical byte 규칙 위반 목록. 빈 리스트 = canonical.
+
+    빈 파일·중간 공백줄도 위반으로 잡는다(빈 seed 가 조용히 PASS 하지 않도록)."""
     v: list[str] = []
+    if not b.strip():
+        return ["empty-file"]
     if b.startswith(_BOM):
         v.append("utf8-bom")
     if b"\r" in b:
@@ -58,12 +62,16 @@ def canonical_violations(b: bytes) -> list[str]:
         b.decode("utf-8")
     except UnicodeDecodeError:
         v.append("non-utf8")
-    if b and not b.endswith(b"\n"):
+    if not b.endswith(b"\n"):
         v.append("no-final-lf")
     if b.endswith(b"\n\n"):
         v.append("multiple-final-lf")
-    for i, line in enumerate(b.split(b"\n"), 1):
+    lines = b.split(b"\n")
+    # 마지막 요소는 파일 끝 LF 뒤 빈 문자열(정상) — 제외하고 각 레코드 검사.
+    body = lines[:-1] if lines and lines[-1] == b"" else lines
+    for i, line in enumerate(body, 1):
         if not line.strip():
+            v.append("blank-line:%d" % i)   # 중간 공백줄
             continue
         try:
             obj = json.loads(line.decode("utf-8", errors="replace"))

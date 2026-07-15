@@ -114,3 +114,47 @@ def test_write_refuses_non_canonical_source(tmp_path, monkeypatch):
     # source 가 CRLF(canonical 위반)면 --write 중단(fixture 오염 방지)
     _setup(tmp_path, monkeypatch, {"seed_canonical_5.jsonl": b'{"a": 1}\r\n'}, {})
     assert S.write(verbose=False) is False
+
+
+def test_empty_file_detected():
+    assert S.canonical_violations(b"") == ["empty-file"]
+    assert S.canonical_violations(b"   \n") == ["empty-file"]
+
+
+def test_blank_line_detected():
+    assert any(v.startswith("blank-line")
+               for v in S.canonical_violations(b'{"a": 1}\n\n{"b": 2}\n'))
+
+
+# ── check_hosted 음성/양성(모듈 상수 monkeypatch) ──
+def _hosted_setup(tmp_path, monkeypatch, data_bytes, seed_hash):
+    import json as _j
+    d = tmp_path / "data"
+    d.mkdir()
+    (d / S.HOSTED_SEED).write_bytes(data_bytes)
+    cent = tmp_path / "centroids.json"
+    cent.write_text(_j.dumps({"seed_hash": seed_hash}), encoding="utf-8")
+    monkeypatch.setattr(S, "DATA_DIR", str(d))
+    monkeypatch.setattr(S, "CENTROIDS", str(cent))
+    return d, cent
+
+
+def test_check_hosted_pass_on_match(tmp_path, monkeypatch):
+    import hashlib
+    b = b'{"a": 1}\n'
+    _hosted_setup(tmp_path, monkeypatch, b, hashlib.sha256(b).hexdigest()[:16])
+    assert S.check_hosted(verbose=False) is True
+
+
+def test_check_hosted_fail_on_mismatch(tmp_path, monkeypatch):
+    _hosted_setup(tmp_path, monkeypatch, b'{"a": 1}\n', "deadbeef00000000")
+    assert S.check_hosted(verbose=False) is False
+
+
+def test_check_hosted_fail_on_missing_centroids(tmp_path, monkeypatch):
+    d = tmp_path / "data"
+    d.mkdir()
+    (d / S.HOSTED_SEED).write_bytes(b'{"a": 1}\n')
+    monkeypatch.setattr(S, "DATA_DIR", str(d))
+    monkeypatch.setattr(S, "CENTROIDS", str(tmp_path / "nonexistent.json"))
+    assert S.check_hosted(verbose=False) is False
