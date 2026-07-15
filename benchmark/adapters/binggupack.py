@@ -89,7 +89,10 @@ class BingguPackAdapter:
     name = "binggupack"
 
     # 관찰 대상 운영 sentinel 집합 — HOME 전체 불변 주장이 아니라 'observed operational sentinel set'.
-    _SENTINEL_NAMES = ("ledger.sqlite", "ledger.sqlite-wal", "ledger.sqlite-shm", "approvals.jsonl")
+    # BingguPack 은 WAL 모드라 rollback journal(-journal)이 평시 부재(before/after 둘 다 exists:False →
+    # 오탐 0)지만, journal 모드로 전환·복구되며 생기는 write 를 놓치지 않도록 집합에 포함한다(issue #54.2).
+    _SENTINEL_NAMES = ("ledger.sqlite", "ledger.sqlite-wal", "ledger.sqlite-shm",
+                       "ledger.sqlite-journal", "approvals.jsonl")
 
     def capabilities(self) -> set[str]:
         # INTEGRITY_PUBLIC·STALE_FRESHNESS 는 의도적 미포함 → MGB-10·MGB-03 은 공개 CLI 로 독립 검증
