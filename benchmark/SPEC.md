@@ -91,8 +91,11 @@ capability 를 선언하는 adapter(예: `toy_conforming`)에서만 실행된다
 거부는 `exit==1` 단일값으로 판정하지 않는다. 시나리오는 다음을 조합한다:
 
 - exit code — 정책 BLOCK(exit1) vs usage·인자오류(exit2) 구분
-- 거부 원인 코드 — `parse_block_code`(`preview_required_mismatch`·`g4_no_auto` 등). 안정된 공개 error
-  code 가 없는 명령은 텍스트 파싱 한계로 취급(SPEC §7)
+- 거부 원인 코드 — `parse_block_code` 로 뽑고 `classify_rejection` 으로 표준 클래스(`content_binding`·
+  `other`·`None`)로 정규화한다. MGB-02 는 관측된 코드가 **내용 결속 불일치(content_binding)** 여야
+  하고, 빈입력·usage·confirm 같은 **엉뚱한 거부(other)** 는 우연통과로 배제한다. 특정 코드 문자열을
+  계약에 하드코딩하지 않으며(adapter 이식성), 안정 공개 코드가 없는 adapter(`None`)는 조합 판정에
+  위임한다(SPEC §7)
 - 상태 불변 — active count before/after · 대상 digest 미생성
 
 거부 문구가 출력돼도 active count 가 증가하거나 대상 digest 가 생성되면 **FAIL**. 특히 MGB-02 는 빈
@@ -105,10 +108,13 @@ capability 를 선언하는 adapter(예: `toy_conforming`)에서만 실행된다
 - 임시 root 와 운영 홈이 같거나 상하위 관계면 중단한다.
 - tamper 시나리오는 벤치마크가 만든 **합성 장부만** 대상으로 한다(운영/사용자 실제 장부 복사·변조 금지).
 - 운영 sentinel 집합(observed operational sentinel set)의 fingerprint 를 실행 전후 비교한다:
-  `ledger.sqlite`·`ledger.sqlite-wal`·`ledger.sqlite-shm`·`approvals.jsonl`. 각 파일의 존재·symlink·
-  realpath·type·size·mtime_ns·sha256 를 기록해 **신규 생성·삭제·변경**을 감지한다(WAL 모드에서 main
-  파일만 불변인 오염을 놓치지 않는다). fingerprint 는 보안 경계가 아니라 **사후 오염 감지 sentinel**
-  이며, v0.1 은 운영 HOME 전체 쓰기 차단을 약속하지 않고 이 **sentinel 집합의 불변**만 주장한다.
+  `ledger.sqlite`·`ledger.sqlite-wal`·`ledger.sqlite-shm`·`ledger.sqlite-journal`·`approvals.jsonl`.
+  각 파일의 존재·symlink·realpath·type·size·mtime_ns·sha256 를 기록해 **신규 생성·삭제·변경**을 감지한다
+  (WAL 모드에서 main 파일만 불변인 오염을 놓치지 않는다). BingguPack 은 WAL 모드라 rollback
+  journal(`-journal`)이 평시 부재하지만(before/after 모두 exists:False → 오탐 0), journal 모드로
+  전환·복구되며 생기는 write 를 놓치지 않도록 집합에 포함한다. fingerprint 는 보안 경계가 아니라
+  **사후 오염 감지 sentinel** 이며, v0.1 은 운영 HOME 전체 쓰기 차단을 약속하지 않고 이 **sentinel
+  집합의 불변**만 주장한다.
 - **mtime 판정 제외**: `mtime_ns` 는 다른 프로세스의 WAL/SHM 체크포인트·read 만으로도 변동하므로
   오염 판정은 **content(존재·size·digest·symlink)** 기준으로 하고 `mtime_ns` 는 evidence 로만 기록한다
   (`fp_content_equal`). WAL 내용 증가·approvals 추가·ledger 본체 변경 등 실제 write 는 content 로 잡힌다.

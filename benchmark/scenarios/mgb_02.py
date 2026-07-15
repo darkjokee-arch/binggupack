@@ -6,7 +6,7 @@
 유지한 채 내용만 변조한 저장이 거부되며, (3)거부 후 active count 불변 + 변조 내용의 digest 미생성
 을 함께 요구한다.
 """
-from benchmark.contracts import Cap
+from benchmark.contracts import REJECTION_OTHER, Cap, classify_rejection
 from benchmark.result import ExecutionStatus, ScenarioResult, Verdict
 
 ID = "MGB-02"
@@ -28,10 +28,18 @@ def run(adapter, home, ctx):
     mutation_rejected = st.get("mutation_exit") == 1  # 정책 거부(usage 오류 2 아님)
     active_unchanged = st.get("active_after_mutation") == st.get("active_after_baseline")
     no_digest = st.get("mutation_digest_present") is False
-    ok = preview_valid and baseline_ok and mutation_rejected and active_unchanged and no_digest
+    # issue #54.1 — 거부 코드가 관측되면 판정에 결속: '내용 결속 불일치' 거부여야 하고, 빈입력·usage·
+    # confirm 같은 '엉뚱한 거부(other)'는 우연통과로 배제한다. 안정 공개 코드가 없는 adapter(None)는
+    # 특정 코드를 강제하지 않고(이식성) 조합 판정에만 의존한다.
+    err_class = classify_rejection(st.get("mutation_error_code"))
+    error_bound = err_class != REJECTION_OTHER
+    ok = (preview_valid and baseline_ok and mutation_rejected
+          and active_unchanged and no_digest and error_bound)
     return ScenarioResult(
         ID, TITLE, ExecutionStatus.OK, Verdict.PASS if ok else Verdict.FAIL,
-        reason=("preview유효=%s baseline성공=%s 변조거부(exit=%s,code=%s)=%s active불변=%s digest미생성=%s"
+        reason=("preview유효=%s baseline성공=%s 변조거부(exit=%s,code=%s,class=%s)=%s "
+                "active불변=%s digest미생성=%s 결속=%s"
                 % (preview_valid, baseline_ok, st.get("mutation_exit"),
-                   st.get("mutation_error_code"), mutation_rejected, active_unchanged, no_digest)),
+                   st.get("mutation_error_code"), err_class, mutation_rejected,
+                   active_unchanged, no_digest, error_bound)),
         evidence={"obs": o.to_dict()})

@@ -88,6 +88,46 @@ def parse_block_code(stdout: str) -> str | None:
     return m.group(1) if m else None
 
 
+# ── 거부 코드 → 표준 거부 클래스 정규화(issue #54.1) ──
+# adapter 마다 실제 코드 문자열은 다르다(BingguPack=preview_required_mismatch · 참조 adapter=
+# content_binding_mismatch). 특정 코드 문자열을 계약에 하드코딩하지 않고(이식성) 같은 '클래스'로
+# 정규화해, MGB-02 가 '내용 결속 불일치' 거부와 '엉뚱한 거부(빈입력·usage·confirm)'를 구분한다.
+REJECTION_CONTENT_BINDING = "content_binding"   # 사용자가 본 내용과 저장 내용의 결속 불일치
+REJECTION_OTHER = "other"                        # 내용 결속과 무관한 거부(우연통과 배제 대상)
+
+_CONTENT_BINDING_CODES = frozenset({
+    "preview_required_mismatch",   # BingguPack: preview 텍스트 해시 불일치
+    "content_binding_mismatch",    # 참조/일반 adapter
+})
+_NONBINDING_REJECTION_CODES = frozenset({
+    "no_candidates", "preview_unavailable", "confirm_mismatch",
+    "confirm_required_mismatch", "confirm_phrase_mismatch", "owner_flat_save_forbidden",
+    "unsafe_segmentation", "node_hash_mismatch", "proposal_not_found",
+})
+
+
+def classify_rejection(code: str | None) -> str | None:
+    """정책 거부 코드를 표준 거부 클래스로 정규화.
+
+    반환:
+      · REJECTION_CONTENT_BINDING — 내용 결속 불일치 거부(MGB-02 가 기대하는 클래스)
+      · REJECTION_OTHER — 내용 결속과 무관한 거부(빈입력·usage·confirm 등 · 우연통과로 배제)
+      · None — 안정 공개 거부 코드 없음 또는 미등록 코드. 특정 코드 문자열을 강제하지 않고(이식성)
+        시나리오의 조합 판정(baseline·active·digest)에 판정을 위임한다.
+    """
+    if not code:
+        return None
+    c = code.strip().lower()
+    if c in _CONTENT_BINDING_CODES:
+        return REJECTION_CONTENT_BINDING
+    # 미등록 코드라도 명시적 내용 결속 키워드를 담으면 인정(preview/content/binding + mismatch).
+    if "mismatch" in c and any(k in c for k in ("preview", "content", "binding")):
+        return REJECTION_CONTENT_BINDING
+    if c in _NONBINDING_REJECTION_CODES:
+        return REJECTION_OTHER
+    return None  # 미등록·불명 — 계약 강제 안 함(조합 판정에 위임)
+
+
 def fp_content_equal(a: dict | None, b: dict | None) -> bool:
     """운영 sentinel fingerprint 오염 판정 — content(존재·size·digest·symlink·realpath) 기준.
 
