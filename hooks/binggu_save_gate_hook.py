@@ -5,7 +5,8 @@
 (~/.binggupack/save_gate_log.jsonl)에 남긴다. 이 기록이 있어야 save_selected 가 actor 를
 human 으로 승격한다(0-A 해법, 4cli debate 20260616_0938 REFINE 합의).
 
-intel loop 확장: 같은 발화 경로로 회수 히트/미스('히트 2'/'미스 2')·승격('승격 1') 스탬프도
+intel loop 확장: 같은 발화 경로로 회수 히트/미스('히트 2'/'미스 2')·승격('승격 1')·학습큐
+소비('컨슘 0' — learn-consume qi 축·0-base) 스탬프도
 기록한다(binggupack.safety.gate_log.stamp_record_from_prompt — 기록 파일은 save 와 동일한
 save_gate_log.jsonl, ref 도메인 접두로 네임스페이스 분리). 분기 순서: ① SAVE(기존 불변) →
 ② 스탬프. 트리거 토큰 계열이 서로소 + 파서가 줄단위 fullmatch 라 같은 줄이 두 분기에 이중
@@ -29,7 +30,7 @@ from pathlib import Path
 # 스탬프 빠른 차단(프리필터) — '<트리거>\s*숫자' 형태일 때만 게이트 모듈 로드. 단순 substring 검사는
 # 영문 오탐("arcHITecture" 등)으로 비트리거 프롬프트마다 로드를 유발하므로 숫자 인접 조건까지 요구.
 # 휴리스틱일 뿐 — 정밀 판정(fullmatch·줄단위)은 gate_log 파서 몫이라 오기록 0(로드 비용만).
-_STAMP_FAST_RE = re.compile(r"(?:HIT|히트|MISS|미스|PROMOTE|승격)\s*\d", re.IGNORECASE)
+_STAMP_FAST_RE = re.compile(r"(?:HIT|히트|MISS|미스|PROMOTE|승격|CONSUME|컨슘)\s*\d", re.IGNORECASE)
 
 
 def _scripts_dir():
@@ -277,6 +278,26 @@ def _selftest():
             check(r.returncode == 0 and r.stdout.strip() == "", "T17 '%s' → exit 0 · 침묵" % _p)
         check(gate_log.read_text(encoding="utf-8") == before,
               "T17e 비정확형 3종 후 gate 기록 불변(오도장 0)")
+
+        # T18 소비 스탬프('컨슘 0' — learn-consume qi 축·0-base) e2e + 파서 계약
+        cp = home / "last_consume_candidates.json"
+        gl.write_last_consume([{"idx": 0, "digest": "d" * 16},
+                               {"idx": 1, "digest": "e" * 16}], path=str(cp))
+        crows = gl.load_last_consume(str(cp))["items"]
+        r = call({"hook_event_name": "UserPromptSubmit", "prompt": "컨슘 0", "cwd": "x"})
+        check(r.returncode == 0 and r.stdout.strip() == ""
+              and gl.gate_human_for_consume(crows, [0], path=str(gate_log)) is True
+              and gl.gate_human_for_consume(crows, [0, 1], path=str(gate_log)) is False,
+              "T18 '컨슘 0' → consume 도장 통과(0-base) / 미도장 idx 포함 시 차단")
+        check(gl.parse_consume_indices("컨슘 0,2") == [0, 2]
+              and gl.parse_consume_indices("CONSUME 1") == [1]
+              and gl.parse_consume_indices("컨슘해줘 0") is None
+              and gl.parse_consume_indices("그 컨슘 0 말이야") is None,
+              "T18b 컨슘 파서 positive('컨슘 0,2'/'CONSUME 1')/negative(문장 속)")
+        gl.write_last_consume([{"idx": 0, "digest": "f" * 16}], path=str(cp))
+        crows2 = gl.load_last_consume(str(cp))["items"]
+        check(gl.gate_human_for_consume(crows2, [0], path=str(gate_log)) is False,
+              "T18c consume staging 변조 → 재계산 ref mismatch 차단")
 
         print(f"\nGATE={'GO' if ok else 'NO-GO'}")
         return 0 if ok else 1

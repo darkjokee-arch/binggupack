@@ -1563,20 +1563,17 @@ def cmd_learn_consume(a):
             print(f"장부가 없습니다: %s · 먼저 {HINT} init" % ledger)
             return 2
         db, _ = _open(ledger)
-        # 소비 승인 actor 판정 = _resolve_human_ctx(save-n 바인딩/cli_command · 에이전트 세션 deny).
-        #   env fail-open 없음. CONSUME <n> 문구 단독으로 human 승격 금지(AOB-3 동종).
-        #   dry-run 이 스테이징한 큐 preview(발화 원문 축·번호=qi+1)에 사람이 '세이브 qi+1'
-        #   (일괄은 '세이브 1-5'/줄 도장) 도장을 찍었으면 ref 바인딩으로 human 승격.
-        _refs = None
-        try:
-            import binggu_save_gate as _sg
-            _cands = [{"sentence": ((e.get("evidence") or {}).get("feedback") or "")}
-                      for _li, e in LC.load_pending(qpath)]
-            if _cands:
-                _refs = [(_sg.preview_ref_for_candidates(_cands), [q + 1 for q in qis])]
-        except Exception:
-            _refs = None
-        _ctx = _resolve_human_ctx(a.ledger, _refs)
+        # 소비 승인 actor 판정 — 채팅 '컨슘 <qi>' 도장(소비시점 consume_gate_ref **재계산** 대조 ·
+        #   미도장/stale/staging 변조 전부 False)이면 human 승격. env fail-open 없음.
+        #   CONSUME <n> 문구 단독으로 human 승격 금지(AOB-3 동종). 미도장은 _resolve_human_ctx
+        #   2·3분기(CLAUDECODE deny / 터미널 cli_command)와 동일. (구 '세이브 qi+1' SAVE 오버로드
+        #   폐지 — 2026-07-16 owner "save n 형식처럼" 지시로 스탬프 패밀리 consume 도메인 정본화.)
+        from binggupack.safety import gate_log as GL
+        _rows = (GL.load_last_consume(_consume_staging_for_ledger(ledger)) or {}).get("items") or []
+        if _rows and GL.gate_human_for_consume(_rows, qis, path=_gate_log_for_ledger(ledger)):
+            _ctx = _resolve_human_ctx(a.ledger, stamp_ctx="consume_stamp_ref")
+        else:
+            _ctx = _resolve_human_ctx(a.ledger)
 
         def _print_ok(r):
             if r.get("rows"):
@@ -1639,20 +1636,21 @@ def cmd_learn_consume(a):
     # dry-run(기본): 소비 대기 목록 + 회상 top preview(read-only · 저장 0)
     pv = LC.preview(ledger, qpath, home=os.path.dirname(ledger))
     print(LC.render_preview_md(pv))
-    # 도장 스테이징 — 대기 발화 원문을 preview 축(번호=qi+1)으로 영속(hash만·ledger write 0).
-    # 사람이 '세이브 <qi+1>' 도장 후 --confirm "CONSUME <qi>" 재실행 = 에이전트 세션에서도 소비.
+    # 도장 스테이징 — 대기 발화 digest 를 qi 축(0-base·표 번호와 동일)으로 영속(ledger write 0).
+    # 사람이 채팅에 '컨슘 <qi>' 한 줄 도장 → --confirm "CONSUME <qi>" 실행 = 에이전트 세션에서도 소비.
     try:
-        import binggu_save_gate as _sg
-        _cands = [{"sentence": ((e.get("evidence") or {}).get("feedback") or "")}
-                  for _li, e in LC.load_pending(qpath)]
-        if _cands:
-            _sg.write_last_preview(_cands, explicit=True,
-                                   path=os.path.join(os.path.dirname(ledger),
-                                                     "last_preview_candidates.json"))
-            print('\n도장(사람 키보드): 표의 [N]번 소비 = "세이브 N+1" 입력 → '
-                  '--confirm "CONSUME N" 재실행'
-                  '\n  일괄: "세이브 1-6" 또는 "세이브 1,3,5" 한 줄 → --confirm "CONSUME 0,2,4"'
-                  ' (도장 1회·재도장 불필요)'
+        import hashlib
+        from binggupack.safety import gate_log as GL
+        _items = [{"idx": _qi, "digest": hashlib.sha256(
+                       (((e.get("evidence") or {}).get("feedback") or "")).encode("utf-8")
+                   ).hexdigest()[:16]}
+                  for _qi, (_li, e) in enumerate(LC.load_pending(qpath))]
+        if _items:
+            GL.write_last_consume(_items, path=_consume_staging_for_ledger(ledger))
+            print('\n도장(사람 채팅 1-발화): 표의 [N]번 소비 = "컨슘 N" 한 줄 → '
+                  '--confirm "CONSUME N" 실행'
+                  '\n  일괄: "컨슘 0,2" 또는 "컨슘 0-3" 한 줄 → --confirm "CONSUME 0,2"'
+                  ' (도장 1회·재도장 불필요 · 번호 = 이 표의 [N] 그대로)'
                   '\n  도장은 메시지 전체 또는 **한 줄 전체**가 도장뿐이어야 인식(문장 속 언급 무시).'
                   '\n  확인(교환 축): 기본 = 발화대로(upheld). 나중에 뒤집힌 건이면 '
                   '--verdict overturned 추가.')
@@ -1667,6 +1665,13 @@ def _promote_staging_for_ledger(ledger):
     from binggupack.safety import gate_log as _gl
     return os.path.join(os.path.dirname(os.path.abspath(ledger)),
                         os.path.basename(_gl.last_promote_candidates_path()))
+
+
+def _consume_staging_for_ledger(ledger):
+    """학습큐 소비 도장 staging 을 ledger scope 에 고정(_promote_staging_for_ledger 동일 원칙)."""
+    from binggupack.safety import gate_log as _gl
+    return os.path.join(os.path.dirname(os.path.abspath(ledger)),
+                        os.path.basename(_gl.last_consume_candidates_path()))
 
 
 def _promote_candidates(db):

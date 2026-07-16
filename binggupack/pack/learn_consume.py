@@ -181,7 +181,8 @@ def render_preview_md(pv):
     if not n:
         return "학습 큐: 소비 대기 0건. (owner 자연 피드백이 쌓이면 여기 표시됩니다.)"
     out = ["학습 큐 소비 대기 %d건 (dry-run · 저장 0 · 축: 사용자 발화 → AI 답변 → 확인)" % n,
-           "  소비: %s learn-consume --confirm \"CONSUME <번호>\""
+           "  소비(에이전트 세션): 채팅에 \"컨슘 <번호>\" 한 줄 도장 → "
+           "%s learn-consume --confirm \"CONSUME <번호>\""
            " [--verdict overturned] [--index k]" % invocation_prefix(), ""]
     for it in pv["items"]:
         tag = _STANCE_TAG.get(it.get("stance"), "미상(stance 없음)")

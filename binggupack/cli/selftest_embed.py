@@ -56,6 +56,8 @@ from binggu import (  # noqa: E402
     cmd_hosted,
     cmd_mark,
     cmd_promote,
+    cmd_learn_consume,
+    _consume_staging_for_ledger,
     _preview_id,
     _open,
     _gate_log_for_ledger,
@@ -678,6 +680,47 @@ def _selftest_body():
             os.environ.pop("BINGGU_HOME", None)
         else:
             os.environ["BINGGU_HOME"] = _prev_home
+
+    # C계열: 학습큐 소비 — 채팅 '컨슘 N'(0-base qi 축) 도장 e2e(7/16 owner "save n 형식처럼").
+    # 무도장+에이전트 세션 = BLOCK(자동확정 0) · 도장 = 소비 성공(consume_stamp_ref).
+    import json as _json
+    from binggupack.pack import learn_consume as LCq
+    _cq = LCq.queue_path()
+    os.makedirs(os.path.dirname(_cq), exist_ok=True)
+    _cq_bak = open(_cq, encoding="utf-8").read() if os.path.exists(_cq) else None
+    with open(_cq, "w", encoding="utf-8") as _f:
+        _f.write(_json.dumps({"ts": "2026-07-16T00:00:00Z", "outcome": "hit",
+                              "queries": ["작업 전에 백업을 먼저"],
+                              "evidence": {"feedback": "백업 먼저 하는 게 맞네"},
+                              "consumed": False}, ensure_ascii=False) + "\n")
+    _cstg = _consume_staging_for_ledger(il_led)
+    try:
+        _rc, _out = _il_run(cmd_learn_consume, ledger=il_led, confirm=None,
+                            index=1, verdict="upheld")
+        ck("C1_dry-run→컨슘staging생성+1발화안내",
+           _rc == 0 and os.path.exists(_cstg) and "컨슘" in _out
+           and bool((GL.load_last_consume(_cstg) or {}).get("items")))
+        os.environ["CLAUDECODE"] = "1"
+        try:
+            _hits0 = _il_q1("SELECT count(*) FROM hit_events")[0]
+            _rc, _out = _il_run(cmd_learn_consume, ledger=il_led, confirm="CONSUME 0",
+                                index=1, verdict="upheld")
+            ck("C2_무도장+에이전트세션→BLOCK(자동확정0·적재0)",
+               _rc == 1 and _il_q1("SELECT count(*) FROM hit_events")[0] == _hits0)
+            GL.stamp_record_from_prompt("컨슘 0", consume_path=_cstg, gate_path=il_gate)
+            _rc, _out = _il_run(cmd_learn_consume, ledger=il_led, confirm="CONSUME 0",
+                                index=1, verdict="upheld")
+            ck("C3_컨슘도장→소비성공(hit적재+사람확정·에이전트세션)",
+               _rc == 0 and _il_q1("SELECT count(*) FROM hit_events")[0] == _hits0 + 1
+               and "사람 확정" in _out)
+        finally:
+            os.environ.pop("CLAUDECODE", None)
+    finally:
+        if _cq_bak is None:
+            os.remove(_cq)
+        else:
+            with open(_cq, "w", encoding="utf-8") as _f:
+                _f.write(_cq_bak)
 
     op_after = {p: (os.path.getmtime(p) if os.path.exists(p) else None) for p in OPERATING_PATHS}
     ck("11_운영_store_불변", op_before == op_after)

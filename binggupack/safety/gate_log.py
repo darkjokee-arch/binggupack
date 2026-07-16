@@ -338,6 +338,12 @@ PROMOTE_TRIGGER_RE = re.compile(
     r"\s*(?:PROMOTE|승격)\s*\d+(\s*[-~]\s*\d+)?(\s*,\s*\d+(\s*[-~]\s*\d+)?)*\s*",
     re.IGNORECASE)
 
+# 소비 스탬프: 'CONSUME 0' / '컨슘 0,2'. 계약 동일(fullmatch·줄단위).
+# ★번호축 주의: learn-consume dry-run 번호(qi)와 동일한 0-base — 히트/승격(1-base)과 다르다.
+CONSUME_TRIGGER_RE = re.compile(
+    r"\s*(?:CONSUME|컨슘)\s*\d+(\s*[-~]\s*\d+)?(\s*,\s*\d+(\s*[-~]\s*\d+)?)*\s*",
+    re.IGNORECASE)
+
 # fullmatch 통과 줄의 verdict 판별 — 선두 트리거가 HIT/히트면 hit, 아니면(MISS/미스) miss.
 _HIT_WORD_RE = re.compile(r"\s*(?:HIT|히트)", re.IGNORECASE)
 
@@ -403,6 +409,17 @@ def parse_promote_indices(prompt):
     return out or None
 
 
+def parse_consume_indices(prompt):
+    """소비 도장 인식('컨슘 0' 등) — 인덱스 리스트 또는 None. 0-base 허용(learn-consume qi 축)."""
+    out, seen = [], set()
+    for chunk in _stamp_chunks(CONSUME_TRIGGER_RE, prompt):
+        for i in _expand_stamp_indices(chunk) or []:
+            if i not in seen:
+                seen.add(i)
+                out.append(i)
+    return out or None
+
+
 def last_recall_candidates_path():
     """직전 회수 staging 경로(호출 시점 lazy, 단일 home 경유). 회상 표면이 쓰고
     스탬프 hook/소비 API 가 읽음. 매 회상 덮어씀(직전 1건 원칙)."""
@@ -413,6 +430,12 @@ def last_promote_candidates_path():
     """직전 승격 후보 staging 경로(호출 시점 lazy, 단일 home 경유). 승격 preview 가 쓰고
     스탬프 hook/소비 API 가 읽음. 매 preview 덮어씀(직전 1건 원칙)."""
     return os.path.join(gate_home(), "last_promote_candidates.json")
+
+
+def last_consume_candidates_path():
+    """직전 학습큐 소비 후보 staging 경로. learn-consume dry-run/세션마무리 preview 가 쓰고
+    스탬프 hook/소비 API 가 읽음. 매 preview 덮어씀(직전 1건 원칙)."""
+    return os.path.join(gate_home(), "last_consume_candidates.json")
 
 
 def _stamp_ref_for_rows(domain, rows):
@@ -432,6 +455,12 @@ def recall_gate_ref(rows):
 def promote_gate_ref(rows):
     """승격 staging rows → ref('promote|' 접두). 규약은 recall_gate_ref 와 동일."""
     return _stamp_ref_for_rows("promote", rows)
+
+
+def consume_gate_ref(rows):
+    """소비 staging rows → ref('consume|' 접두). rows 의 node_id 슬롯 = 큐 항목 digest —
+    바인딩은 idx:digest(발화 원문 축)라 큐 재편/변조 시 재계산 ref 가 달라져 fail-closed."""
+    return _stamp_ref_for_rows("consume", rows)
 
 
 def _write_staging(path, payload):
@@ -476,6 +505,22 @@ def write_last_promote(items, path=None):
     return len(rows)
 
 
+def write_last_consume(items, path=None):
+    """학습큐 소비 후보 staging 영속 — 매 preview 덮어씀(직전 1건 원칙). items 항목 =
+    {"idx"(=qi 0-base), "digest"(발화 원문 sha16), "feedback"(표시용)}. ref 바인딩은
+    idx:digest 만 — feedback 표시문은 판정 미참여(판정은 소비 시점 재계산만 신뢰)."""
+    path = path or last_consume_candidates_path()
+    rows = []
+    for it in (items or []):
+        dg = str((it or {}).get("digest") or "").strip()
+        if not dg or (it or {}).get("idx") is None:
+            continue
+        rows.append({"idx": int(it["idx"]), "node_id": dg,
+                     "feedback": str(it.get("feedback") or "")})
+    _write_staging(path, {"ts": time.time(), "ref": consume_gate_ref(rows), "items": rows})
+    return len(rows)
+
+
 def _load_staging(path):
     """staging 판독 → dict | None(부재/파손 무해)."""
     if not os.path.exists(path):
@@ -497,6 +542,11 @@ def load_last_promote(path=None):
     return _load_staging(path or last_promote_candidates_path())
 
 
+def load_last_consume(path=None):
+    """직전 소비 후보 staging → dict | None."""
+    return _load_staging(path or last_consume_candidates_path())
+
+
 def stamp_record_ref(pref, idxs, stamp, domain, ts=None, source="user_prompt", path=None):
     """스탬프 참조 바인딩 레코드 1행 append — {"pref","idxs","ts","source","domain","stamp"}.
     gate_record_ref 패턴 복제 + 감사용 domain/stamp 필드(기존 판독자 _load/_load_refs 는 무시).
@@ -513,8 +563,9 @@ def stamp_record_ref(pref, idxs, stamp, domain, ts=None, source="user_prompt", p
     return 1
 
 
-def stamp_record_from_prompt(prompt, recall_path=None, promote_path=None, gate_path=None, ts=None):
-    """스탬프 hook 진입점 — 발화가 히트/미스/승격 정확형이면 해당 staging 의 idx 를 게이트에 기록.
+def stamp_record_from_prompt(prompt, recall_path=None, promote_path=None, gate_path=None, ts=None,
+                             consume_path=None):
+    """스탬프 hook 진입점 — 발화가 히트/미스/승격/컨슘 정확형이면 해당 staging 의 idx 를 게이트에 기록.
     ref 는 staging 의 ref 필드가 아니라 rows 에서 재계산(도장 시점부터 저장 필드 미신뢰).
     staging 부재/파손/idx 불일치 → 기록 0(무해). 반환 append 된 ref 레코드 행 수."""
     n = 0
@@ -537,6 +588,16 @@ def stamp_record_from_prompt(prompt, recall_path=None, promote_path=None, gate_p
         matched = [i for i in pidx if by_idx.get(i)]
         if rows and matched:
             n += stamp_record_ref(promote_gate_ref(rows), matched, "promote", "promote",
+                                  ts=ts, path=gate_path)
+    cidx = parse_consume_indices(prompt)
+    if cidx:
+        st = load_last_consume(consume_path) or {}
+        rows = st.get("items") or []
+        # 0-base 축: idx 0 이 유효 — 존재 판정은 digest(node_id 슬롯) 유무로(by_idx.get 진리값 아님).
+        by_idx = {r.get("idx"): r.get("node_id") for r in rows}
+        matched = [i for i in cidx if by_idx.get(i)]
+        if rows and matched:
+            n += stamp_record_ref(consume_gate_ref(rows), matched, "consume", "consume",
                                   ts=ts, path=gate_path)
     return n
 
@@ -603,6 +664,13 @@ def gate_human_for_promote(rows, idxs, path=None, now=None):
     ref 는 소비 시점 rows 재계산(promote_gate_ref) — staging 변조 시 False(mismatch).
     이 True 는 사람 도장 증명일 뿐, 실제 승격 write 는 봉인 모듈 게이트(백업 강제·G4_no_auto) 몫."""
     return gate_human_for_ref(promote_gate_ref(rows), idxs, path=path, now=now)
+
+
+def gate_human_for_consume(rows, idxs, path=None, now=None):
+    """요청 qi 전부가 사람 소비 도장('컨슘 N')으로 기록됐고 신선도 창 이내면 True — 판정 규약은
+    gate_human_for_promote 와 동일(all-or-nothing·stale/미래ts 무효·재계산 ref·fail-closed).
+    이 True 는 사람 도장 증명일 뿐, 실기록은 core(mark_outcome actor=human 게이트) 몫."""
+    return gate_human_for_ref(consume_gate_ref(rows), idxs, path=path, now=now)
 
 
 def stamp_mark_consumed(pref, idxs, ts=None, path=None):

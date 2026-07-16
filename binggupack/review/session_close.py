@@ -255,8 +255,11 @@ def _build_outcome_candidates(home=None, today=None):
     """당일 owner 지적(learn_outcome_queue 소비 대기) 후보 — read-only(소비 0 · 큐 write 0).
 
     ★B안(사람 확정): 세션 마무리 preview 에 "오늘 이런 지적이 있었는데 적중한 것 골라주세요"만
-    표시하고, 확정(hit_events 적재)은 owner 가 learn-consume --confirm "CONSUME <번호>" 로만.
+    표시하고, 확정(hit_events 적재)은 owner 채팅 '컨슘 <번호>' 1-발화 도장 → learn-consume
+    --confirm "CONSUME <번호>" 소비로만(2026-07-16 owner "save n 형식처럼" — 스탬프 패밀리).
     자동 확정 0 — 소비 경로(actor=human 게이트·dup_decision 차단)는 기존 learn_consume 재사용.
+    표시와 같은 시점에 소비 도장 staging(qi→발화 digest·전체 대기 축)을 best-effort 영속 —
+    도장('컨슘 N')이 preview 직후 바로 바인딩되게(실패 시 표시만·소비는 dry-run 재스테이징).
     ★번호(qi)는 learn_consume.load_pending 인덱스 그대로 — dry-run/CONSUME 번호와 동일 보장.
     today='YYYY-MM-DD'(UTC · 큐 ts 와 동일 기준) 주입식 — 미지정 시 현재 UTC 날짜.
     모듈/큐 부재 → graceful(available=False · 에러 0)."""
@@ -274,6 +277,19 @@ def _build_outcome_candidates(home=None, today=None):
                           "stance": LC.stance_of(entry),
                           "ai_answer": (entry.get("ai_answer") or "")[:60],
                           "feedback": fb[:60], "ts": entry.get("ts")})
+        # 소비 도장 staging — 번호 축 = load_pending 전체(qi) — dry-run 과 동일 파일·동일 digest
+        # 파생이라 재스테이징에도 ref 불변(큐가 안 변했으면 도장 유지). 실패 무해(best-effort).
+        try:
+            import hashlib as _hl
+            from binggupack.safety import gate_log as _gl
+            _all = [{"idx": _qi, "digest": _hl.sha256(
+                         (((e.get("evidence") or {}).get("feedback") or "")).encode("utf-8")
+                     ).hexdigest()[:16]}
+                    for _qi, (_li, e) in enumerate(LC.load_pending(qpath))]
+            if _all:
+                _gl.write_last_consume(_all)
+        except Exception:
+            pass
         return {"available": True, "count": len(items), "items": items,
                 "note": "확정은 사람만 — 자동 적재 0 · 번호는 learn-consume dry-run 과 동일"}
     except Exception:
@@ -420,8 +436,8 @@ def render_close_md(summary):
             lines.append("- [%s] %s · 사용자: %s" % (it.get("qi"), tag, it.get("feedback") or ""))
             if it.get("ai_answer"):
                 lines.append("  - AI 답변: %s" % it["ai_answer"])
-        lines.append('- 확정: `binggu learn-consume --confirm "CONSUME <번호>"` '
-                     "(사람 확정만 · 번호는 dry-run 과 동일 · 뒤집힌 건 `--verdict overturned`)")
+        lines.append('- 확정: 채팅에 **"컨슘 <번호>"** 한 줄(예: 컨슘 0 · 일괄 컨슘 0,1) — '
+                     "사람 도장만 · 번호는 위 [N] 그대로 · 뒤집힌 건 도장 후 `--verdict overturned` 요청")
         lines.append("> %s" % oc.get("note", "확정은 사람만 — 자동 적재 0"))
 
     return "\n".join(lines)
@@ -650,9 +666,9 @@ def _selftest():
               "T18 당일 후보만(전일·consumed 제외)·qi=learn-consume 소비 번호 보존·큐 write 0")
         check("### 4) 당일 owner 지적 후보" in md18
               and "[1] 반박(사용자가 AI 정정)" in md18 and "너도 제대로 안 읽었는데" in md18
-              and 'learn-consume --confirm "CONSUME' in md18
+              and '"컨슘 <번호>"' in md18
               and "전일 지적 항목" not in md18 and "이미 소비된 당일 항목" not in md18,
-              "T19 섹션4 렌더: 번호+stance(교환 축)+발화 발췌+CONSUME 안내 · 전일/consumed 미표시")
+              "T19 섹션4 렌더: 번호+stance(교환 축)+발화 발췌+컨슘 도장 안내 · 전일/consumed 미표시")
         # T20 후보 0건(타 일자) → 섹션 생략(노이즈 금지) · summary 키는 존재(count 0)
         s20 = build_close_summary(home=home, today="2026-07-14")
         md20 = render_close_md(s20)
