@@ -271,8 +271,12 @@ def _build_outcome_candidates(home=None, today=None):
     try:
         qpath = LC.queue_path(home)
         items = []
+        noise_skipped = 0
         for qi, entry in LC.load_pending_today(qpath, today=today):
             fb = (entry.get("evidence") or {}).get("feedback") or ""
+            if LC.is_noise_feedback(fb):
+                noise_skipped += 1    # 표시만 제외(실행보고·상태정정 류) — qi 축·큐 보존
+                continue
             items.append({"qi": qi, "outcome": entry.get("outcome"),
                           "stance": LC.stance_of(entry),
                           "ai_answer": (entry.get("ai_answer") or "")[:60],
@@ -290,8 +294,11 @@ def _build_outcome_candidates(home=None, today=None):
                 _gl.write_last_consume(_all)
         except Exception:
             pass
+        note = "확정은 사람만 — 자동 적재 0 · 번호는 learn-consume dry-run 과 동일"
+        if noise_skipped:
+            note += " · 노이즈 제외 %d건(실행보고·상태정정 류 · 큐 보존)" % noise_skipped
         return {"available": True, "count": len(items), "items": items,
-                "note": "확정은 사람만 — 자동 적재 0 · 번호는 learn-consume dry-run 과 동일"}
+                "noise_skipped": noise_skipped, "note": note}
     except Exception:
         return {"available": False, "count": 0, "items": [],
                 "note": "당일 후보 로드 실패(graceful 생략)"}
@@ -653,6 +660,8 @@ def _selftest():
              "evidence": {"feedback": "너도 제대로 안 읽었는데"}, "consumed": False},
             {"ts": "2026-07-13T02:00:00Z", "outcome": "hit", "queries": [],
              "evidence": {"feedback": "이미 소비된 당일 항목"}, "consumed": True},
+            {"ts": "2026-07-13T03:00:00Z", "outcome": "miss", "queries": [],
+             "evidence": {"feedback": "실행안돼"}, "consumed": False},
         ]
         qp.write_text("\n".join(json.dumps(e, ensure_ascii=False) for e in q_entries) + "\n",
                       encoding="utf-8")
@@ -662,13 +671,15 @@ def _selftest():
         md18 = render_close_md(s18)
         check(oc.get("available") and oc.get("count") == 1
               and oc["items"][0]["qi"] == 1 and oc["items"][0]["outcome"] == "miss"
+              and oc.get("noise_skipped") == 1
               and qp.stat().st_mtime_ns == q_mtime,
-              "T18 당일 후보만(전일·consumed 제외)·qi=learn-consume 소비 번호 보존·큐 write 0")
+              "T18 당일 후보만(전일·consumed·노이즈 제외)·qi 보존·noise_skipped=1·큐 write 0")
         check("### 4) 당일 owner 지적 후보" in md18
               and "[1] 반박(사용자가 AI 정정)" in md18 and "너도 제대로 안 읽었는데" in md18
-              and '"컨슘 <번호>"' in md18
-              and "전일 지적 항목" not in md18 and "이미 소비된 당일 항목" not in md18,
-              "T19 섹션4 렌더: 번호+stance(교환 축)+발화 발췌+컨슘 도장 안내 · 전일/consumed 미표시")
+              and '"컨슘 <번호>"' in md18 and "노이즈 제외 1건" in md18
+              and "전일 지적 항목" not in md18 and "이미 소비된 당일 항목" not in md18
+              and "실행안돼" not in md18,
+              "T19 섹션4 렌더: 컨슘 안내+노이즈 제외 표기 · 전일/consumed/노이즈 미표시")
         # T20 후보 0건(타 일자) → 섹션 생략(노이즈 금지) · summary 키는 존재(count 0)
         s20 = build_close_summary(home=home, today="2026-07-14")
         md20 = render_close_md(s20)

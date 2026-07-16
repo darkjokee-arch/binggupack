@@ -129,6 +129,30 @@ def load_pending_today(qpath, today=None):
             if str(entry.get("ts") or "").startswith(today)]
 
 
+# ── 노이즈 필터(v1 · 결정적) — '판단 지적'이 아닌 실행/상태 보고를 후보 표시에서 제외 ──
+# 7/16 owner: "지적후보 뽑는 로직이 허접 — 실행안돼/쓰는중 아니다 류는 쓸모없는 후보".
+# stance 감지기(user-prompt-learn-outcome.js)는 발화 극성만 보므로 도구 실패 보고·상태 정정처럼
+# 재발 방지 교훈 가치 0 인 교환이 섞인다. v1 은 좁은 규칙(점진 구현) — 실큐 로그로 보정.
+# ★qi 축 불변: 필터는 표시층(preview·session_close 후보)만 — load_pending/consume 번호 재편 0.
+#   순수 stance 발화("맞네"/"틀렸어"/"아니야 그거 아냐")는 큐 본래 신호라 유지.
+_NOISE_FEEDBACK_RES = (
+    # (a) 실행/도구 실패 보고 — 판단 지적 아님("실행안돼"/"에러남"/"안 열려"...)
+    re.compile(r"^\W*(실행\s?안\s?(돼|됨|되네?요?)|안\s?(돼요?|됨|되는데|되네)|에러\s?(났|남|야|네)?|"
+               r"오류\s?(났|남|네)?|버그\s?(야|네)?|멈췄?어?|안\s?열려|안\s?나와|안\s?나오는데|"
+               r"없는데|깨졌?(어|네)?|죽었?(어|네)?)\W*$"),
+    # (b) 상태 정정 — "(…)중 아니다/아니야"(지금 상태 서술 정정 · 교훈 아님)
+    re.compile(r"^\W*(?:\S+\s?){0,3}중\s?아니(다|야|에요|요)?\W*$"),
+)
+
+
+def is_noise_feedback(feedback):
+    """후보 가치 필터 — True = 노이즈(표시 제외·큐/qi 보존·소비는 여전히 가능)."""
+    fb = str(feedback or "").strip()
+    if not fb:
+        return True
+    return any(rx.match(fb) for rx in _NOISE_FEEDBACK_RES)
+
+
 def _mark_consumed(qpath, line_idx):
     """지정 라인만 consumed=true 로 원자 재작성(다른 라인 보존)."""
     lines = _load_lines(qpath)
@@ -149,7 +173,11 @@ def _mark_consumed(qpath, line_idx):
 def preview(ledger_path, qpath, home=None, top=3):
     pend = load_pending(qpath)
     items = []
+    noise_skipped = 0
     for qi, (_line_idx, entry) in enumerate(pend):
+        if is_noise_feedback((entry.get("evidence") or {}).get("feedback")):
+            noise_skipped += 1        # 표시만 제외 — qi 축·큐 보존(소비는 번호로 여전히 가능)
+            continue
         queries = entry.get("queries") or []
         recall_top = []
         if queries and ledger_path and os.path.exists(ledger_path):
@@ -170,7 +198,7 @@ def preview(ledger_path, qpath, home=None, top=3):
             "ts": entry.get("ts"),
             "recall_top": recall_top,
         })
-    return {"pending": len(pend), "items": items}
+    return {"pending": len(items), "items": items, "noise_skipped": noise_skipped}
 
 
 _STANCE_TAG = {"refutes": "반박(사용자가 AI 를 정정)", "accepts": "인정(AI 답변 수긍)"}
@@ -178,9 +206,14 @@ _STANCE_TAG = {"refutes": "반박(사용자가 AI 를 정정)", "accepts": "인�
 
 def render_preview_md(pv):
     n = pv.get("pending", 0)
+    ns = pv.get("noise_skipped", 0)
     if not n:
-        return "학습 큐: 소비 대기 0건. (owner 자연 피드백이 쌓이면 여기 표시됩니다.)"
-    out = ["학습 큐 소비 대기 %d건 (dry-run · 저장 0 · 축: 사용자 발화 → AI 답변 → 확인)" % n,
+        base = "학습 큐: 소비 대기 0건. (owner 자연 피드백이 쌓이면 여기 표시됩니다.)"
+        if ns:
+            base += " [노이즈 제외 %d건 — 실행보고·상태정정 류·큐 보존]" % ns
+        return base
+    out = ["학습 큐 소비 대기 %d건 (dry-run · 저장 0 · 축: 사용자 발화 → AI 답변 → 확인)%s"
+           % (n, " [노이즈 제외 %d건 — 큐 보존]" % ns if ns else ""),
            "  소비(에이전트 세션): 채팅에 \"컨슘 <번호>\" 한 줄 도장 → "
            "%s learn-consume --confirm \"CONSUME <번호>\""
            " [--verdict overturned] [--index k]" % invocation_prefix(), ""]
@@ -489,6 +522,26 @@ def _selftest():
             (not bad.get("consumed_any")) and bad.get("reason") == "qi_out_of_range"
             and mr.get("all_consumed") and len(mr.get("results")) == 3
             and len(pend15) == 0)
+
+        # T16 ★노이즈 필터(v1) — 실행보고·상태정정은 표시 제외, 순수 stance/판단 지적은 유지.
+        rec(16, "is_noise_feedback: 실행보고·상태정정 T / stance·판단지적 F",
+            is_noise_feedback("실행안돼") and is_noise_feedback("쓰는중 아니다")
+            and is_noise_feedback("에러남") and is_noise_feedback("")
+            and not is_noise_feedback("오 맞네") and not is_noise_feedback("아니야 그거 아냐")
+            and not is_noise_feedback("그 판단은 원인이 달라 — A가 아니라 B 때문이야"))
+
+        # T17 ★preview 노이즈 제외 — 표시만 제외(qi 축 보존·noise_skipped 집계·큐 write 0).
+        write_queue([
+            {"ts": "2026-07-13T21:00:00Z", "stance": "refutes", "queries": [],
+             "evidence": {"feedback": "실행안돼"}, "consumed": False},
+            {"ts": "2026-07-13T21:01:00Z", "stance": "refutes", "queries": [],
+             "evidence": {"feedback": "진짜 지적 — 원인은 B다"}, "consumed": False},
+        ])
+        pv17 = preview(ledger, qpath, home=tmp)
+        rec(17, "preview: 노이즈 1건 제외·유효 후보 qi=1 보존·noise_skipped=1",
+            pv17["pending"] == 1 and pv17["noise_skipped"] == 1
+            and pv17["items"][0]["qi"] == 1
+            and len(load_pending(qpath)) == 2)
 
     finally:
         db.close()
