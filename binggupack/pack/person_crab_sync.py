@@ -5,9 +5,12 @@
 문장(T3 통과분)을 문장당 1문서로 수출해 crab_pack_wire 로 개념/주장/증거 계층
 팩을 빌드하고, 같은 pack_name 재업로드 = 제자리 교체(package_update 실증·2026-07-06)
 로 서버 팩을 통째 갱신한다. 델타 추적이 필요 없어 상태는 content_hash 하나로 충분.
+제자리 교체(전체 재빌드)라 pack_update 재파싱 중복 노드 위험이 없다 — ingest 경로
+(person_pack_sync)와 달리 승격 플립 재업로드가 안전. 등급(후보/봉인 정본)은 문서
+본문 독립 줄로 병기하고 meta_sig 에 포함해 승격 시 재업로드를 트리거한다.
 
 안전 불변 (전부 _selftest 로 증명):
-  - 수집은 person_pack_sync._owner_sentences 재사용(T3 하드제외 동일 경계).
+  - 수집은 person_pack_sync._owner_sentences_graded 재사용(T3 하드제외 동일 경계).
   - 기본 dry_run. live 는 crab_pack_wire.upload_crab_pack 게이트 전부 상속
     (ENABLE env + confirm + cloud config + ZIP release_ready).
   - --auto 는 <home>/person_pack.json 의 "crab_auto_sync": true 가 있어야만 live
@@ -35,8 +38,12 @@ DEFAULT_PACK_NAME = "Binggu Person Ontology"    # ASCII 강제(서버 한글 키
 # 표시 문구 기본값(중립) — 사용자별 override 는 _crab_meta(env > person_pack.json > 기본).
 # 신규 사용자에게 owner 개인 호칭("사장님")이 노출되지 않도록 중립값을 기본으로 둔다.
 DEFAULT_PACK_TITLE = "개인 의사결정 원칙 온톨로지 (CrabAgent)"
-DEFAULT_PACK_PURPOSE = ("빙구팩 사용자 개인 온톨로지 — 사용자 화자로 확정 저장된 의사결정 원칙·판단을 "
-                        "개념/주장/증거 계층으로 구조화 (T3 하드제외 통과분·스키마 경로).")
+# 실제 내용물 정합 문구 — 후보(SAVE 도장)와 봉인정본(승격 완료)이 등급 표기와 함께 실린다.
+# 운영 person_pack.json 에 crab_pack_purpose override 가 있으면 이 기본값 정정은 전파되지
+# 않는다(override 우선) — 운영 config 갱신은 owner 몫.
+DEFAULT_PACK_PURPOSE = ("빙구팩 사용자 개인 온톨로지 — 사람 도장(SAVE)으로 저장된 원칙(후보)과 "
+                        "승격 완료된 봉인정본을 등급 표기와 함께 개념/주장/증거 계층으로 구조화 "
+                        "(T3 하드제외 통과분·스키마 경로).")
 DEFAULT_OWNER_LABEL = "사용자"                    # export_docs 문서 본문의 화자 호칭(개인화 override 가능)
 # 하위호환 별칭(기존 import 참조 보존) — 실제 사용은 _crab_meta().
 PACK_TITLE = DEFAULT_PACK_TITLE
@@ -102,25 +109,44 @@ def _content_hash(sentences):
     return hashlib.sha256("\n".join(sentences).encode("utf-8")).hexdigest()[:16]
 
 
+# 등급 독립 줄 — candidate 1=후보(SAVE 도장·승격 전)/0=봉인 정본(승격 완료).
+# '봉인 정본' 띄어쓰기는 의도: 등급 줄에 4자+ 연속 한글 토큰(crab_pack_wire.TOKEN_RX)을
+# 남기지 않아 derive_claims(30자 하한으로 이미 제외)/derive_queries(토큰 부재)에
+# 구조적으로 미채택 — 등급은 표기 전용.
+_GRADE_LINES = {1: "등급: 후보(사람 확정 전)", 0: "등급: 봉인 정본(사람 승인 완료)"}
+
+
 def export_docs(sentences, out_dir, owner_label=DEFAULT_OWNER_LABEL):
     """문장당 1문서 수출 — 파일명(=주제)이 문장 자체라 개념/질의 파생이 자기참조로 성립.
 
+    sentences 항목은 str 또는 (문장, candidate) 튜플 — 튜플이면 본문에 등급 독립 줄
+    (_GRADE_LINES)을 병기한다(str 은 기존 형식 유지·등급 미상은 표기 안 함).
     owner_label — 문서 본문의 화자 호칭. 신규 사용자엔 '사용자'(중립), owner 는
     person_pack.json 의 owner_label 로 개인 호칭 유지 가능."""
     out = Path(out_dir)
     if out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True)
-    for i, s in enumerate(sentences, 1):
+    for i, item in enumerate(sentences, 1):
+        s, cand = item if isinstance(item, tuple) else (item, None)
         safe = re.sub(r"\s+", "_", re.sub(r'[\\/:*?"<>|]', "_", s.strip()))
         if len(safe) > 60:
             safe = safe[:60] + "_" + hashlib.sha256(s.encode("utf-8")).hexdigest()[:8]
-        body = "\n".join([
+        # 본문 단언은 등급과 자기모순이 없게 분기 — 후보(candidate=1)에 "확정 저장" 단언 금지.
+        if cand == 0:
+            claim_line = "위 문장은 %s(owner) 화자로 확정 저장된(봉인 정본) 의사결정 원칙·판단이다." % owner_label
+        elif cand is not None:
+            claim_line = "위 문장은 %s(owner) 화자가 사람 도장(SAVE)으로 저장한 원칙·판단(후보)이다." % owner_label
+        else:
+            claim_line = "위 문장은 %s(owner) 화자로 확정 저장된 의사결정 원칙·판단이다." % owner_label
+        lines = [
             "# %s 판단 원칙" % owner_label,
             "%s 판단: %s" % (owner_label, s),
-            "위 문장은 %s(owner) 화자로 확정 저장된 의사결정 원칙·판단이다." % owner_label,
-        ])
-        (out / ("%s_%d.txt" % (safe, i))).write_text(body, encoding="utf-8")
+            claim_line,
+        ]
+        if cand is not None:
+            lines.append(_GRADE_LINES[0 if cand == 0 else 1])
+        (out / ("%s_%d.txt" % (safe, i))).write_text("\n".join(lines), encoding="utf-8")
     return len(sentences)
 
 
@@ -214,10 +240,11 @@ def sync(*, dry_run=True, confirm=False, force=False, env=None, ledger=None, hom
     out = {"status": None, "count": 0, "blocked": 0, "content_hash": None, "grade": None,
            "package_id": None, "pack_name": None, "tries": 0, "reason": None}
     try:
-        sentences, blocked = PPS._owner_sentences(ledger=ledger)
+        graded, blocked = PPS._owner_sentences_graded(ledger=ledger)
     except Exception as ex:  # noqa — 장부 부재/손상도 typed
         out.update({"status": "LEDGER_ERROR", "reason": type(ex).__name__})
         return out
+    sentences = [s for s, _ in graded]
     out.update({"count": len(sentences), "blocked": blocked})
     if not sentences:
         out.update({"status": "NO_SENTENCES"})
@@ -226,7 +253,12 @@ def sync(*, dry_run=True, confirm=False, force=False, env=None, ledger=None, hom
     meta = _crab_meta(home, env)
     # content_hash 에 표시 메타 서명 포함 — 제목/설명/화자 호칭을 바꾸면 재빌드·재업로드가
     # 트리거되도록(표시명만 바꿔도 서버 팩에 반영). 문장 불변 + 메타 불변이면 NO_CHANGE.
-    meta_sig = "meta:%s|%s|%s|%s" % (meta["title"], meta["purpose"], meta["owner_label"], meta["pack_name"])
+    # 등급 서명도 포함 — 승격 플립(candidate 1→0)이 문장 불변이어도 재업로드를 트리거해
+    # 서버 팩 등급 표기가 장부 승격 상태를 따라가게 한다.
+    grade_sig = hashlib.sha256(
+        "\n".join("%d|%s" % (c, s) for s, c in graded).encode("utf-8")).hexdigest()[:12]
+    meta_sig = "meta:%s|%s|%s|%s|grades:%s" % (meta["title"], meta["purpose"],
+                                               meta["owner_label"], meta["pack_name"], grade_sig)
     ch = _content_hash(sentences + ([xsig] if xsig else []) + [meta_sig])
     out["content_hash"] = ch
     st = load_state(home)
@@ -238,7 +270,7 @@ def sync(*, dry_run=True, confirm=False, force=False, env=None, ledger=None, hom
     work = Path(work_dir) if work_dir else Path(tempfile.mkdtemp(prefix="person_crab_"))
     data_dir = work / "data"
     zip_path = work / "person_crab_pack.zip"
-    export_docs(sentences, data_dir, owner_label=meta["owner_label"])
+    export_docs(graded, data_dir, owner_label=meta["owner_label"])
     budget = max(10, int(max_docs) - len(sentences))  # 총 문서 수 ≤ max_docs (finalize 한도)
     out["extra"] = merge_extra_sources(data_dir, home, max_bundle_docs=budget)
     b = build_crab_pack(data_dir, zip_path, meta["title"], meta["purpose"], min_queries=4,
@@ -286,9 +318,12 @@ def sync_auto(env=None, ledger=None, home=None, config_path=None, **inject):
 
 # ───────────────────────────── selftest ─────────────────────────────
 def _fixture_ledger(path, sentences):
+    # candidate 컬럼 포함(운영 스키마 정합) — graded SELECT 경로의 치명 회귀 방어.
+    # 기본 1(후보) = SAVE 직후 상태. 승격(0) 플립은 selftest 에서 UPDATE 로 검증.
     import sqlite3
     con = sqlite3.connect(str(path))
-    con.execute("CREATE TABLE nodes (id INTEGER PRIMARY KEY, sentence TEXT, speaker TEXT, state TEXT)")
+    con.execute("CREATE TABLE nodes (id INTEGER PRIMARY KEY, sentence TEXT, speaker TEXT,"
+                " state TEXT, candidate INTEGER DEFAULT 1)")
     for s in sentences:
         con.execute("INSERT INTO nodes (sentence, speaker, state) VALUES (?, 'owner', 'active')", (s,))
     con.execute("INSERT INTO nodes (sentence, speaker, state) VALUES ('AI 요약 문장이라 제외 대상이다', 'ai', 'active')")
@@ -446,6 +481,34 @@ def _selftest():
                    transport=transport, put_fn=lambda u, b, **k: 200,
                    post_fn=lambda u, h, **k: fin, sleep_fn=lambda s: None)
         chk("S18 메타·문장 모두 불변 → NO_CHANGE(메타 서명 안정)", s18["status"] == "NO_CHANGE")
+
+        # ── 등급 표기(candidate) — 승격 플립 = 재업로드 트리거 · 파생 미채택 ──
+        con = sqlite3.connect(led)
+        con.execute("UPDATE nodes SET candidate=0 WHERE sentence=?", (_FIX_SENTENCES[0],))
+        con.commit()
+        con.close()
+        s19 = sync(ledger=led, home=home, work_dir=work, dry_run=False, confirm=True, env=live_env,
+                   transport=transport, put_fn=lambda u, b, **k: 200,
+                   post_fn=lambda u, h, **k: fin, sleep_fn=lambda s: None)
+        chk("S19 승격 플립(candidate 1→0·문장 불변) → 등급 서명 변경으로 재업로드",
+            s19["status"] == "DONE")
+        bodies = "\n".join(p.read_text(encoding="utf-8")
+                           for p in sorted((Path(work) / "data").glob("*.txt")))
+        chk("S20 문서 본문 등급 독립 줄(후보/봉인 정본 병기)",
+            _GRADE_LINES[0] in bodies and _GRADE_LINES[1] in bodies)
+        s19b = sync(ledger=led, home=home, work_dir=work, dry_run=False, confirm=True, env=live_env,
+                    transport=transport, put_fn=lambda u, b, **k: 200,
+                    post_fn=lambda u, h, **k: fin, sleep_fn=lambda s: None)
+        chk("S19b 승격 반영 후 재실행 → NO_CHANGE(등급 서명 안정)", s19b["status"] == "NO_CHANGE")
+        # 등급 줄은 개념/주장/질의 파생에 미채택(표기 전용) — 4자+ 한글 토큰 부재로 구조 보장.
+        from binggupack.pack.crab_pack_wire import derive_claims, derive_queries, scan_data
+        ed3 = os.path.join(tmp, "ed3")
+        export_docs([(s, i % 2) for i, s in enumerate(_FIX_SENTENCES)], ed3)
+        docs3 = scan_data(ed3)
+        blob = json.dumps({"claims": derive_claims(docs3), "queries": derive_queries(docs3)},
+                          ensure_ascii=False)
+        chk("S21 등급 줄 derive_claims/derive_queries 미채택('등급'/'봉인' 토큰 0)",
+            "등급" not in blob and "봉인" not in blob)
 
     ok = all(c for _, c in checks)
     print("\nGATE=%s (%d/%d)" % ("GO" if ok else "NO-GO", sum(1 for _, c in checks if c), len(checks)))

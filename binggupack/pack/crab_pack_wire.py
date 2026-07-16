@@ -204,6 +204,8 @@ def build_crab_pack(data_dir, out_zip, title, purpose, *, min_queries=6, now_fn=
     {ok, grade, release_ready, failed_gates, counts, zip, leak_count, retrieval,
      concepts, claims, queries, reason}
     ok = grade 'A' + release_ready. 원본 문서는 ZIP 에 넣지 않는다(파생 청크만).
+    Claim 노드의 properties.status='candidate' 는 스키마 고정값(파생 주장=검증 전 후보)로,
+    장부 candidate 등급(문서 본문의 후보/봉인 정본 텍스트 표기)과는 무관하다.
     """
     out = {"ok": False, "grade": None, "release_ready": False, "failed_gates": [],
            "counts": {}, "zip": str(out_zip), "leak_count": 0, "retrieval": {},

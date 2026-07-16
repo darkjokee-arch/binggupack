@@ -30,6 +30,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import tempfile
 import unicodedata
@@ -43,26 +44,35 @@ for _p in (_ROOT, _HERE):
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 정규화 — 어떤 표면의 팩이든 '원칙 문장 집합'으로 환원해 layout 무관하게 비교 가능하게.
+# 등급 꼬리표 "(등급: 후보)"/"(등급: 정본)"(person_pack_sync 렌더)는 표기 전용이라
+# 비교 전 strip — 꼬리표 유무/승격 플립이 영구 DRIFT 오판을 만들지 않게 한다.
 # ─────────────────────────────────────────────────────────────────────────────
+_GRADE_TAIL_RX = re.compile(r"\s*\(등급:\s*[^)]*\)\s*$")
+
+
+def _strip_grade_tail(s: str) -> str:
+    return _GRADE_TAIL_RX.sub("", s or "").strip()
+
+
 def _norm_sentence(s: str) -> str:
-    return unicodedata.normalize("NFC", (s or "")).strip()
+    return _strip_grade_tail(unicodedata.normalize("NFC", (s or "")).strip())
 
 
 def _digest(sentences) -> str:
     """원칙 문장 집합의 순서 무관 content digest(정렬 후 sha256). 두 표면이 같은 로컬 빌드를
-    반영하면 digest 가 일치한다(문장 순서·layout·파일형식과 무관)."""
+    반영하면 digest 가 일치한다(문장 순서·layout·파일형식·등급 꼬리표와 무관)."""
     norm = sorted({_norm_sentence(s) for s in sentences if _norm_sentence(s)})
     blob = "\n".join(norm).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()[:16]
 
 
 def _sentences_from_md(text: str):
-    """개인 팩 .md 텍스트 → '- ' 불릿 원칙 문장."""
+    """개인 팩 .md 텍스트 → '- ' 불릿 원칙 문장(등급 꼬리표 strip)."""
     out = []
     for line in (text or "").splitlines():
         st = line.strip()
         if st.startswith("- "):
-            out.append(st[2:].strip())
+            out.append(_strip_grade_tail(st[2:].strip()))
     return out
 
 
@@ -411,6 +421,16 @@ def _selftest() -> int:
         ov = snapshot_view(omd)
         ck(ov["available"] and ov["version_digest"] == local_dig,
            "opencrab .md 파싱 · 순서 무관 digest 로컬 일치")
+
+        # (2b) 등급 꼬리표 부착 .md — strip 정규화로 여전히 로컬 digest 일치
+        #      (등급 도입/승격 플립이 영구 DRIFT 오판을 만들지 않음).
+        omd_g = os.path.join(tmp, "opencrab_pack_graded.md")
+        with open(omd_g, "w", encoding="utf-8") as f:
+            f.write("\n".join("- %s (등급: %s)" % (s, "후보" if i % 2 else "정본")
+                              for i, s in enumerate(principles)))
+        ovg = snapshot_view(omd_g)
+        ck(ovg["available"] and ovg["version_digest"] == local_dig,
+           "등급 꼬리표 .md → strip 정규화로 digest 로컬 일치(DRIFT 오판 차단)")
 
         # (3) 두 표면 모두 로컬과 같음 → IN_SYNC · cross=AGREE.
         local = {"available": True, "version_digest": local_dig, "principle_count": 3,
