@@ -964,7 +964,7 @@ def _gate_log_for_ledger(ledger):
                         os.path.basename(_sg.gate_path()))
 
 
-def _resolve_human_ctx(ledger, save_refs=None, confirm=None):
+def _resolve_human_ctx(ledger, save_refs=None, confirm=None, stamp_ctx=None):
     """운영 write 의 'human' 승격 — 사람 증명 = "preview + 사람의 save n 입력" 단일 원칙.
 
     save_refs: list[(preview_ref: str, indices: list[int])] | None — save-n 참조 바인딩 대조 대상.
@@ -992,6 +992,14 @@ def _resolve_human_ctx(ledger, save_refs=None, confirm=None):
         ctx["confirm"] = confirm
     if os.environ.get("BINGGU_STRICT_HUMAN_GATE", "").strip():
         print("NOTE: BINGGU_STRICT_HUMAN_GATE 는 deprecated no-op 입니다(strict 가 기본 · fail-open 불가).")
+    # 0) intel-loop 도장(recall/promote) — 호출측이 gate_human_for_recall/promote 로 사전 검증한
+    #    사람 도장. save_gate_ref 와 동일 규약(재계산 ref 대조 통과)의 recall/promote 도메인 승격.
+    #    subscript 할당(dict 리터럴 아님) — approval-origin 인벤토리 계약(binggu.py CLI 진입점
+    #    {"actor":"human"} 리터럴 0)을 지키며 human 승격을 이 단일 해소 지점으로 집중한다.
+    if stamp_ctx is not None:
+        ctx["actor"] = "human"
+        ctx["actor_source"] = stamp_ctx
+        return ctx
     # 1) save-n 참조 바인딩 (hook 이 쓴 (preview_ref, idx) — AI 는 UserPromptSubmit 를 못 거쳐 위조 불가)
     try:
         import binggu_save_gate as _sg
@@ -1461,8 +1469,8 @@ def _mark_from_recall(a, ledger, outcome):
         print('  채팅에 정확형 1줄로 "%s %d" 를 입력한 뒤 다시 실행하세요.'
               % ("히트" if outcome == "hit" else "미스", idx))
         return 1
-    # 사람 증명 = 도장(재계산 ref 대조 통과) — save_gate_ref 와 동일 규약의 recall 도메인 승격.
-    ctx = {"actor": "human", "actor_source": "recall_stamp_ref"}
+    # 사람 증명 = 도장(재계산 ref 대조 통과) — _resolve_human_ctx 경유(인벤토리 계약: 리터럴 0).
+    ctx = _resolve_human_ctx(ledger, stamp_ctx="recall_stamp_ref")
     query = st.get("query") or ""
     domain = st.get("domain") or None
     db, _ = _open(ledger)
@@ -1748,11 +1756,10 @@ def cmd_promote(a):
         # staging 변조 전부 False) ② CLAUDECODE = deny 전용 ③ 터미널 직접 입력 = 사람.
         gate_p = _gate_log_for_ledger(ledger)
         if GL.gate_human_for_promote(rows, [a.n], path=gate_p):
-            ctx = {"actor": "human", "actor_source": "promote_stamp_ref"}
-        elif os.environ.get("CLAUDECODE"):
-            ctx = {"actor": "reader", "actor_source": "agent_session_unanchored"}
+            ctx = _resolve_human_ctx(ledger, stamp_ctx="promote_stamp_ref")
         else:
-            ctx = {"actor": "human", "actor_source": "cli_command"}
+            # 미도장 → _resolve_human_ctx 2·3분기(CLAUDECODE deny / 터미널 cli_command)와 동일.
+            ctx = _resolve_human_ctx(ledger)
         import binggu_publish_p5_promote as P5
         backup_dir = os.path.join(os.path.dirname(ledger), "_backup")
         # tag=timestamp — 백업 파일명 유니크(연속 승격 덮어씀 방지). .sqlite 확장자로 restore 목록 노출.
