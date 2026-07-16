@@ -27,6 +27,7 @@ nonce(회상 봉인):
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import sys
 
@@ -243,6 +244,129 @@ def mark_exchange_uttered(db, feedback, ts, stance, verdict, ctx, domain=None, a
             "anchor": "utterance", "ai_answer": (ai_answer or "")[:70]}
 
 
+# ---------------- 단순판 verdict (2026-07-16 owner) — 개방 기록 트랙 ----------------
+
+VERDICT_LOG_NAME = "verdict_log.jsonl"
+_VERDICT_SUBTYPE = "ai판정"
+
+
+def _verdict_log_path(home):
+    return os.path.join(str(home), VERDICT_LOG_NAME)
+
+
+def record_verdict(db, home, owner_claim, ai_claim, who_right, evidence, ts=None, domain=None):
+    """★단순판(2026-07-16 owner "내가 말하고 니가 찾아보니 누가 맞았는지만 체크하면 되는거").
+
+    논쟁이 실측으로 판가름 난 **그 순간** AI 가 즉시 기록하는 개방 기록 트랙 — 큐·세션마무리
+    표·컨슘 도장 의식을 전부 대체한다(구 파이프라인은 학습큐 §supersede 참조). 사람 도장
+    게이트를 요구하지 않는 유일한 hit_events 경로이며, 대신 3중 방어:
+      - evidence(실측 증거 1줄) 필수 — 증거 없는 기록 거부(fail-closed)
+      - subtype='ai판정' 라벨 — 사람 확정 행과 등급 구분(신뢰서열: SAVE 확정 > 자동기록 > AI 추론).
+        get_hit_rate 는 subtype 무필터라 적중률에 합류하되 라벨은 영구 보존(후속 tier 분리 가능)
+      - overturn_verdict(owner 1-발화 정정)로 언제든 반전 — 기록 트랙이라 정정 자유
+    귀속(mark_exchange_uttered 표와 동일 방향): who_right='owner' → owner(주장,hit)+ai(답변,miss)
+    / 'ai' → 반대. dup = 같은 논쟁(주장쌍 digest) 재기록 all-or-nothing skip.
+    사이드카 verdict_log.jsonl 에 원문·증거 append(뒤집기 번호 축·감사용 — DB 행은 텍스트 미저장).
+    """
+    oc_claim = (owner_claim or "").strip()
+    ai_c = (ai_claim or "").strip()
+    ev = (evidence or "").strip()
+    if who_right not in ("owner", "ai"):
+        return {"recorded": False, "reason": "invalid_who_right"}
+    if not oc_claim or not ai_c:
+        return {"recorded": False, "reason": "empty_claim"}
+    if not ev:
+        return {"recorded": False, "reason": "evidence_required"}
+    anchor_raw = (oc_claim + _UNIT_SEP + ai_c).encode("utf-8", "replace")
+    claims_hash = hashlib.sha256(anchor_raw).hexdigest()[:16]
+    node_id = "verdict:" + claims_hash
+    # dup 키 = 논쟁(주장쌍)만 — 증거를 바꿔 같은 논쟁을 재기록하는 이중계상 차단(정정은 overturn).
+    did = HIT._decision_id(node_id, claims_hash)
+    dom = HIT._domain_norm(domain)
+    owner_oc = "hit" if who_right == "owner" else "miss"
+    rows = [("owner", "주장", owner_oc),
+            ("ai", "답변", "miss" if owner_oc == "hit" else "hit")]
+    for speaker, _k, _o in rows:
+        if HIT._dup_exists(db, did, node_id, speaker):
+            return {"recorded": False, "reason": "dup_decision", "node_id": node_id}
+    now = HIT._now_iso(ts)
+    for speaker, kind, oc in rows:
+        db.con.execute(
+            "INSERT INTO hit_events(node_id,speaker,kind,outcome,subtype,ts,domain,context_hash,decision_id) "
+            "VALUES(?,?,?,?,?,?,?,?,?)",
+            (node_id, speaker, kind, oc, _VERDICT_SUBTYPE, now, dom, None, did))
+    db.con.commit()
+    entry = {"ts": now, "who_right": who_right, "owner_claim": oc_claim, "ai_claim": ai_c,
+             "evidence": ev, "node_id": node_id, "decision_id": did, "domain": dom,
+             "overturned": False}
+    try:
+        with open(_verdict_log_path(home), "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass  # 사이드카 실패는 DB 기록에 비치명(뒤집기 번호 축만 잃음)
+    return {"recorded": True, "who_right": who_right, "node_id": node_id,
+            "decision_id": did, "domain": dom,
+            "rows": [{"speaker": s, "kind": k, "outcome": o} for s, k, o in rows]}
+
+
+def list_verdicts(home, limit=10):
+    """사이드카 최근 판정 목록 — [(seq, entry)] (seq = 전체 로그 상 1-base 순번·정정에도 불변)."""
+    p = _verdict_log_path(home)
+    out = []
+    if not os.path.exists(p):
+        return out
+    with open(p, encoding="utf-8") as f:
+        for i, ln in enumerate(f, 1):
+            ln = ln.strip()
+            if not ln:
+                continue
+            try:
+                out.append((i, json.loads(ln)))
+            except Exception:
+                continue
+    return out[-limit:] if limit else out
+
+
+def overturn_verdict(db, home, seq):
+    """owner 1-발화 정정("뒤집어 N") — seq(list_verdicts 순번)의 판정을 반전.
+
+    개방 기록 트랙의 owner 지시 정정: hit_events 두 행의 outcome 을 반전(UPDATE) +
+    subtype='ai판정:정정' 마킹, 사이드카 해당 라인 overturned=true·who_right 반전(원자 재작성 —
+    learn_consume._mark_consumed 와 동일 방식). 이미 정정된 건 재정정 거부(핑퐁 방지)."""
+    p = _verdict_log_path(home)
+    if not os.path.exists(p):
+        return {"overturned": False, "reason": "no_verdict_log"}
+    with open(p, encoding="utf-8") as f:
+        lines = [ln.rstrip("\n") for ln in f]
+    idx = int(seq) - 1
+    real = [i for i, ln in enumerate(lines) if ln.strip()]
+    if idx < 0 or idx >= len(real):
+        return {"overturned": False, "reason": "seq_out_of_range", "count": len(real)}
+    li = real[idx]
+    try:
+        entry = json.loads(lines[li])
+    except Exception:
+        return {"overturned": False, "reason": "corrupt_entry"}
+    if entry.get("overturned"):
+        return {"overturned": False, "reason": "already_overturned"}
+    did = entry.get("decision_id")
+    flipped = "ai" if entry.get("who_right") == "owner" else "owner"
+    db.con.execute(
+        "UPDATE hit_events SET outcome=CASE outcome WHEN 'hit' THEN 'miss' ELSE 'hit' END,"
+        " subtype=? WHERE decision_id=?", (_VERDICT_SUBTYPE + ":정정", did))
+    db.con.commit()
+    entry["overturned"] = True
+    entry["who_right"] = flipped
+    entry["overturned_at"] = HIT._now_iso(None)
+    lines[li] = json.dumps(entry, ensure_ascii=False)
+    tmp = p + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + ("\n" if lines else ""))
+    os.replace(tmp, p)
+    return {"overturned": True, "seq": int(seq), "who_right_now": flipped,
+            "decision_id": did}
+
+
 # ---------------- selftest (temp DB · 운영 write 0) ----------------
 
 def _selftest():
@@ -394,6 +518,37 @@ def _selftest():
         rec(15, "교환 게이트(G4_no_auto·invalid_stance·invalid_verdict → 기록 0)",
             re5.get("reason") == "G4_no_auto" and re6.get("reason") == "invalid_stance"
             and re7.get("reason") == "invalid_verdict" and b15 == a15)
+
+        # T16~T19 ★단순판 verdict(2026-07-16 owner) — 개방 기록 트랙(증거 필수·라벨·정정)
+        v1 = record_verdict(db, tmp, "커넥터 이미 30개 뜬다", "재등록 필요하다",
+                            "owner", "curl tools/list 30도구 정상 실증")
+        vrows = set(db.con.execute(
+            "SELECT speaker, outcome, subtype FROM hit_events WHERE decision_id=?",
+            (v1.get("decision_id"),)).fetchall())
+        rec(16, "verdict owner맞음 → owner(주장,hit)+ai(답변,miss)+subtype='ai판정'+사이드카",
+            v1.get("recorded")
+            and vrows == {("owner", "hit", "ai판정"), ("ai", "miss", "ai판정")}
+            and len(list_verdicts(tmp)) == 1)
+        v2 = record_verdict(db, tmp, "커넥터 이미 30개 뜬다", "재등록 필요하다",
+                            "owner", "다른 증거로 재기록 시도")
+        v3 = record_verdict(db, tmp, "주장A", "주장B", "ai", "")
+        v4 = record_verdict(db, tmp, "", "주장B", "owner", "증거")
+        rec(17, "verdict 방어 3종 — 같은 논쟁 dup skip·증거 없음 거부·빈 주장 거부",
+            v2.get("reason") == "dup_decision" and v3.get("reason") == "evidence_required"
+            and v4.get("reason") == "empty_claim")
+        ov = overturn_verdict(db, tmp, 1)
+        vrows2 = set(db.con.execute(
+            "SELECT speaker, outcome, subtype FROM hit_events WHERE decision_id=?",
+            (v1.get("decision_id"),)).fetchall())
+        ov2 = overturn_verdict(db, tmp, 1)
+        rec(18, "verdict 뒤집기 — outcome 반전+':정정' 마킹+사이드카 반영·재정정 거부",
+            ov.get("overturned") and ov.get("who_right_now") == "ai"
+            and vrows2 == {("owner", "miss", "ai판정:정정"), ("ai", "hit", "ai판정:정정")}
+            and list_verdicts(tmp)[0][1].get("overturned") is True
+            and ov2.get("reason") == "already_overturned")
+        ov3 = overturn_verdict(db, tmp, 9)
+        rec(19, "verdict 뒤집기 범위 밖 → seq_out_of_range(무해)",
+            ov3.get("reason") == "seq_out_of_range")
 
     finally:
         db.close()
