@@ -9,14 +9,20 @@
 (구 render_block 나열 형식은 대체됐고, 함수만 단위 재사용 위해 잔류. 접근 가능한 구조화
 mandates(옵션 <home>/preflight_mandates.json)가 있으면 detect_conflicts 로 충돌 조언까지.)
 
-이 hook 이 하는 일은 "정보(조언) 표시"뿐 — 강제·차단·저장은 0이다.
-  - read-only 회상(binggu_recall.preflight_context) 만 호출 → ledger / 운영 store write 0.
+이 hook 이 하는 일은 "정보(조언) 표시 + 도장 소비용 staging 포인터 기록" — 강제·차단·ledger 저장은 0이다.
+  - read-only 회상(binggu_recall.preflight_context) 만 호출 → ledger write 0.
   - stdout 으로 출력하면 Claude Code 가 그 텍스트를 컨텍스트로 주입한다(=상단 자동주입).
   - 차단 0: 항상 exit 0. 사람이 읽고 판단·진행한다(무승인 자동적용 0).
+  - 작업A2(intel loop): 회상이 표시될 때만 <home>/last_recall_candidates.json(도장 소비용
+    idx→node_id staging · ledger 아님·redact 정화 query)을 덮어쓰고 도장 번호 푸터를 병기한다.
+    owner 채팅 1-발화("히트 N"/"미스 N")가 사람 도장 — 기록은 save_gate hook, 소비는
+    binggu mark-hit/miss --from-recall. 도장 정확형 발화 자체는 회상/staging 전체 skip(MF3 —
+    도장 발화 위에 staging 이 덮이면 도장 대상 ref 가 어긋나는 레이스 차단).
 
 안전 불변 (전부 --selftest 로 증명):
   - 기본 OFF: ~/.binggupack/preflight_enabled 플래그가 없으면 즉시 종료(타 세션 무부담, import 전 차단).
-  - read-only: preflight_context 는 ledger 를 mode=ro 로만 연다(write 0). 운영 store 불변.
+  - read-only ledger: preflight_context 는 ledger 를 mode=ro 로만 연다(ledger write 0).
+    write 는 도장 staging 파일(last_recall_candidates.json) 덮어쓰기 한 곳뿐(회상 표시 시에만).
   - 빈 그래프 graceful: 신규 사용자(장부 없음/노드 0) → 출력 0 · 에러 0.
   - 무관 작업: 관련 기억 0 → 출력 0(소음 0). 관련 있을 때만 상단 블록 주입.
   - scope 게이트: 기본 content_only(관련성 게이트된 content block 만 노출) · 전역 trust·owner 원칙은
@@ -258,6 +264,63 @@ def _render_person_principles(ledger_path, prompt, cwd, RC, max_n=4):
     return "\n".join(lines)
 
 
+def _is_stamp_prompt(prompt):
+    """도장 정확형 발화(HIT/히트/MISS/미스/PROMOTE/승격/SAVE 계열 fullmatch) 판별 — MF3 자기 트리거 가드.
+
+    도장 발화 위에 회상이 다시 돌면 staging 이 덮여 도장 대상(ref)이 어긋난다 → 해당 발화는
+    회상 주입·staging write 전체 skip. 판정은 gate_log 파서(발화 전체/줄단위 fullmatch)에 위임 —
+    문장 속 언급("그거 히트 3 어쩌고")은 도장이 아니므로 통과. 판별 실패는 비도장 취급(예외 흡수)."""
+    try:
+        rr = str(_repo_root())
+        if rr not in sys.path:
+            sys.path.insert(0, rr)
+        from binggupack.safety import gate_log as GL
+        p = str(prompt or "")
+        return bool(GL.parse_save_indices(p) or GL.parse_hit_stamps(p)
+                    or GL.parse_promote_indices(p))
+    except Exception:
+        return False
+
+
+def _render_stamp_footer(res, prompt):
+    """회상 도장 번호 블록 + staging 기록(작업A2 — 사람 도장 = owner 채팅 1-발화 "히트 N").
+
+    표시 순서(1-base)→node_id 를 <home>/last_recall_candidates.json 에 영속(gate_log.
+    write_last_recall)하고 같은 번호를 화면에 보여준다 — raw node_id 미노출(claim 발췌만).
+    query 는 fresh_index._leak_safe(redact+독립검증) 정화 후 영속(평문 시크릿/PII 미영속).
+    ledger 는 여전히 mode=ro(위 read-only 불변). staging write 실패 시 번호 블록도 미표시
+    (번호↔staging 불일치 차단). 모든 예외 흡수 → None(hook 무방해)."""
+    try:
+        rr = str(_repo_root())
+        if rr not in sys.path:
+            sys.path.insert(0, rr)
+        from binggupack.safety import gate_log as GL
+        ordered, seen = [], set()
+        for group in ((res or {}).get("remember") or [], (res or {}).get("avoid_patterns") or [],
+                      (res or {}).get("preferences") or []):
+            for n in group:
+                nid = n.get("node_id")
+                if nid and nid not in seen:
+                    seen.add(nid)
+                    ordered.append((nid, (n.get("claim") or n.get("sentence") or "")[:60]))
+        if not ordered:
+            return None
+        try:
+            from binggupack.pack.fresh_index import _leak_safe
+            safe_q, _ok = _leak_safe(str(prompt or "")[:1000])
+        except Exception:
+            safe_q = ""  # 정화기 부재 → 원문 미영속(보수적 blank · 멱등키만 약화)
+        GL.write_last_recall([nid for nid, _c in ordered], query=safe_q,
+                             surface="preflight_hook")
+        lines = ['## 회상 도장 번호 (유용했으면 채팅 정확형 1줄 "히트 N" · 아니면 "미스 N")']
+        for i, (_nid, claim) in enumerate(ordered, 1):
+            lines.append("  %d. %s" % (i, claim))
+        lines.append("(도장 후 소비: binggu mark-hit --from-recall --index N — 자동 기록 0 · 사람 도장만)")
+        return "\n".join(lines)
+    except Exception:
+        return None
+
+
 def _resolve_scope(home, dom=None):
     """세션 scope 판정 → (level, domain, reason). level ∈ {'off','content_only','full'}.
 
@@ -320,6 +383,10 @@ def _run(data):
     # 4) 사람 입력(prompt/cwd)에서만 회상 — read-only · write 0
     try:
         prompt = data.get("prompt", "") or ""
+        # MF3 자기 트리거 가드: 도장/SAVE 정확형 발화 → 회상 주입·staging write 전체 skip
+        #   (save_gate hook 이 이 발화를 직전 staging 에 도장하는 중 — 덮어쓰기 레이스 차단).
+        if _is_stamp_prompt(prompt):
+            return None
         cwd = data.get("cwd") or os.getcwd()
         # scope 게이트(단일 지점 · 별경로 누출 0): 세션 in-scope 판정 → off/content_only/full.
         try:
@@ -341,7 +408,9 @@ def _run(data):
         #   positively in-scope(full)일 때만 노출(Fable5 E 전역 누출 차단). read-only·관련 없으면 소음 0.
         person = _render_person_principles(str(ledger), prompt, cwd, RC) if level == "full" else None
         trust = _render_trust(str(ledger)) if level == "full" else None
-        parts = [b for b in (block, person, trust) if b]
+        # 작업A2: 조언이 실제 표시될 때만 도장 staging+번호 푸터(표시 0 이면 staging 도 0 — stale 덮어쓰기 방지).
+        stamp = _render_stamp_footer(res, prompt) if block else None
+        parts = [b for b in (block, person, trust, stamp) if b]
         return "\n\n".join(parts) if parts else None
     except Exception:
         return None
@@ -691,6 +760,38 @@ def _selftest():
         # T25d mandates 로드·detect_conflicts 는 read-only — ledger mtime/size 불변(write 0)
         check((ledger.stat().st_mtime_ns, ledger.stat().st_size) == mand_before,
               "T25d conflicts 경로(파일 read + detect_conflicts) 전후 ledger 불변(write 0)")
+
+        # ── T26/T27 작업A2 intel loop: 도장 번호 푸터 + staging write · MF3 자기 트리거 가드 ──
+        # T26 조언 블록 표시 시 → 번호 푸터 병기 + staging(idx→node_id) 기록 · raw node_id 미노출
+        stg = home / "last_recall_candidates.json"
+        r = call({"hook_event_name": "UserPromptSubmit", "prompt": MATCH, "cwd": repo_cwd})
+        stg_items = []
+        if stg.exists():
+            stg_items = (json.loads(stg.read_text(encoding="utf-8")) or {}).get("items") or []
+        check("회상 도장 번호" in r.stdout and '"히트 N"' in r.stdout
+              and len(stg_items) >= 1
+              and all(i.get("idx") == n + 1 for n, i in enumerate(stg_items))
+              and "node:CONV:aa01" not in r.stdout,
+              "T26 조언 표시 → 도장 번호 푸터 + staging 기록(idx=번호·raw node_id 미노출)")
+        # T26b 회상 표면의 write 는 staging 뿐 — ledger 는 여전히 불변(read-only 불변 유지)
+        mt26 = (ledger.stat().st_mtime_ns, ledger.stat().st_size)
+        call({"hook_event_name": "UserPromptSubmit", "prompt": MATCH, "cwd": repo_cwd})
+        check((ledger.stat().st_mtime_ns, ledger.stat().st_size) == mt26,
+              "T26b staging write 경로에서도 ledger 불변(write 는 staging 파일 한 곳뿐)")
+
+        # T27 MF3: 도장 정확형 발화("히트 1"/"SAVE 1"/"승격 2") → 회상 주입·staging 덮어쓰기 전체 skip
+        #   (도장 발화 위에 staging 이 덮이면 도장 대상 ref 가 어긋나는 레이스 차단)
+        before_stg = stg.read_bytes()
+        for _p in ("히트 1", "미스 2", "SAVE 1", "승격 2"):
+            r = call({"hook_event_name": "UserPromptSubmit", "prompt": _p, "cwd": repo_cwd})
+            check(r.returncode == 0 and r.stdout.strip() == "",
+                  "T27 도장 발화 '%s' → 주입 skip(침묵)" % _p)
+        check(stg.read_bytes() == before_stg,
+              "T27e 도장 발화 4종 후 staging 불변(덮어쓰기 레이스 차단)")
+        # T27f 문장 속 언급("그거 히트 3 ...")은 도장이 아님 — 가드 통과(단위 판별로 확인)
+        check(_is_stamp_prompt("그거 히트 3 어쩌고 얘기") is False
+              and _is_stamp_prompt("히트 1") is True and _is_stamp_prompt("승격 2") is True,
+              "T27f _is_stamp_prompt: 정확형만 skip(문장 속 언급은 통과)")
 
         print(f"\nGATE={'GO' if ok else 'NO-GO'}")
         return 0 if ok else 1

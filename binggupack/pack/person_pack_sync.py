@@ -8,6 +8,9 @@ opencrab_pack_update 를 호출한다. 실제 클라우드 호출은 MCP(Agent) 
 
 파이프:
   1. ledger 의 speaker=owner active 노드 → T3 필터(PII·과거사 하드제외) → pack text.
+     문장마다 등급 꼬리표를 병기: candidate=1 → "(등급: 후보)"(SAVE 도장·승격 전) ·
+     candidate=0 → "(등급: 정본)"(봉인 승격 완료). 등급은 표기 전용 — 델타 추적
+     (_sent_hash)은 원문 문장 기준이라 승격 플립은 델타 0(재업로드 0).
   2. 이전 스냅샷(person_pack_last.json)의 content_hash 와 비교.
   3. NO_CHANGE / UPDATE_NEEDED / BASELINE_SET 판정(JSON) 반환.
   4. Agent 가 업로드 성공하면 --confirm 으로 baseline 갱신(다음 변경 감지 기준).
@@ -116,9 +119,9 @@ def record_pack_id(pack_id, title=None, baseline=True, ledger=None):
         json.dump(c, f, ensure_ascii=False, indent=2)
     absorbed = 0
     if baseline:
-        sentences, _b = _owner_sentences(ledger=ledger)
-        cur = [_sent_hash(s) for s in sentences]
-        save_state(_hash(_render_pack(sentences)), len(sentences),
+        graded, _b = _owner_sentences_graded(ledger=ledger)
+        cur = [_sent_hash(s) for s, _ in graded]
+        save_state(_hash(_render_pack(graded)), len(graded),
                    uploaded_hashes=cur, pack_id=pid)
         absorbed = len(cur)
     return {"status": "OK", "pack_id": pid, "config": path, "absorbed": absorbed}
@@ -148,34 +151,69 @@ def _pack_header(label=None):
 _PACK_HEADER = _pack_header()
 
 
-def _owner_sentences(ledger=None):
-    """owner active 노드 → T3 통과 uniq 문장 리스트. 반환 (uniq_sentences, blocked_count)."""
+def _owner_sentences_graded(ledger=None):
+    """owner active 노드 → T3 통과 uniq (문장, candidate) 리스트. 반환 (graded, blocked_count).
+
+    candidate: 1=후보(SAVE 도장·승격 전) · 0=정본(봉인 승격 완료). 구 ledger(candidate
+    컬럼 부재)는 전부 후보(1)로 폴백 — 승격(사람 승인)을 과대 표기하지 않는 방향.
+    같은 문장이 등급 충돌로 중복이면 정본(0) 우선(첫 등장 순서 유지).
+    T3 필터(filter_uploadable) 호출 위치·순서는 기존 _owner_sentences 와 동일."""
     L = ledger or _ledger()
     con = sqlite3.connect("file:%s?mode=ro" % str(L).replace("\\", "/"), uri=True)
     try:
-        rows = con.execute(
-            "SELECT sentence FROM nodes WHERE speaker='owner' AND state='active'").fetchall()
+        cols = {r[1] for r in con.execute("PRAGMA table_info(nodes)")}
+        if "candidate" in cols:
+            rows = con.execute(
+                "SELECT sentence, candidate FROM nodes"
+                " WHERE speaker='owner' AND state='active'").fetchall()
+        else:
+            rows = [(r[0], 1) for r in con.execute(
+                "SELECT sentence FROM nodes WHERE speaker='owner' AND state='active'")]
     finally:
         con.close()
-    items = [{"sentence": r[0]} for r in rows if r[0]]
+    # candidate 정규화: 0(정본 확정)만 정본, NULL/기타는 후보(1) — fail-closed.
+    items = [{"sentence": r[0], "candidate": 0 if r[1] == 0 else 1} for r in rows if r[0]]
     fr = filter_uploadable(items)
-    seen, uniq = set(), []
+    grade, order = {}, []
     for it in fr["ok"]:
         s = (it["sentence"] or "").strip()
-        if s and s not in seen:
-            seen.add(s)
-            uniq.append(s)
-    return uniq, len(fr["blocked"])
+        if not s:
+            continue
+        if s in grade:
+            grade[s] = min(grade[s], it["candidate"])  # 등급 충돌 → 정본(0) 우선
+        else:
+            grade[s] = it["candidate"]
+            order.append(s)
+    return [(s, grade[s]) for s in order], len(fr["blocked"])
+
+
+def _owner_sentences(ledger=None):
+    """owner active 노드 → T3 통과 uniq 문장 리스트. 반환 (uniq_sentences, blocked_count).
+    시그니처 불변(기존 소비처 무파급) — 등급이 필요하면 _owner_sentences_graded."""
+    graded, blocked = _owner_sentences_graded(ledger=ledger)
+    return [s for s, _ in graded], blocked
+
+
+def _grade_tail(candidate):
+    """등급 꼬리표 — 1=후보(SAVE 도장·승격 전) / 0=정본(봉인 승격 완료)."""
+    return "(등급: 후보)" if candidate else "(등급: 정본)"
+
+
+def _bullet(item):
+    """불릿 1줄 — (문장, candidate) 튜플이면 등급 꼬리표 병기, str 이면 기존 형식 유지."""
+    if isinstance(item, tuple):
+        return "- %s %s" % (item[0], _grade_tail(item[1]))
+    return "- " + item
 
 
 def _render_pack(sentences, label=None):
-    return "\n".join(_pack_header(label) + ["- " + s for s in sentences])
+    return "\n".join(_pack_header(label) + [_bullet(s) for s in sentences])
 
 
 def build_pack_text(ledger=None):
-    """owner active 노드 → T3 통과분 → pack text. 반환 (text, ok_count, blocked_count)."""
-    uniq, blocked = _owner_sentences(ledger=ledger)
-    return _render_pack(uniq), len(uniq), blocked
+    """owner active 노드 → T3 통과분 → pack text(등급 꼬리표 포함). 반환 (text, ok_count, blocked_count)."""
+    graded, blocked = _owner_sentences_graded(ledger=ledger)
+    return _render_pack(graded), len(graded), blocked
 
 
 def load_state():
@@ -221,7 +259,11 @@ def _sent_hash(s):
 
 def sync(baseline=False, write_text=None, ledger=None):
     """변경 감지. baseline=True → 현재 상태를 기준으로 기록(업로드 안 함).
-    반환 {status, pack_id, count, blocked, hash, ...}."""
+    반환 {status, pack_id, count, blocked, hash, ...}.
+
+    주의(등급 표기): 등급 꼬리표 도입/승격 플립(candidate 1→0)은 렌더 변경이라
+    full sync 가 UPDATE_NEEDED 를 낸다. 전체 pack_update 재파싱은 기존 문장을
+    다시 파싱해 중복 노드를 만들 위험 — 업로드는 델타(sync_delta) 우선."""
     req = pack_create_required()
     if req:
         text, count, blocked = build_pack_text(ledger=ledger)
@@ -257,13 +299,16 @@ def confirm(content_hash, count):
 # opencrab pack_update(content) 는 content 를 재파싱→그래프 append 한다. 매번 전체 pack
 # text 를 던지면 같은 문장이 반복 파싱돼 유사 노드가 중복 누적된다(E2E: 노드 13→26).
 # → baseline 이후 신규 문장만 델타 텍스트로 던지면 신규 노드만 추가된다(중복 0).
+# 등급 꼬리표 도입/승격 플립도 같은 원칙: 렌더만 변경이면 원문 기준 _sent_hash 가
+# 불변이라 delta_count=0(재업로드 0) — 전체 재파싱(중복 노드 위험)으로 도망가지 않는다.
 
 
 def _render_delta(sentences, label=None):
-    """델타 업로드 텍스트 — 신규 원칙 문장만(기존 노드 재파싱·중복 방지)."""
+    """델타 업로드 텍스트 — 신규 원칙 문장만(기존 노드 재파싱·중복 방지). 항목은
+    str 또는 (문장, candidate) 튜플(등급 꼬리표 병기)."""
     lbl = label or _owner_label()
     return "\n".join(["# (추가) %s 의사결정 원칙 — 신규 반영분" % lbl, ""]
-                     + ["- " + s for s in sentences])
+                     + [_bullet(s) for s in sentences])
 
 
 def sync_delta(write_text=None, ledger=None):
@@ -273,7 +318,11 @@ def sync_delta(write_text=None, ledger=None):
                            것으로 흡수(업로드 스킵). 클라우드엔 이미 full 반영돼 있다는 가정.
       DELTA_UPDATE       — 신규 문장 있음. delta_sentences/delta_hashes/delta_text 제공.
       NO_CHANGE          — 신규 없음.
-    write_text: DELTA_UPDATE 시 델타 텍스트(신규만)를 파일로 출력(Agent 업로드용)."""
+    write_text: DELTA_UPDATE 시 델타 텍스트(신규만)를 파일로 출력(Agent 업로드용).
+
+    문장 hash(_sent_hash)는 등급 꼬리표 없는 원문 기준 — 승격 플립(candidate 1→0)
+    등 렌더만 변경 시 delta_count=0(재업로드 0). full sync 는 이때 UPDATE_NEEDED 를
+    내지만 전체 pack_update 재파싱은 중복 노드 위험이 있어 델타 우선이 원칙."""
     req = pack_create_required()
     if req:
         text, count, blocked = build_pack_text(ledger=ledger)
@@ -284,15 +333,15 @@ def sync_delta(write_text=None, ledger=None):
                 "count": count, "blocked": blocked, "text": text, "delta_count": 0,
                 "hint": "MCP Agent: opencrab_ingest_text(title, text)로 팩 생성 → "
                         "person_pack_sync.record_pack_id('<uuid>') 호출(이후 델타만 업로드)"}
-    sentences, blocked = _owner_sentences(ledger=ledger)
-    cur = [(_sent_hash(s), s) for s in sentences]
-    full_hash = _hash(_render_pack(sentences))
+    graded, blocked = _owner_sentences_graded(ledger=ledger)
+    cur = [(_sent_hash(s), s, c) for s, c in graded]
+    full_hash = _hash(_render_pack(graded))
     st = load_state()
     uploaded = st.get("uploaded_hashes")
     if uploaded is None:
         # 마이그레이션: 현재 전체를 uploaded 로 흡수(재업로드 방지). 이후 신규만 델타.
-        save_state(full_hash, len(sentences), uploaded_hashes=[h for h, _ in cur])
-        return {"status": "DELTA_BASELINE_SET", "pack_id": PACK_ID, "count": len(sentences),
+        save_state(full_hash, len(graded), uploaded_hashes=[h for h, _, _ in cur])
+        return {"status": "DELTA_BASELINE_SET", "pack_id": PACK_ID, "count": len(graded),
                 "blocked": blocked, "hash": full_hash, "absorbed": len(cur), "delta_count": 0}
     uploaded = set(uploaded)
     # 레거시 hash 호환: 과거 12자 hash 는 현재 16자 hash 의 접두사이므로 길이별 접두사로
@@ -303,17 +352,17 @@ def sync_delta(write_text=None, ledger=None):
     def _seen(h):
         return any(h[:n] in uploaded for n in ulens)
 
-    new = [(h, s) for h, s in cur if not _seen(h)]
+    new = [(h, s, c) for h, s, c in cur if not _seen(h)]
     if not new:
-        return {"status": "NO_CHANGE", "pack_id": PACK_ID, "count": len(sentences),
+        return {"status": "NO_CHANGE", "pack_id": PACK_ID, "count": len(graded),
                 "hash": full_hash, "delta_count": 0}
-    delta_text = _render_delta([s for _, s in new])
+    delta_text = _render_delta([(s, c) for _, s, c in new])
     if write_text:
         with open(write_text, "w", encoding="utf-8") as f:
             f.write(delta_text)
-    return {"status": "DELTA_UPDATE", "pack_id": PACK_ID, "count": len(sentences),
+    return {"status": "DELTA_UPDATE", "pack_id": PACK_ID, "count": len(graded),
             "blocked": blocked, "hash": full_hash, "delta_count": len(new),
-            "delta_hashes": [h for h, _ in new], "delta_sentences": [s for _, s in new],
+            "delta_hashes": [h for h, _, _ in new], "delta_sentences": [s for _, s, _ in new],
             "delta_text": delta_text}
 
 
@@ -527,6 +576,46 @@ def _selftest():
         check(_owner_label() == "사장님" and "# 사장님(owner)" in _render_pack(["문장"]),
               "Tc7 config owner_label(env 부재) → owner 개인 호칭('사장님') 표시 유지")
         os.remove(cfgp)
+
+        # ---- 등급 표기(candidate) — 클라우드 팩 등급 꼬리표 (트랙 ③) ----
+        # apply_schema(정본) 기본 candidate=0(정본) — add() 삽입분은 전부 정본으로 시작.
+        con.execute("UPDATE nodes SET candidate=1 WHERE node_id IN ('o1','o2')")
+        con.commit()
+        g1, _bg = _owner_sentences_graded()
+        gd = dict(g1)
+        check(gd["결론부터 짧게 답한다"] == 1 and gd["새 판단 하나 추가됨"] == 0,
+              "Tg1 candidate 컬럼 반영(1=후보·0=정본)")
+        gtxt = _render_pack(g1)
+        check("- 결론부터 짧게 답한다 (등급: 후보)" in gtxt
+              and "- 새 판단 하나 추가됨 (등급: 정본)" in gtxt,
+              "Tg2 렌더 꼬리표 — 후보/정본 병기")
+        # 등급 충돌 dedup — 같은 문장 후보(o1)+정본(o7 기본 0) 공존 → 정본 우선·중복 미증가
+        add("o7", "결론부터 짧게 답한다")
+        g2, _bg = _owner_sentences_graded()
+        check(dict(g2)["결론부터 짧게 답한다"] == 0 and len(g2) == len(g1),
+              "Tg3 dedup 등급 충돌 → 정본 우선(중복 미증가)")
+        # 승격 플립 = 렌더만 변경 → 델타 0(원문 hash 기준·재업로드 0), full sync 는
+        # UPDATE_NEEDED(문서화된 동작 — 전체 재파싱 중복 위험이라 델타 우선).
+        rg0 = sync_delta()
+        check(rg0["status"] == "DELTA_BASELINE_SET", "Tg4a 등급 검증용 델타 baseline")
+        con.execute("UPDATE nodes SET candidate=0 WHERE node_id='o2'")
+        con.commit()
+        rg1 = sync_delta()
+        check(rg1["status"] == "NO_CHANGE" and rg1["delta_count"] == 0,
+              "Tg4 승격 플립(렌더만 변경) → delta_count=0(재업로드 0)")
+        rg2 = sync()
+        check(rg2["status"] == "UPDATE_NEEDED",
+              "Tg5 승격 플립 → full sync 는 UPDATE_NEEDED(델타 우선 원칙 문서화)")
+        # 구 ledger(candidate 컬럼 부재) → PRAGMA 폴백으로 전부 후보(1)
+        oldled = os.path.join(tmp, "old_ledger.sqlite")
+        oc = sqlite3.connect(oldled)
+        oc.execute("CREATE TABLE nodes(node_id TEXT, sentence TEXT, state TEXT, speaker TEXT)")
+        oc.execute("INSERT INTO nodes VALUES('x1','구 장부 문장이다','active','owner')")
+        oc.commit()
+        oc.close()
+        gl, _bg = _owner_sentences_graded(ledger=oldled)
+        check(gl == [("구 장부 문장이다", 1)],
+              "Tg6 구 ledger(candidate 부재) → 전부 후보(1) 폴백(승격 과대표기 없음)")
 
         con.close()
         print(f"\nGATE={'GO' if ok else 'NO-GO'}")

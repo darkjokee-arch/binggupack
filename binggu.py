@@ -461,6 +461,32 @@ def _reindex_after_write(ledger_arg):
         pass
 
 
+def _recall_staging_for_ledger(ledger):
+    """회수 도장 staging 을 ledger scope 에 고정(_gate_log_for_ledger 와 동일 원칙·split-brain 차단).
+    운영에선 dirname(ledger)==home 이라 gate_log.last_recall_candidates_path() 와 동일 경로."""
+    from binggupack.safety import gate_log as _gl
+    return os.path.join(os.path.dirname(os.path.abspath(ledger)),
+                        os.path.basename(_gl.last_recall_candidates_path()))
+
+
+def _stage_recall(ledger, node_ids, query, domain, surface):
+    """회수 staging 기록(도장 소비용 idx→node_id 포인터 · ledger write 0 · 실패 침묵 False).
+
+    owner 채팅 1-발화("히트 N"/"미스 N")가 유일한 사람 도장이 되는 intel loop 의 대상 고정 —
+    표시 순서(1-base) = staging idx. query 는 fresh_index._leak_safe(redact+독립검증) 정화 후
+    영속(gate_log 호출측 계약: 평문 시크릿/PII 미영속). 정화로 query 가 비워지는 병리 케이스는
+    --record 경로와 adoption_key 가 갈릴 수 있으나(staging 내부 멱등은 유지) 미영속 우선."""
+    try:
+        from binggupack.pack.fresh_index import _leak_safe
+        from binggupack.safety import gate_log as GL
+        safe_q, _ok = _leak_safe(str(query or "")[:1000])
+        GL.write_last_recall(node_ids, query=safe_q, domain=domain or "", surface=surface,
+                             path=_recall_staging_for_ledger(ledger))
+        return True
+    except Exception:
+        return False
+
+
 def _recall_deep(a):
     """Deep 회상(명시 --deep) — 원본 전체 탐색(기존 why_search full scan). read-only."""
     import binggu_recall as RC
@@ -530,6 +556,10 @@ def cmd_recall(a):
         _nonce = _HR.recall_nonce(a.query, node_ids)
         print(f"  → 맞았으면:  {HINT} mark-hit \"%s\" --index N --nonce %s" % (a.query, _nonce))
         print("     틀렸으면 mark-miss (N=위 번호). 자동 기록 0 · 사람 확정만.")
+        # 작업A2(intel loop): 도장 소비용 staging(idx=위 번호·raw node_id 화면 미노출) + 푸터 1줄.
+        if _stage_recall(ledger, node_ids, a.query, getattr(a, "domain", None), "cli_recall"):
+            print(f'  → 유용했으면 채팅 정확형 1줄 "히트 N"(아니면 "미스 N") 후: '
+                  f'{HINT} mark-hit --from-recall --index N')
     # P1-② use_count++ — --record 명시 시에만(사람의 '유용했다' 신호). 기본 회상은 read-only.
     if getattr(a, "record", False) and node_ids:
         db, _ = _open(ledger)
@@ -537,6 +567,7 @@ def cmd_recall(a):
         for nid in node_ids:
             RANK.record_use(db, nid, use_key=use_key)
         db.close()
+        _reindex_after_write(a.ledger)   # use_count 변화 → fresh_index rank 반영
         print("\n(use_count 기록됨 · 유용성 신호 · 채택멱등[같은 회상 재기여 0] · 도장/문장 불변)")
     return 0
 
@@ -776,19 +807,30 @@ def cmd_preflight(a):
                                domain=getattr(a, "domain", None), files_changed=files,
                                home=os.path.dirname(ledger))
     print("# preflight — 이번 작업 전 회상 (read-only · candidate)")
+    # 작업A2(intel loop): 표시 번호(1-base) = 도장 staging idx — 중복 노드는 첫 번호 재사용.
+    _stamp_ids = []
+
+    def _stamp_no(n):
+        nid = n.get("node_id")
+        if not nid:
+            return "-"
+        if nid not in _stamp_ids:
+            _stamp_ids.append(nid)
+        return "%d." % (_stamp_ids.index(nid) + 1)
+
     if res["remember"]:
         print("\n## 기억할 것")
         for n in res["remember"]:
             sub = (" [%s]" % n["semantic_subtype"]) if n["semantic_subtype"] else ""
-            print("  - (%s%s) %s" % (n["node_type"], sub, n["claim"]))
+            print("  %s (%s%s) %s" % (_stamp_no(n), n["node_type"], sub, n["claim"]))
     if res["avoid_patterns"]:
         print("\n## 하면 안 되는 과거 패턴(버그패턴)")
         for m in res["avoid_patterns"]:
-            print("  - (위험도 %.2f) %s" % (m["risk_score"], m["claim"]))
+            print("  %s (위험도 %.2f) %s" % (_stamp_no(m), m["risk_score"], m["claim"]))
     if res["preferences"]:
         print("\n## 사용자 선호")
         for p in res["preferences"]:
-            print("  - %s" % p["claim"])
+            print("  %s %s" % (_stamp_no(p), p["claim"]))
     print("\n위험도: %s" % res["risk_level"])
     if res["needs_question"] and res["question"]:
         print("\n반문 ⚠ %s" % res["question"])
@@ -796,6 +838,13 @@ def cmd_preflight(a):
         print("(주의: 과거 위험패턴과 일부 닮음 — 참고하세요)")
     if not (res["remember"] or res["avoid_patterns"] or res["preferences"]):
         print("(관련 기억 없음 — 새로운 작업이거나 그래프가 비어 있습니다)")
+    # 작업A2(intel loop): 도장 소비용 staging(idx=위 번호·raw node_id 화면 미노출) + 푸터 1줄.
+    #   query 는 --record 의 adoption_key 파생과 동일 원문(prompt or "preflight") — 교차 경로 멱등.
+    if _stamp_ids and _stage_recall(ledger, _stamp_ids,
+                                    getattr(a, "prompt", None) or "preflight",
+                                    getattr(a, "domain", None), "cli_preflight"):
+        print(f'\n  → 유용했으면 채팅 정확형 1줄 "히트 N"(아니면 "미스 N" · N=위 번호) 후: '
+              f'{HINT} mark-hit --from-recall --index N')
     # P1-② use_count++ — --record 명시 시에만(사람의 '이 회상 유용했다' 신호). 기본 preflight 는 read-only.
     if getattr(a, "record", False):
         import binggu_p1_ranking as RANK
@@ -810,6 +859,7 @@ def cmd_preflight(a):
                     seen.add(nid)
                     RANK.record_use(db, nid, use_key=use_key)
         db.close()
+        _reindex_after_write(a.ledger)   # use_count 변화 → fresh_index rank 반영
         print("\n(use_count 기록됨 %d건 · 유용성 신호 · 채택멱등 · 도장/문장 불변)" % len(seen))
     return 0
 
@@ -914,7 +964,7 @@ def _gate_log_for_ledger(ledger):
                         os.path.basename(_sg.gate_path()))
 
 
-def _resolve_human_ctx(ledger, save_refs=None, confirm=None):
+def _resolve_human_ctx(ledger, save_refs=None, confirm=None, stamp_ctx=None):
     """운영 write 의 'human' 승격 — 사람 증명 = "preview + 사람의 save n 입력" 단일 원칙.
 
     save_refs: list[(preview_ref: str, indices: list[int])] | None — save-n 참조 바인딩 대조 대상.
@@ -942,6 +992,14 @@ def _resolve_human_ctx(ledger, save_refs=None, confirm=None):
         ctx["confirm"] = confirm
     if os.environ.get("BINGGU_STRICT_HUMAN_GATE", "").strip():
         print("NOTE: BINGGU_STRICT_HUMAN_GATE 는 deprecated no-op 입니다(strict 가 기본 · fail-open 불가).")
+    # 0) intel-loop 도장(recall/promote) — 호출측이 gate_human_for_recall/promote 로 사전 검증한
+    #    사람 도장. save_gate_ref 와 동일 규약(재계산 ref 대조 통과)의 recall/promote 도메인 승격.
+    #    subscript 할당(dict 리터럴 아님) — approval-origin 인벤토리 계약(binggu.py CLI 진입점
+    #    {"actor":"human"} 리터럴 0)을 지키며 human 승격을 이 단일 해소 지점으로 집중한다.
+    if stamp_ctx is not None:
+        ctx["actor"] = "human"
+        ctx["actor_source"] = stamp_ctx
+        return ctx
     # 1) save-n 참조 바인딩 (hook 이 쓴 (preview_ref, idx) — AI 는 UserPromptSubmit 를 못 거쳐 위조 불가)
     try:
         import binggu_save_gate as _sg
@@ -1372,18 +1430,96 @@ def cmd_abstraction(a):
     return _show(r)
 
 
+def _mark_from_recall(a, ledger, outcome):
+    """--from-recall — staging(직전 회상) idx→node_id 정본 + 사람 도장('히트 N'/'미스 N') 소비.
+
+    마찰 해소 축: 사람 증명 = 별도 터미널 재입력이 아니라 owner 채팅 1-발화(UserPromptSubmit
+    hook 이 save_gate_log.jsonl 에 기록한 recall 스탬프). 도장 강도는 SAVE 패리티(hook 기록 +
+    gate 파일 존재/신선도 의존 · CLAUDECODE env 는 소프트 신호).
+
+    절차: staging 로드 → gate_human_for_recall(소비시점 recall_gate_ref **재계산** 대조 —
+    미도장/verdict 불일치/stale/staging 변조 전부 BLOCK·fail-closed) → human ctx 승격
+    (actor_source=recall_stamp_ref) → mark_outcome(expected_node_id=staging 정본 —
+    why_search 재확보 집합 실재 확인·없으면 stale_recall·MF1/MF4) → recorded=True 이고
+    outcome=hit 일 때만 record_use(MF6 · miss 는 유용성 신호가 아니라 use 기여 0 —
+    랭킹/승격 오염 차단 · adoption_key 는 --record 경로와 동일하게 staging 의
+    query·domain 원문으로 파생 — 교차 경로 멱등).
+
+    record_resolution(hit_events)과 record_use(use_count)는 각각 내부 commit 하는 별개
+    write 다(원자 아님) — 중간 중단의 부분 실패는 decision_id/use_key 멱등으로 재실행 시
+    이중계상 없이 수렴한다(정직 서술)."""
+    import binggu_p1_ranking as RANK
+
+    from binggupack.pack import hit_recording as HR
+    from binggupack.safety import gate_log as GL
+    st = GL.load_last_recall(_recall_staging_for_ledger(ledger)) or {}
+    rows = st.get("items") or []
+    if not rows:
+        print(f"BLOCK: no_recall_staging — 직전 회상 staging 이 없습니다. 먼저 {HINT} recall 을 실행하세요.")
+        return 1
+    idx = a.index
+    node_id = {r.get("idx"): r.get("node_id") for r in rows}.get(idx)
+    if not node_id:
+        print("BLOCK: index_out_of_range — staging 회상은 %d건(번호 1~%d)." % (len(rows), len(rows)))
+        return 1
+    gate_p = _gate_log_for_ledger(ledger)
+    if not GL.gate_human_for_recall(rows, [idx], outcome, path=gate_p):
+        print("BLOCK: stamp_not_found — 이 번호의 사람 도장이 없습니다"
+              "(미도장/verdict 불일치/신선도 창 초과/staging 변조 전부 거부 · fail-closed).")
+        print('  채팅에 정확형 1줄로 "%s %d" 를 입력한 뒤 다시 실행하세요.'
+              % ("히트" if outcome == "hit" else "미스", idx))
+        return 1
+    # 사람 증명 = 도장(재계산 ref 대조 통과) — _resolve_human_ctx 경유(인벤토리 계약: 리터럴 0).
+    ctx = _resolve_human_ctx(ledger, stamp_ctx="recall_stamp_ref")
+    query = st.get("query") or ""
+    domain = st.get("domain") or None
+    db, _ = _open(ledger)
+    used = None
+    try:
+        r = HR.mark_outcome(db, ledger, query, idx, outcome, ctx, nonce=None,
+                            domain=domain or getattr(a, "domain", None),
+                            home=os.path.dirname(ledger), expected_node_id=node_id)
+        if r.get("recorded") and outcome == "hit":
+            used = RANK.record_use(db, node_id, use_key=RANK.adoption_key(query, domain))
+    finally:
+        db.close()
+    if r.get("recorded"):
+        GL.stamp_mark_consumed(GL.recall_gate_ref(rows), [idx], path=gate_p)  # 감사 마킹(판정 미반영)
+        _reindex_after_write(a.ledger)   # use_count 변화 → fresh_index rank 반영
+        print("OK: %s 기록 — [%d] \"%s\"" % (outcome, idx, r.get("node_claim") or ""))
+        print("    decision=%s · domain=%s · 사람 도장(recall_stamp_ref · 자동 0) · use_count=%s"
+              % (r.get("decision_id"), r.get("domain"), used if used is not None else "-"))
+        return 0
+    reason = r.get("reason")
+    print("BLOCK: %s" % reason)
+    if reason == "stale_recall":
+        print(f"  staging 노드가 재확보(why_search) 집합에 없습니다 — ledger 변경/회상 낡음."
+              f" {HINT} recall 재실행 후 새 번호로 다시 도장하세요.")
+    elif reason == "dup_decision":
+        print("  이미 같은 회상에서 기록됨(이중계상 방지). 중복 아님.")
+    elif reason == "no_recall":
+        print("  staging query 로 재확보되는 판단이 없습니다. recall 재실행 후 다시 도장하세요.")
+    return 1
+
+
 def cmd_mark(a):
     """회상(recall/why) 조언의 적중/빗나감 기록 — mark-hit / mark-miss.
 
     node_id 를 직접 받지 않고 (query, index)로 받아 why_search 를 재실행해 서버가 노드를 확보한다
     (D-1 위조 차단). nonce 로 회상 스냅샷을 고정하고(stale 차단), decision_id 를 (node_id,nonce)
-    안정 해시로 만들어 반복 mark 를 dup_decision 으로 막는다(D-2 이중계상 차단). 사람 확정만(actor=human)."""
+    안정 해시로 만들어 반복 mark 를 dup_decision 으로 막는다(D-2 이중계상 차단). 사람 확정만(actor=human).
+    --from-recall 은 staging+채팅 도장 소비 경로(_mark_from_recall) — 별도 터미널 증명 대체."""
     from binggupack.pack import hit_recording as HR
     ledger, _ = _ledger_paths(a.ledger)
     if not os.path.exists(ledger):
         print(f"장부가 없습니다(회상 기억 없음): %s · 먼저 {HINT} init" % ledger)
         return 2
     outcome = "hit" if a.cmd == "mark-hit" else "miss"
+    if getattr(a, "from_recall", False):
+        return _mark_from_recall(a, ledger, outcome)
+    if not a.query:
+        print("BLOCK: query_required — --from-recall 없이는 query 인자가 필요합니다.")
+        return 2
     db, _ = _open(ledger)
     r = HR.mark_outcome(db, ledger, a.query, a.index, outcome, _resolve_human_ctx(a.ledger, None),
                         nonce=a.nonce, domain=a.domain, home=os.path.dirname(ledger))   # P1-A.1 fail-closed
@@ -1523,6 +1659,195 @@ def cmd_learn_consume(a):
     except Exception:
         pass
     return 0
+
+
+def _promote_staging_for_ledger(ledger):
+    """승격 도장 staging 을 ledger scope 에 고정(_recall_staging_for_ledger 와 동일 원칙).
+    운영에선 dirname(ledger)==home 이라 gate_log.last_promote_candidates_path() 와 동일 경로."""
+    from binggupack.safety import gate_log as _gl
+    return os.path.join(os.path.dirname(os.path.abspath(ledger)),
+                        os.path.basename(_gl.last_promote_candidates_path()))
+
+
+def _promote_candidates(db):
+    """승격 후보(candidate=1·active) 정렬 조회 — hit수↓ > use_count↓ > 최근 저장↓(동률 node_id).
+
+    hit_events 테이블/use_count·created_at·state 컬럼은 구 ledger 에 없을 수 있어 PRAGMA 로
+    존재 확인 후 0/'' 폴백(부재 시 candidate+저장순 정렬만 남고 크래시 0). read-only."""
+    ncols = {r[1] for r in db.con.execute("PRAGMA table_info(nodes)")}
+    use_expr = "COALESCE(use_count,0)" if "use_count" in ncols else "0"
+    created_expr = "COALESCE(created_at,'')" if "created_at" in ncols else "''"
+    state_pred = " AND COALESCE(state,'active')='active'" if "state" in ncols else ""
+    rows = db.con.execute(
+        "SELECT node_id, sentence, %s, %s FROM nodes WHERE candidate=1%s"
+        % (use_expr, created_expr, state_pred)).fetchall()
+    hits = {}
+    if list(db.con.execute("PRAGMA table_info(hit_events)")):
+        hits = dict(db.con.execute(
+            "SELECT node_id, COUNT(*) FROM hit_events WHERE outcome='hit' GROUP BY node_id"))
+    out = [{"node_id": r[0], "id8": str(r[0] or "")[:8], "claim": r[1] or "",
+            "hits": int(hits.get(r[0], 0)), "use": int(r[2] or 0), "created_at": r[3] or ""}
+           for r in rows]
+    out.sort(key=lambda c: (c["hits"], c["use"], c["created_at"], c["node_id"]), reverse=True)
+    return out
+
+
+def _stage_promote(ledger, cands):
+    """승격 staging 기록(도장 소비용 idx→node_id 바인딩 · ledger write 0 · 실패 침묵 False).
+
+    표시 번호(1-base) = staging idx — owner 채팅 1-발화("승격 N")가 이 바인딩에 도장을 찍는다.
+    표시 --limit 과 무관하게 항상 전체 후보 기록(번호는 전체 리스트 위치 — 어느 번호든 도장 가능).
+    같은 후보 집합이면 재기록해도 promote_gate_ref 불변(기존 도장 유지)."""
+    try:
+        from binggupack.safety import gate_log as GL
+        GL.write_last_promote(
+            [{"node_id": c["node_id"], "id8": c["id8"], "claim": c["claim"]} for c in cands],
+            path=_promote_staging_for_ledger(ledger))
+        return True
+    except Exception:
+        return False
+
+
+def cmd_promote(a):
+    """candidate→active 봉인 승격 — 인자없음=후보 리스트 · <n> <id8>=dry-run(기본) · --confirm=실행.
+
+    abstraction --promote(규칙 제안→candidate '등록')와 다른 단계 — 여기는 이미 저장된 candidate
+    노드의 active 봉인 승격이며 write 는 봉인 모듈(scripts/binggu_publish_p5_promote.run_promote ·
+    백업 강제·evidence 1:1 전후 검증·G4_no_auto·idempotent)로만 간다. 자동 승격 0.
+
+    사람 증명 = owner 채팅 1-발화("승격 N" — UserPromptSubmit hook 이 promote 스탬프 기록) +
+    --confirm 정확 문구. 도장 강도는 SAVE 패리티(hook 기록 + gate 파일 존재/신선도 의존 ·
+    CLAUDECODE env 는 deny 전용 소프트 신호). ctx 는 도장 판정 결과로 **항상 명시** 전달 —
+    도장 없음(에이전트 세션)=actor reader → core G4_no_auto BLOCK. run_promote 의 ctx 기본값
+    {"actor":"human"} fail-open 경로를 호출부에서 배제한다."""
+    ledger, _ = _ledger_paths(a.ledger)
+    if not os.path.exists(ledger):
+        print(f"장부가 없습니다: %s · 먼저 {HINT} init" % ledger)
+        return 2
+    from binggupack.safety import gate_log as GL
+
+    # ── --confirm 실행: staging 정본 + 도장 대조 → run_promote(자체 open · read 연결 없음) ──
+    if getattr(a, "confirm", None):
+        if a.n is None or not a.id8:
+            print("BLOCK: usage — --confirm 은 번호+id8 과 함께: "
+                  f'{HINT} promote <n> <id8> --confirm "PROMOTE <n> <id8>"')
+            return 2
+        st = GL.load_last_promote(_promote_staging_for_ledger(ledger)) or {}
+        rows = st.get("items") or []
+        if not rows:
+            print("BLOCK: no_promote_staging — 승격 staging 이 없습니다. "
+                  f"먼저 {HINT} promote <n> <id8> (dry-run) 을 실행하세요.")
+            return 1
+        row = {r.get("idx"): r for r in rows}.get(a.n)
+        if not row:
+            print("BLOCK: index_out_of_range — staging 후보는 %d건(번호 1~%d)." % (len(rows), len(rows)))
+            return 1
+        if (row.get("id8") or "") != a.id8:
+            print("BLOCK: id8_mismatch — 번호 %d 의 id8 은 %s 입니다(리스트 변경/오지정 방지)."
+                  % (a.n, row.get("id8")))
+            print(f"  {HINT} promote <n> <id8> (dry-run) 으로 번호를 다시 확인하세요.")
+            return 1
+        expect = "PROMOTE %d %s" % (a.n, a.id8)
+        if a.confirm != expect:
+            print('BLOCK: confirm_mismatch — 정확히 "%s" 를 입력해야 실행됩니다(자동확정 0).' % expect)
+            return 1
+        # 사람 도장 판정 → actor 명시 결정(fail-closed). 판정 규약은 _resolve_human_ctx 3분기와
+        # 동일 — ① promote 스탬프(소비시점 promote_gate_ref **재계산** 대조 · 미도장/stale/
+        # staging 변조 전부 False) ② CLAUDECODE = deny 전용 ③ 터미널 직접 입력 = 사람.
+        gate_p = _gate_log_for_ledger(ledger)
+        if GL.gate_human_for_promote(rows, [a.n], path=gate_p):
+            ctx = _resolve_human_ctx(ledger, stamp_ctx="promote_stamp_ref")
+        else:
+            # 미도장 → _resolve_human_ctx 2·3분기(CLAUDECODE deny / 터미널 cli_command)와 동일.
+            ctx = _resolve_human_ctx(ledger)
+        import binggu_publish_p5_promote as P5
+        backup_dir = os.path.join(os.path.dirname(ledger), "_backup")
+        # tag=timestamp — 백업 파일명 유니크(연속 승격 덮어씀 방지). .sqlite 확장자로 restore 목록 노출.
+        tag = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f") + ".sqlite"
+        r = P5.run_promote(ledger, [row["node_id"]], backup_dir, ctx=ctx, tag=tag)
+        if r.get("applied"):
+            GL.stamp_mark_consumed(GL.promote_gate_ref(rows), [a.n], path=gate_p)  # 감사 마킹(판정 미반영)
+            if r.get("promoted"):
+                _reindex_after_write(a.ledger)   # candidate 플립 → fresh_index trust 반영
+                print("OK: 승격 완료 — [%d/%s] \"%s\"" % (a.n, a.id8, row.get("claim") or ""))
+            else:
+                print("이미 active 입니다(idempotent · 변경 0) — [%d/%s]" % (a.n, a.id8))
+            print("    백업=%s · checksum %s→%s · 사람 증명=%s(자동 0)"
+                  % (r.get("backup"), (r.get("checksum_before") or "")[:8],
+                     (r.get("checksum_after") or "")[:8], ctx["actor_source"]))
+            return 0
+        reason = r.get("reason")
+        print("BLOCK: %s" % reason)
+        if reason == "G4_no_auto":
+            print('  사람 도장이 없습니다(에이전트 세션 · fail-closed). '
+                  '채팅 정확형 1줄 "승격 %d" 후 재실행하세요.' % a.n)
+        elif reason in ("linkage_broken_pre", "linkage_broken_post"):
+            print("  evidence↔node 정합이 깨져 승격 0 (issues=%d)." % len(r.get("issues") or []))
+            if r.get("need_restore"):
+                print(f'  백업 복원 검토: {HINT} restore "%s"' % r.get("backup"))
+        elif reason == "node_not_found":
+            print(f"  staging 노드가 ledger 에 없습니다(변경/삭제됨). {HINT} promote 로 리스트를 다시 확인하세요.")
+        return 1
+
+    # ── 리스트 / dry-run (read-only · 승격 write 0) ──
+    db, _ = _open(a.ledger)
+    try:
+        cands = _promote_candidates(db)
+        if a.n is None:
+            # 리스트(추천 표시만 · 자동 승격 0) — claim 원문 전문(요약·말줄임 금지)
+            if not cands:
+                print("승격 후보(candidate=1)가 없습니다 — 전부 봉인(active)이거나 장부가 비었습니다.")
+                return 0
+            staged = _stage_promote(ledger, cands)
+            shown = cands[:a.limit] if getattr(a, "limit", 0) else cands
+            print("# 승격 후보 %d건 — hit↓ · use↓ · 최근저장↓ (추천 표시만 · 자동 승격 0 · read-only)"
+                  % len(cands))
+            for i, c in enumerate(shown, 1):
+                print("  %d. [%s] (hit %d · use %d · %s) %s"
+                      % (i, c["id8"], c["hits"], c["use"], c["created_at"] or "-", c["claim"]))
+            if len(shown) < len(cands):
+                print("  … 외 %d건(번호 %d~%d) — 전체 표시: --limit 0"
+                      % (len(cands) - len(shown), len(shown) + 1, len(cands)))
+            print(f"\n다음(dry-run · 아직 승격 안 함):  {HINT} promote <번호> <id8>")
+            if not staged:
+                print("  (주의: staging 기록 실패 — 채팅 도장은 dry-run 재실행 후 사용하세요)")
+            return 0
+        # dry-run: 사전 점검(evidence 1:1) + staging 기록 + 다음 단계 안내
+        if not a.id8:
+            print(f"BLOCK: usage — 번호와 id8 을 함께 지정하세요: {HINT} promote <n> <id8> "
+                  f"(리스트: {HINT} promote)")
+            return 2
+        if a.n < 1 or a.n > len(cands):
+            print("BLOCK: index_out_of_range — 승격 후보는 %d건(번호 1~%d)." % (len(cands), len(cands)))
+            return 1
+        c = cands[a.n - 1]
+        if c["id8"] != a.id8:
+            print("BLOCK: id8_mismatch — 번호 %d 의 id8 은 %s 입니다(리스트 변경/오지정 방지)."
+                  % (a.n, c["id8"]))
+            print(f"  {HINT} promote 로 최신 리스트를 다시 확인하세요.")
+            return 1
+        staged = _stage_promote(ledger, cands)
+        import binggu_publish_p5_promote as P5
+        chk = P5.verify_evidence_linkage(db, [c["node_id"]])
+        if not chk["ok"]:
+            print("BLOCK: linkage_broken_pre — evidence↔node 정합이 깨져 있어 실행해도 BLOCK 됩니다(승격 0).")
+            for iss in chk["issues"]:
+                print("  - %s: %s" % (iss.get("node"), iss.get("issue")))
+            return 1
+        print("# 승격 미리보기(dry-run · 아직 승격 안 함 · ledger write 0)")
+        print("대상          : %d. [%s] %s" % (a.n, c["id8"], c["claim"]))
+        print("evidence 정합 : OK(1:1) — 실행 시 전후 재검증")
+        print("백업 예고     : %s (실행 시 자동 생성 · timestamp 유니크)"
+              % os.path.join(os.path.dirname(ledger), "_backup", "ledger.bak_promote_<ts>.sqlite"))
+        print("다음 단계:")
+        print('  1) 채팅 정확형 1줄로 "승격 %d"  (한 줄 전체가 도장이어야 인식 · 문장 속 언급 무시)' % a.n)
+        print(f'  2) {HINT} promote %d %s --confirm "PROMOTE %d %s"'
+              % (a.n, c["id8"], a.n, c["id8"]))
+        if not staged:
+            print("  (주의: staging 기록 실패 — 채팅 도장이 이 후보에 바인딩되지 않습니다)")
+        return 0
+    finally:
+        db.close()
 
 
 def cmd_reminders(a):
@@ -2308,9 +2633,10 @@ _HELP_EPILOG = """\
 고급 명령:
   studio · capture · explain · forget · preflight · index · deprecate · replace ·
   accept · unaccept · due · resolve · reminders · mark-hit · mark-miss ·
-  learn-consume · abstraction · trace · hosted · harvest · trust · route ·
+  learn-consume · abstraction · promote · trace · hosted · harvest · trust · route ·
   confirm-edges · setup-cloud · onboard · backup · export · restore ·
   approvals · approval · app
+  (promote = candidate→active 봉인 승격 · abstraction --promote = 규칙 제안의 candidate 등록 — 별 단계)
 
 각 명령 상세:  binggu <command> -h
 """
@@ -2432,10 +2758,12 @@ def main():
     sp.add_argument("--approval-id", dest="approval_id", default=None)   # P1-B A2 비대화형 owner 경로
     # 회상 조언 적중 기록(작업A) — mark-hit / mark-miss (query+index, node_id 미노출·nonce 방어)
     for _mk in ("mark-hit", "mark-miss"):
-        mkp = sub.add_parser(_mk); mkp.add_argument("query")
+        mkp = sub.add_parser(_mk); mkp.add_argument("query", nargs="?", default=None)
         mkp.add_argument("--index", type=int, default=1)   # recall 표시 번호(1-based)
         mkp.add_argument("--nonce", default=None)           # recall 이 발급한 회상 봉인(stale 방어)
         mkp.add_argument("--domain", default=None)          # 분모 분리 키(선택)
+        mkp.add_argument("--from-recall", action="store_true", dest="from_recall")
+        #   ↑ 작업A2: staging(직전 회상)+채팅 도장("히트 N"/"미스 N") 소비 — query/nonce 불필요
     # 학습 큐(교환 후보) owner 승인 소비(작업C) — dry-run 기본 · CONSUME <n> 정확 confirm(자동 0)
     lcp = sub.add_parser("learn-consume")
     lcp.add_argument("--confirm", default=None)        # "CONSUME <n>" 정확 일치(자동확정 0)
@@ -2448,6 +2776,12 @@ def main():
                      help="proposal_id 를 candidate 로 등록(승격 연결). dry-run 기본")
     abp.add_argument("--confirm", default=None,
                      help='정확 문구 "PROMOTE <proposal_id>" 일치 시에만 등록(자동확정 0)')
+    # candidate→active 봉인 승격(intel loop) — 인자없음=후보 리스트 · <n> <id8>=dry-run · --confirm=실행
+    prp = sub.add_parser("promote")
+    prp.add_argument("n", type=int, nargs="?", default=None)   # 후보 리스트 번호(1-based)
+    prp.add_argument("id8", nargs="?", default=None)           # node_id 앞 8자(오지정 방지 이중 키)
+    prp.add_argument("--confirm", default=None)   # 정확 문구 "PROMOTE <n> <id8>"(자동확정 0)
+    prp.add_argument("--limit", type=int, default=0)   # 리스트 표시 상한(0=전체) — staging/번호는 항상 전체
     pp = sub.add_parser("pair")              # owner 발화 + ai 요약 페어 저장(화자 축)
     pp.add_argument("owner_text"); pp.add_argument("ai_text", nargs="?", default=None)
     pp.add_argument("--relation", choices=["accepts", "refutes", "revises"], default="accepts")
@@ -2530,7 +2864,7 @@ def main():
           "accept": cmd_accept, "unaccept": cmd_unaccept, "due": cmd_due,
           "resolve": cmd_resolve, "mark-hit": cmd_mark, "mark-miss": cmd_mark,
           "learn-consume": cmd_learn_consume,
-          "abstraction": cmd_abstraction,
+          "abstraction": cmd_abstraction, "promote": cmd_promote,
           "reminders": cmd_reminders, "capture": cmd_capture,
           "recall": cmd_recall, "why": cmd_recall, "ask": cmd_recall, "trace": cmd_trace, "preflight": cmd_preflight,
           "hosted": cmd_hosted, "harvest": cmd_harvest, "setup-cloud": cmd_setup_cloud,

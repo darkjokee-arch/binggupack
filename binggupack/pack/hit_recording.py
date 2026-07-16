@@ -56,7 +56,7 @@ def recall_nonce(query, node_ids):
 
 
 def mark_outcome(db, ledger_path, recall_query, index, outcome, ctx,
-                 nonce=None, domain=None, home=None):
+                 nonce=None, domain=None, home=None, expected_node_id=None):
     """회상 조언(recall_query 의 index 번째 노드)의 적중/빗나감을 기록. read 재실행 + 안전 write.
 
     절차: actor=human 게이트 → why_search 재실행(read-only) → nonce 대조(stale 차단) →
@@ -72,6 +72,12 @@ def mark_outcome(db, ledger_path, recall_query, index, outcome, ctx,
       ctx         : {"actor": "human"} 필수(AI 자동 기록 0).
       nonce       : 회상 시 발급된 recall_nonce. 지정 시 재계산과 대조(stale_recall 차단).
       domain      : 분모 분리 키(hit_stats._domain_norm 정규화).
+      expected_node_id: 도장 staging(--from-recall) 경로의 정본 노드. Hot(어휘) 회상과
+        why_search(semantic 활성 시 집합/순위 상이 가능)의 위치 불일치를 구조로 차단 —
+        지정 시 index 위치가 아니라 재확보 결과 집합에 이 node_id 가 **실재**하는지로
+        대상을 집고, 없으면 stale_recall BLOCK. 미지정(None)=기존 위치 재확보(하위호환).
+        위조 표면 아님: 호출측(cmd_mark --from-recall)이 staging 파일에서만 읽고,
+        재확보 집합 실재 확인 + 사람 도장(gate_human_for_recall) 이중 게이트를 거친다.
     반환: {recorded, reason?, outcome?, node_claim?, decision_id?, nonce?, events?, domain?}.
     """
     if (ctx or {}).get("actor", "").strip().lower() != "human":
@@ -96,11 +102,19 @@ def mark_outcome(db, ledger_path, recall_query, index, outcome, ctx,
         return {"recorded": False, "reason": "stale_recall",
                 "expected_nonce": recomputed}
 
-    if index > len(nodes):
-        return {"recorded": False, "reason": "index_out_of_range",
-                "recall_count": len(nodes)}
-    target = nodes[index - 1]
-    node_id = target.get("node_id")
+    if expected_node_id is not None:
+        # MF1/MF4: staging idx→node_id 가 정본 — 위치(index)가 아니라 실재로 집는다.
+        target = next((n for n in nodes if n.get("node_id") == expected_node_id), None)
+        if target is None:
+            return {"recorded": False, "reason": "stale_recall",
+                    "expected_nonce": recomputed}
+        node_id = expected_node_id
+    else:
+        if index > len(nodes):
+            return {"recorded": False, "reason": "index_out_of_range",
+                    "recall_count": len(nodes)}
+        target = nodes[index - 1]
+        node_id = target.get("node_id")
 
     # D-2: decision_id 는 now() 가 아니라 (node_id, nonce) 안정 해시 — 같은 회상의 반복 mark 는 dup.
     did = HIT._decision_id(node_id, recomputed)
