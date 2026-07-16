@@ -1,6 +1,12 @@
 # -*- coding: utf-8 -*-
 """binggu_learn_consume — 학습 큐(교환 후보) → hit_recording 안전 소비.
 
+[§supersede 2026-07-16 — 파이프라인 폐지·모듈은 이력/레거시 소비용 보존]
+owner "뭘 이리 복잡하게 하냐 — 내가 말하고 니가 찾아보니 누가 맞았는지만 체크":
+큐 적재 → 세션마무리 표 → CONSUME 확정의 배치 의식은 폐지. 정본 = 논쟁이 실측으로
+판가름 난 순간 `binggu verdict` 즉시 기록(hit_recording.record_verdict · 개방 기록
+트랙 · 증거 필수 · owner "뒤집어 N" 정정). 잔여 큐 항목의 레거시 소비만 본 모듈로.
+
 user-prompt-learn-outcome.js 가 owner 자연 피드백("맞네"/"틀렸어")을 감지해 append 하는
 learn_outcome_queue.jsonl(append-only)을 **사람 승인**으로 소비해 hit_events 에 적재한다.
 

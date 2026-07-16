@@ -252,7 +252,11 @@ def _build_preview(home=None, session_id=None):
 # ---------------- 2b. 당일 owner 지적 후보 (learn 큐 · read-only · 사람 확정만) ----------------
 
 def _build_outcome_candidates(home=None, today=None):
-    """당일 owner 지적(learn_outcome_queue 소비 대기) 후보 — read-only(소비 0 · 큐 write 0).
+    """[DEPRECATED 2026-07-16 — §supersede] 세션마무리 지적 후보 표시는 owner 지시로 폐지.
+    판정은 `binggu verdict` 즉시 기록(hit_recording.record_verdict)이 정본. 본 함수는
+    build_close_summary 에서 분리됐고 호출부 0 — 이력 보존용으로만 남김(신규 배선 금지).
+
+    (구 계약) 당일 owner 지적(learn_outcome_queue 소비 대기) 후보 — read-only(소비 0 · 큐 write 0).
 
     ★B안(사람 확정): 세션 마무리 preview 에 "오늘 이런 지적이 있었는데 적중한 것 골라주세요"만
     표시하고, 확정(hit_events 적재)은 owner 가 learn-consume --confirm "CONSUME <번호>" 로만.
@@ -352,13 +356,14 @@ def _build_governance(home=None, cwd=None, ledger_path=None):
 
 
 def build_close_summary(home=None, cwd=None, ledger_path=None, session_id=None, today=None):
-    """세션 마무리 표시용 요약 빌드(저장 0 · read-only). preview + 당일 지적 후보 + 거버넌스 묶음.
-    session_id 지정 시 preview 를 그 세션 발화로 한정(세션 경계). today('YYYY-MM-DD' UTC)는
-    당일 지적 후보 필터 주입용(테스트 결정성 · 미지정 시 현재 UTC 날짜).
-    반환 {preview, outcome_candidates, governance, save_action}."""
+    """세션 마무리 표시용 요약 빌드(저장 0 · read-only). preview + 거버넌스 묶음.
+    session_id 지정 시 preview 를 그 세션 발화로 한정(세션 경계). today 파라미터는 하위호환
+    유지(구 지적 후보 필터용 — §supersede: 지적 후보 섹션은 2026-07-16 owner 지시로 폐지,
+    판정은 binggu verdict 즉시 기록으로 대체 — 세션마무리 배치 확인 의식 0).
+    반환 {preview, governance, save_action}."""
+    _ = today  # 하위호환(구 시그니처 호출자 무해)
     return {
         "preview": _build_preview(home, session_id=session_id),
-        "outcome_candidates": _build_outcome_candidates(home, today=today),
         "governance": _build_governance(home, cwd, ledger_path),
         "save_action": {
             "auto_save": False,
@@ -409,20 +414,9 @@ def render_close_md(summary):
     lines.append("- 자동저장: **0** (헌법 — candidate-only · 사람 승인 게이트)")
     lines.append("- %s" % sa.get("how", "저장은 사람이 직접 `SAVE n` 타이핑."))
 
-    # ★B안(사람 확정): 당일 owner 지적 후보 — 0건이면 섹션 자체 생략(노이즈 금지).
-    oc = summary.get("outcome_candidates", {}) or {}
-    if oc.get("available") and oc.get("count"):
-        lines.append("")
-        lines.append("### 4) 당일 owner 지적 후보 — 맞았는지 확인해 주세요 (자동 확정 0)")
-        for it in oc.get("items", []):
-            tag = ("인정(AI 답변 수긍)" if it.get("stance") == "accepts"
-                   else "반박(사용자가 AI 정정)")
-            lines.append("- [%s] %s · 사용자: %s" % (it.get("qi"), tag, it.get("feedback") or ""))
-            if it.get("ai_answer"):
-                lines.append("  - AI 답변: %s" % it["ai_answer"])
-        lines.append('- 확정: `binggu learn-consume --confirm "CONSUME <번호>"` '
-                     "(사람 확정만 · 번호는 dry-run 과 동일 · 뒤집힌 건 `--verdict overturned`)")
-        lines.append("> %s" % oc.get("note", "확정은 사람만 — 자동 적재 0"))
+    # (§supersede 2026-07-16 owner) 구 "당일 owner 지적 후보" 섹션 폐지 — 판정은 논쟁이
+    # 실측으로 판가름 난 순간 `binggu verdict` 즉시 기록(개방 기록 트랙·의식 0)으로 대체.
+    # 세션마무리 배치 확인·컨슘 도장 의식 0. 정정은 owner "뒤집어 N" → verdict --overturn.
 
     return "\n".join(lines)
 
@@ -625,40 +619,25 @@ def _selftest():
         check(detect_session_close("Wrap Up!", home=home)["is_close"],
               "T17 casefold(Wrap Up!≡wrap up)→True")
 
-        # ── T18~T20 ★B안(사람 확정): 당일 owner 지적 후보 — read-only 표시·번호 보존·0건 생략 ──
-        #    today 는 주입식(wall-clock 의존 0). 큐 = learn_consume 규칙(home/state/learn_outcome_queue.jsonl).
+        # ── T18~T19 §supersede(2026-07-16 owner): 지적 후보 섹션 폐지 — verdict 즉시 기록 대체 ──
+        #    큐에 당일 대기 항목이 있어도 세션마무리에 섹션이 안 뜨고 큐 write 0 인지 확인.
         st_dir = home / "state"
         st_dir.mkdir(parents=True, exist_ok=True)
         qp = st_dir / "learn_outcome_queue.jsonl"
-        q_entries = [
-            {"ts": "2026-07-12T22:00:00Z", "outcome": "hit", "queries": [],
-             "evidence": {"feedback": "전일 지적 항목"}, "consumed": False},
+        qp.write_text(json.dumps(
             {"ts": "2026-07-13T01:00:00Z", "outcome": "miss", "queries": [],
              "evidence": {"feedback": "너도 제대로 안 읽었는데"}, "consumed": False},
-            {"ts": "2026-07-13T02:00:00Z", "outcome": "hit", "queries": [],
-             "evidence": {"feedback": "이미 소비된 당일 항목"}, "consumed": True},
-        ]
-        qp.write_text("\n".join(json.dumps(e, ensure_ascii=False) for e in q_entries) + "\n",
-                      encoding="utf-8")
+            ensure_ascii=False) + "\n", encoding="utf-8")
         q_mtime = qp.stat().st_mtime_ns
         s18 = build_close_summary(home=home, today="2026-07-13")
-        oc = s18.get("outcome_candidates", {}) or {}
         md18 = render_close_md(s18)
-        check(oc.get("available") and oc.get("count") == 1
-              and oc["items"][0]["qi"] == 1 and oc["items"][0]["outcome"] == "miss"
+        check("outcome_candidates" not in s18
+              and "당일 owner 지적 후보" not in md18 and "CONSUME" not in md18
               and qp.stat().st_mtime_ns == q_mtime,
-              "T18 당일 후보만(전일·consumed 제외)·qi=learn-consume 소비 번호 보존·큐 write 0")
-        check("### 4) 당일 owner 지적 후보" in md18
-              and "[1] 반박(사용자가 AI 정정)" in md18 and "너도 제대로 안 읽었는데" in md18
-              and 'learn-consume --confirm "CONSUME' in md18
-              and "전일 지적 항목" not in md18 and "이미 소비된 당일 항목" not in md18,
-              "T19 섹션4 렌더: 번호+stance(교환 축)+발화 발췌+CONSUME 안내 · 전일/consumed 미표시")
-        # T20 후보 0건(타 일자) → 섹션 생략(노이즈 금지) · summary 키는 존재(count 0)
-        s20 = build_close_summary(home=home, today="2026-07-14")
-        md20 = render_close_md(s20)
-        check((s20.get("outcome_candidates", {}) or {}).get("count") == 0
-              and "당일 owner 지적 후보" not in md20,
-              "T20 당일 후보 0건 → 섹션 생략(노이즈 0)")
+              "T18 지적 후보 섹션 폐지(§supersede) — 당일 큐 존재해도 미표시·큐 write 0")
+        check(callable(_build_outcome_candidates)
+              and "DEPRECATED" in (_build_outcome_candidates.__doc__ or ""),
+              "T19 구 빌더는 호출부 0·DEPRECATED 마킹 보존(이력)")
 
         print("\nGATE=%s" % ("GO" if ok else "NO-GO"))
         return ok

@@ -1661,6 +1661,73 @@ def cmd_learn_consume(a):
     return 0
 
 
+def cmd_verdict(a):
+    """논쟁 판정 즉시 기록(단순판·2026-07-16 owner "누가 맞았는지만 체크") — 개방 기록 트랙.
+
+    사장님 주장 ↔ AI 주장이 실측으로 판가름 난 순간 AI 가 즉시 기록한다 — 큐·세션마무리 표·
+    컨슘 도장 의식 전부 대체(의식 0). 사람 도장 없는 유일한 hit_events 경로: 방어는
+    evidence 필수 + subtype='ai판정' 라벨(신뢰서열 구분) + owner 1-발화 정정(--overturn N).
+    actor/confirm 미사용 — 승인 경로가 아니라 기록 트랙(§approval-origin 인벤토리 무관)."""
+    from binggupack.pack import hit_recording as HR
+    ledger, _ = _ledger_paths(a.ledger)
+    home = os.path.dirname(ledger)
+    if getattr(a, "overturn", None) is not None:
+        if not os.path.exists(ledger):
+            print(f"장부가 없습니다: %s · 먼저 {HINT} init" % ledger)
+            return 2
+        db, _ = _open(ledger)
+        try:
+            r = HR.overturn_verdict(db, home, a.overturn)
+        finally:
+            db.close()
+        if r.get("overturned"):
+            print("OK: 판정 뒤집음 — [%d] 이제 %s 맞음 (기록 트랙 정정·감사 로그 보존)"
+                  % (r["seq"], "사장님" if r["who_right_now"] == "owner" else "AI"))
+            return 0
+        print("BLOCK: %s" % r.get("reason"))
+        return 1
+    who = "owner" if getattr(a, "owner_right", False) else ("ai" if getattr(a, "ai_right", False) else None)
+    if who is None:
+        # 인자 없음 = 최근 판정 목록(원문 전문 — 요약 금지)
+        rows = HR.list_verdicts(home, limit=10)
+        if not rows:
+            print("판정 기록 0건. (논쟁이 실측으로 판가름 나면 즉시 기록됩니다 — 의식 0)")
+            return 0
+        print("최근 판정 %d건 (뒤집기: %s verdict --overturn <번호>)" % (len(rows), HINT))
+        for seq, e in rows:
+            mark = "뒤집힘→" if e.get("overturned") else ""
+            print("[%d] %s%s 맞음 · %s" % (seq, mark,
+                  "사장님" if e.get("who_right") == "owner" else "AI", e.get("ts") or ""))
+            print("    사장님: %s" % e.get("owner_claim"))
+            print("    AI: %s" % e.get("ai_claim"))
+            print("    증거: %s" % e.get("evidence"))
+        return 0
+    if not os.path.exists(ledger):
+        print(f"장부가 없습니다: %s · 먼저 {HINT} init" % ledger)
+        return 2
+    db, _ = _open(ledger)
+    try:
+        r = HR.record_verdict(db, home, a.owner, a.ai_claim, who, a.evidence,
+                              domain=getattr(a, "domain", None))
+    finally:
+        db.close()
+    if r.get("recorded"):
+        print("OK: 판정 기록 — %s 맞음 (ai판정 라벨·증거 첨부·자동확정 아님 — 기록 트랙)"
+              % ("사장님" if who == "owner" else "AI"))
+        print("    decision=%s · 뒤집기: %s verdict --overturn <번호> (verdict 로 번호 확인)"
+              % (r.get("decision_id"), HINT))
+        return 0
+    reason = r.get("reason")
+    print("BLOCK: %s" % reason)
+    if reason == "evidence_required":
+        print("  실측 증거 1줄(--evidence)이 없으면 기록하지 않습니다(자기채점 방어).")
+    elif reason == "dup_decision":
+        print("  같은 논쟁이 이미 기록됨(이중계상 차단). 정정은 --overturn.")
+    elif reason == "empty_claim":
+        print("  --owner(사장님 주장)·--ai(AI 주장) 원문이 둘 다 필요합니다.")
+    return 1
+
+
 def _promote_staging_for_ledger(ledger):
     """승격 도장 staging 을 ledger scope 에 고정(_recall_staging_for_ledger 와 동일 원칙).
     운영에선 dirname(ledger)==home 이라 gate_log.last_promote_candidates_path() 와 동일 경로."""
@@ -2770,6 +2837,16 @@ def main():
     lcp.add_argument("--index", type=int, default=1)   # 회상 top 중 적중 노드(1-based·dry-run 확인)
     lcp.add_argument("--verdict", choices=("upheld", "overturned"), default="upheld")
     #   ↑ 사람 확인(교환 축): upheld=발화 판단이 결과적으로 옳았음(기본) · overturned=뒤집힘
+    # 논쟁 판정 즉시 기록(단순판·2026-07-16 owner) — 개방 기록 트랙·의식 0. 인자없음=최근 목록
+    vdp = sub.add_parser("verdict")
+    vdg = vdp.add_mutually_exclusive_group()
+    vdg.add_argument("--owner-right", action="store_true", dest="owner_right")
+    vdg.add_argument("--ai-right", action="store_true", dest="ai_right")
+    vdg.add_argument("--overturn", type=int, default=None)   # 목록 순번 정정("뒤집어 N")
+    vdp.add_argument("--owner", default=None, help="사장님 주장(원문)")
+    vdp.add_argument("--ai", dest="ai_claim", default=None, help="AI 주장(원문)")
+    vdp.add_argument("--evidence", default=None, help="실측 증거 1줄(필수 — 없으면 기록 거부)")
+    vdp.add_argument("--domain", default=None)
     # 추상화 규칙 후보 제안(작업4·C) — read-only·자동확정 0. --promote 로 candidate 등록(승격 연결)
     abp = sub.add_parser("abstraction"); abp.add_argument("--domain", default=None)
     abp.add_argument("--promote", default=None,
@@ -2863,7 +2940,7 @@ def main():
           "list": cmd_list, "deprecate": cmd_deprecate, "replace": cmd_replace,
           "accept": cmd_accept, "unaccept": cmd_unaccept, "due": cmd_due,
           "resolve": cmd_resolve, "mark-hit": cmd_mark, "mark-miss": cmd_mark,
-          "learn-consume": cmd_learn_consume,
+          "learn-consume": cmd_learn_consume, "verdict": cmd_verdict,
           "abstraction": cmd_abstraction, "promote": cmd_promote,
           "reminders": cmd_reminders, "capture": cmd_capture,
           "recall": cmd_recall, "why": cmd_recall, "ask": cmd_recall, "trace": cmd_trace, "preflight": cmd_preflight,
