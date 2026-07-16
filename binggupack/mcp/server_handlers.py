@@ -206,6 +206,12 @@ def _ensure_scripts_path():
         sys.path.insert(0, scripts)
 
 
+# 회수 도장 안내(작업A2) — MCP reader 원격 표면은 도장 소비용 staging 파일에 일절 쓰지 않는다(MF7).
+#   사람 도장 경로는 로컬 세션 한정(UserPromptSubmit hook 기록) → 안내 문구 1줄만 응답에 병기.
+_STAMP_HINT = ("유용했으면 로컬 세션(Claude Code)에서 recall 후 채팅 정확형 1줄 '히트 N' — "
+               "MCP 는 도장 staging 기록 0(안내만)")
+
+
 def _u_recall(params=None):
     """query 관련 기억 회상(read-only·use_count 미기록·랭킹순). ledger 없으면 빈 결과."""
     params = params or {}
@@ -226,8 +232,11 @@ def _u_recall(params=None):
              for i, n in enumerate(res["relevant_nodes"], 1)]
     edges = [{"source": e["source"], "relation": e["relation"], "target": e["target"]}
              for e in res.get("relevant_edges", [])]
-    return {"action": "recall", "mode": "read", "count": len(nodes),
-            "nodes": nodes, "edges": edges, "summary": res.get("summary", "")}
+    out = {"action": "recall", "mode": "read", "count": len(nodes),
+           "nodes": nodes, "edges": edges, "summary": res.get("summary", "")}
+    if nodes:
+        out["stamp_hint"] = _STAMP_HINT  # 안내 1줄만 — MCP 는 도장 staging 기록 0(MF7)
+    return out
 
 
 def _u_why(params=None):
@@ -258,9 +267,12 @@ def _u_why(params=None):
                       "claim": _redact_pii(n["claim"])})
     edges = [{"relation": e["relation"], "source_i": id2i.get(e["source"]),
               "target_i": id2i.get(e["target"])} for e in res.get("relevant_edges", [])]
-    return {"action": "why", "mode": "read", "count": len(nodes), "nodes": nodes,
-            "edges": edges, "summary": _redact_pii(res.get("summary", "")),
-            "confidence": res.get("confidence", 0.0)}
+    out = {"action": "why", "mode": "read", "count": len(nodes), "nodes": nodes,
+           "edges": edges, "summary": _redact_pii(res.get("summary", "")),
+           "confidence": res.get("confidence", 0.0)}
+    if nodes:
+        out["stamp_hint"] = _STAMP_HINT  # 안내 1줄만 — MCP 는 도장 staging 기록 0(MF7)
+    return out
 
 
 def _u_preflight(params=None):
@@ -278,14 +290,17 @@ def _u_preflight(params=None):
     res = RC.preflight_context(ledger, prompt=params.get("prompt"),
                                cwd=params.get("cwd") or os.getcwd(),
                                domain=params.get("domain"), files_changed=files or None)
-    return {"action": "preflight", "mode": "read",
-            "remember": [{"node_type": n["node_type"], "subtype": n.get("semantic_subtype"), "claim": n["claim"]}
-                         for n in res["remember"]],
-            "avoid_patterns": [{"risk": round(m["risk_score"], 2), "claim": m["claim"]}
-                               for m in res["avoid_patterns"]],
-            "preferences": [{"claim": p["claim"]} for p in res["preferences"]],
-            "risk_level": res["risk_level"],
-            "question": res.get("question") if res.get("needs_question") else None}
+    out = {"action": "preflight", "mode": "read",
+           "remember": [{"node_type": n["node_type"], "subtype": n.get("semantic_subtype"), "claim": n["claim"]}
+                        for n in res["remember"]],
+           "avoid_patterns": [{"risk": round(m["risk_score"], 2), "claim": m["claim"]}
+                              for m in res["avoid_patterns"]],
+           "preferences": [{"claim": p["claim"]} for p in res["preferences"]],
+           "risk_level": res["risk_level"],
+           "question": res.get("question") if res.get("needs_question") else None}
+    if res["remember"] or res["avoid_patterns"] or res["preferences"]:
+        out["stamp_hint"] = _STAMP_HINT  # 안내 1줄만 — MCP 는 도장 staging 기록 0(MF7)
+    return out
 
 
 def _u_trace_review(params=None):
