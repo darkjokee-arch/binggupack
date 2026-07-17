@@ -34,8 +34,10 @@ SPECS = [
     ("person_pack_sync", "scripts/binggu_person_pack_sync.py", ["--selftest"], "GATE=GO"),
     ("public_tree_scan", "scripts/openbinggu_public_tree_scan.py", ["--selftest"], "GATE: GO"),
     ("recall", "scripts/binggu_recall.py", ["--selftest"], "GATE=GO"),
-    # 회귀 묶음(P1~P7 + cloud_pack + tree scan, ~30 selftest 를 한 러너가 순회).
-    ("regression_all", "scripts/binggu_publish_run_all_selftests.py", [], "REGRESSION=GO"),
+    # 회귀 묶음(run_all: P1~P7 + cloud_pack + tree scan)은 여기서 제외한다 — ci.yml selftest job 의
+    # "Publish pipeline regression" 스텝과 scripts/ci_local_preflight.py 의 "run_all 회귀" 스텝이
+    # 각 환경에서 이미 1회 실행하므로, pytest 경로에서 또 돌리면 run_all 이 2회 실행된다(중복 제거).
+    # t3_filter·person_pack_sync 등 위 항목은 run_all GATES 에 없는 유일 커버리지라 유지한다.
 ]
 
 
