@@ -51,6 +51,14 @@ def run_smoke(home=None):
     checks = []
     def chk(name, cond): checks.append((name, bool(cond)))
 
+    def chk_live(name, tr):
+        # rank6 회귀망: live 결선 도구가 synthetic stub 으로 되돌아가면 FAIL.
+        #   미결선 stub 은 tool_result 에 synthetic=True + verdict=NOT_IMPLEMENTED 를 남긴다
+        #   (server_handlers _STUB_NOTE 계약). 그러면 게이트 verdict=ALLOW 만으로 green 통과하던
+        #   구멍을 실값으로 막는다. selftest(설계상 stub·안내유지)에는 적용하지 않는다.
+        checks.append((name, tr.get("synthetic") is not True
+                       and tr.get("verdict") != "NOT_IMPLEMENTED"))
+
     r = handle_tool("selftest", {}, allow_root)
     chk("1.selftest_ALLOW", r.get("verdict") == "ALLOW" and r.get("executed"))
 
@@ -63,17 +71,69 @@ def run_smoke(home=None):
     chk("3.capture_preview_ALLOW_nothing_saved",
         r.get("verdict") == "ALLOW" and tr.get("nothing_saved") is True and len(tr.get("candidates", [])) >= 1)
 
+    # #67/CS-1/CS-5: 게이트 verdict=ALLOW 만으로 통과 처리 금지 — tool_result 실값까지 검증.
     r = handle_tool("pack_build", {"input_dir": FX_DIR}, allow_root)
-    chk("4.pack_build_dryrun_ALLOW", r.get("verdict") == "ALLOW")
+    tr = r.get("tool_result") or {}
+    chk("4.pack_build_GO_nodes>0",
+        r.get("verdict") == "ALLOW" and tr.get("verdict") == "GO"
+        and tr.get("counts", {}).get("nodes", 0) > 0)
+    chk_live("4s.pack_build_not_synthetic_stub", tr)
 
     r = handle_tool("pack_validate", {"pack_path": FX_FILE}, allow_root)
-    chk("5.pack_validate_ALLOW", r.get("verdict") == "ALLOW")
+    tr = r.get("tool_result") or {}
+    # FX_FILE(toy 요약 json)은 manifest 계약 필드 미충족 → STOP 이 정확한 실값(negative 검증).
+    # valid manifest 의 PASS positive 는 아래 5b(build_pack 산출 manifest)에서 확인.
+    chk("5.pack_validate_STOP_on_incomplete_summary",
+        r.get("verdict") == "ALLOW" and tr.get("verdict") == "STOP")
+    chk_live("5s.pack_validate_not_synthetic_stub", tr)
 
     r = handle_tool("publish_guard_dryrun", {"pack_path": FX_FILE}, allow_root)
-    chk("6.publish_guard_dryrun_ALLOW", r.get("verdict") == "ALLOW")
+    tr = r.get("tool_result") or {}
+    # dry-run 은 publish_approved=False 고정 → fail-closed(BLOCK)이 정상. verdict 실값 존재 확인.
+    chk("6.publish_guard_dryrun_ran",
+        r.get("verdict") == "ALLOW" and tr.get("verdict") in ("BLOCK", "PASS", "REVIEW_ONLY", "ALLOW"))
+    chk_live("6s.publish_guard_not_synthetic_stub", tr)
 
-    r = handle_tool("consumer_smoke", {"pack_path": FX_FILE}, allow_root)
-    chk("7.consumer_smoke_ALLOW", r.get("verdict") == "ALLOW")
+    # 7. consumer_smoke — CS-1: 단일 요약 json 이 아니라 실제 5-jsonl pack 디렉토리를 read.
+    #    build_pack 으로 repo 상대경로(tmp/) 5파일 pack 을 런타임 생성(절대 temp 는 outside_root BLOCK).
+    from binggupack.pack import pack_factory as _pf
+    _cdir_rel = os.path.join("tmp", "smoke_consumer_pack")
+    _cdocs = [{
+        "nodes": [{"id": "node:STAGING:sm:%d" % i, "promotion_allowed": False,
+                   "properties": {"candidate": True, "sentence": "스모크 소비 문장 %d." % i,
+                                  "origin": "watcher", "domain": "STAGING_UNASSIGNED"},
+                   "evidence_refs": ["EVC-sm-%d" % i]} for i in range(3)],
+        "evidence_index": [{"evidence_id": "EVC-sm-%d" % i, "kind": "file_pointer",
+                            "domain": "STAGING_UNASSIGNED", "promotion_allowed": False, "note": "p"}
+                           for i in range(3)],
+        "evidence_chunks": [{"item_id": "EVC-sm-%d" % i, "text": "스모크 소비 문장 %d." % i,
+                             "source": "harvest :: url :: src", "evidence_meta": {"raw_pointer": "x"}}
+                            for i in range(3)],
+    }]
+    _pf.build_pack("smoke_consumer", _cdocs, out_dir=os.path.join(ROOT, _cdir_rel))
+    # 5b. pack_validate PASS positive — build_pack 산출 manifest 는 validate_pack 계약 충족.
+    r = handle_tool("pack_validate", {"pack_path": os.path.join(_cdir_rel, "manifest.json")}, allow_root)
+    tr = r.get("tool_result") or {}
+    chk("5b.pack_validate_PASS_on_valid_manifest",
+        r.get("verdict") == "ALLOW" and tr.get("verdict") in ("PASS", "REVIEW_ONLY"))
+    r = handle_tool("consumer_smoke", {"pack_path": _cdir_rel}, allow_root)
+    tr = r.get("tool_result") or {}
+    chk("7.consumer_smoke_GO_nodes>0",
+        r.get("verdict") == "ALLOW" and tr.get("verdict") == "GO"
+        and tr.get("counts", {}).get("nodes", 0) == 3)
+    chk_live("7s.consumer_smoke_not_synthetic_stub", tr)
+    # 7b. raw 미노출(CS-2) — 원문 문장이 반환 blob 에 없어야.
+    import json as _json7
+    chk("7b.consumer_smoke_no_raw_leak", "스모크 소비 문장" not in _json7.dumps(r, ensure_ascii=False))
+    # 7c. 빈 pack → STOP (CS-1 빈 입력 false-GO 방지).
+    _edir_rel = os.path.join("tmp", "smoke_consumer_empty")
+    _pf.build_pack("smoke_empty", [], out_dir=os.path.join(ROOT, _edir_rel))
+    r = handle_tool("consumer_smoke", {"pack_path": _edir_rel}, allow_root)
+    tr = r.get("tool_result") or {}
+    chk("7c.consumer_smoke_empty_STOP", r.get("verdict") == "ALLOW" and tr.get("verdict") == "STOP")
+    import shutil as _sh7
+    _sh7.rmtree(os.path.join(ROOT, _cdir_rel), ignore_errors=True)
+    _sh7.rmtree(os.path.join(ROOT, _edir_rel), ignore_errors=True)
 
     r = handle_tool("save_candidate", {"text": SYN, "indices": [1]}, allow_root)
     tr = r.get("tool_result") or {}

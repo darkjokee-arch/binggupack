@@ -1,388 +1,55 @@
 # -*- coding: utf-8 -*-
-"""OpenBinggu Watcher — Incoming Folder Adapter (기존 기록 폴더 → MVP2 evidence_chunk[], dry-run only).
+"""OpenBinggu Watcher — Incoming Folder Adapter (backward-compatible thin wrapper).
 
-P0 첫 삽: 빈 그래프엔 채울 게 없다 → 기존 기록(박제·traj·md/txt)을 읽어 MVP2 노드 파이프라인이
-바로 물 수 있는 evidence_chunk[] 로 정규화한다. 이 모듈은 **입력 어댑터**일 뿐 —
-node→node 강한관계(edge) 0, 운영 store(~/.binggupack) 절대 미접촉(read-only stat만), candidate=true/
-promotion_allowed=false/temp only.
+strangler 이관(candidate_mvp2 전례): 순수 파이프라인 로직(scan → parse → chunk →
+redact → adapt) + 상수/정규식 정본은 binggupack.pack.incoming_folder 로 byte-identical
+이관됐고, 이 파일은 공개 심볼을 re-export 하는 thin wrapper 다. __file__ 경로상수
+(BASE/SCRIPTS/FIXTURE_DIR/TMP_OUT/SELFTEST_REPORT) + fixtures/selftest/CLI 오케스트레이션
+(경로 의존)은 이 wrapper 에 잔류한다. dry-run only(운영 store write 0).
 
-기존 git diff 어댑터(watcher_capture_mvp1/batch_m1)와 다른 점:
-  - 입력 = 폴더 안의 .md/.txt 파일들(구조 있는 문서). git diff 아님.
-  - 빈 줄 단락분할 우회: 표·코드블록(fenced)·중첩리스트·blockquote 를 쪼개지 않고 한 덩어리로 보존
-    (markdown 구조 파서). 단락은 빈 줄로만 분리.
-  - 각 block 에 line_start/line_end 부여 → chunk→원본 파일+라인 역추적 가능.
-  - evc_id = sha256[:24] (기존 EVC-sha8 폐기 — 대량 박제 충돌 방지).
-
-재사용(무수정):
-  - watcher_batch_m1.batch_redact(text) -> (redacted, hits, review_flag)   # secret(mvp1)+PII 복합 마스킹
-  - watcher_batch_m1.scan_residual_pii(text) -> [kind...]                  # 독립 잔존 스캐너(검증자≠피검증자)
-  - watcher_candidate_mvp2.to_nodes(chunks) -> (nodes, ev_index, stops)    # 노드 변환(엣지 미생성)
-  - watcher_candidate_mvp2._meaningful(text) -> bool                       # 짧은/redacted-only 문장 거부
-
-강제: candidate=true / promotion_allowed=false / origin=watcher / node→node edge 0 / redaction_required.
-STOP: PII/secret 잔존(FN) = 전체 STOP (chunk 미생성, 작업 중단).
+MCP 상한(MF3): adapt_incoming_folder(input_dirs, *, max_files, max_total_bytes,
+max_file_bytes). 기본 None = 무제한 = 기존 동작 100% 보존.
 
 CLI:
   python watcher_incoming_folder_adapter.py --selftest
   python watcher_incoming_folder_adapter.py <folder> [<folder> ...]   # dry-run (temp 산출)
 """
-import hashlib
 import json
-import re
+import os
 import sys
 from pathlib import Path
+
+HERE = os.path.dirname(os.path.abspath(__file__))   # <repo>/scripts
+ROOT = os.path.dirname(HERE)                         # <repo>
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)   # binggupack 패키지 import 경로
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)   # scripts 형제(importer 호환) 호환
+
+from binggupack.pack.incoming_folder import *  # noqa: E402,F401,F403
+from binggupack.pack.incoming_folder import (  # noqa: E402,F401  (전체 명시 re-export)
+    SCOPE,
+    ALLOWED_SUFFIXES,
+    OPERATING_STORE_FILES,
+    make_evc_id,
+    _text_hash,
+    _is_excluded,
+    scan_markdown_files,
+    _classify_block_type,
+    parse_markdown_preserve_blocks,
+    make_evidence_chunks,
+    redact_and_validate,
+    _store_snapshot,
+    adapt_incoming_folder,
+    batchm1,
+    mvp2,
+)
 
 BASE = Path(__file__).resolve().parent.parent
 SCRIPTS = Path(__file__).resolve().parent
 FIXTURE_DIR = BASE / "tests" / "fixtures" / "incoming_folder"
 TMP_OUT = BASE / "tmp" / "watcher_incoming_folder"
 SELFTEST_REPORT = BASE / "reports" / "watcher_incoming_folder_selftest.json"
-
-sys.path.insert(0, str(SCRIPTS))
-import watcher_batch_m1 as batchm1          # batch_redact / scan_residual_pii 재사용
-import watcher_candidate_mvp2 as mvp2       # to_nodes / _meaningful 재사용
-
-SCOPE = "project:openbinggu"
-ALLOWED_SUFFIXES = (".md", ".txt")
-
-# 운영 store (절대 write 금지 — read-only stat 으로 mtime/size 불변 검증). 헌법: ~/.binggupack 미접촉.
-_BINGGU_HOME = Path.home() / ".binggupack"
-_ONTOLOGY = Path.home() / ".claude" / "memory" / "ontology"
-OPERATING_STORE_FILES = [
-    _BINGGU_HOME / "ledger.sqlite",
-    _BINGGU_HOME / "capture_buffer.sqlite",
-    _ONTOLOGY / "user_graph.yaml",
-    _ONTOLOGY / "_graph_merge.yaml",
-]
-
-# 숨김/백업/temp 제외 (파일명·경로 토큰 기준)
-_EXCLUDE_NAME_TOKENS = ("_backup", ".bak", ".tmp", "~", ".swp")
-_EXCLUDE_DIR_TOKENS = ("_backup", ".git", "__pycache__", "node_modules", ".venv", "tmp", "_archived")
-
-# 코드펜스 시작/끝 (``` 또는 ~~~, 들여쓰기 3칸까지 허용)
-_FENCE_RE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
-# 표 행 (| 로 시작하거나 셀 구분 | 포함). 보수적으로 '|' 가 줄에 존재.
-_TABLE_ROW_RE = re.compile(r"^\s{0,3}\|.*\|?\s*$|^\s{0,3}[^\n|]*\|[^\n|]*$")
-# 표 구분선 (---|--- 형태)
-_TABLE_SEP_RE = re.compile(r"^\s{0,3}\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$")
-# 리스트 아이템 (-, *, +, 또는 1. 형태, 들여쓰기 허용)
-_LIST_ITEM_RE = re.compile(r"^(\s*)([-*+]|\d+[.)])\s+\S")
-# blockquote (> 시작, 들여쓰기 허용)
-_QUOTE_RE = re.compile(r"^\s{0,3}>")
-# 헤딩 (# 시작)
-_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+\S")
-
-
-def make_evc_id(source_path, block_text, block_index):
-    """대량 박제 충돌 방지용 안정 ID. sha256[:24] (기존 EVC-sha8 폐기).
-    소스경로+블록순번+내용 기반 → 같은 파일 내 동일 텍스트 반복 블록도
-    block_index가 달라 다른 id (provenance 라인 보존). cross-file 동일 블록도
-    소스가 다르면 다른 id. 같은 파일 같은 위치 재실행은 동일 id (멱등)."""
-    key = str(source_path) + "::" + str(block_index) + "::" + block_text
-    return "EVC-" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
-
-
-def _text_hash(text):
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:24]
-
-
-def _is_excluded(path):
-    name = path.name
-    low = name.lower()
-    if name.startswith("."):
-        return True
-    if any(tok in low for tok in _EXCLUDE_NAME_TOKENS):
-        return True
-    parts = [p.lower() for p in path.parts]
-    if any(tok in parts for tok in _EXCLUDE_DIR_TOKENS):
-        return True
-    return False
-
-
-def scan_markdown_files(input_dirs):
-    """폴더(들)에서 .md/.txt 수집. 숨김/백업/temp 제외. 결정적 정렬."""
-    found = []
-    for d in input_dirs:
-        d = Path(d)
-        if not d.exists() or not d.is_dir():
-            continue
-        for p in sorted(d.rglob("*")):
-            if not p.is_file():
-                continue
-            if p.suffix.lower() not in ALLOWED_SUFFIXES:
-                continue
-            if _is_excluded(p):
-                continue
-            found.append(p)
-    return sorted(found, key=lambda x: str(x))
-
-
-def _classify_block_type(lines):
-    """블록의 첫 의미줄 기준 type 판정 (heading/table/code_fence/list/blockquote/paragraph)."""
-    first = next((ln for ln in lines if ln.strip()), "")
-    if _FENCE_RE.match(first):
-        return "code_fence"
-    if _HEADING_RE.match(first):
-        return "heading"
-    if _QUOTE_RE.match(first):
-        return "blockquote"
-    if _LIST_ITEM_RE.match(first):
-        return "list"
-    # 표: 첫 줄에 | 있고 다음 줄이 구분선이거나, 연속 | 행
-    if "|" in first and any(_TABLE_SEP_RE.match(ln) for ln in lines):
-        return "table"
-    return "paragraph"
-
-
-def parse_markdown_preserve_blocks(markdown):
-    """markdown → [block] (line_start/line_end 1-based, 끝 포함).
-    빈줄 단락분할을 우회: 표·코드펜스·중첩리스트·blockquote 는 빈 줄이 끼어도 한 덩어리로 보존.
-    각 block = {'type', 'text', 'line_start', 'line_end'}.
-    CRLF 정규화: \r\n 및 단독 \r 을 \n 으로 통일 → text_hash/evc_id 멱등(Windows).
-    라인 번호(line_start/line_end)는 정규화 후 라인 기준."""
-    # \r\n → \n, 그다음 잔여 단독 \r → \n (Mac classic). 정규화 후 라인 분할 → 라인번호 일관.
-    markdown = markdown.replace("\r\n", "\n").replace("\r", "\n")
-    raw_lines = markdown.split("\n")
-    n = len(raw_lines)
-    blocks = []
-    i = 0
-    while i < n:
-        line = raw_lines[i]
-        # 빈 줄 스킵 (블록 사이 구분)
-        if not line.strip():
-            i += 1
-            continue
-        start = i  # 0-based
-
-        # 1) 코드펜스: 시작 펜스 → 동일/더 긴 닫는 펜스까지 통째 (내부 빈 줄·구조 무시)
-        mfence = _FENCE_RE.match(line)
-        if mfence:
-            open_fence = mfence.group(1)        # 여는 펜스 전체 (예: ``` 또는 ````)
-            fence_char = open_fence[0]           # ` 또는 ~
-            open_len = len(open_fence)            # 여는 펜스 길이
-            j = i + 1
-            while j < n:
-                m2 = _FENCE_RE.match(raw_lines[j])
-                # CommonMark: 닫는 펜스 = 같은 문자 + 같거나 더 긴 길이.
-                # (여는 ``` 는 ``` 이상으로만 닫힘; 더 긴 ```` 로 열면 ``` 로 안 닫힘 → 중첩 펜스 보존)
-                if m2 and m2.group(1)[0] == fence_char and len(m2.group(1)) >= open_len:
-                    j += 1  # 닫는 펜스 포함
-                    break
-                j += 1
-            end = min(j, n) - 1
-            i = end + 1
-            blocks.append(("code_fence", raw_lines[start:end + 1], start, end))
-            continue
-
-        # 2) 표: 첫 줄에 | 포함 + 다음 줄 구분선 → 연속 표행(빈 줄 만나면 종료)
-        if "|" in line:
-            # 표 여부 확인: 다음 비어있지 않은 줄이 구분선
-            look = i + 1
-            is_table = False
-            if look < n and _TABLE_SEP_RE.match(raw_lines[look]):
-                is_table = True
-            if is_table:
-                j = i
-                while j < n and raw_lines[j].strip() and ("|" in raw_lines[j] or _TABLE_SEP_RE.match(raw_lines[j])):
-                    j += 1
-                end = j - 1
-                i = j
-                blocks.append(("table", raw_lines[start:end + 1], start, end))
-                continue
-
-        # 3) blockquote: 연속 > 행 (인접한 비-빈 줄도 lazy continuation 으로 포함)
-        if _QUOTE_RE.match(line):
-            j = i
-            while j < n and raw_lines[j].strip():
-                # > 행이거나, 인용 내부의 lazy continuation(빈 줄 전까지)
-                j += 1
-            end = j - 1
-            i = j
-            blocks.append(("blockquote", raw_lines[start:end + 1], start, end))
-            continue
-
-        # 4) 리스트(중첩 포함): 리스트 아이템 시작 → 들여쓰기 연속/하위 단락/빈 줄 1개 끼움 허용
-        if _LIST_ITEM_RE.match(line):
-            j = i + 1
-            while j < n:
-                cur = raw_lines[j]
-                if cur.strip() == "":
-                    # 빈 줄 다음이 들여쓰기된 줄 또는 새 리스트 아이템이면 리스트 계속
-                    k = j + 1
-                    while k < n and raw_lines[k].strip() == "":
-                        k += 1
-                    if k < n and (raw_lines[k].startswith(("  ", "\t")) or _LIST_ITEM_RE.match(raw_lines[k])):
-                        j = k
-                        continue
-                    break  # 빈 줄로 리스트 종료
-                # 새 리스트 아이템이거나 들여쓰기된 연속 줄(중첩/이어쓰기)
-                if _LIST_ITEM_RE.match(cur) or cur.startswith(("  ", "\t")):
-                    j += 1
-                    continue
-                # 들여쓰기 없는 비-리스트 줄 → 리스트 종료
-                break
-            end = j - 1
-            i = j
-            blocks.append(("list", raw_lines[start:end + 1], start, end))
-            continue
-
-        # 5) 헤딩: 한 줄
-        if _HEADING_RE.match(line):
-            end = i
-            i = i + 1
-            blocks.append(("heading", raw_lines[start:end + 1], start, end))
-            continue
-
-        # 6) 일반 단락: 빈 줄 또는 구조 시작 줄 전까지
-        j = i + 1
-        while j < n:
-            cur = raw_lines[j]
-            if cur.strip() == "":
-                break
-            if (_FENCE_RE.match(cur) or _HEADING_RE.match(cur) or _QUOTE_RE.match(cur)
-                    or _LIST_ITEM_RE.match(cur)):
-                break
-            j += 1
-        end = j - 1
-        i = j
-        blocks.append(("paragraph", raw_lines[start:end + 1], start, end))
-
-    # type 정밀 보정 + dict 화 (line 은 1-based, end 포함)
-    out = []
-    for btype, lines, s, e in blocks:
-        if btype == "paragraph":
-            refined = _classify_block_type(lines)
-        else:
-            refined = btype
-        out.append({
-            "type": refined,
-            "text": "\n".join(lines).rstrip("\n"),
-            "line_start": s + 1,
-            "line_end": e + 1,
-        })
-    return out
-
-
-def make_evidence_chunks(path, blocks):
-    """[block] → [evidence_chunk] (redaction 전 raw 골격). block_index 부여."""
-    chunks = []
-    for idx, b in enumerate(blocks):
-        text = b["text"]
-        if not text.strip():
-            continue
-        chunks.append({
-            "source_path": str(path),
-            "block_index": idx,
-            "block_type": b["type"],
-            "text": text,
-            "line_start": b["line_start"],
-            "line_end": b["line_end"],
-        })
-    return chunks
-
-
-def redact_and_validate(chunks):
-    """기존 batch_redact + scan_residual_pii 재사용. residual PII/secret 발견 시 전체 STOP.
-    반환 (clean_chunks, stops). stops 비어있지 않으면 호출자가 전체 STOP 처리."""
-    out, stops = [], []
-    for c in chunks:
-        red, hits, review = batchm1.batch_redact(c["text"])
-        residual = batchm1.scan_residual_pii(red)
-        if residual:
-            stops.append({
-                "source_path": c["source_path"],
-                "block_index": c["block_index"],
-                "line_start": c["line_start"],
-                "line_end": c["line_end"],
-                "reason": "secret/PII residual",
-                "kinds": residual,
-            })
-            continue
-        # MVP2 to_nodes 호환: item_id + text + evidence_meta.raw_pointer 필수.
-        evc_id = make_evc_id(c["source_path"], red, c["block_index"])
-        out.append({
-            "evc_id": evc_id,
-            "item_id": evc_id,            # to_nodes 가 읽는 키 (호환)
-            "source_path": c["source_path"],
-            "block_index": c["block_index"],
-            "block_type": c["block_type"],
-            "text": red,
-            "text_hash": _text_hash(red),
-            "line_start": c["line_start"],
-            "line_end": c["line_end"],
-            "evidence_meta": {
-                "confidence": 0.5,
-                "source_kind": "incoming_folder",
-                "timestamp": "(deterministic-incoming)",
-                "scope": SCOPE,
-                "raw_pointer": c["source_path"],     # to_nodes 가 읽는 evidence_meta.raw_pointer
-                "redaction_applied": True,
-                "redaction_hits": hits,
-                "review_flag": review,
-                "line_start": c["line_start"],
-                "line_end": c["line_end"],
-                "block_type": c["block_type"],
-            },
-        })
-    return out, stops
-
-
-def _store_snapshot():
-    """운영 store mtime/size 스냅샷 (write 안 함 — read-only stat)."""
-    snap = {}
-    for p in OPERATING_STORE_FILES:
-        try:
-            if p.exists():
-                st = p.stat()
-                snap[str(p)] = {"mtime_ns": st.st_mtime_ns, "size": st.st_size, "exists": True}
-            else:
-                snap[str(p)] = {"exists": False}
-        except OSError:
-            snap[str(p)] = {"exists": False, "stat_error": True}
-    return snap
-
-
-def adapt_incoming_folder(input_dirs):
-    """scan → parse → chunk → redact → MVP2 입력(evidence_chunk[]) 반환.
-    residual PII/secret 발견 시 전체 STOP (chunks 미반환)."""
-    store_before = _store_snapshot()
-    files = scan_markdown_files(input_dirs)
-
-    all_chunks = []
-    per_file = []
-    for fp in files:
-        md = fp.read_text(encoding="utf-8", errors="replace")
-        blocks = parse_markdown_preserve_blocks(md)
-        raw_chunks = make_evidence_chunks(fp, blocks)
-        all_chunks.extend(raw_chunks)
-        per_file.append({"source_path": str(fp), "n_blocks": len(blocks), "n_chunks": len(raw_chunks)})
-
-    clean_chunks, stops = redact_and_validate(all_chunks)
-    store_after = _store_snapshot()
-    store_unchanged = (store_before == store_after)
-
-    if stops:
-        return {
-            "gate": "STOP",
-            "reason": "secret/PII residual — 전체 STOP",
-            "n_files": len(files),
-            "per_file": per_file,
-            "stops": stops,
-            "chunks": [],
-            "operating_store_unchanged": store_unchanged,
-        }
-
-    return {
-        "gate": "GO",
-        "n_files": len(files),
-        "per_file": per_file,
-        "n_chunks": len(clean_chunks),
-        "chunks": clean_chunks,           # MVP2 to_nodes 입력 그대로
-        "stops": [],
-        "operating_store_unchanged": store_unchanged,
-        "production_write": 0, "store_write": 0, "db_write": 0,
-        "opencrab_call": 0, "github_push": 0, "node_to_node_edges": 0,
-    }
 
 
 # ---------------------------------------------------------------------------
