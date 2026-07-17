@@ -137,8 +137,14 @@ jobs:
     # wheel 자족성 게이트(2026-07-13) — 설치본이 repo checkout 없이 자족하는지 실측.
     # ① 클린 venv 설치본 `binggu --selftest`(과거: tests/ 미동봉 ModuleNotFoundError)
     # ② 전 모듈(binggu·binggupack.*·scripts.*) fresh-subprocess import sweep — 저장소 밖 cwd 로
-    #    repo sys.path 우연 통과 차단. 경량 단일 잡(매트릭스 불변).
-    runs-on: ubuntu-latest
+    #    repo sys.path 우연 통과 차단.
+    # posix(venv/bin/) 경로 공유 — ubuntu+macos 매트릭스로 macOS wheel 설치본 자족성 커버(2026-07-17).
+    # windows(venv/Scripts/)는 경로 분기 필요 → 별도. 스텝은 무변경(posix 공유).
+    strategy:
+      fail-fast: false  # 한 OS가 깨져도 나머지 OS 결과를 끝까지 본다
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
