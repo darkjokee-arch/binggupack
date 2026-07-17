@@ -64,6 +64,12 @@ LEAK_PATTERNS = [
     ("pii_email", re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")),
     ("secret_kv", re.compile(r"(api[_-]?key|passwd|password)\s*[:=]\s*\S", re.I)),
     ("win_abs_path", re.compile(r"[A-Za-z]:\\Users\\(?!<)")),
+    # 접두 없는 맨 토큰(prefix 없이도 유출) — batch_m1 의 가장 공격적(최소) 임계와 정합.
+    ("secret_aws_akia", re.compile(r"\bAKIA[0-9A-Z]{7,}")),
+    ("secret_vendor_token",
+     re.compile(r"\b(?:sk-live-[A-Za-z0-9]{8,}|sk-[A-Za-z0-9]{16,}|gh[oprsu]_[A-Za-z0-9]{20,})")),
+    ("secret_bearer", re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._-]{20,}")),
+    ("secret_private_key", re.compile(r"-----BEGIN[A-Z ]*PRIVATE KEY-----")),
 ]
 
 
@@ -736,6 +742,24 @@ def _selftest():
         chk("B6 PII leak → release 차단(fail-closed)",
             not r_leak["ok"] and r_leak["leak_count"] >= 1
             and "evidence_leak_count==0" in r_leak["failed_gates"])
+
+        # ── B7: 신규 secret 패턴이 접두 없는 맨 토큰을 잡는다(런타임 조립 — 리터럴 회피) ──
+        raw_tokens = [
+            "AKIA" + "ABCDEFGH1234567",              # AWS access key
+            "ghp_" + "A" * 36,                       # GitHub PAT
+            "gho_" + "B" * 36,                       # GitHub OAuth
+            "sk-" + "C" * 32,                        # OpenAI 류
+            "Bearer " + "D" * 40,                    # bearer 토큰
+            "-----BEGIN" + " RSA PRIVATE KEY-----",  # private key 헤더
+        ]
+
+        def _leak_hit(s):
+            return any(rx.search(s) for _, rx in LEAK_PATTERNS)
+
+        chk("B7 신규 secret 패턴 → 접두 없는 맨 토큰 전부 포착",
+            all(_leak_hit(t) for t in raw_tokens))
+        chk("B7b 정상 여행 문장 → secret 오탐 0",
+            not _leak_hit("정글사파리투어 코스는 신혼여행 추천 명소로 손꼽힌다."))
 
         # ── 업로드 wire (mock 주입·네트워크 0) ──
         fake_url = "https://storage.example/fake-signed/upload.zip?token=dummysig"
