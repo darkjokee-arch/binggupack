@@ -236,6 +236,14 @@ def commit_bundle(db, home, staging_dir, selected_intent_ids, ctx, confirm, snap
     #   shrink)이 되므로 — ok 이어도 rejected 가 있으면 hard-fail 로 취급해 전체 BLOCK(§2·계약 5).
     prepared, prep_fail = [], None
     for it in items:
+        # §8-1-⑥ owner=pair-only: hosted flat owner intent 는 화자축 연결(노드2+엣지1)이 빠져 노드가
+        # 흩어진다(화자축 본질 상실). CLI cmd_save 의 owner_flat_save_forbidden 을 저장 코어 경로에도
+        # 내려 hosted pull(commit_bundle) 경로를 커버 — owner 는 로컬 pair(binggu pair)로만 저장.
+        # hosted flat owner 는 hard-fail(전체 BLOCK·write 0·원문 보존, 계약 5 부분저장 방지와 정합).
+        if it.get("speaker") == "owner":
+            prep_fail = {"intent_id": it["intent_id"], "reason": "owner_flat_save_forbidden",
+                         "rejected": None}
+            break
         pr = _convsave.prepare_selected(db, it["text"], it["indices"],
                                         speaker=it.get("speaker"), explicit=False)
         if pr["ok"] and not pr["rejected"]:
@@ -358,11 +366,13 @@ def _selftest():
     HUMAN = {"actor": "human", "actor_source": "cli_command"}
     READER = {"actor": "reader", "actor_source": "agent_session_unanchored"}
 
-    def mk(staging, text, idxs, created=NOW - 10):
+    def mk(staging, text, idxs, created=NOW - 10, speaker=None):
         confirm = "SAVE " + ",".join(str(i) for i in idxs)
         it = {"schema_ver": SCHEMA_VER, "text": text, "indices": idxs, "confirm": confirm,
               "intent_id": intent_hash(text, idxs, confirm),
               "created_ts": created, "ttl_s": DEFAULT_TTL_S, "source": "hosted"}
+        if speaker is not None:
+            it["speaker"] = speaker
         with open(os.path.join(staging, it["intent_id"] + ".json"), "w", encoding="utf-8") as f:
             json.dump(it, f, ensure_ascii=False)
         return it["intent_id"]
@@ -431,6 +441,17 @@ def _selftest():
     ck(r5["write"] == 0 and r5["reason"] == "bundle_prepare_failed" and n_after5 == n_before5
        and both_preserved,
        "5 exact membership: 1건 PII → 전체 write 0 · 원문 보존")
+
+    # 5b) §8-1-⑥ owner=pair-only — hosted flat owner intent → owner_flat_save_forbidden hard-fail.
+    #     CLI cmd_save 의 owner flat 차단을 저장 코어(commit_bundle)에도 내려 hosted pull 경로 커버.
+    i5c = mk(staging, "이 방식으로 진행하기로 정했다.", [1], speaker="owner")
+    nb5b = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
+    r5b = commit_bundle(db, home, staging, [i5c], HUMAN, "SAVE 1", snap, NOW)
+    na5b = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
+    ck(r5b["write"] == 0 and r5b["reason"] == "bundle_prepare_failed"
+       and r5b.get("fail", {}).get("reason") == "owner_flat_save_forbidden" and na5b == nb5b
+       and os.path.isfile(os.path.join(staging, i5c + ".json")),
+       "5b owner flat → owner_flat_save_forbidden · 전체 write 0 · 원문 보존(§8-1-⑥)")
 
     # 6) 선택 번호와 confirm 의 idx 바인딩 — indices 명시 시 confirm 은 그 번호와 정확 일치해야
     r6 = commit_bundle(db, home, staging, [i5a], HUMAN, "SAVE 1", snap, NOW, indices=[3])
