@@ -1620,6 +1620,81 @@ def cmd_verdict(a):
     return 1
 
 
+def cmd_outcome(a):
+    """회상→작업결과 귀속 기록/조회/정정(Recall→Outcome Attribution v0.1).
+
+    측정 축을 '이 기억이 맞았나'(회수측)에서 '기억이 행동을 바꿔 결과를 개선했나'(결과-귀속)로 옮긴다.
+    정상 경로 = AI 가 테스트·CI·실측 결과를 확인한 직후 자동 기록(evidence-gated · 관찰 로그라 SAVE
+    불요). 별도 store(recall_trace.sqlite sibling) · 운영 ledger 미접촉 · append-only. 정정만 owner
+    --overturn(사람 게이트). 인과 단정 0 — application·result 두 관찰 사실만."""
+    from datetime import datetime, timezone
+    from binggupack.pack import outcome_attribution as OA
+    ledger, _ = _ledger_paths(a.ledger)
+    home = os.path.dirname(ledger)
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # 정정: binggu outcome --overturn N (owner 전용 · 원본 보존 + reversal append)
+    if getattr(a, "overturn", None) is not None:
+        r = OA.overturn_run_outcome(a.overturn, ts, home=home)
+        if r.get("overturned"):
+            print("OK: 결과 판정 [%d] 정정(overturn) — 원본 보존·reversal 이력 append(삭제 0)" % r["seq"])
+            return 0
+        print("BLOCK: %s" % r.get("reason"))
+        return 1
+    # 기록: binggu outcome record --trace ... --application ... --result ... --evidence-kind ... --evidence-digest ...
+    if getattr(a, "outcome_cmd", None) == "record":
+        trace = getattr(a, "trace", None)
+        node_ids = ([n.strip() for n in a.nodes.split(",") if n.strip()]
+                    if getattr(a, "nodes", None) else None)
+        if not trace or not node_ids:  # staging 폴백(정상 자동 경로 — 직전 회상 trace 재사용)
+            st = OA.last_staged_trace(home=home)
+            if st:
+                trace = trace or st.get("trace_id")
+                node_ids = node_ids or st.get("node_ids")
+        if not trace:
+            print("BLOCK: --trace 없음(직전 회상 staging 도 없음). preflight/recall 회상 후 기록하세요.")
+            return 1
+        r = OA.record_run_outcome(trace, node_ids or [], a.application, a.result,
+                                  a.evidence_kind, a.evidence_digest, ts, home=home)
+        if r.get("recorded"):
+            print("OK: 결과-귀속 기록 — 적용=%s 결과=%s (ai_observation 관찰 로그·자동확정 아님)"
+                  % (r["application"], r["result"]))
+            print("    outcome=%s · 정정: %s outcome --overturn <번호>" % (r["outcome_id"], HINT))
+            return 0
+        reason = r.get("reason")
+        print("BLOCK: %s" % reason)
+        hints = {
+            "evidence_required": "  결과 증거 digest(--evidence-digest)가 없으면 기록 안 함(fail-closed).",
+            "trace_not_found": "  --trace 가 실제 회상 trace 가 아닙니다. 회상 후 그 trace_id 로.",
+            "node_not_in_trace": "  --nodes 는 그 trace 가 회상한 node_id 부분집합만 가능(%s)." % r.get("bad"),
+            "dup_outcome": "  같은 (trace, 증거)는 이미 기록됨(1회). 정정은 --overturn.",
+            "invalid_application": "  --application 은 applied|ignored|corrected.",
+            "invalid_result": "  --result 는 success|failure|mixed|unknown.",
+            "invalid_evidence_kind": "  --evidence-kind 는 pytest|ci|file|user.",
+        }
+        if reason in hints:
+            print(hints[reason])
+        return 1
+    # 인자 없음 = 최근 결과 목록(원문 전문 — 요약 금지) + signal_only 집계
+    rows = OA.list_run_outcomes(home, limit=getattr(a, "limit", 10) or 10)
+    agg = OA.aggregate_run_outcomes(home)["overall"]
+    if not rows:
+        print("결과-귀속 기록 0건. (회상→작업→결과를 evidence 와 함께 기록 — 자동 관찰·SAVE 불요)")
+        print("  회상 trace %d건 중 결과 미연결 %d건 — 회상 후 outcome record 로 결과를 이으세요."
+              % (agg["traces"], agg["pending_traces"]))
+        return 0
+    print("최근 결과-귀속 %d건 (정정: %s outcome --overturn <번호>)" % (len(rows), HINT))
+    for r in rows:
+        mark = "정정됨→" if r["overturned"] else ""
+        print("[%d] %s적용=%s · 결과=%s · 증거=%s(%s) · %s"
+              % (r["seq"], mark, r["application"], r["result"],
+                 r["evidence_kind"], (r["evidence_digest"] or "")[:12], r["ts"] or ""))
+        print("    기억: %s" % ", ".join(r["applied_node_ids"]))
+    print("  집계(signal_only·인과 아님): trace %d · 적용 %d(성공 %d/실패 %d) · 무시 %d · 교정 %d · 미결 %d"
+          % (agg["traces"], agg["applied"], agg["applied_success"], agg["applied_failure"],
+             agg["ignored"], agg["corrected"], agg["pending_traces"]))
+    return 0
+
+
 def _promote_staging_for_ledger(ledger):
     """승격 도장 staging 을 ledger scope 에 고정(_recall_staging_for_ledger 와 동일 원칙).
     운영에선 dirname(ledger)==home 이라 gate_log.last_promote_candidates_path() 와 동일 경로."""
@@ -2578,6 +2653,20 @@ def main():
     vdp.add_argument("--ai", dest="ai_claim", default=None, help="AI 주장(원문)")
     vdp.add_argument("--evidence", default=None, help="실측 증거 1줄(필수 — 없으면 기록 거부)")
     vdp.add_argument("--domain", default=None)
+    # 회상→작업결과 귀속(Recall→Outcome Attribution v0.1) — 인자없음=목록 · record=기록 · --overturn=정정
+    ocp = sub.add_parser("outcome")
+    ocsub = ocp.add_subparsers(dest="outcome_cmd", required=False)
+    ocr = ocsub.add_parser("record")
+    ocr.add_argument("--trace", default=None, help="회상 trace_id(생략 시 직전 회상 staging 사용)")
+    ocr.add_argument("--nodes", default=None, help="적용한 node_id 목록(쉼표구분·생략 시 staging)")
+    ocr.add_argument("--application", default="applied", choices=("applied", "ignored", "corrected"))
+    ocr.add_argument("--result", default="unknown", choices=("success", "failure", "mixed", "unknown"))
+    ocr.add_argument("--evidence-kind", dest="evidence_kind", default=None,
+                     choices=("pytest", "ci", "file", "user"), help="결과 증거 유형")
+    ocr.add_argument("--evidence-digest", dest="evidence_digest", default=None,
+                     help="결과 증거 digest(sha256 등·필수·원문 저장 0)")
+    ocp.add_argument("--overturn", type=int, default=None, help="목록 순번 정정(owner 게이트)")
+    ocp.add_argument("--limit", type=int, default=10)
     # 추상화 규칙 후보 제안(작업4·C) — read-only·자동확정 0. --promote 로 candidate 등록(승격 연결)
     abp = sub.add_parser("abstraction"); abp.add_argument("--domain", default=None)
     abp.add_argument("--promote", default=None,
@@ -2681,7 +2770,8 @@ def main():
           "route": cmd_route, "backup": cmd_backup, "export": cmd_export,
           "restore": cmd_restore, "demo": cmd_demo, "explain": cmd_explain,
           "forget": cmd_forget, "inbox": cmd_inbox, "index": cmd_index,
-          "approvals": cmd_approvals, "approval": cmd_approval, "app": cmd_app}[a.cmd]
+          "approvals": cmd_approvals, "approval": cmd_approval, "app": cmd_app,
+          "outcome": cmd_outcome}[a.cmd]
     sys.exit(fn(a))
 
 
