@@ -35,15 +35,17 @@ STEPS = [
     ("platform policy",   [PY, "scripts/binggu_platform_selftest.py"], "rc0"),
     ("binggu --selftest", [PY, "binggu.py", "--selftest"], "rc0"),
     ("doctor",            [PY, "scripts/openbinggu_doctor.py", "--selftest"], "rc0"),
-    ("autopush",          [PY, "scripts/binggu_publish_autopush.py", "--selftest"], "rc0"),
     ("setup_cloud",       [PY, "scripts/binggu_setup_cloud.py", "--selftest"], "rc0"),
+    # autopush(--selftest) 와 tree scan(--tree . --public) 은 아래 run_all 회귀 묶음
+    # (binggu_publish_run_all_selftests.py 의 "autopush" · "tree scan" GATES)이 1회 실행하므로
+    # 직접 스텝을 제거해 로컬 중복(직접 + run_all + pytest regression_all = 3중)을 정리했다.
+    # ci.yml 도 동일하게 직접 스텝을 제거하고 run_all 로 수렴했다(커버리지 동일 · 중복만 제거).
     ("run_all 회귀",       [PY, "scripts/binggu_publish_run_all_selftests.py"], "rc0"),
     ("e2e lifecycle",     [PY, "scripts/binggu_e2e_lifecycle_selftest.py"], "rc0"),
-    ("pytest tests/",     [PY, "-m", "pytest", "tests/", "-q"], "rc0"),
+    ("pytest tests/",     [PY, "-m", "pytest", "tests/", "-q", "-n", "auto"], "rc0"),
     ("semantic seed SSOT", [PY, "scripts/sync_semantic_seed.py", "--check", "--check-hosted"], "rc0"),
     ("publish workflow",  [PY, "scripts/publish_workflow_selftest.py"], "rc0"),
     ("private path scan", [PY, "scripts/private_path_scan.py", "--source"], "rc0"),
-    ("tree scan",         [PY, "scripts/openbinggu_public_tree_scan.py", "--tree", ".", "--public"], "contains:verdict=CLEAN"),
     ("smoke_test",        [PY, "scripts/smoke_test.py", "--home", os.path.join(TMP_HOME, "smoke")], "rc0"),
     ("installer dry-run", [PY, "scripts/install_claude_mcp.py", "--sandbox",
                            "--home", os.path.join(TMP_HOME, "install"), "--dry-run"], "rc0"),

@@ -80,7 +80,7 @@ def _relevance(query_tokens, sentence):
 # ---------------- ledger 로드(read-only) ----------------
 
 def _load_graph(ledger_path):
-    """ledger → {nodes, edges, evidence}. 파일 부재/노드 0 → 빈 그래프(graceful, 에러 0).
+    """ledger → {nodes, edges, ev_sent(항상 {} · 스키마 호환), by_id}. 파일 부재/노드 0 → 빈 그래프(graceful, 에러 0).
 
     로컬 회상 = owner 가 자기 ledger 를 읽는 것 → state='active' 노드 전부(candidate 무관).
     (cloud publish 게이트의 candidate=0 필터와 다름 — 로컬은 SAVE 확정분 모두가 회상 대상.
@@ -103,8 +103,6 @@ def _load_graph(ledger_path):
                "use_count" if "use_count" in ncols else "0 AS use_count"]
         cur.execute("SELECT " + ",".join(sel) + " FROM nodes")
         nrows = cur.fetchall()
-        cur.execute("SELECT evidence_id,sentence FROM evidence")
-        erows = cur.fetchall()
         try:
             cur.execute("SELECT edge_id,relation,source,target,state FROM edges")
             edge_rows = cur.fetchall()
@@ -113,7 +111,6 @@ def _load_graph(ledger_path):
         conn.close()
     except Exception:
         return empty
-    ev_sent = {r[0]: r[1] for r in erows}
     nodes = []
     for r in nrows:
         # r: node_id, node_type, sentence, state, semantic_subtype, created_at, use_count
@@ -135,7 +132,7 @@ def _load_graph(ledger_path):
         if er[4] not in (None, "active", "confirmed"):
             continue
         edges.append({"id": er[0], "relation": er[1], "source": er[2], "target": er[3]})
-    return {"nodes": nodes, "edges": edges, "ev_sent": ev_sent, "by_id": by_id}
+    return {"nodes": nodes, "edges": edges, "ev_sent": {}, "by_id": by_id}
 
 
 # ---------------- 선택적 cos 보강(없으면 term-frequency) ----------------
@@ -392,9 +389,10 @@ def why_search(ledger_path, query, limit=None, home=None, scorer=None):
     반환(설계 §10 응답형식): {relevant_nodes, relevant_edges, evidence, summary,
                               recommended_question, confidence}. read-only · write 0.
     빈 그래프/무관 query → relevant_nodes [] · confidence 0.0(에러 0).
+
+    얇은 래퍼 — ledger 를 1회 로드해 _why_search_on_graph 본체로 위임한다(preflight_context 는
+    이미 로드한 그래프를 본체에 직접 넘겨 재로드 0). scorer 소유권(감사 #5)은 이 래퍼가 관리.
     """
-    rc = CFG.recall_config(home)
-    limit = limit or rc["recall_limit"]
     _own_scorer = False
     if scorer is None:
         scorer = _semantic_scorer(home=home)  # opt-in 통과 시만 활성, 아니면 None(어휘만)
@@ -407,10 +405,23 @@ def why_search(ledger_path, query, limit=None, home=None, scorer=None):
             if _c is not None:
                 _c()
 
-    g = _load_graph(ledger_path)
+    try:
+        g = _load_graph(ledger_path)
+        return _why_search_on_graph(g, query, limit, home, scorer)
+    finally:
+        _release()
+
+
+def _why_search_on_graph(g, query, limit, home, scorer):
+    """why_search 본체 — 이미 로드된 그래프 g 위에서 회상 수행(재로드 0).
+
+    scorer 소유권은 호출자(why_search 래퍼 · preflight_context)에게 있다 — 여기서 닫지 않는다.
+    반환 형식·정렬 규약은 why_search 와 동일(hosted index.ts 미러 계약 불변).
+    """
+    rc = CFG.recall_config(home)
+    limit = limit or rc["recall_limit"]
     qtok = _tokens(query)
     if not g["nodes"]:
-        _release()
         return {"relevant_nodes": [], "relevant_edges": [], "evidence": [],
                 "summary": "그래프가 비어 있습니다(관련 기억 없음).",
                 "recommended_question": None, "confidence": 0.0}
@@ -454,7 +465,6 @@ def why_search(ledger_path, query, limit=None, home=None, scorer=None):
     confidence = round(top[0][0], 4) if top else 0.0
     summary = ("관련 기억 %d건(랭킹순). candidate — 사람 확정 전 참고용." % len(top)
                if top else "query 와 관련된 판단/근거 노드를 찾지 못했습니다.")
-    _release()
     return {"relevant_nodes": rel_nodes, "relevant_edges": rel_edges,
             "evidence": evidence, "summary": summary,
             "recommended_question": None, "confidence": confidence}
@@ -623,8 +633,8 @@ def preflight_context(ledger_path, prompt=None, cwd=None, domain=None,
                 "confidence": 0.0,
                 "summary": "그래프가 비어 있습니다(신규 사용자 — 회상할 기억 없음)."}
 
-    # remember = 관련 판단/근거 상위 preflight_max개(why_search 재사용).
-    ws = why_search(ledger_path, work_text, limit=rc["preflight_max"], home=home, scorer=scorer)
+    # remember = 관련 판단/근거 상위 preflight_max개(why_search 본체 재사용 — g 재로드 0).
+    ws = _why_search_on_graph(g, work_text, rc["preflight_max"], home, scorer)
     remember = ws["relevant_nodes"]
 
     # 반문 = 위험패턴 매칭(Phase6).
