@@ -121,6 +121,26 @@ _TABLE_COLUMNS = {
         "actor TEXT",
         "ts TEXT",
     ],
+    # ── recall_run_outcomes (Recall→Outcome Attribution v0.1) ──────────────────
+    # 회상된 기억이 실제 작업에 '적용됐고'(application) 그 작업 '결과가 어땠는지'(result)의
+    # 관찰 telemetry. recall_outcomes(회상 자체의 효용 used/ignored/corrected)와 **다른 축** —
+    # 오염 금지 별도 테이블(스펙 §2). 인과 단정 컬럼(memory_improved_result 류)은 **스키마에서
+    # 원천 배제**(스펙 §3) — application·result 두 관찰 사실만 저장. 원문 evidence 미저장, digest만.
+    # trust_tier: 'ai_observation'(evidence-gated 자동 관찰) / 'owner_overturn'(사람 정정 reversal).
+    # supersedes: overturn reversal 이 가리키는 원본 outcome_id. 원본 행은 ''(빈 문자열·NULL 아님 →
+    #   UNIQUE 가 원본 중복을 막도록). append-only — 삭제/UPDATE 0, 정정도 reversal 행 append.
+    "recall_run_outcomes": [
+        "outcome_id TEXT PRIMARY KEY",
+        "trace_id TEXT",
+        "applied_node_ids_json TEXT",
+        "application TEXT",
+        "result TEXT",
+        "evidence_digest TEXT",
+        "evidence_kind TEXT",
+        "trust_tier TEXT",
+        "supersedes TEXT",
+        "ts TEXT",
+    ],
     "applied_registry": [
         "pack_id TEXT",
         "content_hash TEXT",
@@ -191,6 +211,9 @@ _TABLE_CONSTRAINTS = {
     "recall_outcomes": ["UNIQUE(trace_id, node_id)"],
     "applied_registry": ["PRIMARY KEY(pack_id, content_hash)"],
     "use_events": ["UNIQUE(node_id, use_key)"],  # 채택 멱등 dedup 키(작업B)
+    # 같은 (trace, 증거) 원본은 1건만(합격기준5) — supersedes=''(원본) 이라 NULL-distinct 회피.
+    # reversal 행은 supersedes=원본oid 라 (trace,digest,oid) 별개 → append 가능(정정 이력 보존).
+    "recall_run_outcomes": ["UNIQUE(trace_id, evidence_digest, supersedes)"],
 }
 
 # ── 인덱스 정본 (실제 WHERE/JOIN 쿼리 패턴 기반) ──────────────────────────────

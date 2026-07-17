@@ -183,7 +183,8 @@ def record_trace(query, kind, recalled_nodes, ts, *, domain=None,
         con.commit()
     finally:
         con.close()
-    return {"status": "ok", "recorded": True, "trace_id": tid, "n_nodes": len(node_ids)}
+    return {"status": "ok", "recorded": True, "trace_id": tid, "n_nodes": len(node_ids),
+            "node_ids": node_ids}  # node_ids: outcome staging(preflight hook)이 재사용(비파괴 확장)
 
 
 def trace_from_why_search(query, result, ts, *, domain=None, home=None):

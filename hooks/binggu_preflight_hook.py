@@ -428,7 +428,15 @@ def _maybe_record_trace(prompt, res):
             return
         from datetime import datetime, timezone
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        RT.trace_from_preflight(prompt, res, ts, home=h)
+        r = RT.trace_from_preflight(prompt, res, ts, home=h)
+        # MF2: 발급된 trace_id + 회상 node_ids 를 staging 보존(outcome record 자동 경로 — 종전엔 버려짐).
+        #   원문 0(node_id 는 식별자) · 실패 흡수(hook 무방해) · trace 미기록이면 no-op.
+        if isinstance(r, dict) and r.get("recorded") and r.get("trace_id"):
+            try:
+                import binggu_outcome_attribution as OA
+                OA.stage_last_trace(r["trace_id"], r.get("node_ids"), "preflight", ts, home=h)
+            except Exception:
+                pass
     except Exception:
         return
 
