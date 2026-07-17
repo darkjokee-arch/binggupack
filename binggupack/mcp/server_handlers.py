@@ -48,8 +48,32 @@ def _u_pack_build(params=None):
 
 
 def _u_pack_validate(params=None):
-    return {"action": "pack_validate", "mode": "read", "synthetic": True,
-            "verdict": "NOT_IMPLEMENTED", "note": _STUB_NOTE}
+    # 실 결선(2026-07-17): pack manifest 계약검증 정본 binggupack.pack.contract_validate.validate_pack.
+    # read-only 순수함수(production write 0·graph 0·LLM 0). path 입력(pack_path)은 handle_tool 이
+    # guarded_tool_call 로 gate 통과시킨 뒤에만 도달. verdict/stops/reviews/notes 만 반환(raw 경로 미노출·
+    # manifest 계약 필드값만 stops 에 노출되며 secret/PII 아님).
+    params = params or {}
+    pack_path = params.get("pack_path")
+    if not pack_path:
+        return {"action": "pack_validate", "mode": "read", "verdict": "REJECT",
+                "reason_code": "missing_pack_path"}
+    import json as _json
+    from binggupack.pack import contract_validate as _CV
+    try:
+        with open(pack_path, encoding="utf-8") as _f:
+            _doc = _json.load(_f)
+    except (OSError, ValueError) as _e:
+        return {"action": "pack_validate", "mode": "read", "verdict": "REJECT",
+                "reason_code": "load_error:" + type(_e).__name__}
+    # manifest 후보: canonical(manifest 키) / summary fixture(pack 키) / flat(doc 자체) 순.
+    _manifest = None
+    if isinstance(_doc, dict):
+        _manifest = _doc.get("manifest") or _doc.get("pack")
+    if _manifest is None:
+        _manifest = _doc
+    _res = _CV.validate_pack(_manifest)
+    return {"action": "pack_validate", "mode": "read", "verdict": _res["verdict"],
+            "stops": _res["stops"], "reviews": _res["reviews"], "notes": _res["notes"]}
 
 
 def _u_consumer_smoke(params=None):
@@ -57,9 +81,51 @@ def _u_consumer_smoke(params=None):
             "verdict": "NOT_IMPLEMENTED", "note": _STUB_NOTE}
 
 
+def _collect_source_pointers(doc):
+    """pack dict 어디든 source pointer 필드(source_path/source_ref/path)를 재귀 수집.
+    pack layout(canonical/flat/summary) 무관 — raw 값은 classify 로만 넘기고 반환 안 함."""
+    ptrs = []
+
+    def _walk(o):
+        if isinstance(o, dict):
+            for k, v in o.items():
+                if k in ("source_path", "source_ref", "path") and isinstance(v, str):
+                    ptrs.append(v)
+                else:
+                    _walk(v)
+        elif isinstance(o, list):
+            for x in o:
+                _walk(x)
+
+    _walk(doc)
+    return ptrs
+
+
 def _u_publish_guard_dryrun(params=None):
-    return {"action": "publish_guard_dryrun", "mode": "dry-run", "synthetic": True,
-            "verdict": "NOT_IMPLEMENTED", "note": _STUB_NOTE}
+    # 실 결선(2026-07-17): 공개(publish) fail-closed 게이트 정본 binggupack.pack.scope_envelope.
+    # pack 의 source pointer 를 재귀 수집→classify_source_pointers(clean/dirty/unknown, raw 미반환)→
+    # publish_decision(items, publish_approved=False). dry-run 은 publish_approved 를 False 로 고정 —
+    # 실제 공개 승인은 owner 전용(§MCP_EXPOSURE: 운영반영·외부전송 미노출). fail-closed: dirty/unknown
+    # 1건↑ 또는 미승인이면 BLOCK. reason_codes/pointer_counts 만 반환(raw 경로 미노출). production write 0.
+    params = params or {}
+    pack_path = params.get("pack_path")
+    if not pack_path:
+        return {"action": "publish_guard_dryrun", "mode": "dry-run", "verdict": "REJECT",
+                "reason_code": "missing_pack_path"}
+    import json as _json
+    from binggupack.pack import scope_envelope as _SE
+    try:
+        with open(pack_path, encoding="utf-8") as _f:
+            _doc = _json.load(_f)
+    except (OSError, ValueError) as _e:
+        return {"action": "publish_guard_dryrun", "mode": "dry-run", "verdict": "REJECT",
+                "reason_code": "load_error:" + type(_e).__name__}
+    _cls = _SE.classify_source_pointers(_collect_source_pointers(_doc))
+    _items = [{"mask_result": lbl} for lbl in _cls["labels"]]
+    _dec = _SE.publish_decision(_items, publish_approved=False)
+    return {"action": "publish_guard_dryrun", "mode": "dry-run", "verdict": _dec["verdict"],
+            "publish_allowed": _dec["publish_allowed"], "reason_codes": _dec["reason_codes"],
+            "pointer_counts": _cls["counts"]}
 
 
 def _u_selftest(params=None):
