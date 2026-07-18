@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "binggupack"
-version = "1.22.0.dev0"   # main 개발분(태그 v1.21.0 이후) — 배포 릴리스와 버전 겹침 방지(dev-bump). version SSOT = binggupack/__about__.py.
+version = "1.22.0"   # version SSOT = binggupack/__about__.py.
 description = "BingguPack — local-first, evidence-backed memory/context pack framework with an installable Claude Code MCP server (stdio JSON-RPC). Python stdlib only."
 readme = "README.md"
 requires-python = ">=3.10"

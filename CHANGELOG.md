@@ -1,6 +1,6 @@
 # Changelog — BingguPack
 
-## [Unreleased] — main 1.22.0.dev0 (태그 v1.21.0 이후 미출하분)
+## [1.22.0] - 2026-07-18
 
 ### Security/Fixed — fenced/blockquote 안 독립줄은 도장 아님 (P0 승인 우회 차단, 2026-07-18)
 Codex 릴리스 감사 + 병렬 적대검증으로 확정된 P0. 2026-07-13 '줄 단위 도장' 도입 후, owner 가 로그·AI응답·문서 예시를 붙여넣을 때 그 안에 박힌 독립줄 `세이브 n`(및 히트/승격 n)이 실제 사람 승인으로 오인 기록되던 회귀. 배포본 1.21.0(태그 7560250·whole-prompt fullmatch 단일 경로)은 안전했고 현 main 만 퇴행.
