@@ -152,7 +152,7 @@ confirm 없이 차단되는 건 실패가 아니라 PASS입니다. 쓰기 도구
 
 ## Web/app connector — HTTP 모드 (optional)
 
-Claude 웹/앱 커넥터에서 로컬 24도구를 그대로 쓰려면, 로컬 MCP 서버를 HTTP 모드로 열고 터널 뒤에 둡니다:
+Claude 웹/앱 커넥터에서 로컬 30도구(advanced 프로파일)를 그대로 쓰려면, 로컬 MCP 서버를 HTTP 모드로 열고 터널 뒤에 둡니다:
 
 ```bash
 BINGGU_MCP_PATH_TOKEN=<경로토큰> python scripts/openbinggu_mcp_server.py --http <PORT> <ROOT>

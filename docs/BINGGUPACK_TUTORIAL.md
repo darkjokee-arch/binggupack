@@ -79,27 +79,14 @@ python scripts/openbinggu_batch_pack_loader.py --pack-dir <pack 디렉터리> --
 
 ## 5. 승격 전 preview (read-only)
 
-pack을 운영형 그래프로 승격하면 무슨 일이 일어날지 **미리 보기만** 합니다(write 0):
+pack을 운영형 그래프로 승격하기 전에 무슨 일이 일어날지 **미리 보기만** 합니다(write 0). 이전의 독립 CLI 스크립트(`openbinggu_promotion_preview.py`)는 아카이브됐고, 지금은 **advanced 프로파일의 MCP 도구**로 대체됐습니다:
 
-```bash
-python scripts/openbinggu_promotion_preview.py --selftest    # 12/12 기대
-python scripts/openbinggu_promotion_preview.py --pack-dir <pack 디렉터리> --domain D10
-```
+- **`publish_guard_dryrun`** — pack 공개/승격 전 스코프 분류 + 게이트 판정을 dry-run으로 확인(write 0).
+- **`pack_validate`** — pack 계약(구조·근거·PII 스캔)을 검증.
 
-✅ 기대: D1~D4 변환 계획·id 충돌·FTS insert 계획·backup/rollback 계획·write 예정 row 수가 출력되고, 마지막에 `PREVIEW VERDICT: GO`. 승격 실행기는 이 RC에 포함되지 않습니다.
+MCP 클라이언트(Claude·Codex)에서 **advanced 프로파일**로 등록한 뒤(등록법: [INSTALL.md](../INSTALL.md) `--profile advanced`) 위 두 도구를 호출하면 됩니다. 승격 **실행기**는 이 배포에 포함되지 않습니다(preview는 read-only).
 
-자기 운영형 DB와 대조하고 싶으면 (read-only로만 엽니다):
-
-macOS/Linux (bash):
-```bash
-OPENBINGGU_OPERATING_DB=<자기 DB 경로> python scripts/openbinggu_promotion_preview.py --pack-dir <dir> --domain D10
-```
-
-Windows (PowerShell):
-```powershell
-$env:OPENBINGGU_OPERATING_DB = "<자기 DB 경로>"
-python scripts/openbinggu_promotion_preview.py --pack-dir <dir> --domain D10
-```
+✅ 기대: 변환 계획·id 충돌·backup/rollback 계획·write 예정 row 수 등이 출력되고 `verdict: GO`. 실제 승격 write는 로컬 승인 게이트 몫입니다.
 
 ## 6. 후보 관리 UX 따라하기 (temp-only)
 
