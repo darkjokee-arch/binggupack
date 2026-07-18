@@ -1,0 +1,24 @@
+# BingguPack sdist 번들 — hosted worker 소스(③ sdist 포함 · wheel 미포함)
+#
+# 배경: `binggu onboard`(ChatGPT/웹 커넥터 저장 채널)는 본인 Cloudflare 계정에
+#       직접 배포하는 hosted worker 소스가 필요하다. wheel 은 파이썬 패키지 데이터만
+#       담으므로 hosted/ 가 빠진다 → sdist 에만 소스를 동봉해 `git clone` 없이도 쓰게 한다.
+#       ★관리형 SaaS/멀티테넌트 호스팅이 아니다 — 사용자가 스스로 배포하는 소스만 넣는다.
+#
+# ★최우선 안전: 시크릿(.dev.vars*) 절대 번들 금지 — 아래 prune/global-exclude 로 3중 방어.
+#
+# 시크릿 게이트(MF8 · CI/로컬 · 빌드 직후 필수 검증):
+#   python -m build
+#   tar tzf dist/*.tar.gz | grep -c "dev.vars"           # → 0 (시크릿 0)
+#   tar tzf dist/*.tar.gz | grep -c "hosted/workers/src"  # → >0 (worker 소스 포함)
+
+# ── whitelist: 배포에 필요한 hosted worker 소스만 ──────────────────────────────
+recursive-include hosted/workers/src *.ts
+include hosted/workers/wrangler*.toml
+include hosted/workers/tsconfig.json
+
+# ── 안전 배제(prune/global-exclude): 빌드 부산물·의존성·데이터·시크릿 ──────────────
+prune hosted/workers/node_modules
+prune hosted/workers/.wrangler
+prune hosted/workers/data
+global-exclude .dev.vars*

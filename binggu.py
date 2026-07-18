@@ -642,7 +642,16 @@ def cmd_preflight(a):
 
 def cmd_status(a):
     db, _ = _open(a.ledger)
-    n = db.con.execute("SELECT count(*) FROM nodes WHERE state='active'").fetchone()[0]
+    home = os.path.dirname(os.path.abspath(a.ledger))
+    # active 후보 수 + 히트(use_count) 롤업을 한 SELECT 로 통합(nodes 재스캔 0 · MF2). use_count 컬럼이
+    # 없는 구 ledger 는 PRAGMA 폴백(promote.py 패턴)으로 0 처리 — status 크래시 0.
+    _has_uc = "use_count" in {r[1] for r in db.con.execute("PRAGMA table_info(nodes)")}
+    _uc_sum = "COALESCE(SUM(use_count),0)" if _has_uc else "0"
+    _uc_hit = "SUM(CASE WHEN use_count>0 THEN 1 ELSE 0 END)" if _has_uc else "0"
+    n, hit_sum, hit_nodes = db.con.execute(
+        "SELECT count(*), %s, %s FROM nodes WHERE state='active'" % (_uc_sum, _uc_hit)).fetchone()
+    hit_sum = int(hit_sum or 0)
+    hit_nodes = int(hit_nodes or 0)
     d = db.con.execute("SELECT count(*) FROM nodes WHERE state='deprecated'").fetchone()[0]
     p = db.con.execute("SELECT count(*) FROM judgment_reviews WHERE status='pending'").fetchone()[0]
     acc = len(accepted_view(db))
@@ -663,6 +672,52 @@ def cmd_status(a):
         print("capture hook: 정상 등록(경로 실존)")
     else:
         print(f"capture hook: 미등록 ({HINT} capture install 로 등록)")
+    # ── 지능 루프 롤업(read-only 표시일 뿐 · 운영홈 write 0 · 자동저장 0 · 규칙 자동변경 0) ──
+    # 두 축 정직 분리(MF3): (1) 히트 = use_count(수동 recall --record 신호) · (2) 사람판정 = 회상 효용(used).
+    # golden_drift 는 재검토 '후보'만 표시 — 사람이 raw 확인 후 도장(빙구팩이 규칙을 자기가 바꾸지 않음).
+    print("지능 루프(read-only · 표시일 뿐 · 규칙 자동변경 0):")
+    try:
+        # automation 스위치 실상태(발견성 — binggu status/doctor 별칭에서 바로 보이게). read-only.
+        from binggupack.pack.doctor import _automation_flags
+        _af = _automation_flags(home)
+        print("  automation: capture=%s preflight=%s trace=%s crab_sync=%s (owner 만 켬 · doctor 거울)"
+              % ("ON" if _af["capture"] else "OFF", "ON" if _af["preflight"] else "OFF",
+                 "ON" if _af["recall_trace"] else "OFF", "ON" if _af["crab_sync"] else "OFF"))
+    except Exception:
+        pass  # MF5: automation 줄 실패해도 status 불사
+    print("  히트(수동 recall --record 신호): use_count 합 %d · 히트 노드 %d개" % (hit_sum, hit_nodes))
+    try:
+        # Core read-only 헬퍼만 import(집계 자체가 mode=ro · store write 0). MF5: 실패해도 status 불사.
+        from binggupack.pack import recall_trace as RT
+        from binggupack.pack import outcome_attribution as OA
+        if not RT.trace_enabled(home):
+            # 잠김 가시화(MF3) — opt-in 게이트가 꺼져 있으면 사람판정 축은 애초에 축적 0.
+            print("  사람판정(used): 회상 trace OFF(§25 owner 게이트 · 잠김) — 켜기: %s trace enable" % HINT)
+        else:
+            _ag = RT.aggregate(home)
+            _ov = _ag["overall"]
+            _oa = OA.aggregate_run_outcomes(home)["overall"]
+            _tot = _ov["outcomes"]
+            if _tot == 0:
+                # N=0 = 고장 아님(켜졌지만 도장 대기). 히트→사람판정 전환 액션 힌트(MF3).
+                print("  사람판정(used): 0건 (고장 아님 — 도장: %s recall --record · 판정: %s trace mark)"
+                      % (HINT, HINT))
+            else:
+                _rate = _ov["usefulness_rate"]
+                _rate_s = ("%.0f%%" % (_rate * 100)) if _rate is not None else "-"
+                print("  사람판정(used): used %d/%d(%s) · ignored %d · corrected %d"
+                      % (_ov["used"], _tot, _rate_s, _ov["ignored"], _ov["corrected"]))
+            # 결과-귀속(별도 축 · signal_only) — RT 판정 유무와 무관하게 표시(신호 누락 0).
+            print("  결과-귀속(signal_only · 인과 아님): trace %d · 적용 %d(성공 %d/실패 %d) · 미결 %d"
+                  % (_oa["traces"], _oa["applied"], _oa["applied_success"],
+                     _oa["applied_failure"], _oa["pending_traces"]))
+            _drift = len(_ag["golden_drift_candidates"])
+            if _drift:
+                print("  재검토 후보 %d건(golden_drift · 사람 raw 확인 후 도장 · 자동변경 0): %s trace review"
+                      % (_drift, HINT))
+    except Exception:
+        # MF5: RT/OA 미탑재·스토어 손상도 status 전체를 죽이지 않음(read-only 표시일 뿐).
+        print("  사람판정(used): 집계 불가(회상 trace 모듈 미탑재) — %s trace enable 후 축적" % HINT)
     return 0
 
 

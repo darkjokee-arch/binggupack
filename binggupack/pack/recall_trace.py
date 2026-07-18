@@ -86,6 +86,17 @@ def _open_store(home=None):
     return con
 
 
+def _open_store_ro(home=None):
+    """집계용 read-only 커넥션 — mode=ro URI 로만 열어 apply_schema/makedirs 미경유(write 0).
+
+    _open_store 와 달리 폴더 생성·스키마 적용을 하지 않는다 → store(recall_trace.sqlite +
+    -wal/-shm/-journal 사이드카)를 1바이트도 안 건드리는 순수 SELECT 경로. 호출측이 store 존재를
+    os.path.exists 로 먼저 가드해야 한다(부재 시 OperationalError). store 는 항상 _open_store 가
+    apply_schema 로 만든 것이라 recall_traces/recall_outcomes 테이블이 이미 있다(정본 상위집합)."""
+    uri = "file:%s?mode=ro" % os.path.abspath(trace_store_path(home)).replace("\\", "/")
+    return sqlite3.connect(uri, uri=True)
+
+
 def review_snapshot_path(home=None):
     """review 번호→(trace_id,node_id) 매핑 스냅샷 경로. 메타만(원문 0). mark 의 N shift 방지."""
     base = home or _plat.binggu_home()
@@ -336,7 +347,7 @@ def aggregate(home=None):
                             "corrected": 0, "usefulness_rate": None},
                 "per_node": {}, "golden_drift_candidates": [],
                 "signal_only": True, "note": _SIGNAL_NOTE}
-    con = _open_store(home)
+    con = _open_store_ro(home)  # read-only 집계 — apply_schema/makedirs 미경유(store write 0)
     try:
         n_traces = con.execute("SELECT COUNT(*) FROM recall_traces").fetchone()[0]
         rows = con.execute("SELECT node_id, verdict, reason_code FROM recall_outcomes").fetchall()
@@ -507,6 +518,13 @@ def _selftest():
            "golden_drift: bb02(ignored2+corrected1/3=1.0≥0.5,N≥3) → 재검토 후보")
         ck("node:CONV:aa01" not in drift_ids,
            "golden_drift: aa01(used 1·N<3) → 후보 아님(표본게이트)")
+
+        # ── readonly 집계: store mtime 불변(mode=ro · apply_schema/makedirs 미경유 · write 0) ──
+        sp_ro = trace_store_path(home)
+        mt_ro = os.path.getmtime(sp_ro)
+        aggregate(home=home)
+        ck(os.path.getmtime(sp_ro) == mt_ro,
+           "readonly 집계: aggregate 후 store mtime 불변(mode=ro · write 0)")
 
         # ── env opt-in: config OFF 라도 BINGGU_RECALL_TRACE=1 이면 기록 ──
         home2 = os.path.join(tmp, ".binggupack2")

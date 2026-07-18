@@ -196,7 +196,7 @@ def aggregate_run_outcomes(home=None):
              "overturned": 0, "pending_traces": 0}
     if not os.path.exists(RT.trace_store_path(home)):
         return {"overall": empty, "signal_only": True, "note": _SIGNAL_NOTE}
-    con = RT._open_store(home)
+    con = RT._open_store_ro(home)  # read-only 집계 — apply_schema/makedirs 미경유(sibling store write 0)
     try:
         n_traces = con.execute("SELECT COUNT(*) FROM recall_traces").fetchone()[0]
         rows = con.execute("SELECT outcome_id,trace_id,application,result,supersedes"
@@ -399,6 +399,13 @@ def _selftest():
 
         # signal_only 라벨
         ck(aggregate_run_outcomes(home=home)["signal_only"] is True, "집계 signal_only=True(랭킹 진입 0)")
+
+        # ── readonly 집계: store mtime 불변(mode=ro · apply_schema/makedirs 미경유 · write 0) ──
+        sp_ro = RT.trace_store_path(home)
+        mt_ro = os.path.getmtime(sp_ro)
+        aggregate_run_outcomes(home=home)
+        ck(os.path.getmtime(sp_ro) == mt_ro,
+           "readonly 집계: aggregate_run_outcomes 후 store mtime 불변(mode=ro · write 0)")
 
         # staging: trace_id 보존 라운드트립
         stage_last_trace(tid, ["node:CONV:aa01", "node:CONV:bb02"], "preflight", TS, home=home)
