@@ -21,6 +21,8 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: hosted/workers/package-lock.json
       - name: Install (hosted/workers devDeps · lockfile 있으면 npm ci)
         working-directory: hosted/workers
         run: |
@@ -64,22 +66,25 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements/dev.txt
+
+      - name: Install dev toolchain (requirements/dev.txt · leg당 1회 통합)
+        # 과거: ruff/pytest 스텝마다 pip install 반복(leg당 5회). setup-python cache:pip 와 함께
+        # leg당 1회로 통합 — 후속 스텝은 이미 설치된 툴체인을 재사용한다.
+        run: pip install -r requirements/dev.txt
 
       - name: Version SSOT consistency selftest (3/3, GATE=GO — pyproject==__about__)
         run: python scripts/version_consistency_selftest.py
 
       - name: Ruff static gate (binggupack/ F-rules 0 — 7/3 달성 상태 고정)
-        run: |
-          pip install -r requirements/dev.txt
-          python -m ruff check binggupack/ scripts/ --select F
+        run: python -m ruff check binggupack/ scripts/ --select F
 
       - name: Anywhere vendor sync drift gate (vendored read core == source)
         run: python scripts/sync_anywhere_vendor.py --check
 
       - name: Anywhere targeted tests (snapshot/service/upload · synthetic)
-        run: |
-          pip install -r requirements/dev.txt
-          python -m pytest tests/test_anywhere_snapshot.py tests/test_anywhere_service.py tests/test_anywhere_upload.py -q
+        run: python -m pytest tests/test_anywhere_snapshot.py tests/test_anywhere_service.py tests/test_anywhere_upload.py -q -n auto
 
       - name: Cross-platform policy selftest (40/40, GATE=GO)
         run: python scripts/binggu_platform_selftest.py
@@ -97,41 +102,34 @@ jobs:
 
       - name: Local Fresh Index — selftest + full pytest (신규 기능 · 3.14 포함)
         run: |
-          pip install -r requirements/dev.txt
           python -m binggupack.pack.fresh_index --selftest
-          python -m pytest tests/test_fresh_index.py -q
+          python -m pytest tests/test_fresh_index.py -q -n auto
 
       - name: Doctor selftest (12/12, GATE=GO required)
         run: python scripts/openbinggu_doctor.py --selftest
 
-      - name: Autopush double-gate selftest (18/18, GATE=GO — npx/--remote 실경로)
-        run: python scripts/binggu_publish_autopush.py --selftest
-
       - name: Cloud setup selftest (38/38, GATE=GO — wrangler npx 폴백)
         run: python scripts/binggu_setup_cloud.py --selftest
 
-      - name: Publish pipeline regression (P1~cloud_pack, REGRESSION=GO required)
+      # Autopush(18/18) 와 Public tree scan(verdict=CLEAN) 은 아래 run_all 회귀 묶음
+      # (binggu_publish_run_all_selftests.py 의 "autopush" · "tree scan" GATES)이 leg 마다 1회 실행하므로
+      # 별도 직접 스텝을 제거해 leg당 2중 실행을 1회로 정리했다(커버리지 동일 · 중복만 제거).
+      - name: Publish pipeline regression (P1~cloud_pack + autopush + tree scan, REGRESSION=GO required)
         run: python scripts/binggu_publish_run_all_selftests.py
 
       - name: End-to-end lifecycle (real CLI init->preview->save->list->deprecate, 10/10)
         run: python scripts/binggu_e2e_lifecycle_selftest.py
 
       - name: Demo regression (60초 데모 · 격리·오프라인·승인분만 저장·운영 장부 미접촉)
-        run: |
-          pip install -r requirements/dev.txt
-          python -m pytest tests/test_demo.py -q
+        run: python -m pytest tests/test_demo.py -q -n auto
 
       - name: Semantic seed SSOT (issue #52 · canonical·byte-identity·hosted seed_hash · Windows LF 결정성)
         # selftest 잡은 Windows 포함 매트릭스 — Windows checkout(autocrlf) 에서도 .gitattributes eol=lf
         # 로 working tree 가 LF 인지, source↔fixture byte-identical·source canonical·hosted seed_hash
         # 정합인지 실측(sync --check 는 CR 바이트·BOM·final-LF 도 검사). write mode 는 CI 에서 실행 0.
         run: |
-          pip install -r requirements/dev.txt
           python scripts/sync_semantic_seed.py --check --check-hosted
-          python -m pytest tests/test_semantic_seed_resolver.py tests/test_semantic_seed_sync.py -q
-
-      - name: Public tree secret/PII scan (verdict=CLEAN required)
-        run: python scripts/openbinggu_public_tree_scan.py --tree . --public
+          python -m pytest tests/test_semantic_seed_resolver.py tests/test_semantic_seed_sync.py -q -n auto
 
   wheel-selfcontained:
     # wheel 자족성 게이트(2026-07-13) — 설치본이 repo checkout 없이 자족하는지 실측.
@@ -196,6 +194,8 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements/dev.txt
 
       - name: Install dev toolchain (requirements/dev.txt · mypy 포함)
         run: pip install -r requirements/dev.txt
@@ -215,6 +215,8 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: hosted/workers/package-lock.json
       - name: npm audit (hosted/workers · high 이상 · 비게이팅)
         working-directory: hosted/workers
         run: npm audit --audit-level=high || true
@@ -231,9 +233,46 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements/dev.txt
       - name: Install dev toolchain (requirements/dev.txt)
         run: pip install -r requirements/dev.txt
       - name: Memory PR KAT drift gate (canonicalization 순수함수 재계산 == vectors/kat · exit0=GO)
         run: python docs/memory-pr/tools/check_vectors.py
       - name: MGB benchmark tests (result model · toy 이식성 · runner 독립판정 · BingguPack 12)
-        run: python -m pytest benchmark/tests/ -q
+        run: python -m pytest benchmark/tests/ -q -n auto
+
+  ci-gate:
+    # 단일 게이트 join job (2026-07-17) — branch protection 이 매트릭스 파생 leg 이름
+    # (selftest 7leg · wheel 3leg 등)을 required 로 직접 지목하면, 매트릭스가 바뀔 때마다
+    # required check 이름이 갈려 branch protection 이 BLOCKED 된다(7/17 wheel 매트릭스화 사고).
+    # 게이팅을 이 한 job 으로 수렴 — branch protection 은 `ci-gate` 1개만 required 로 두면 된다.
+    #
+    # ★ 게이팅 규칙: needs 에 나열된 게이팅 job 이 전부 result=='success' 여야만 통과한다
+    #   (skipped/cancelled/failure = fail — fail-open 0, 정확일치). 아래 needs 목록에서 job 을
+    #   빼는 diff = "게이팅 완화"이므로 owner 리뷰 필수. 신규 게이팅 job 추가 시 반드시 needs 에도
+    #   넣어야 한다(누락 시 그 job 은 게이트되지 않고 조용히 통과 = silent fail-open).
+    #   npm-audit 는 continue-on-error(비게이팅 · 상류 advisory 신호만)라 의도적으로 needs 에서 제외한다.
+    needs: [typecheck-workers, selftest, wheel-selfcontained, typecheck-python, mgb-benchmark]
+    if: always()  # 선행 job 이 실패/취소돼도 이 job 은 돌아 결과를 명시적으로 판정한다
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assert all gating jobs succeeded (정확일치 · fail-closed)
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - "$RESULTS" <<'PY'
+          import json, sys
+          results = json.loads(sys.argv[1])
+          # 게이팅 job 전수 — 이 목록은 위 needs 와 반드시 동일해야 한다.
+          gating = ["typecheck-workers", "selftest", "wheel-selfcontained", "typecheck-python", "mgb-benchmark"]
+          bad = []
+          for job in gating:
+              res = results.get(job, {}).get("result")
+              if res != "success":  # skipped/cancelled/failure 전부 실패 — 정확일치
+                  bad.append("%s=%s" % (job, res))
+          if bad:
+              print("CI-GATE=BLOCK — 게이팅 job 미통과:", ", ".join(bad))
+              sys.exit(1)
+          print("CI-GATE=GO — 게이팅 job 전부 success (%d개)" % len(gating))
+          PY

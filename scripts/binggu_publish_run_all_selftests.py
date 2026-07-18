@@ -44,6 +44,7 @@ GATES = [
     ("p1 config",         "binggu_p1_config.py",                       [], "GATE=GO"),
     ("recall engine",     "binggu_recall.py",                          ["--selftest"], "GATE=GO"),
     ("recall trace P2",   "binggu_recall_trace.py",                    ["--selftest"], "GATE=GO"),
+    ("recall run outcome","binggu_outcome_attribution.py",             ["--selftest"], "GATE=GO"),
     ("answer_rules",      os.path.join("..", "binggupack", "pack", "answer_rules.py"), ["--selftest"], "GATE=GO"),
     ("abstraction",       os.path.join("..", "binggupack", "pack", "abstraction.py"), ["--selftest"], "GATE=GO"),
     ("preflight hook",    os.path.join("..", "hooks", "binggu_preflight_hook.py"), ["--selftest"], "GATE=GO"),
