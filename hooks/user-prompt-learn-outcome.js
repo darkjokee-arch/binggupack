@@ -1,4 +1,12 @@
 #!/usr/bin/env node
+// ─────────────────────────────────────────────────────────────────────────
+// [2026-07-18 DEPRECATED · 비활성화] learn-outcome 학습 채널은 verdict-instant-record
+//   (binggu verdict · PR#65, 2026-07-16)가 승계했습니다. owner 결정(2026-07-18)으로 폐기.
+//   settings.json 의 이 hook 등록이 harness 재작성으로 되살아나도, 이 조기 종료로
+//   무동작(무해)합니다 — 폐지된 learn_outcome_queue 에 더는 append 하지 않습니다.
+//   정본: feedback_verdict_instant_record. 아래 원본 로직은 보존하되 도달하지 않습니다.
+// ─────────────────────────────────────────────────────────────────────────
+process.exit(0);
 /**
  * user-prompt-learn-outcome.js — 빙구팩 학습 채널 "결과 기록" (UserPromptSubmit · SYNC)
  *
