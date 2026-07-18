@@ -26,6 +26,8 @@ import os
 import re
 import sqlite3
 import subprocess
+import tempfile
+import shutil
 
 # __file__ = <repo>/binggupack/pack/doctor.py → 3단계 상위가 repo 루트.
 # _HERE(scripts)·_ROOT(repo) 는 하위 selftest subprocess 경로·_OP_STORE·_real_tree_scan
@@ -90,13 +92,25 @@ _GATE_RE = re.compile(r"GATE[:=]\s*([A-Za-z\-]+)")
 
 
 def _run_selftest(script):
-    """하위 selftest subprocess 실행. raw stdout 은 보관하지 않고 GATE 라벨 + exit 만 추출."""
+    """하위 selftest subprocess 실행. raw stdout 은 보관하지 않고 GATE 라벨 + exit 만 추출.
+
+    하위 selftest 는 synthetic/temp staging 을 쓰는 회귀 검사다. 운영홈
+    (BINGGU_HOME/기본 경로)의 설정·기존 ledger 노드에 오염되면 결정성이 깨진다
+    (운영홈 실데이터 검사는 OI1~OI3 read-only 정합검사가 전담). 그래서 매 subprocess 를
+    격리 임시 BINGGU_HOME 으로 실행해 운영홈 상태와 무관한 결정적 결과를 보장한다.
+    self-contained selftest 는 BINGGU_HOME 을 참조하지 않으므로 무영향(부작용 0).
+    os.environ 자체는 변경하지 않으므로 in-process OI 검사의 운영홈 경로는 그대로 유지된다."""
     path = os.path.join(_HERE, script)
+    env = dict(os.environ)
+    iso_home = tempfile.mkdtemp(prefix="bgp_doctor_st_")
+    env["BINGGU_HOME"] = iso_home
     try:
         p = subprocess.run([sys.executable, path, "--selftest"],
-                           capture_output=True, text=True, timeout=120)
+                           capture_output=True, text=True, timeout=120, env=env)
     except Exception as e:
         return {"gate": "ERROR", "exit": -1, "reason_code": "subprocess_error:" + type(e).__name__}
+    finally:
+        shutil.rmtree(iso_home, ignore_errors=True)
     m = None
     for line in p.stdout.splitlines():
         mm = _GATE_RE.search(line)
