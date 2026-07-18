@@ -47,13 +47,28 @@ try:
     if _ROOT not in sys.path:
         sys.path.insert(0, _ROOT)
     from binggupack.safety.gate_text import (  # noqa: E402,F401
-        parse_save_indices, SAVE_TRIGGER_RE, _norm, sent_hash)
+        parse_save_indices, SAVE_TRIGGER_RE, _norm, sent_hash, _strip_embedded_regions)
 except Exception:  # pragma: no cover - 폴백(외부 의존 없이 동일 정의)
     SAVE_TRIGGER_RE = re.compile(
         r"\s*(?:SAVE|저장|세이브)\s*\d+(\s*[-~]\s*\d+)?(\s*,\s*\d+(\s*[-~]\s*\d+)?)*\s*",
         re.IGNORECASE)
 
     _RANGE_CAP = 50
+
+    _FENCE_RE = re.compile(r"^\s*(?:```|~~~)")
+
+    def _strip_embedded_regions(text):
+        out, in_fence = [], False
+        for line in str(text).splitlines():
+            if _FENCE_RE.match(line):
+                in_fence = not in_fence
+                continue
+            if in_fence:
+                continue
+            if line.lstrip().startswith(">"):
+                continue
+            out.append(line)
+        return "\n".join(out)
 
     def _expand_indices(text):
         out, seen = [], set()
@@ -77,7 +92,7 @@ except Exception:  # pragma: no cover - 폴백(외부 의존 없이 동일 정�
         if SAVE_TRIGGER_RE.fullmatch(p):
             return _expand_indices(p)
         out, seen = [], set()
-        for line in p.splitlines():
+        for line in _strip_embedded_regions(p).splitlines():
             if line.strip() and SAVE_TRIGGER_RE.fullmatch(line):
                 idx = _expand_indices(line)
                 for i in idx or []:

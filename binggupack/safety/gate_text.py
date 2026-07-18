@@ -29,6 +29,27 @@ SAVE_TRIGGER_RE = re.compile(
 
 _RANGE_CAP = 50  # 범위 확장 상한(오타 '1-99999' 폭주 방지 — 초과 시 그 도장 무효)
 
+# fenced 코드블록 구분선(``` 또는 ~~~ 로 시작하는 줄) — 붙여넣은 로그/AI응답/문서의 '명령 아닌 영역' 표시.
+_FENCE_RE = re.compile(r"^\s*(?:```|~~~)")
+
+
+def _strip_embedded_regions(text):
+    """줄 스캔 전 '명령 아닌 영역' 제거 — fenced 코드블록(``` 또는 ~~~ 구분선 사이 본문+구분선)과
+    blockquote('>' 시작) 줄을 걸러낸다. owner 가 로그·AI응답·문서 예시를 붙여넣을 때 그 안에 박힌
+    독립줄 '세이브 n'(및 히트/승격 도장)이 실제 승인으로 오인되는 것을 차단(임베디드 트리거 무효화).
+    정상 다중명령 묶음('메모 정리\\n세이브 1\\n끝')은 펜스/인용이 아니라 그대로 보존. 순수·write 0."""
+    out, in_fence = [], False
+    for line in str(text).splitlines():
+        if _FENCE_RE.match(line):
+            in_fence = not in_fence
+            continue  # 구분선 자체도 제거
+        if in_fence:
+            continue  # 펜스 본문 제거
+        if line.lstrip().startswith(">"):
+            continue  # blockquote 인용 제거
+        out.append(line)
+    return "\n".join(out)
+
 
 def _expand_indices(text):
     """'1,3' / '1-5' / '1,3-5' → 인덱스 리스트(중복 제거·순서 보존). 범위 폭주 → None."""
@@ -56,12 +77,15 @@ def parse_save_indices(prompt):
     ② ★줄 단위 정확형(2026-07-13 owner GO): 여러 지시를 한 메시지에 묶는 사용자 스타일 대응 —
        어떤 **한 줄 전체**가 정확형이면 그 줄(들)을 도장으로 인정. 문장 속 언급("도장은 세이브1
        왜 실패")은 줄 일부라 여전히 무시(오도장 차단 계약 유지).
+    ③ ★fenced 코드블록/blockquote 안 독립줄은 도장 아님(2026-07-18 P0 수정): owner 가 로그·AI응답·
+       문서 예시를 붙여넣을 때 그 안 '세이브 n' 줄이 실제 승인으로 오인되던 회귀 차단
+       (_strip_embedded_regions 로 줄 스캔 전 제거). 평문 라인모드(②)는 그대로 보존.
     트리거 = SAVE/저장/세이브(대소문자 무시). 범위 '1-5' 지원(_RANGE_CAP 상한)."""
     p = str(prompt or "")
     if SAVE_TRIGGER_RE.fullmatch(p):
         return _expand_indices(p)
     out, seen = [], set()
-    for line in p.splitlines():
+    for line in _strip_embedded_regions(p).splitlines():
         if line.strip() and SAVE_TRIGGER_RE.fullmatch(line):
             idx = _expand_indices(line)
             for i in idx or []:
