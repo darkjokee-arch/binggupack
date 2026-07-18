@@ -175,7 +175,7 @@ ChatGPT 채팅에서 `SAVE n`으로 승인한 것만 hosted inbox에 잠깐 적�
 
 ### 원클릭 온보딩 — `binggu onboard`
 
-> ⚠️ 이 저장 채널은 `hosted/` worker 소스가 필요합니다 — **`git clone` 후** 실행하세요. **pip 배포판엔 `hosted/`가 포함되지 않아** `binggu onboard`가 첫 단계(s0)에서 멈춥니다. Cloudflare 계정이 없으면 먼저 [무료 가입](https://dash.cloudflare.com/sign-up).
+> ⚠️ 이 저장 채널은 `hosted/` worker 소스가 필요합니다. **sdist 배포판엔 `hosted/workers/src`가 포함**되지만 **wheel 배포판엔 미포함**입니다 — wheel로 설치했다면 `binggu onboard`가 첫 단계(s0)에서 멈추니, **sdist**(`pip download --no-binary :all: binggupack`)로 받거나 **`git clone` 후** 실행하세요. (관리형 SaaS/멀티테넌트 호스팅은 범위 밖 — 본인 Cloudflare 계정에 직접 배포하는 소스만 동봉합니다.) Cloudflare 계정이 없으면 먼저 [무료 가입](https://dash.cloudflare.com/sign-up).
 
 본인 Cloudflare 계정에 읽기 worker + 저장 채널(save_mcp) + auto-pull 스케줄러를 한 번에 셋업합니다(멱등 · dry-run 기본):
 
@@ -232,6 +232,14 @@ python -m venv .build_venv
 - `pyproject.toml`에 `[build-system]` + `binggupack` 패키지 정의가 있습니다.
 - build 산출물(`dist/`, `.build_venv/`)은 `.gitignore` 대상입니다.
 - 패키지 설치 CLI 회귀는 `python tests/package_cli_selftest.py`로 확인합니다.
+
+**sdist 시크릿 게이트(빌드 직후 필수 · CI/로컬)** — hosted worker 소스(`MANIFEST.in`)는 **sdist에만** 동봉되고 시크릿(`.dev.vars*`)은 **절대 포함되면 안 됩니다**. 빌드 직후 확인:
+
+```bash
+python -m build
+tar tzf dist/*.tar.gz | grep -c "dev.vars"           # → 0 이어야 함(시크릿 0)
+tar tzf dist/*.tar.gz | grep -c "hosted/workers/src"  # → >0 (worker 소스 포함 확인)
+```
 
 ## 화자 축 사용 (v1.12.0+ · 양방향 페어 v1.14.0)
 

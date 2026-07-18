@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added — 지능 루프 계기판 + doctor automation 줄 + hosted sdist 번들 (평가 4추천 ①③④)
+- `binggu status`(=`binggu doctor` 별칭) 에 "지능 루프" 롤업(read-only): automation 스위치(capture/preflight/trace/crab_sync) 1줄 + 히트(use_count 수동 recall --record 신호)·사람판정(회상 효용 used)·결과-귀속(signal_only)·golden_drift 재검토 후보. 잠김(trace OFF)·N=0 은 액션 힌트로 가시화. 운영홈 write 0(집계는 mode=ro read-only 커넥션).
+- `binggupack/pack/recall_trace.py`·`outcome_attribution.py` 에 `_open_store_ro`(mode=ro URI) — 집계가 사이드카 store 를 apply_schema/makedirs 로 건드리던 write 제거(ledger + recall_trace.sqlite mtime 불변 실증).
+- `binggupack/pack/doctor.py` automation 줄(capture/preflight/trace/crab_sync 실플래그 read-only · trace 는 `recall_trace.trace_enabled` 3원천 OR 로 status 와 동일 판정).
+- `MANIFEST.in` 신규 — hosted worker 소스(`hosted/workers/src/*.ts`·`wrangler*.toml`·`tsconfig.json`)를 **sdist 에만** 동봉(wheel 미포함). 시크릿(`.dev.vars*`)·`node_modules`·`.wrangler`·`data` 는 3중 방어로 번들 0(`tar tzf dist/*.tar.gz | grep -c dev.vars` == 0 게이트). 관리형 SaaS 는 범위 밖(배포는 owner 손).
+
 ### Internal — doctor selftest subprocess 격리 (PR #82)
 - `binggupack/pack/doctor.py` `_run_selftest` 가 매 subprocess 를 격리 임시 `BINGGU_HOME`(tempfile.mkdtemp + env · finally rmtree)에서 실행 — synthetic selftest 케이스가 운영홈 상태를 오염시키던 문제 해소(운영홈 ledger read-only 유지, DOCTOR GATE NO-GO(19/21)→GO(21/21)).
 

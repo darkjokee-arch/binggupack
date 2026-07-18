@@ -170,6 +170,46 @@ def _store_snapshot():
     return snap
 
 
+# ---------------- automation 플래그 read-only 표시 (MF10 · write 0) ----------------
+# 운영 자동화 스위치(capture/preflight/recall-trace/crab-sync)의 현재 ON/OFF 만 비춘다.
+# 플래그 파일 존재 또는 config 값만 확인 — 생성/수정/삭제 0. owner 원칙: 이 스위치는
+# owner 만 켠다(자동적재 금지의 대상은 'AI 자가 활성'). doctor 는 실상태 거울일 뿐(변경 0).
+
+def _automation_flags(home):
+    """capture/preflight/recall_trace/crab_sync 실플래그를 read-only 로 읽어 bool 반환.
+
+    - capture     : <home>/capture_enabled 존재 AND capture_paused/capture_disabled 없음
+                    (binggupack.cli.daily._capture_status 규약과 동일)
+    - preflight   : <home>/preflight_enabled 존재 (daily._preflight_status 규약)
+    - recall_trace: recall_trace.trace_enabled(home) — 3원천 OR(파일플래그 OR env
+                    BINGGU_RECALL_TRACE=1 OR config recall_config.trace_enabled). status 롤업의
+                    trace 게이트와 동일 판정(내부 비대칭 제거). 모듈 부재 시 파일플래그 폴백.
+    - crab_sync   : <home>/person_pack.json 의 crab_auto_sync == True (config 값)
+    파일/DB write 0 · 손상/부재는 graceful OFF(보수)."""
+    def _has(name):
+        return os.path.exists(os.path.join(home, name))
+    capture = (_has("capture_enabled") and not _has("capture_paused")
+               and not _has("capture_disabled"))
+    preflight = _has("preflight_enabled")
+    try:
+        # trace 는 정본 판정(3원천 OR)으로 — status 롤업(RT.trace_enabled)과 동일 결과 보장.
+        from binggupack.pack import recall_trace as _RT
+        recall_trace = bool(_RT.trace_enabled(home))
+    except Exception:
+        recall_trace = _has("recall_trace_enabled")  # 폴백: 파일플래그만
+    crab_sync = False
+    try:
+        import json
+        pp = os.path.join(home, "person_pack.json")
+        if os.path.exists(pp):
+            with open(pp, encoding="utf-8") as f:
+                crab_sync = (json.load(f).get("crab_auto_sync") is True)
+    except Exception:
+        crab_sync = False  # config 손상/부재 → OFF
+    return {"capture": capture, "preflight": preflight,
+            "recall_trace": recall_trace, "crab_sync": crab_sync}
+
+
 def _real_tree_scan(tree_root):
     """실 공개 후보 트리 scan(요약만). raw 미출력. import 는 호출 시점에만."""
     from binggupack.safety.public_tree_scan import scan_public_tree  # noqa: E402
@@ -365,6 +405,14 @@ def run_doctor(tree_root=None, ledger_path=None):
     oi_res, _b, _a = _run_oi_checks(lp)
     oi_ok = _print_oi(oi_res)
     all_ok = all_ok and oi_ok
+
+    # automation 플래그 read-only 표시 (MF10) — 운영 자동화 스위치 실상태 1줄(write 0).
+    #   OFF 가 기본이나 ON 도 정상(owner 가 켠 것) — 자체 FAIL 아님(거울일 뿐). 켜는 주체는 owner.
+    af = _automation_flags(os.path.dirname(lp))
+    print("  [INFO] %-24s automation: capture=%s preflight=%s trace=%s crab_sync=%s"
+          % ("automation_flags",
+             "ON" if af["capture"] else "OFF", "ON" if af["preflight"] else "OFF",
+             "ON" if af["recall_trace"] else "OFF", "ON" if af["crab_sync"] else "OFF"))
 
     # operating store 불변 확인
     store_after = _store_snapshot()

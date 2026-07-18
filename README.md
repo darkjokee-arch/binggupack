@@ -221,7 +221,7 @@ binggu start            # 내 PC에 기억 장부 만들기 — 끝
 ```
 
 - 로컬 CLI + **stdio MCP(Claude Code·Codex)**는 `pip install`만으로 충분합니다([INSTALL](INSTALL.md#install-claude-code-mcp-sandbox-entry)에 등록 방법).
-- **ChatGPT/웹 커넥터 저장 채널**(`binggu onboard`)은 hosted worker 소스가 필요해 **`git clone` 후** 실행하세요(pip 배포판엔 `hosted/`가 포함되지 않음 · [INSTALL](INSTALL.md#chatgpt-저장-채널-optional--hosted) 참조).
+- **ChatGPT/웹 커넥터 저장 채널**(`binggu onboard`)은 hosted worker 소스가 필요합니다 — **sdist 배포판엔 `hosted/workers/src` 포함, wheel 배포판엔 미포함**입니다. wheel로 설치했다면 **sdist**(`pip download --no-binary :all: binggupack`) 또는 **`git clone`**으로 받으세요(관리형 SaaS는 범위 밖 · [INSTALL](INSTALL.md#chatgpt-저장-채널-optional--hosted) 참조).
 
 | 다음 단계 | 문서 |
 |---|---|

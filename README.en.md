@@ -79,7 +79,7 @@ binggu                  # home screen: status + what to do next
 ```
 
 - Local CLI + **stdio MCP** (Claude Code, Codex) work from `pip install` alone. See [INSTALL.md](INSTALL.md).
-- The **ChatGPT / web connector** save channel (the Bridge) needs the hosted worker source, so `git clone` and run it separately (the pip wheel does not bundle `hosted/`).
+- The **ChatGPT / web connector** save channel (the Bridge) needs the hosted worker source. The **sdist** bundles `hosted/workers/src` (get it via `pip download --no-binary :all: binggupack`, then unpack, or `git clone`); the **wheel** does not. Deploying it (your own Cloudflare account / `wrangler`) stays in your hands — no managed SaaS is provided.
 
 ## License
 

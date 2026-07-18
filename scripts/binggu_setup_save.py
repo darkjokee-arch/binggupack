@@ -269,7 +269,8 @@ def web_mcp_step(os_name=None, webmcp=False, apply=False, runner=None,
         return step("s8", INFO, "(선택) 웹 MCP — 로컬 24도구를 claude/ChatGPT 커넥터로",
                     "--webmcp --apply 로 로그온 자동가동 등록(공개 터널=본인 결정 옵트인) 또는 본인 셸에서:\n"
                     "  powershell -ExecutionPolicy Bypass -File \"%s\"\n"
-                    "  주소는 <home>/mcp_web_url.txt (quick tunnel — 재부팅 시 갱신)"
+                    "  권장=named tunnel(고정 도메인, 예: mcp.binggu.uk) — 재부팅에도 URL 불변이라 커넥터 재등록 0.\n"
+                    "  quick tunnel(<home>/mcp_web_url.txt)은 임시 폴백 — 재부팅마다 주소 갱신(그때만 사용)."
                     % REGISTER_WEBMCP_PS1)
     os_name = os_name or P.detect_os()
     if os_name != "windows":
@@ -288,7 +289,8 @@ def web_mcp_step(os_name=None, webmcp=False, apply=False, runner=None,
     if isinstance(r, dict) and r.get("rc") not in (0, None):
         return step("s8", STOP, "웹 MCP 등록 실패",
                     "직접 실행: powershell -ExecutionPolicy Bypass -File \"%s\"" % REGISTER_WEBMCP_PS1)
-    return step("s8", OK, "웹 MCP 스케줄러 '%s' 등록 완료(로그온 자동가동 · 주소 <home>/mcp_web_url.txt)"
+    return step("s8", OK, "웹 MCP 스케줄러 '%s' 등록 완료(로그온 자동가동 · 권장 named tunnel 고정도메인"
+                " → 재부팅에도 URL 불변 · quick tunnel 폴백 주소 <home>/mcp_web_url.txt)"
                 % WEBMCP_TASK_NAME)
 
 
@@ -481,7 +483,7 @@ def run_save_setup(apply=False, deploy=False, show_url=False, os_name=None, wp_d
     # [s0] preflight — toml + wrangler 존재(read-only)
     if not os.path.exists(toml_path):
         steps.append(step("s0", STOP, "wrangler.save_mcp.prod.toml 없음: %s" % toml_path,
-                          "clone 이 온전한지 확인(hosted/workers)"))
+                          "wheel 설치본엔 hosted/ 미포함 — sdist(`pip download --no-binary :all: binggupack`) 또는 `git clone` 으로 받으세요(hosted/workers 소스 필요)"))
         return {"apply": apply, "deploy": deploy, "steps": steps, "halted_at": "s0"}
     steps.append(step("s0", OK, "save_mcp toml 확인: %s" % os.path.basename(toml_path)))
 
