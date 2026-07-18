@@ -96,3 +96,82 @@ def save_candidates_batch(db, snap_dir, buffer_items, indices, gate_log_path=Non
                             "reason": r.get("reason"), "pack_id": r.get("pack_id")})
     return {"applied": total_saved > 0, "reason": None, "saved": total_saved,
             "skipped": skipped, "results": results}
+
+
+def _selftest():
+    """환경 비의존·결정적 게이트 — 격리 tempdir 에서 순수 함수 + 승인 경계(fail-closed·
+    owner SAVE 앵커 승격)를 검증한다. 실 ledger/운영홈 미접근(save_paired 실저장은
+    데모/E2E 가 커버 — 여기선 db=None 으로 fail-closed 조기반환 경로만 확인)."""
+    import tempfile
+    from binggupack.safety.gate_log import (
+        preview_ref_for_candidates, gate_human_for_ref, gate_record_from_prompt,
+    )
+    fails = []
+
+    def check(name, cond):
+        if not cond:
+            fails.append(name)
+
+    items = [
+        {"idx": 1, "text": "빠른 결정이 느린 완벽보다 낫다."},
+        {"idx": 2, "text": "성공은 크기가 아니라 자유다."},
+        {"idx": 3, "text": "안 됩니다는 답이 아니다."},
+    ]
+
+    # 1) _anchor_candidates: idx 순서·원문 보존, sentence 키(앵커 재계산 패리티의 근거)
+    anc = _anchor_candidates(items)
+    check("anchor_len", len(anc) == 3)
+    check("anchor_order", [a["sentence"] for a in anc] == [it["text"] for it in items])
+
+    # 2) render_batch_preview: 번호 + 원문 발췌 + SAVE 안내(무음 폐기 방지)
+    pv = render_batch_preview(items)
+    check("preview_nums", ("| 1 |" in pv) and ("| 2 |" in pv) and ("| 3 |" in pv))
+    check("preview_save_hint", "SAVE" in pv)
+    check("preview_excerpt", "성공은 크기가 아니라 자유다." in pv)
+
+    # 3) preview_ref 안정성 — 같은 buffer 는 어디서 재계산해도 동일 pref(순서보존 계약)
+    p1 = preview_ref_for_candidates(anc)
+    p2 = preview_ref_for_candidates(_anchor_candidates(items))
+    check("pref_stable", bool(p1) and p1 == p2)
+
+    with tempfile.TemporaryDirectory() as td:
+        anchor_path = os.path.join(td, "last_preview_candidates.json")
+        gate_log = os.path.join(td, "save_gate_log.jsonl")
+
+        # 4) stage_batch_anchor: rows 수 == items 수 + 앵커 파일 생성(저장 0)
+        n = stage_batch_anchor(items, path=anchor_path)
+        check("stage_rows", n == 3)
+        check("stage_file", os.path.exists(anchor_path))
+
+        # 5) fail-closed A: indices 없음 → applied False(db 접근 전 조기반환)
+        r0 = save_candidates_batch(None, None, items, [], gate_log_path=gate_log)
+        check("fc_no_indices", (r0.get("applied") is False) and (r0.get("reason") == "no_indices"))
+
+        # 6) fail-closed B(★핵심 안전): owner SAVE 앵커 미기록 → no_save_gate_ref·saved 0
+        r1 = save_candidates_batch(None, None, items, [1], gate_log_path=gate_log)
+        check("fc_no_gate_ref",
+              (r1.get("applied") is False)
+              and (r1.get("reason") == "no_save_gate_ref")
+              and (r1.get("saved") == 0))
+
+        # 7) 승격 계약: owner 'SAVE n' 발화가 앵커와 대조돼 human 승격되는지(저장 직전 게이트)
+        rec = gate_record_from_prompt("SAVE 1,2", preview_path=anchor_path, gate_path=gate_log)
+        check("gate_record", rec > 0)
+        pref = preview_ref_for_candidates(anc)
+        check("promote_true", gate_human_for_ref(pref, [1, 2], path=gate_log) is True)
+        # 미발화 idx 는 승격 안 됨(부분 우회 차단·all-or-nothing)
+        check("promote_partial_false", gate_human_for_ref(pref, [3], path=gate_log) is False)
+
+    if fails:
+        print("save_batch selftest FAIL: %s" % ", ".join(fails))
+        print("GATE=NO-GO")
+        return 1
+    print("save_batch selftest: 7 checks pass (순수함수 3 + 앵커/게이트 fail-closed·승격 4)")
+    print("GATE=GO")
+    return 0
+
+
+if __name__ == "__main__":
+    if "--selftest" in sys.argv:
+        sys.exit(_selftest())
+    print("binggu_save_batch: --selftest 로 검증 실행")
