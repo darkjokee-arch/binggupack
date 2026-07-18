@@ -1974,6 +1974,12 @@ _HELP_EPILOG = """\
 """
 
 
+# rank12 SSOT — 순수 별칭(동작 100% 동일) 정의 1곳. argparse aliases= 와 dispatch 정규화가 여기서 파생.
+# remember(preview+explicit)·why(독립 파서)·mark-hit/miss(독립 명령)는 별칭이 아니므로 제외.
+_PURE_ALIASES = {"init": ["start"], "status": ["doctor"], "recall": ["ask"]}
+_ALIAS_TO_CANON = {al: canon for canon, als in _PURE_ALIASES.items() for al in als}
+
+
 def main():
     if sys.argv[1:] == ["--selftest"]:
         sys.exit(selftest())
@@ -1995,15 +2001,15 @@ def main():
     dmp.add_argument("--non-interactive", action="store_true", dest="non_interactive")
     dmp.add_argument("--home", default=None)   # 데모 격리 홈(미지정=임시폴더·종료 시 자동정리)
     dmp.add_argument("--keep", action="store_true")   # 데모 데이터 보존(정리 안 함)
-    # 쉬운 별칭(UX): start=init · doctor=status · remember=preview · ask=recall.
-    # 동작/안전 게이트는 본명령과 동일(별칭은 이름만 짧게). aliases= 와 dispatch dict 양쪽에 매핑.
-    ip = sub.add_parser("init", aliases=["start"])
+    # 쉬운 별칭(UX): start=init · doctor=status · ask=recall — 순수 별칭은 _PURE_ALIASES SSOT 1곳.
+    # remember=preview+explicit · why=recall 은 동작이 달라 별칭이 아니며 dispatch dict 에 별도 유지.
+    ip = sub.add_parser("init", aliases=_PURE_ALIASES["init"])
     ip.add_argument("--agi-memory", action="store_true", dest="agi_memory")  # 명시 별칭(동작 동일)
     ip.add_argument("--global", action="store_true", dest="global_scope")     # 전역 수집(미지정 시 현재 위치만)
     ip.add_argument("--with-capture", action="store_true", dest="with_capture")  # 자동 후보 수집 옵트인(hook 등록)
     ip.add_argument("--no-capture", action="store_true", dest="no_capture")   # 하위호환 no-op(기본이 곧 no-capture)
     ip.add_argument("--force-capture", action="store_true", dest="force_capture")  # (--with-capture 와) owner sticky OFF 해제 강제 ON
-    sub.add_parser("status", aliases=["doctor"])
+    sub.add_parser("status", aliases=_PURE_ALIASES["status"])
     hmp = sub.add_parser("home")            # 데일리 콘솔(상태+다음 할 일 · read-only · 인자없는 binggu 와 동일)
     hmp.add_argument("--json", action="store_true")
     stp = sub.add_parser("studio")          # 로컬 read-only 웹 UI(loopback · ephemeral session · 저장 0)
@@ -2024,7 +2030,7 @@ def main():
     sp = sub.add_parser("list"); sp.add_argument("--status", default=None)
     sp.add_argument("--kind", default=None)
     # 회상(L4~L6 · read-only) — recall(why_search) / trace(judgment_trace) / preflight
-    rcp = sub.add_parser("recall", aliases=["ask"]); rcp.add_argument("query")
+    rcp = sub.add_parser("recall", aliases=_PURE_ALIASES["recall"]); rcp.add_argument("query")
     rcp.add_argument("--limit", type=int, default=None)
     rcp.add_argument("--record", action="store_true", dest="record")  # use_count++ (기본 read-only)
     rcp.add_argument("--deep", action="store_true")   # 원본 전체 탐색(기본=Hot 색인)
@@ -2212,7 +2218,8 @@ def main():
     appup.add_argument("--endpoint", default=None)        # https gateway base url
     appup.add_argument("--confirm", action="store_true")  # perform upload (default: dry-run preview)
     a = p.parse_args()
-    fn = {"init": cmd_init, "start": cmd_init, "status": cmd_status, "doctor": cmd_status,
+    canon = _ALIAS_TO_CANON.get(a.cmd, a.cmd)   # rank12 SSOT — 순수 별칭 정규화(start→init·doctor→status·ask→recall)
+    fn = {"init": cmd_init, "status": cmd_status,
           "home": cmd_home, "studio": cmd_studio,
           "preview": cmd_preview, "remember": lambda a: cmd_preview(a, explicit=True),  # remember=명시 입력
           "reflect": cmd_reflect, "save": cmd_save,
@@ -2222,7 +2229,7 @@ def main():
           "learn-consume": cmd_learn_consume, "verdict": cmd_verdict,
           "abstraction": cmd_abstraction, "promote": cmd_promote,
           "reminders": cmd_reminders, "capture": cmd_capture,
-          "recall": cmd_recall, "why": cmd_recall, "ask": cmd_recall, "trace": cmd_trace, "preflight": cmd_preflight,
+          "recall": cmd_recall, "why": cmd_recall, "trace": cmd_trace, "preflight": cmd_preflight,
           "hosted": cmd_hosted, "harvest": cmd_harvest, "setup-cloud": cmd_setup_cloud,
           "onboard": cmd_onboard,
           "confirm-edges": cmd_confirm_edges, "pair": cmd_pair, "trust": cmd_trust,
@@ -2230,7 +2237,7 @@ def main():
           "restore": cmd_restore, "demo": cmd_demo, "explain": cmd_explain,
           "forget": cmd_forget, "inbox": cmd_inbox, "index": cmd_index,
           "approvals": cmd_approvals, "approval": cmd_approval, "app": cmd_app,
-          "outcome": cmd_outcome}[a.cmd]
+          "outcome": cmd_outcome}[canon]
     sys.exit(fn(a))
 
 
