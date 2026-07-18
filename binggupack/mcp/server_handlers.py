@@ -43,8 +43,51 @@ _STUB_NOTE = "미결선 stub — 실제 검사는 CLI/scripts 경로. MCP 노출
 
 
 def _u_pack_build(params=None):
-    return {"action": "pack_build", "mode": "dry-run", "synthetic": True,
-            "verdict": "NOT_IMPLEMENTED", "note": _STUB_NOTE}
+    # 실 결선(2026-07-17): input_dir → in-package incoming_folder 파이프라인(scan + markdown 블록파싱 +
+    # batch_redact/scan_residual_pii 잔존 시 전체 STOP 게이트) → candidate_mvp2.to_nodes →
+    # pack_factory.build_pack dry-run(out_dir=None·메모리). temp only·production write 0·raw 경로 미노출
+    # (counts/verdict/reason_code 만 반환 — REJECT/STOP 의 source_path·stops 는 개수만 추출). MCP 상한
+    # (파일수/바이트) + 심링크 자식 거부(reject_symlinks)로 자원/경로우회 방어. path_gate 통과 후 도달.
+    params = params or {}
+    input_dir = params.get("input_dir")
+    if not input_dir:
+        return {"action": "pack_build", "mode": "dry-run", "verdict": "REJECT",
+                "reason_code": "missing_input_dir"}
+    from binggupack.pack import candidate_mvp2 as _CM
+    from binggupack.pack import incoming_folder as _IF
+    from binggupack.pack import pack_factory as _PF
+    _adapt = _IF.adapt_incoming_folder(
+        [input_dir], max_files=500, max_file_bytes=2_000_000, max_total_bytes=20_000_000,
+        reject_symlinks=True)
+    _gate = _adapt.get("gate")
+    if _gate == "REJECT":
+        return {"action": "pack_build", "mode": "dry-run", "verdict": "REJECT",
+                "reason_code": _adapt.get("reason"), "n_files": _adapt.get("n_files")}
+    if _gate == "STOP":
+        # PII/secret 잔존 — raw(stops[].source_path) 미노출, 개수만.
+        return {"action": "pack_build", "mode": "dry-run", "verdict": "STOP",
+                "reason_code": "pii_secret_residual", "n_files": _adapt.get("n_files"),
+                "n_stops": len(_adapt.get("stops", []))}
+    _chunks = _adapt.get("chunks", [])
+    _nodes, _ev_index, _node_stops = _CM.to_nodes(_chunks)
+    _documents = [{"nodes": _nodes, "evidence_index": _ev_index, "evidence_chunks": _chunks}]
+    _res = _PF.build_pack("incoming", _documents, out_dir=None)   # dry-run 메모리(파일 write 0)
+    _status = _res.get("status")
+    _c = _res.get("counts", {})
+    _n_nodes = int(_c.get("nodes", 0))
+    if _status == "BLOCK":
+        _verdict = "STOP"          # candidate 불변식 위반 등
+    elif _n_nodes > 0:
+        _verdict = "GO"
+    else:
+        _verdict = "EMPTY"         # 파일은 스캔됐으나 노드 0 — silent drop 방지(명시 표기)
+    return {"action": "pack_build", "mode": "dry-run", "verdict": _verdict,
+            "counts": {"nodes": _n_nodes,
+                       "evidence_index": int(_c.get("evidence_index", 0)),
+                       "evidence_chunk": int(_c.get("evidence_chunk", 0)),
+                       "documents": int(_c.get("documents", 0)),
+                       "node_stops": len(_node_stops)},
+            "validate": (_res.get("verdict") or {}).get("verdict")}
 
 
 def _u_pack_validate(params=None):
@@ -77,8 +120,28 @@ def _u_pack_validate(params=None):
 
 
 def _u_consumer_smoke(params=None):
-    return {"action": "consumer_smoke", "mode": "read", "synthetic": True,
-            "verdict": "NOT_IMPLEMENTED", "note": _STUB_NOTE}
+    # 실 결선(2026-07-17): pack 소비(읽기) smoke 정본 binggupack.pack.pack_consumer.
+    # pack_dir 5파일(manifest/nodes/edges/evidence_index/evidence_chunk) → consume + safety_checks →
+    # summarize(counts + 안전 불리언만). ★raw(claim/relation/source_pointer) 미노출(summarize 가 strip).
+    # verdict: 안전필수(candidate/promotion/secret/confirmed) 전부 통과 AND nodes>0 → GO(빈 pack=STOP).
+    # CS-3: pack_dir 자식 5파일이 심링크면 REJECT(path_gate 우회 외부 read 차단). path_gate 통과 후 도달.
+    params = params or {}
+    pack_path = params.get("pack_path")
+    if not pack_path:
+        return {"action": "consumer_smoke", "mode": "read", "verdict": "REJECT",
+                "reason_code": "missing_pack_path"}
+    import os as _os
+    for _child in ("manifest.json", "nodes.jsonl", "edges.jsonl",
+                   "evidence_index.jsonl", "evidence_chunk.jsonl"):
+        if _os.path.islink(_os.path.join(pack_path, _child)):
+            return {"action": "consumer_smoke", "mode": "read", "verdict": "REJECT",
+                    "reason_code": "symlink_child_forbidden"}
+    from binggupack.pack import pack_consumer as _PC
+    _view, _checks = _PC.run_on_pack(pack_path)
+    _summary = _PC.summarize(_view, _checks)
+    return {"action": "consumer_smoke", "mode": "read",
+            "verdict": _summary["verdict"], "counts": _summary["counts"],
+            "checks": _summary["checks"], "info": _summary["info"]}
 
 
 def _collect_source_pointers(doc):
@@ -129,8 +192,14 @@ def _u_publish_guard_dryrun(params=None):
 
 
 def _u_selftest(params=None):
+    # 결선 안 함(정직 유지): selftest 배터리는 subprocess(scripts/*_selftest.py · python -m binggupack
+    # --selftest)라 MCP 표면에서 실행하면 타임아웃·프로세스 위생 위험(좀비/hang). 노출은 안내만 —
+    # verdict=NOT_IMPLEMENTED 유지(실검증 통과로 오인 방지). 실 게이트 CLI 를 note 로 명시.
     return {"action": "selftest", "mode": "read", "synthetic": True,
-            "verdict": "NOT_IMPLEMENTED", "note": _STUB_NOTE + " 실 게이트: scripts/*_selftest.py"}
+            "verdict": "NOT_IMPLEMENTED", "run_via": "cli",
+            "note": ("MCP 미탑재(subprocess 프로세스 위생). 실 자가검증 CLI: "
+                     "`python -m binggupack --selftest`(설치본) 또는 "
+                     "`python scripts/binggu_publish_run_all_selftests.py`(개발 배터리).")}
 
 
 def _u_capture_classify(params=None):
