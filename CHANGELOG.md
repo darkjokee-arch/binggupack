@@ -1,6 +1,24 @@
 # Changelog — BingguPack
 
+## [Unreleased]
+
+### Internal — doctor selftest subprocess 격리 (PR #82)
+- `binggupack/pack/doctor.py` `_run_selftest` 가 매 subprocess 를 격리 임시 `BINGGU_HOME`(tempfile.mkdtemp + env · finally rmtree)에서 실행 — synthetic selftest 케이스가 운영홈 상태를 오염시키던 문제 해소(운영홈 ledger read-only 유지, DOCTOR GATE NO-GO(19/21)→GO(21/21)).
+
 ## [1.22.0] - 2026-07-18
+
+### Perf — semantic centroid 콜드빌드 배치화 (PR #79)
+- `_centroids` per-row 64왕복 → `S._embed_batch` 1왕복 배치 임베딩 — 콜드빌드 38s→1.32s(~29배), 분류 drift 0(단건 벡터 등가 실측 diff 0.00e+00), 캐시 불변.
+
+### Added — `binggu save-batch` (PR #76)
+- 여러 후보를 발화별 preview → owner `SAVE n[,n]` 한 번의 앵커로 각 candidate 번호를 일괄 확정하는 CLI. 게이트 계약(preview·PII·index 범위)은 건별 유지.
+
+### Changed — MCP `pack_build`·`consumer_smoke` 실결선 (PR #70)
+- 스텁이던 MCP `pack_build`·`consumer_smoke` 도구를 실제 파이프라인에 결선.
+
+### Internal — dispatch 별칭 SSOT (PR #75)
+- `_PURE_ALIASES` 단일 소스에서 argparse aliases + dispatch 정규화(`_ALIAS_TO_CANON`) 파생 — `--help` 10명령 DIFF 0.
+
 
 ### Security/Fixed — fenced/blockquote 안 독립줄은 도장 아님 (P0 승인 우회 차단, 2026-07-18)
 Codex 릴리스 감사 + 병렬 적대검증으로 확정된 P0. 2026-07-13 '줄 단위 도장' 도입 후, owner 가 로그·AI응답·문서 예시를 붙여넣을 때 그 안에 박힌 독립줄 `세이브 n`(및 히트/승격 n)이 실제 사람 승인으로 오인 기록되던 회귀. 배포본 1.21.0(태그 7560250·whole-prompt fullmatch 단일 경로)은 안전했고 현 main 만 퇴행.
@@ -17,7 +35,7 @@ owner 지적 상당수인 반문형("너 안 읽었지?")·완곡 교정("제대
 
 ## [1.21.0] - 2026-07-13
 
-> ⚠ 정정(2026-07-18): 아래 **'Changed — 도장 줄 단위 인정'** 의 줄 단위 도장(`gate_text.parse_save_indices` 줄 스캔)은 태그 v1.21.0(`7560250`)보다 나중 커밋(`d909d07`)이라 **PyPI 배포본 1.21.0 에는 미포함**이다(배포본은 whole-prompt 정확형만 인정). 해당 기능과 그로 인한 P0 수정은 [Unreleased] 참조. 이 절의 다른 항목 중 태그 이후 반영분이 더 섞였을 수 있어, 재현 기준선은 **PyPI 설치본 = 태그 빌드**로 본다.
+> ⚠ 정정(2026-07-18): 아래 **'Changed — 도장 줄 단위 인정'** 의 줄 단위 도장(`gate_text.parse_save_indices` 줄 스캔)은 태그 v1.21.0(`7560250`)보다 나중 커밋(`d909d07`)이라 **PyPI 배포본 1.21.0 에는 미포함**이다(배포본은 whole-prompt 정확형만 인정). 해당 기능과 그로 인한 P0 수정은 [1.22.0] 참조. 이 절의 다른 항목 중 태그 이후 반영분이 더 섞였을 수 있어, 재현 기준선은 **PyPI 설치본 = 태그 빌드**로 본다.
 
 ### Fixed — Codex 재감사 6트랙 수정 (main 77/REFINE · PyPI 1.20.0 52/BLOCK → 해소)
 울트라코드 2단(설계+적대검토 2각 · must_fix 10건 선반영 → 수리 라운드 0)으로 처리. production 로직/스키마/의존성 변경 0.

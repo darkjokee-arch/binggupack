@@ -1,5 +1,7 @@
 # BingguPack — save-intent D4 4조건 게이트 검증표 (2026-06-12, 실측)
 
+> ⚠ D5 는 이후 owner GO 로 라이브 진행됨(2026-06-12 라이브 실증) — 현행 운영 정본: `hosted/workers/README.md` · 라이브 E2E: `docs/_archive/BINGGUPACK_SAVE_INTENT_V23_LIVE_E2E_RESULT.md`. (본 문서 본문은 당시 시점 기록으로 불변)
+
 > **[P1-A 정합 노트]** confirm 을 "사람 발화 유래 증거"로 다루는 서술은 **NOT_A_TRUSTED_APPROVAL_CHANNEL**
 > (전송된 confirm = 형식/무결성 검증일 뿐 사람 승인 아님). intent_id rehash 등 무결성 검증 결과는 유지.
 > 사람 승인 = out-of-band trusted approval event(`docs/BINGGUPACK_TRUSTED_APPROVAL_EVENT_RFC.md`). 상세 = RFC §23.

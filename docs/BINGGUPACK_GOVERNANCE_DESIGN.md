@@ -33,16 +33,18 @@
 
 ## 5. 구현 (stdlib only)
 
-| 모듈 | 역할 |
+> 정본은 `binggupack/` 패키지로 이관됨(v1.16+ strangler). 아래 `scripts/binggu_*.py`는 CLI 호환용 **thin wrapper**(공개 심볼·CLI 동작 동일).
+
+| 모듈(정본 경로 · scripts는 thin wrapper) | 역할 |
 |---|---|
-| `binggu_contrast_protocol.py` | 1단 대비 — 충돌 감지·대비표·원문 봉인 |
+| `binggupack/safety/contrast_protocol.py` (wrapper `scripts/binggu_contrast_protocol.py`) | 1단 대비 — 충돌 감지·대비표·원문 봉인 |
 | `binggu_hit_stats.py` (확장) | 2단 적중률 — 비인과 불변식·domain·신호화 |
 | `binggu_merkle_anchor.py` | 2단 무결성 — atomic 봉인·외부 재계산 |
 | `binggu_policy.py` + `policies/binggu_policy.json` | 안전 화이트리스트·정책 pin |
 | `binggu_hit_export.py` | 3단 분리 — raw export·거버넌스 write 물리 차단 |
-| `binggu_session_close.py` | 세션 마무리 — 의미 감지·저장 preview |
+| `binggupack/review/session_close.py` (wrapper `scripts/binggu_session_close.py`) | 세션 마무리 — 의미 감지·저장 preview |
 
-검증: 가드 5/5 통과 · selftest 전수 GO(hit_stats 12 · merkle 13 · hit_export 8 · staging 17 · binggu 40) · 거버넌스 write 0 · 운영 장부 마이그레이션 무손상.
+검증: 가드 5/5 통과 · selftest 전수 GO(hit_stats 12 · merkle 13 · hit_export 8 · staging 17 · binggu 40 — *v1.13.0 당시 기준. 현행 수치는 `selftest` 실행 결과가 정본*) · 거버넌스 write 0 · 운영 장부 마이그레이션 무손상.
 
 ## 6. 한 줄
 

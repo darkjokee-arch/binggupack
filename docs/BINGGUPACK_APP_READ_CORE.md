@@ -56,10 +56,10 @@ python -m binggupack.app.conformance --selftest
 
 synthetic pack 10종(valid minimal/multi·contradicting·missing-ref·malformed·path-traversal·symlink·oversized·ambiguous·PII/secret)으로 5 tool 계약을 검증한다(운영 ledger/네트워크 0).
 
-## 남은 범위 (v1.21-B/C/D · 별도 GO)
+## 남은 범위 (v1.21-B/C/D) → Binggu Anywhere로 구현 (정본: BINGGUPACK_ANYWHERE_DEPLOYMENT.md)
 
-- **B**: HTTPS MCP transport(streamable HTTP · stateless JSON) — 이 core 를 호출.
-- **C**: auth/user isolation(플랫폼 OAuth · 사용자별 pack namespace · cross-user deny-by-default).
-- **D**: upload 게이트(publish guard 연동) · hosted 배포(Cloudflare Workers 등).
+- **B**: HTTPS MCP transport(streamable HTTP · stateless JSON) — ✅ gateway.ts HTTP/MCP envelope로 구현, 이 core 를 호출.
+- **C**: auth/user isolation — ✅ Bearer + KV cred:<hash> tenant 격리(cross-user deny-by-default).
+- **D**: upload 게이트 · hosted 배포 — ✅ /admin/packs immutable upload + R2 스냅샷 · Cloudflare Workers.
 
-`@BingguPack` 은 아직 사용 가능하지 않다(remote transport/배포 미구현).
+구현/배포 구분: remote transport·auth·upload 코드는 repo에 구현·CI 게이트 검증 완료. 실 프로덕션 워커의 라이브 배포 여부는 repo만으로 미확증 — 실 배포 상태는 ANYWHERE_DEPLOYMENT.md 및 운영 확인에 위임.

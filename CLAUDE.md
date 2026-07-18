@@ -22,7 +22,7 @@ binggupack/          # pip 패키지: pack(빌드·검증) safety(경로·시크
 scripts/             # ~166개: *_selftest.py 게이트·publish 파이프라인·doctor·autopush·경로 SSOT(binggu_paths.py)
 hosted/workers/      # Cloudflare Workers (wrangler.*.toml 다수) + anywhere/core = 벤더 사본(아래 함정 ①)
 hooks/               # Claude Code 훅 (capture·preflight·save_gate·session_close·enforce-recall)
-tests/               # pytest 15 + 하니스 7 | docs/ 설계 정본(START_HERE·ARCHITECTURE·CONSTITUTION 2026-06-17)
+tests/               # pytest + 하니스(개수 가변 · 정본 = ls tests/) | docs/ 설계 정본(START_HERE·ARCHITECTURE·CONSTITUTION 2026-06-17)
 ```
 
 ## 검증 게이트 (커밋 전 이 순서로 — 목표: preflight 1회 통과)

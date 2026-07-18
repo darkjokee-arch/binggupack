@@ -140,7 +140,7 @@ claude mcp get openbinggu-local-sandbox    # Status: Connected · env BINGGU_HOM
 자동/무단 저장은 차단되어야 정상입니다. `save_candidate`는 `dry_run` 기본이고, `dry_run=false`로 호출해도:
 
 - confirm 부재/불일치 → **REJECT** (`confirm_phrase_mismatch`) · `executed_write=false` · write 0
-- `"SAVE n"` confirm 은 **형식 검증**일 뿐 사람 승인 증거가 아닙니다(모델이 dry-run 응답을 재현 가능). 실 저장은 **사람 앵커**(키보드 `SAVE n` → `save_gate`) 또는 **trusted approval event**(P1-A: 요청→owner `binggu approval approve`)가 있을 때만 human 승격 — 저장 위치는 `BINGGU_HOME` 장부(sandbox 등록이면 sandbox home, 운영 ledger 불변)
+- `"SAVE n"` confirm 은 **형식 검증**일 뿐 사람 승인 증거가 아닙니다(모델이 dry-run 응답을 재현 가능). 실 저장은 **사람 앵커**(키보드 `SAVE n` → `save_gate`)가 있을 때만 human 승격입니다(2026-07-13 개정: 저장 경로 승격은 사람 `SAVE n` 앵커 단일 원칙 — trusted approval 은 비-저장 mutation 전용, SECURITY.md 참조) — 저장 위치는 `BINGGU_HOME` 장부(sandbox 등록이면 sandbox home, 운영 ledger 불변)
 
 confirm 없이 차단되는 건 실패가 아니라 PASS입니다. 쓰기 도구 8종(`save_candidate`/`pair`/`deprecate`/`replace`/`harvest_add`/`harvest_remove`/`mark_hit`/`mark_miss`) 전부 같은 방식의 confirm 게이트(도구별 문구 정확 일치)를 씁니다.
 
@@ -171,7 +171,7 @@ BINGGU_MCP_PATH_TOKEN=<경로토큰> python scripts/openbinggu_mcp_server.py --h
 
 ## ChatGPT 저장 채널 (optional · hosted)
 
-ChatGPT 채팅에서 `SAVE n`으로 승인한 것만 hosted inbox에 잠깐 적재되고, 내 PC가 서명키로 pull해 로컬 장부에 반영합니다(자동 저장 0 유지 · PII 백스톱 reject).
+ChatGPT 채팅에서 `SAVE n`으로 승인한 것만 hosted inbox에 잠깐 적재되고, 내 PC가 서명키로 pull해 로컬 staging에 회수합니다(로컬 장부 확정은 PC측 `SAVE n` · 무인 저장 0 · PII 백스톱 reject).
 
 ### 원클릭 온보딩 — `binggu onboard`
 
@@ -197,7 +197,7 @@ python binggu.py onboard --show-url       # 4) ChatGPT 커넥터에 붙여넣을
 | **웹 MCP(30도구)** | Claude 웹/앱에서 로컬 30도구 직접 사용 | `…trycloudflare.com/mcp/<토큰>` (named tunnel이면 고정 주소) | Claude.ai / 앱 커넥터 |
 
 - 저장 채널(위 온보딩)은 `hosted/` worker, 웹 MCP는 로컬 `--http` 서버 + 터널 — 서로 다른 채널입니다.
-- 무인 반영: `scripts/auto_pull_hosted.py`(후보 있으면 자동 반영) + `scripts/register_autopull.ps1`(Windows 스케줄러 등록 — 경로 자동탐지 · mac/linux는 cron 라인 안내).
+- staging 회수(무인 저장 아님): `scripts/auto_pull_hosted.py`(후보를 staging 까지만 자동 회수 · 로컬 장부 확정은 PC에서 사람 `SAVE n`) + `scripts/register_autopull.ps1`(Windows 스케줄러 등록 — 경로 자동탐지 · mac/linux는 cron 라인 안내).
 - hosted 경로 설계·경계: [docs/BINGGUPACK_SAVE_INTENT_V2A_MCP_CONNECTOR_DESIGN.md](docs/BINGGUPACK_SAVE_INTENT_V2A_MCP_CONNECTOR_DESIGN.md) · [docs/BINGGUPACK_HOSTED_BOUNDARY.md](docs/BINGGUPACK_HOSTED_BOUNDARY.md).
 
 ## Troubleshooting

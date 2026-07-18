@@ -1,7 +1,7 @@
-# RFC — save-intent hosted write v2 (설계만, 구현 0)
+# RFC — save-intent hosted write v2 (구현·라이브 완료)
 
 > 작성: 2026-06-12. 근거: 4cli 토론 `20260612_1025_d5_live_exposure` both_reject → P2 보류 + P1 재진입 조건.
-> **상태: 설계 문서. 구현·deploy·secret 발급·connector 노출 전부 별도 owner GO.**
+> **(2026-06-12 구현 상태) 구현 완료 — `hosted/workers/src/save_intent_v2.ts`(V2-1 durable inbox + HMAC 서명) · V2-2 운영 config `wrangler.save_v2.prod.toml` · 라이브 E2E: `docs/_archive/BINGGUPACK_SAVE_INTENT_V23_LIVE_E2E_RESULT.md`.** 본 RFC 는 그 설계 정본.
 > v1(D1~D4, commit 72267c4)은 로컬 wrangler dev 한정 검증으로 유효 — v2는 라이브 재진입 조건을 채우는 증분 설계.
 
 ## 0. v1의 라이브 부적합 사유 (토론 적중 사항)

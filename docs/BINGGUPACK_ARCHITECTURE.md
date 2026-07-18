@@ -20,7 +20,7 @@ BingguPack은 **로컬 우선 개인 기억 엔진**입니다. 원본 기억은 
 
 | 서브패키지 | 담는 것 |
 |---|---|
-| `cli/` | 대화형 저장(interactive_save) |
+| `cli/` | 대화형 저장·preflight·demo·hosted·promote·approval·learn-consume·daily CLI |
 | `capture/` | 캡처 buffer·preview·session·CLI |
 | `classifier/` | 저장 후보 분류(capture_classifier)·canonical label_kind 매핑 |
 | `policy/` | match policy(중복·근접 판정) |
@@ -31,6 +31,9 @@ BingguPack은 **로컬 우선 개인 기억 엔진**입니다. 원본 기억은 
 | `review/` | 검토 라우팅(resolver)·검토 샌드박스(resolver_sandbox)·reviewed plan preview·세션 마감(session_close) |
 | `mcp/` | MCP 서버 핸들러(server_handlers)·경로 게이트(path_gate_adapter) |
 | `workspace/` | 작업공간 정리(organize)·플랫폼(platform) |
+| `app/` | 애플리케이션 서비스 계층 — read core·service·snapshot·upload·conformance·models |
+| `studio/` | studio 서버·읽기 모델·승인 뷰(approval_view)·정적 자원 |
+| `data/` | 데이터 리소스 — semantic 임베딩 자원 |
 
 ## strangler 이관 패턴 (동결 확정 — 2026-07-05)
 
@@ -57,7 +60,7 @@ scripts/ 는 shim + 오케스트레이션 잔류층으로 유지합니다(ruff F
 
 ```bash
 # 전체 selftest 회귀 (핵심 게이트)
-python scripts/binggu_publish_run_all_selftests.py     # → 30/30 PASS · REGRESSION=GO
+python scripts/binggu_publish_run_all_selftests.py     # → 전 게이트 PASS · REGRESSION=GO
 
 # 공개 트리 PII/경로 스캔
 python scripts/openbinggu_public_tree_scan.py --tree . --public   # → CLEAN

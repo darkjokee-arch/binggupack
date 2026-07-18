@@ -1,10 +1,17 @@
+---
+status: superseded
+superseded_by: scripts/openbinggu_mcp_server.py
+---
+
+⚠ 2026-06-08 시점 설계 후보 문서 — 현행 정본: scripts/openbinggu_mcp_server.py (CORE_TOOLS/_TOOL_DESC 30도구·core/advanced 프로필·_EXPOSED_MODES=read/dry-run/write-gated). 실 MCP는 30도구 라이브 노출 중이며, write는 consent-gated(사람 SAVE n 앵커) 한정 허용이다. 아래 본문은 원안 설계 기록.
+
 > OpenBinggu is the legacy/internal codename for BingguPack.
 
 marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dry-run)
 
 # BingguPack 1차 배포 — MCP 기능 노출 후보 (D)
 
-> **상태: MCP 노출 후보(2026-06-08). docs only · MCP 서버 코드 구현 0 · 실 노출 0.**
+> **상태: 2026-06-08 설계 후보 기록 — superseded. 현행 노출 정본 = scripts/openbinggu_mcp_server.py CORE_TOOLS/_TOOL_DESC(30도구). "MCP 서버 코드 구현 0 · 실 노출 0"은 낡음(당시 기준).**
 > 상위: [FIRST_RELEASE_GITHUB_MCP_DESIGN](BINGGUPACK_FIRST_RELEASE_GITHUB_MCP_DESIGN.md).
 > 본 문서는 "무엇을 MCP 도구로 노출할지/하지 말지" 기준까지. 실제 MCP 서버 구현은 별도 GO.
 
@@ -42,7 +49,7 @@ marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dr
 | marketplace 거래/정산 | 제품 목표 아님 | BLOCK |
 | raw evidence/secret/path 반환 | 유출 | 영구 금지 |
 
-> **원칙: MCP는 "만들고·검증하고·읽고·공개 가능 여부를 판정"까지만. "운영에 반영"·"외부로 내보냄"은 도구로 노출하지 않는다.**
+> **원칙(당시): MCP는 "만들고·검증하고·읽고·공개 가능 여부를 판정"까지만.** ⚠ 현행(정본 openbinggu_mcp_server.py): write는 consent-gated(사람 SAVE n 앵커·approval_id, 무효 시 REJECT) 한정으로 노출 허용(save_candidate·pair·deprecate·replace). 무조건 자동 write/외부 내보냄은 여전히 미노출.
 
 > **경로 입력 안전(S3/X1)**: MCP 도구가 받는 모든 경로 입력은 `scripts/openbinggu_path_safety_gate.py`의 `classify_path(input, allow_root)`를 거쳐 **ALLOW만 처리**한다. allow_root 밖·symlink/junction·UNC/ADS/8.3·parent 탈출·bid-engine/NPKI·인증서/secret/OpenCrab store/타프로젝트 경로는 **BLOCK**(reason_code만, raw 경로 미출력). gate selftest 15/15 GATE=GO.
 >

@@ -1,4 +1,7 @@
-# BingguPack — 후보 수정 = 기각+신규 transaction 묶음 설계 (2026-06-11, 설계만·코드 0)
+# BingguPack — 후보 수정 = 기각+신규 transaction 묶음 설계 (2026-06-11 설계 · 구현 완료)
+
+> **(구현 상태) 구현 완료 — `scripts/openbinggu_candidate_replace_ux.py` (`replace_from_list`) · CLI + MCP `replace` 도구 노출.** (이전 '설계만·코드 0' 표기 갱신)
+
 
 > owner 확정(BINGGUPACK_V1_CANDIDATE_MGMT_UX_GAP.md 결정①): in-place 수정 금지.
 > "기존 candidate 기각(deprecated/replaced) + 수정본 신규 candidate 저장"을 하나의 transaction/audit 묶음으로.

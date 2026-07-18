@@ -59,7 +59,7 @@ BingguPack is **not** a tool that hoovers up every conversation. It turns durabl
 
 > Unlike Git, there is no actual merge, branch or diff protocol — the mapping is a **conceptual metaphor**, and the commit gate is a single human-typed `SAVE n`.
 
-**Core (pip) vs Bridge (remote relay).** The local CLI, stdio MCP, ledger, recall and explain all work offline from `pip install` alone (Core). A separate remote relay (the hosted Cloudflare Worker) lets you **mark save intents** from your phone / web / ChatGPT and pull them home (Bridge) — the intent alone never writes; a candidate becomes **active** memory only after you review the pulled bundle's preview on your PC and type `SAVE n` yourself. **Your local machine is always the source of truth**; the relay only forwards (it writes nothing to the ledger).
+**Core (pip) vs Bridge (remote relay).** The local CLI, stdio MCP, ledger, recall and explain all work offline from `pip install` alone (Core). A separate remote relay (the hosted Cloudflare Worker) lets you **mark save intents** from your phone / web / ChatGPT and pull them home (Bridge) — the intent alone never writes; a candidate becomes **active** memory only after you review the pulled bundle's preview on your PC and type `SAVE n` yourself. **Your local machine is always the source of truth**; the relay only forwards (it writes nothing to the ledger). (The opt-in auto-pull scheduler registered by `onboard` only fetches candidates into a local **staging** area — the actual ledger commit still requires you to type `SAVE n` on your PC; no unattended writes.)
 
 ## 🛡 Safety model
 

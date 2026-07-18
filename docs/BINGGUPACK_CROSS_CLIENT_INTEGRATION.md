@@ -33,7 +33,7 @@ BingguPack 은 **읽기 표면**과 **저장 표면**이 다른 URL·다른 인�
 
 | 구분 | 경로 형식 | 용도 | 도구 수 | 인증 | 정본 |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **읽기(로컬 MCP)** | `<WORKER_URL>/mcp/<path_token>` | 로컬 24~30 도구(recall·why·list·contrast 등) 웹/앱 커넥터 노출 | 30도구(read+dry-run+write-gated) | 경로키(path_token) + Origin | `scripts/openbinggu_mcp_server.py` · `binggu_setup_save.py` s8(web MCP) |
+| **읽기(로컬 MCP)** | `<WORKER_URL>/mcp/<path_token>` | 로컬 30 도구(recall·why·list·contrast 등) 웹/앱 커넥터 노출 (정본 위임: openbinggu_mcp_server.py) | 30도구(read+dry-run+write-gated) | 경로키(path_token) + Origin | `scripts/openbinggu_mcp_server.py` · `binggu_setup_save.py` s8(web MCP) |
 | **저장(hosted)** | `<WORKER_URL>/mcp2/<save_path_token>` | 채팅에서 저장 intent 적재(폰·ChatGPT) → 로컬 inbox | save intent tools | 경로키(save_path_token, 추측불가 24자) + Origin(HMAC 헤더 불가한 커넥터 대응) | `BINGGUPACK_SAVE_INTENT_V2A_MCP_CONNECTOR_DESIGN.md` |
 | **OpenCrab 팩** | `https://…opencrab.<tld>/api/mcp/<token>` | Expert 가입 발행 전용 URL — OpenCrab 클라우드 팩 read/QA | OpenCrab 도구 | OpenCrab 발행 토큰 | `binggu_setup_save.py` s10(opencrab_url) |
 
@@ -74,8 +74,8 @@ BingguPack 은 **읽기 표면**과 **저장 표면**이 다른 URL·다른 인�
 > **배경(7/12 실측)**: 외부 client(Claude·ChatGPT custom connector) 신규 등록은 현 정책상 **OAuth
 > 또는 authless 만** 받는다. Bearer/path-token 헤더 신규등록은 미지원으로 관측됐고, Claude 에서
 > "OAuth 클라이언트 ID 추가" 에러가 났다. 살아있던 기존 커넥터는 **구정책 잔존 기존등록**이지 신규
-> authless 성립 증거가 아니다. 7/12 owner 가 Claude 커넥터를 삭제 → **재등록이 미해결 갭**이다.
-> 아래 두 경로 중 어느 것이 실제로 통과하는지는 **owner 1회 실측(§8)** 으로만 확정된다.
+> authless 성립 증거가 아니다. 7/12 owner 가 Claude 커넥터를 삭제 → 재등록 갭이 열렸다.
+> **7/16 실측 완료(마감)**: named tunnel(mcp.binggu.uk)로 서버 30도구 정상 노출 curl 실증, ChatGPT 커넥터 읽기+저장 실증(pair_bf8faf09), 저장 채널 무영향. 재등록 미해결 프레이밍은 해소됨. 아래 두 경로 서술은 절차 참조로 보존.
 
 ### Branch A — OAuth 경로 (현재 Claude 신규 등록에서 요구될 가능성 높음)
 1. owner: 클라이언트(Claude) 커넥터 설정 → 새 커넥터 → **OAuth** 방식 선택.
@@ -146,7 +146,9 @@ wrangler secret put SAVE_PATH_TOKEN      # 저장 경로키(값=owner stdin)
 
 ## 6. 복구 절차 (Claude 커넥터 삭제 → 재등록)
 
-7/12 owner 가 Claude 커넥터를 삭제한 상태가 미해결 갭이다. 복구 순서:
+> ⚠ 7/16 실측 완료로 마감됨(30도구 정상·ChatGPT 저장 실증·저장 채널 무영향). 아래는 재발 시 복구 순서로 보존.
+
+7/12 owner 가 Claude 커넥터를 삭제한 상태에서 열렸던 갭. 복구 순서:
 1. **형식 확인(AI)**: §1 표로 읽기(`/mcp/`)·저장(`/mcp2/`) 표면과 토큰 존재를 §2 마스킹 확인으로 점검.
 2. **URL 확보(owner)**: `binggu onboard --show-url` 본인 화면(§2 owner_gate).
 3. **재등록(owner)**: §3 Branch A(OAuth) 우선 → 실패 시 Branch B 시도(미확인 전제).
@@ -181,6 +183,8 @@ python scripts/person_pack_daily_sync.py --wiring-status
 ---
 
 ## 8. owner_gate 회신 항목 (owner 1회 실측)
+
+> ⚠ 7/16 실측 완료로 아래 대기 항목 해소: 서버 30도구 curl 실증·ChatGPT 읽기+저장 실증(pair_bf8faf09)·저장 채널 무영향 확인. 아래는 재등록 재발 시 회신 양식으로 보존.
 
 아래는 AI 가 추측으로 채울 수 없는 항목 — owner 실측 회신으로만 이 런북이 확정된다.
 

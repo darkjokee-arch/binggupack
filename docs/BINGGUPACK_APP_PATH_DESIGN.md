@@ -3,8 +3,9 @@
 > 최종 UX: 일반 채팅 앱에서 `@BingguPack`처럼 자기 pack context를 호출.
 > **상태 (v1.21-A, 2026-07-12):**
 > - ✅ **read core IMPLEMENTED** — `binggupack/app/read_core.py` 에 transport-independent 5-tool 순수 core(pack_list·pack_summary·evidence_search·node_edge_lookup·handoff_context) 구현. read-only · write/network/cache 0 · conformance harness GO.
-> - ❌ **HTTPS transport NOT implemented** · ❌ **auth/user isolation NOT implemented** · ❌ **upload/deploy 0** · ❌ hosted 배포 0.
-> ChatGPT Apps/HTTPS MCP first, Claude/Gemini는 platform adapter later. §1~§6 spec 은 read core 가 그대로 구현했고, transport/auth/upload 는 v1.21-B/C/D 로 남는다.
+> - ✅ **transport/auth/upload IMPLEMENTED** — Binggu Anywhere로 구현(정본: BINGGUPACK_ANYWHERE_DEPLOYMENT.md). HTTPS transport = hosted/workers/anywhere/gateway.ts, auth/tenant 격리 = Bearer + KV cred:<hash>, upload = /admin/packs immutable + R2 스냅샷. sync_anywhere_vendor.py --check + CI 게이트(ci.yml) 배선.
+> - 잔여 미구현: platform adapter(Gemini 등) · 실 프로덕션 워커 라이브 여부(repo 기준 미확증).
+> ChatGPT Apps/HTTPS MCP first, Claude/Gemini는 platform adapter later. §1~§6 spec 은 read core 가 그대로 구현했다.
 
 ## 1. hosted MCP 최소 v1 범위
 

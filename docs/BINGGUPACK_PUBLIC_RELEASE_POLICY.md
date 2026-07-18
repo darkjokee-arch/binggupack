@@ -6,7 +6,7 @@
 
 > BingguPack는 향후 GitHub에 **framework/skeleton**으로 공개될 수 있다.
 > 공개 대상은 **골조·정책·템플릿·검증기·워크플로 코드**이며, **작성자의 실제 데이터는 절대 포함하지 않는다.**
-> 이번 문서는 문서화만. production write·GitHub push·repo 생성 0.
+> 이번 문서는 문서화만. production write·GitHub push·repo 생성 0. *(2026-06-17 당시 기준 — 이후 공개 완료: 실물 공개 repo darkjokee-arch/binggupack.)*
 
 ## 1. 공개 원칙
 
@@ -19,6 +19,8 @@ scripts · validators · merge adapter · match policy · apply gate · review w
 reingest_pack_draft 실제 원본 · localcrab_index.sqlite · localbinggu_production_graph.yaml · 실제 reports · 실제 reviews · 실제 evidence_index · 실제 CLI logs · 실제 git diff/test result · 실제 Claude Code traj/handoff · 실제 user decisions · 실제 프로젝트 경로 · 실제 업무/운영 지식 · .env·token·API key·cookie·private key·credential·secret·PII
 
 ## 2. Core ↔ Private Data 분리
+
+> *`openbinggu-core`/`openbinggu-private`는 설계 당시 후보 명칭 — 실물 공개 repo는 `darkjokee-arch/binggupack`, 패키지는 `binggupack/`. 실물 구조는 repo 루트/`pyproject.toml` 참조.*
 
 | 저장소 | 역할 |
 | --- | --- |
@@ -88,6 +90,8 @@ private_key*
 단, synthetic fixture·toy example은 `tests/fixtures/synthetic/` 또는 `examples/toy_project/` 아래에만 둔다.
 
 ## 6. 공개 repo 권장 구조
+
+> *아래 `openbinggu/` 트리는 설계 당시 후보 — 실물 구조는 repo 루트/`pyproject.toml`·`binggupack/` 패키지 참조.*
 
 ```
 openbinggu/

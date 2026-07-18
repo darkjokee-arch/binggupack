@@ -1,3 +1,10 @@
+---
+status: superseded
+superseded_by: scripts/binggupack_http_mcp_skeleton.py
+---
+
+⚠ 2026-06-10/27 시점 후보 문서 — 현행 정본: 후보1 hosted MCP = scripts/binggupack_http_mcp_skeleton.py, hosted 배포 = BINGGUPACK_ANYWHERE_DEPLOYMENT.md, MCP 로직 정본 = binggupack/mcp/server_handlers.py(scripts/는 thin shim). 후보1·2는 구현 완료. 공통 불변의 "write 도구 공개 금지"는 consent-gated(사람 SAVE n 앵커) 한정 허용으로 개정됨. 아래 본문은 원안 기록.
+
 ## 🚧 Next milestone blocker: Phase 2 canonicalization (2026-06-27)
 
 > 트랙 C(C0~C4)에서 `binggupack.storage` / `binggupack.mcp` facade(strangler 1단계)를 만들었다. 정본 로직은 호환·안정성을 위해 아직 `scripts/`에 있다. 릴리스 차단은 아니지만 **다음 마일스톤의 필수(blocker)** 로 고정한다.

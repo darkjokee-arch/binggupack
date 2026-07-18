@@ -11,6 +11,8 @@ marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dr
 
 ## 1. 공개 repo 트리 후보
 
+> *아래 `openbinggu/` 가상 트리는 2026-06-08 설계 당시 후보 — 실물 공개 repo는 `darkjokee-arch/binggupack`, 패키지 `binggupack/`. 실물 구조는 repo 루트/`pyproject.toml` 참조.*
+
 ```
 openbinggu/                         # 공개 repo 루트
 ├── README.md                       # = BINGGUPACK_PUBLIC_README_DRAFT.md 기반

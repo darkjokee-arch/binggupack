@@ -44,6 +44,8 @@ LLM wiki와의 차이는 다음이다.
 
 ## 3. 현재 구현 기준
 
+> ⚠ 아래 표·edge 절은 2026-06-17 시점 실측 기록. 이후 구현 반영(2026-07): 외부 소스 자동 수확 = scripts/binggu_harvest.py + MCP harvest_add/list/remove로 구현(후보 단계). edge 저장 경로 = binggu.py `cmd_pair`(노드2+엣지1, save_paired) 추가로 사용자 pair 저장 경로 개통. outcome attribution = recall_run_outcomes(binggu outcome CLI) 추가. 표의 '계획(P1)'·'edge 명령 0'은 당시 기준.
+
 현재 이미 있는 축은 다음이다.
 
 | 층 | 구현 상태 | 대표 모듈 |

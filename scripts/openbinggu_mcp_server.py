@@ -298,7 +298,7 @@ def serve_http(allow_root, port, path_token, profile="advanced", server_name="op
 
     - 127.0.0.1 바인드: 인바운드 포트를 직접 열지 않는다(외부 노출은 터널이 담당).
     - 경로키 인증: POST /mcp/<path_token> 만 처리(그 외 403). path_token 은 env 로 주입(코드 평문 0).
-    - handle_jsonrpc 재사용: stdio 와 동일 로직(initialize/tools/list/tools/call) — 22도구 그대로.
+    - handle_jsonrpc 재사용: stdio 와 동일 로직(initialize/tools/list/tools/call) — 노출 집합 그대로(개수 하드코딩 0·_EXPOSED_MODES 필터 파생).
     - SSE/JSON 협상: Accept: text/event-stream 이면 SSE 로 감싼다(claude.ai 등 호환).
     - notification(id 없음) 202. request 만 응답.
     """

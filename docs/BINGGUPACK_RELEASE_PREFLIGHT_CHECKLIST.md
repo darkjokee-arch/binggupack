@@ -1,3 +1,10 @@
+---
+status: superseded
+superseded_by: binggupack-release 스킬(10단계) · docs/PYPI_RELEASE_VERIFICATION.md
+---
+
+> ⚠ 2026-06-08 1차 GitHub 공개 전 시점 문서 — 현행 릴리스 절차 아님. 현행 정본: `binggupack-release` 스킬(release branch→version bump→preflight→tag→publish→smoke→GitHub release→dev-bump 10단계) · `docs/PYPI_RELEASE_VERIFICATION.md`.
+
 > OpenBinggu is the legacy/internal codename for BingguPack.
 
 marketplace=BLOCK / enum=HOLD / team_paid=DEFER / track1=GO(after fail-closed dry-run)
