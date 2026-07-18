@@ -23,7 +23,7 @@ Every memory starts as a reviewable proposal — and **only what you approve** b
 
 ---
 
-> Maintained English translation of the Korean-first docs — see [README.md](README.md) for the full documentation. Safety boundaries have a single source of truth in [SECURITY.md](SECURITY.md) (this page summarizes; it does not redefine them). In sync as of **v1.21.0**.
+> Maintained English translation of the Korean-first docs — see [README.md](README.md) for the full documentation. Safety boundaries have a single source of truth in [SECURITY.md](SECURITY.md) (this page summarizes; it does not redefine them). In sync as of **v1.22.0**.
 
 ## ⚡ 60-second demo
 
