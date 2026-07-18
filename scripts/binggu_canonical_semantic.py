@@ -153,10 +153,14 @@ class CanonicalSemantic:
 
     def _centroids(self):
         acc = {k: [] for k in KINDS}
-        for r in self.rows:
-            if r.get("band") != "clear":
-                continue
-            e = self.embed_fn(r["text"])
+        clear = [r for r in self.rows if r.get("band") == "clear"]
+        # #6 콜드 빌드 배치화: 실 embed 경로만 /api/embed 1회 왕복(seed clear N행 N왕복→1왕복).
+        # 배치=단건 벡터 등가 실측(max abs diff 0.0) → centroid·캐시값 불변(분류 drift 0). 순수 속도.
+        # 주입 embed_fn(테스트/커스텀)·배치 미지원/실패 → 단건 폴백(기존 동작 byte-identical).
+        embs = S._embed_batch([r["text"] for r in clear]) if self.embed_fn is S._embed else None
+        if embs is None:
+            embs = [self.embed_fn(r["text"]) for r in clear]
+        for r, e in zip(clear, embs):
             if e:
                 acc[r["canonical_kind"]].append(e)
         cent = {}
