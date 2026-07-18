@@ -976,6 +976,53 @@ def cmd_pair(a):
     return _show(r)
 
 
+def cmd_save_batch(a):
+    """세션 마무리 candidate 번호 배치 저장 — preview(앵커) / --confirm 저장 2단계.
+
+    발화별 pair preview→SAVE 반복(N번) UX 제거(2026-07-18 owner 지적). owner 는 세션 마무리
+    preview 를 보고 'SAVE 6,11,13' 한 번만 발화. 승인 경계: owner SAVE 앵커가 유일 근거
+    (gate_human_for_ref 검증) · 각 candidate 는 기존 save_paired 로 저장(무변경) · 자동저장 0."""
+    from binggu_save_batch import stage_batch_anchor, render_batch_preview, save_candidates_batch
+    from binggu_capture_persist import PersistentCaptureBuffer
+    home = os.path.dirname(os.path.abspath(a.ledger))
+    items = PersistentCaptureBuffer(home=home).render_preview().get("items", [])
+    if not items:
+        print("배치 저장 후보 0건 — 세션 마무리 candidate 가 없습니다.")
+        return 0
+    anchor_path = os.path.join(home, "last_preview_candidates.json")
+    if a.confirm is None:
+        # preview + 번호축 앵커 생성(owner 'SAVE n' 발화 대조용 · 저장 0)
+        stage_batch_anchor(items, path=anchor_path)
+        print(render_batch_preview(items))
+        return 0
+    # confirm: 'SAVE 6,11,13' → 저장
+    from binggupack.safety.gate_log import parse_save_indices
+    indices = parse_save_indices(a.confirm)
+    if not indices:
+        print("BLOCK: confirm 형식 오류 — 'SAVE 6,11,13' 형식이어야 합니다.")
+        return 1
+    db, snap_dir = _open(a.ledger)
+    r = save_candidates_batch(db, snap_dir, items, indices,
+                              gate_log_path=_gate_log_for_ledger(a.ledger))
+    if not r.get("applied"):
+        print("BLOCK: %s — 저장 0건." % r.get("reason"))
+        if r.get("reason") == "no_save_gate_ref":
+            print("  owner 의 'SAVE %s' 발화 앵커가 없습니다 — preview(save-batch) 먼저 → "
+                  "SAVE 발화 → 재실행." % ",".join(str(i) for i in indices))
+        return 1
+    by_cand = {}
+    for res in r["results"]:
+        by_cand.setdefault(res["cand"], []).append(res)
+    print("OK: 배치 저장 %d건 (candidate %d개%s)"
+          % (r["saved"], len([c for c in by_cand]), (" · skip %d" % r["skipped"]) if r["skipped"] else ""))
+    for cand, ress in by_cand.items():
+        ok = sum(1 for x in ress if x.get("applied"))
+        dup = sum(1 for x in ress if x.get("reason") == "pair_partial_exists")
+        note = (" (중복 %d)" % dup) if dup else ""
+        print("  candidate %s → %d건 저장%s" % (cand, ok, note))
+    return 0
+
+
 def cmd_trust(a):
     """양방향 신뢰도 표시(read-only) — 내 직감 적중률 + AI 반박·수용 적중률.
     참고 가중치이지 맹종 스위치가 아니다(헌법). 최종 판단은 사람+근거."""
@@ -2153,6 +2200,8 @@ def main():
     # --confirm 생략 = 결합 미리보기 스테이징(저장 0·도장 1회 흐름). 저장은 confirm 정확문구+사람 도장.
     pp.add_argument("--confirm", default=None); pp.add_argument("--due", default=None)
     pp.add_argument("--accept", action="store_true")  # 저장과 동시에 owner_accepted 확정(별도 ACCEPT 문구 면제)
+    sbp = sub.add_parser("save-batch")   # 세션 마무리 candidate 번호 배치 저장(발화별 반복 UX 제거)
+    sbp.add_argument("--confirm", default=None)   # "SAVE 6,11,13" 정확형(owner SAVE 앵커 검증)
     tp = sub.add_parser("trust"); tp.add_argument("--subtype", default=None)  # 양방향 신뢰도(read-only)
     rtp = sub.add_parser("route"); rtp.add_argument("text")  # 저장 의도 라우팅(신규/수정/결과 read-only 안내)
     sp = sub.add_parser("reminders"); sp.add_argument("--today", default=None)
@@ -2233,7 +2282,7 @@ def main():
           "hosted": cmd_hosted, "harvest": cmd_harvest, "setup-cloud": cmd_setup_cloud,
           "onboard": cmd_onboard,
           "confirm-edges": cmd_confirm_edges, "pair": cmd_pair, "trust": cmd_trust,
-          "route": cmd_route, "backup": cmd_backup, "export": cmd_export,
+          "route": cmd_route, "save-batch": cmd_save_batch, "backup": cmd_backup, "export": cmd_export,
           "restore": cmd_restore, "demo": cmd_demo, "explain": cmd_explain,
           "forget": cmd_forget, "inbox": cmd_inbox, "index": cmd_index,
           "approvals": cmd_approvals, "approval": cmd_approval, "app": cmd_app,
