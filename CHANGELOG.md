@@ -1,6 +1,12 @@
 # Changelog — BingguPack
 
-## [Unreleased]
+## [Unreleased] — main 1.22.0.dev0 (태그 v1.21.0 이후 미출하분)
+
+### Security/Fixed — fenced/blockquote 안 독립줄은 도장 아님 (P0 승인 우회 차단, 2026-07-18)
+Codex 릴리스 감사 + 병렬 적대검증으로 확정된 P0. 2026-07-13 '줄 단위 도장' 도입 후, owner 가 로그·AI응답·문서 예시를 붙여넣을 때 그 안에 박힌 독립줄 `세이브 n`(및 히트/승격 n)이 실제 사람 승인으로 오인 기록되던 회귀. 배포본 1.21.0(태그 7560250·whole-prompt fullmatch 단일 경로)은 안전했고 현 main 만 퇴행.
+- `_strip_embedded_regions`(gate_text) 로 줄 스캔 전 fenced(```` ``` ````/`~~~`) 코드블록·blockquote(`>`) 영역 제거 — 임베디드 트리거 무효화. 발화 전체 정확형(`세이브 1`)과 평문 라인모드(`메모\n세이브 1\n끝`)는 보존(오도장 차단 계약 유지).
+- `gate_text.parse_save_indices`(정본)+`gate_log`/`save_gate` 폴백 3사본 동기 · `gate_log._stamp_chunks`(HIT/MISS/PROMOTE) 동일 계약 · anywhere 벤더 재동기(byte-identical).
+- 검증: `tests/test_save_gate_fenced.py` 19케이스(차단/보존/기존계약/e2e/3사본동기) · P0 재현 차단(None/0/False) · `binggu --selftest` 69/69 GO(FE2 보존) · CI 전 매트릭스 green(PR #77 · merge 3aaba948).
 
 ### Fixed — learn-outcome 반문형·완곡 지적 감지 복구 + silent-death (2026-07-14 · 4cli 토론)
 owner 지적 상당수인 반문형("너 안 읽었지?")·완곡 교정("제대로 안 읽었네")이 훅에서 통째 배제돼 학습 큐에 유입되지 않던 핵심 구멍(7/12 이후 큐 신규 0건). 4cli 토론(both_reject → 실질 수렴: hook 단독 정규식은 반문질책=진짜질문 동일 표면이라 원리적 불가 → aiAnswer 게이트 채택). debate 세션 `20260714_1605_learn_outcome_detection`.
@@ -10,6 +16,8 @@ owner 지적 상당수인 반문형("너 안 읽었지?")·완곡 교정("제대
 - scope 세션분리(대화형 vs 무인)는 스키마 변경 수반이라 별도 트랙으로 defer(D 반박 반영 · 실 로그 관찰 후 판단).
 
 ## [1.21.0] - 2026-07-13
+
+> ⚠ 정정(2026-07-18): 아래 **'Changed — 도장 줄 단위 인정'** 의 줄 단위 도장(`gate_text.parse_save_indices` 줄 스캔)은 태그 v1.21.0(`7560250`)보다 나중 커밋(`d909d07`)이라 **PyPI 배포본 1.21.0 에는 미포함**이다(배포본은 whole-prompt 정확형만 인정). 해당 기능과 그로 인한 P0 수정은 [Unreleased] 참조. 이 절의 다른 항목 중 태그 이후 반영분이 더 섞였을 수 있어, 재현 기준선은 **PyPI 설치본 = 태그 빌드**로 본다.
 
 ### Fixed — Codex 재감사 6트랙 수정 (main 77/REFINE · PyPI 1.20.0 52/BLOCK → 해소)
 울트라코드 2단(설계+적대검토 2각 · must_fix 10건 선반영 → 수리 라운드 0)으로 처리. production 로직/스키마/의존성 변경 0.

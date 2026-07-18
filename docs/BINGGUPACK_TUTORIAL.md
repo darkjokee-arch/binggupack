@@ -168,9 +168,9 @@ python binggu.py route "아까 그 판단 틀렸어"
 ## 7. 다음 단계
 
 - **여러 AI에 pack 넘기기**: [Multi-agent handoff guide](BINGGUPACK_PHASE3_MULTI_AGENT_HANDOFF_GUIDE.md)
-- **내 pack을 공개하기 전**: [실데이터 검증 절차](BINGGUPACK_REAL_DATA_VALIDATION_PROCEDURE.md) 필수 — `doctor --tree <공개 후보 트리>`가 CLEAN이어야 하고, 검출 1건이라도 있으면 공개가 차단(BLOCK)됩니다.
+- **내 pack을 공개하기 전**: [실데이터 검증 절차](_archive/BINGGUPACK_REAL_DATA_VALIDATION_PROCEDURE.md) 필수 — `doctor --tree <공개 후보 트리>`가 CLEAN이어야 하고, 검출 1건이라도 있으면 공개가 차단(BLOCK)됩니다.
 
 ## 막혔을 때
 
 - `GATE: GO`가 안 나온다 → 종료코드와 마지막 요약(PASS/FAIL·reason_code)만 확인하세요. raw 경로/원문은 출력되지 않는 것이 정상입니다.
-- FTS 검색 결과에서 값이 안 보인다 → contentless FTS 설계입니다. [Promotion Preview 설계](BINGGUPACK_PROMOTION_PREVIEW_DESIGN.md) §contentless FTS 검증법 참조.
+- FTS 검색 결과에서 값이 안 보인다 → contentless FTS 설계입니다. [Promotion Preview 설계](_archive/BINGGUPACK_PROMOTION_PREVIEW_DESIGN.md) §contentless FTS 검증법 참조.
