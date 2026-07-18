@@ -1,7 +1,7 @@
 ---
 status: draft
 name: BINGGUPACK_PROTECTED_WRITER_RFC
-description: P1-B Track B — Protected Writer + Detached Signer. approval store 를 모델 tool surface 밖으로 옮겨 FS/Shell 병재 호스트에서도 승인 위조를 막는 하드닝 설계. Assurance Levels L0~L4 · Provider Matrix · 공격 프로토타입 명세. (설계 RFC · 미구현 · 정직 경계 계승)
+description: P1-B Track B — Protected Writer + Detached Signer. approval store 를 모델 tool surface 밖으로 옮겨 FS/Shell 병재 호스트에서도 승인 위조를 막는 하드닝 설계. Assurance Levels L0~L4 · Provider Matrix · 공격 프로토타입 명세. (L2(keychain) 구현됨(PR#61, 2026-07-15) · L3/L4 미구현 · 정직 경계 계승)
 metadata:
   type: reference
 scope: project:binggupack
@@ -29,6 +29,12 @@ Base: `docs/p1b1-protected-writer-rfc` worktree (main `39d8c74` 후속). 상위 
 > **후에 남는 위협** — **"모델이 승인 자체를 위조할 수 있다"**(상위 RFC §19.1 ③) — 를 다룬다. 두 트랙은
 > 직교하며 **Track B 없이 Track A 는 FS/Shell 병재 호스트에서 하드 통제가 아니다**(그 사실을 Track A 도
 > §1 에서 정직히 인정한다). **Track B 는 설계 RFC · 미구현 · production 코드 0.**
+
+> **(2026-07-15 구현 상태 갱신)** Track B 의 **L2(keychain)** 는 이후 구현·머지됨(PR #61) —
+> `binggupack/safety/signing_provider.py`(순수 stdlib Ed25519) + `keychain_backend.py`(OS keychain)
+> + `trusted_approval.py` 의 `kind in SIGNING_KINDS → signing_provider_for(home)` 위임 · approve
+> 레코드 서명/검증 분기 · CLI `approval keychain-init` 실재. **L3(detached_process)·L4(detached_device)
+> 는 여전히 미구현**(설계만). 아래 Provider Matrix·인터페이스 스케치의 L3/L4 표기는 유효하나 L2 는 구현됨.
 
 ---
 
@@ -225,7 +231,7 @@ protected writer/verifier/trust-root 동반). **어떤 등급도 "완전"이 아
 | provider | store 위치 | 서명 | assurance | 현재 상태 | placeholder 를 채우는 법 |
 |---|---|---|---|---|---|
 | `local_owner`(현행) | `~/.binggupack/approvals.jsonl` 평문 | 없음 | **L1** | **구현됨**(P1-A) | — (MCP-only 배포에서만 하드) |
-| `keychain` | OS keychain 항목 | HMAC/Ed25519 키를 keychain 에 | **L2** | 미구현 | 신규 `KeychainProvider(kind="keychain")`: `store/read_events` 를 keychain read/write 로 오버라이드. `verify_event` 는 서명 검증 추가. fallback: keychain 부재→L0. |
+| `keychain` | OS keychain 항목 | HMAC/Ed25519 키를 keychain 에 | **L2** | **구현됨**(PR#61 — signing_provider.py+keychain_backend.py, trusted_approval kind 분기) | 신규 `KeychainProvider(kind="keychain")`: `store/read_events` 를 keychain read/write 로 오버라이드. `verify_event` 는 서명 검증 추가. fallback: keychain 부재→L0. |
 | `detached_process` | 별도 uid/컨테이너 소유 파일 + local socket | Ed25519(sk=helper 안) | **L3** | 미구현 | 신규 `DetachedProcessProvider`: `mint`/`verify` 를 helper IPC 호출로. helper 데몬 별도 배포. MCP 는 pk 로 검증만. |
 | `detached_device` | 폰 앱/하드웨어 토큰 | Ed25519/FIDO2(sk=디바이스) | **L4** | 미구현 | 신규 `DetachedDeviceProvider`: request digest 를 디바이스로 push → 서명 회수 → pk 검증. hosted(§R5) 전달 채널 재사용 가능. |
 | `hosted`(현행 stub) | (전달만·권한 아님) | transport HMAC(`sign_util`) | — | `NotImplementedError`(P1-B) | **주의**: hosted 는 **transport**(전달)이지 approval **발행**이 아니다. hosted+detached_device 결합 시에만 L4 권한. hosted 단독은 P1-A §23 대로 **untrusted intent**. |
@@ -234,7 +240,7 @@ protected writer/verifier/trust-root 동반). **어떤 등급도 "완전"이 아
 `verify_event` 에 **서명 검증 단계 추가**(pk 로) — 서명 없거나 invalid → `binding_mismatch:signature`
 → fail-closed. 이로써 L1 평문 위조 레코드는 L2+ verify 에서 **자동 거부**된다(§6 데모가 실증).
 
-**인터페이스 스케치(설계만·미구현):**
+**인터페이스 스케치(L2 는 `binggupack/safety/signing_provider.py`·`keychain_backend.py` 로 구현됨 · L3/L4 는 설계만):**
 
 ```python
 class SigningProvider:              # L2~L4 공통 추상

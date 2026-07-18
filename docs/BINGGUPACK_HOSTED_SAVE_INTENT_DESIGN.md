@@ -11,10 +11,12 @@
 > hosted 묶음 exact-bound approval 커밋은 저장 게이트 개정으로 다시 대체됨 — hosted commit 의 사람 증명은
 > **inbox preview + 사람의 `SAVE n` 입력**(save-n 참조 바인딩 · `CLAUDECODE` deny 가드 · isatty 미사용).
 > transport ≠ authority·intent_id rehash·all-or-nothing 단일 COMMIT 은 유지. trusted approval event 는
-> 비-저장 mutation 자산으로 존치. 정본: `CHANGELOG.md` [Unreleased] · `SECURITY.md`.
+> 비-저장 mutation 자산으로 존치. 정본: `CHANGELOG.md` [1.21.0] · `SECURITY.md`.
 
-> DRAFT(`BINGGUPACK_HOSTED_SAVE_BUTTON_DESIGN_DRAFT.md`)를 승격·구체화한 정본. **설계만 — 코드 0.**
-> live 노출 = D5 owner 명시 GO 전 영구 금지 (fail-closed).
+> DRAFT(`BINGGUPACK_HOSTED_SAVE_BUTTON_DESIGN_DRAFT.md`)를 승격·구체화한 정본.
+> ⚠ **(2026-06-12 구현 상태)** 구현·라이브 완료 — D5 는 owner 명시 GO 로 진행됨(2026-06-12 라이브 실증).
+> 결과: `docs/_archive/BINGGUPACK_SAVE_INTENT_V23_LIVE_E2E_RESULT.md` · 운영 정본: `hosted/workers/README.md`.
+> 아래 §32 '구현(selftest)' 서술 참조. (이전 '설계만 — 코드 0 · live 노출 영구 금지' 문구는 이 노트로 대체)
 
 ## 0. 원칙 (불변)
 

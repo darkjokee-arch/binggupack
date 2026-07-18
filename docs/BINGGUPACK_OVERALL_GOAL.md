@@ -2,6 +2,8 @@
 
 # BingguPack 상위 설계 목표 — Multi-User × Multi-Agent Shared Pack System
 
+> ⚠ 2026-06-07 시점 목표 — GraphMerge 트랙은 2026-07-13 빙구팩 ledger 로 승계됨. §7 상태표는 당시 기준(소비측 MCP 표면·cross-client 통합은 이후 구현됨).
+
 - 작성일: 2026-06-07
 - 상태: **상위 목표 정의(설계 only)**. 코드 구현 0 / 실행 0 / OpenCrab write 0 / v09 freeze·ARMED OFF 유지.
 - scope: project:openbinggu

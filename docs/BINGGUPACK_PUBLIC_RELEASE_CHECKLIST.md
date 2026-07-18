@@ -1,3 +1,10 @@
+---
+status: superseded
+superseded_by: binggupack.pack.scope_envelope (classify_source_pointers) · MCP publish_guard_dryrun · binggupack.pack.doctor --tree
+---
+
+> ⚠ 2026-06 1차 GitHub 공개 **전** 시점 문서 — 1차 공개(2026-06, v1.22.0 시점 공개 repo darkjokee-arch/binggupack)는 이후 완료됨. 당시 게이트 기록으로 보존. 현행 공개 fail-closed 게이트 정본: `binggupack.pack.scope_envelope`(classify_source_pointers, MCP publish_guard_dryrun 결선) · `binggupack.pack.doctor --tree`.
+
 > OpenBinggu is the legacy/internal codename for BingguPack.
 
 # BingguPack Public Release Checklist

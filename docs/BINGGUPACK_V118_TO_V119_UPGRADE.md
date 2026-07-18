@@ -37,7 +37,7 @@ binggu recall "<질의>"          # 회상 동작 확인
 
 ## 2. 동작 변화 (MCP 저장 흐름)
 
-> ⚠ superseded by 저장 게이트 개정(2026-07-12 사장님 룰 · CHANGELOG [Unreleased]): 저장(save/pair/hosted pull)의
+> ⚠ superseded by 저장 게이트 개정(2026-07-12 사장님 룰 · CHANGELOG [1.21.0]): 저장(save/pair/hosted pull)의
 > 사람 증명은 "preview + 사람의 save n 입력" 단일 원칙으로 바뀌었고 hosted 저장의 `--approval-id` 절차는 제거됐다.
 > 아래 서술은 v1.19 당시 기준 기록이다(MCP fail-closed·비저장 mutation approval 은 현행 유지).
 

@@ -39,7 +39,7 @@ dirty/unknown source pointer는 **기본 공개 BLOCK**이며, **자동 sanitize
 - **dirty source pointer**(Windows 절대경로/`file://`·UNC·비공개 unix path·localhost·내부IP·내부도메인) → 기본 공개 **BLOCK**.
 - **unknown source pointer**(빈값·판단불가 토큰·미지원 형태) → 기본 공개 **BLOCK** (fail-open 금지).
 - **자동 치환/마스킹으로 통과시키지 않는다.** 엔진이 "알아서 가려서 공개"하는 경로는 두지 않음.
-- 판정·차단은 기존 `watcher_pack_builder_m0` source pointer 판정(`source_pointer_scan`)을 입력으로 사용(selftest GATE=GO/EXIT=0). 본 문서는 그 위의 **해제(예외) 정책**만 정의.
+- 판정·차단 정본은 `binggupack.pack.scope_envelope`(`classify_source_pointers`, MCP `publish_guard_dryrun` 결선 · server_handlers.py:168 실 결선 2026-07-17). *(작성 당시 표기 `watcher_pack_builder_m0` source_pointer_scan은 현행 MCP publish 게이트에서 경유하지 않음 — 정본 위임.)* 본 문서는 그 위의 **해제(예외) 정책**만 정의.
 
 ---
 
@@ -103,7 +103,7 @@ dirty/unknown source pointer는 **기본 공개 BLOCK**이며, **자동 sanitize
 - **HOLD(구현 금지, 별도 GO 전)**:
   - 자동 sanitizer/치환 로직(정책상 "안 만든다" 확정 — 채택 안 함).
   - **실제 whitelist 저장소/스키마/CLI 구현** — 본 문서는 정책·필드 정의까지만.
-  - enum 확정 · production/OpenCrab/store write · apply/ingest/merge/push/v09/ARMED · team_paid 코드 · GitHub repo 생성/push.
+  - enum 확정 · production/OpenCrab/store write · apply/ingest/merge/push/v09/ARMED · team_paid 코드 · GitHub repo 생성/push. *(GitHub repo 생성/push는 이후 별도 GO 완료 — 2026-06 공개 repo darkjokee-arch/binggupack. 나머지 HOLD 항목은 유효.)*
 - **다음 GO 후보(전부 별도 GO)**:
   1. whitelist 데이터 구조(필드 §4-2) + dryrun check(`whitelist_exception_recorded` 등) 설계.
   2. 차단 내역 확인 출력 형식(§3) selftest fixture 추가 + GATE=GO 재확인.

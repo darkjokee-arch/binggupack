@@ -103,6 +103,8 @@ production write / 운영 store write(`_graph_merge.yaml`·`user_graph.yaml`·`l
 `reingest_pack_draft` 원본 수정 / scheduler 수정 / `promotion_allowed` 변경 / D9 상태 변경 /
 coverage·pattern 승격 — **전부 금지**. validator 의 유일한 write 는 selftest report JSON.
 
+> ⚠ 2026-06-03 당시 작업 스코프 기준 — 프로젝트 repo 공개(2026-06)·릴리스 push는 이후 owner 승인으로 해소됨. pack 단위 `hard_defaults`(github_publish_allowed=false 등)는 안전 기본값으로 계속 유효.
+
 ## 7. 다음 (별도 GO)
 
 - v0.11 후보: incoming → staging loader 가 본 contract 를 통과한 pack 만 수용(여전히 dry-run).

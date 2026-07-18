@@ -11,7 +11,7 @@ scope: project:binggupack
 
 > ⚠ **부분 superseded (2026-07-13, owner 결정)**: 이 RFC 의 **MCP tool surface 소비 배선**(§18 —
 > MCP write 핸들러의 `approval_gate.authorize` 경유·`approval_id` 승격)은 저장 게이트 단일 원칙
-> ("preview + 사람의 save n 입력") 후속으로 **제거**됐다 — 정본: CHANGELOG [Unreleased] "MCP save
+> ("preview + 사람의 save n 입력") 후속으로 **제거**됐다 — 정본: CHANGELOG [1.21.0] "MCP save
 > approval 제거". approval core·owner CLI(`binggu approval`/`--approval-id`)·HAG import 경로 서술은 유효.
 
 > "AI가 기억해도, 결정권은 나에게." — 제품 원칙
@@ -34,7 +34,7 @@ Base: `feat/p1a-trusted-approval-event` (= PR #2 head `78486e7`, P0/P0.1 포함)
 > deny 가드)이다. §23/R5 의 "유일 저장 경로 = 로컬 exact-bound `hosted_bundle` 승인" 서술은 그 시점 기준
 > (저장 경로에 한해 superseded). 본 RFC 의 나머지 자산 — MCP mutation fail-closed·`binggu approval` 채널·
 > exact binding·one-time consume·비-저장 mutation(P1-B) 봉인 — 은 무손상 유지. 정본: `CHANGELOG.md`
-> [Unreleased] 저장 게이트 개정 · `SECURITY.md`.
+> [1.21.0] 저장 게이트 개정 · `SECURITY.md`.
 
 ---
 

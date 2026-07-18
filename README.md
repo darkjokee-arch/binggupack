@@ -210,7 +210,7 @@ AI와 오래 일하다 보면 이런 일이 반복됩니다.
 <p align="center"><img src="assets/channels.svg" width="880" alt="Claude Code·ChatGPT·웹 커넥터 → 내 PC 장부 → 오픈크랩 전문가 팩"></p>
 
 - 🌐 **웹/앱 커넥터(HTTP 모드)** — 로컬 MCP 서버를 HTTP 모드(`--http`)로 열고 Cloudflare Tunnel 뒤에 두면, Claude 웹/앱 커넥터에서도 같은 MCP 도구를 그대로 씁니다. 접근은 경로 토큰으로 보호돼요. *(quick tunnel은 재시작마다 주소가 바뀌므로, 고정 주소가 필요하면 named tunnel — [INSTALL](INSTALL.md#webapp-connector--http-모드-optional) 참조.)*
-- 💬 **ChatGPT/폰 저장 채널** — 폰·웹에서 `SAVE n`으로 표시한 건 **저장 승인이 아니라 저장 "의도"**예요. 그 의도만 클라우드 inbox에 잠깐 담기고, 내 PC가 서명키로 가져와(pull) 화면에 묶음으로 보여줘요. **실제 로컬 장부 확정은 PC에서 그 묶음의 미리보기를 보고 내가 직접 `SAVE n` 을 입력해야** 일어나고, 전부 저장되거나 전부 안 되거나(all-or-nothing)예요. 폰이 직접 내 장부에 쓰는 경로는 없어요.
+- 💬 **ChatGPT/폰 저장 채널** — 폰·웹에서 `SAVE n`으로 표시한 건 **저장 승인이 아니라 저장 "의도"**예요. 그 의도만 클라우드 inbox에 잠깐 담기고, 내 PC가 서명키로 가져와(pull) 화면에 묶음으로 보여줘요. **실제 로컬 장부 확정은 PC에서 그 묶음의 미리보기를 보고 내가 직접 `SAVE n` 을 입력해야** 일어나고, 전부 저장되거나 전부 안 되거나(all-or-nothing)예요. 폰이 직접 내 장부에 쓰는 경로는 없어요. (`onboard`가 등록하는 옵트인 auto-pull 스케줄러도 후보를 **staging 까지만** 자동 회수하고, 실제 로컬 장부 확정은 언제나 PC에서 내가 `SAVE n` 을 쳐야 일어나요 — 무인 반영 0.)
 - ☁️ **클라우드 읽기 도구** — `cloud_recall`/`cloud_packs`로 오픈크랩의 지식·팩을 조회만 해요 *(읽기 전용 · 민감정보 마스킹)*.
 
 ## 7 · 시작하기
@@ -287,10 +287,12 @@ python binggu.py doctor
 | **안전·개발자 도구** | path safety, match policy, classifier, governance, selftest, publish/export |
 
 ```text
-CLI 전체: init/start · status/doctor · preview/remember · reflect · save · list
-          recall/ask/why · trace · preflight · deprecate/replace/accept/unaccept
+주요 CLI: init/start · status/doctor · preview/remember · reflect · save · save-batch · list
+          recall/ask/why/explain · trace · preflight · deprecate/replace/accept/unaccept
+          verdict · outcome · promote · approval · learn-consume · forget · demo · studio
           due/reminders/resolve · pair/trust/route · capture · hosted · harvest
           confirm-edges · setup-cloud · onboard · backup/export/restore
+          (전체 목록은 `binggu --help` 정본)
 ```
 
 ### 짧은 점검

@@ -4,7 +4,7 @@
 > base: main `39d8c74`. worktree: `feat/p1b0-mutation-surface-closure`.
 > **v2 개정**: Fable5 사전 4-reviewer(바인딩·정직·공격·회귀) Critical 2·High 6 인라인 해소.
 
-> ⚠ **[2026-07-12 SUPERSEDED_IN_PART — 저장 경로]** 본 문서 중 **hosted 묶음 커밋의 approval 절차**(`hosted pull --approval-id` · `hosted_bundle` PENDING mint→`approval approve`→exact-bound consume · §하단 owner 흐름 3단)는 저장 게이트 개정으로 대체됨 — hosted commit 의 사람 증명은 approval event 가 아니라 **inbox preview + 사람의 `SAVE n` 입력**(Claude Code 훅 save-n 참조 바인딩 앵커 또는 에이전트 세션 밖 터미널 명령 직접 입력 · `CLAUDECODE` deny 가드)이다. crash-atomic 단일 COMMIT·사전검증 전체차단·원문 보존 계약은 유지. **비-저장 mutation(accept/unaccept/due/resolve·confirm_edges·hag import-edges)의 exact-bound approval 봉인과 `_resolve_human_ctx` 밖 `_mutation_via_approval` 구조는 여전히 정본.** 단, `_resolve_human_ctx` 의 "대화형 TTY → human" 분기 서술도 같은 개정으로 폐기(isatty 삭제). 정본: `CHANGELOG.md` [Unreleased] 저장 게이트 개정 · `SECURITY.md` 위협모델.
+> ⚠ **[2026-07-12 SUPERSEDED_IN_PART — 저장 경로]** 본 문서 중 **hosted 묶음 커밋의 approval 절차**(`hosted pull --approval-id` · `hosted_bundle` PENDING mint→`approval approve`→exact-bound consume · §하단 owner 흐름 3단)는 저장 게이트 개정으로 대체됨 — hosted commit 의 사람 증명은 approval event 가 아니라 **inbox preview + 사람의 `SAVE n` 입력**(Claude Code 훅 save-n 참조 바인딩 앵커 또는 에이전트 세션 밖 터미널 명령 직접 입력 · `CLAUDECODE` deny 가드)이다. crash-atomic 단일 COMMIT·사전검증 전체차단·원문 보존 계약은 유지. **비-저장 mutation(accept/unaccept/due/resolve·confirm_edges·hag import-edges)의 exact-bound approval 봉인과 `_resolve_human_ctx` 밖 `_mutation_via_approval` 구조는 여전히 정본.** 단, `_resolve_human_ctx` 의 "대화형 TTY → human" 분기 서술도 같은 개정으로 폐기(isatty 삭제). 정본: `CHANGELOG.md` [1.21.0] 저장 게이트 개정 · `SECURITY.md` 위협모델.
 
 ## 0. owner 결정 (2026-07-11)
 > "휴대폰→PC 워크플로는 유지. 휴대폰은 저장 승인 안 함·저장 의도만 전달. 실제 영구 저장은 PC의 exact-bound 로컬 승인 이벤트 이후에만 정확히 한 번."

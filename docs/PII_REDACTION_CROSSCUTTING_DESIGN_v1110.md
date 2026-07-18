@@ -3,6 +3,8 @@
 > 상태: **design-only / no code change**. 이 문서는 인터페이스·적용 지점·원칙만 정의한다. 코드는 후속 stage에서.
 > 불변식 정합: stdlib-only(`re`) / local-first(네트워크 0) / production write 0 / fail-closed.
 
+> **정본 수렴 현황 (v1.22)**: canonical = `binggupack/safety/pii.py`(facade) → `binggupack.pack.batch_m1`(batch_redact + scan_residual_pii, 정규식 정본 byte-identical 이관). harvest(binggu_harvest.py)·t3_filter·cloud_query_wire가 이 정본을 재사용('복붙 아님' — 3곳 분산 아님). 다만 본 설계 고유 형태(`redact()` 단일함수·`RedactionError` raise·4출구 전면 게이트)는 **미채택**, pii.py의 나머지 6개 진입 함수 이관은 **backlog**. 아래 본문은 원안 설계.
+
 ---
 
 ## 0. 한 줄 요약

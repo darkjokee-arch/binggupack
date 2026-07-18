@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""auto_pull_hosted.py — schtasks 주기 실행용 자동 pull.
+"""auto_pull_hosted.py — schtasks 주기 실행용 자동 회수(staging-only).
 
 ChatGPT/claude 채팅에서 저장한 것(클라우드 inbox 적재분)을 주기적으로 회수해
-로컬 장부에 반영한다. hosted 저장 시 이미 사람이 confirm('SAVE n')을 넣었으므로
-그 confirm 을 사람-증거로 신뢰해 로컬 commit 을 자동화한다(이중 confirm 생략).
+로컬 staging 에 적재만 한다. 실제 로컬 장부(ledger) 확정은 PC 에서 사람이 'SAVE n'
+을 쳐야 이뤄진다 — auto_pull 은 회수만, 무인 commit 은 하지 않는다.
 
-안전: 후보>0(판단/지식으로 분류된) intent 만 commit. 후보 0(짧은 조각 등)은 skip.
-inbox 회수(drain)는 HMAC 서명(.dev.vars.save_mcp)으로만 가능 — 인증 없으면 no-op.
+(2026-07-18 staging-only 전환: 과거엔 원격 confirm 을 사람-증거로 신뢰해 무인 commit
+ 했으나, 안전 약속["hosted 확정은 항상 PC 에서 사람 SAVE n"]을 문서로 낮추지 말고
+ 코드가 지키게 하는 방향[owner 원칙]으로 되돌림. hosted CLI 설계["collect broad,
+ commit narrow · no autopull no autosave"]와도 정합.)
+
+안전: 회수(drain)는 HMAC 서명(.dev.vars.save_mcp)으로만 가능 — 인증 없으면 no-op.
+PII/secret flag 후보도 staging 에만 남고 사람 검토로 위임(무인 반영 0).
 """
 import subprocess
 import re
@@ -51,27 +56,23 @@ def _run(args):
 
 
 def main():
-    # 1) inbox 회수 + 요약(번호별 후보 수)
+    # 1) inbox 회수 → staging 적재만(무인 commit 없음). 실제 ledger 확정은 PC 에서 사람 'SAVE n'.
     #    --no-anchor: 무인 렌더는 사람 SAVE 앵커(last_preview)를 덮지 않는다 — owner 가 CLI preview
     #    를 보고 '세이브 n' 을 치기 전에 5분 틱이 앵커를 갈아치우던 결함 봉합(2026-07-13 실측).
+    #    (2026-07-18 staging-only: 과거엔 여기서 hosted pull --confirm 로 무인 commit 했으나,
+    #     안전 약속["hosted 확정은 항상 PC SAVE n"]을 코드가 지키도록 회수만 하고 확정은 사람에 위임.
+    #     사람은 PC 에서 `binggu hosted inbox` 확인 후 `hosted pull --select n --confirm "SAVE n"`
+    #     또는 세션 '세이브 n' 발화로 ledger 에 확정한다.)
     out = _run(["hosted", "inbox", "--no-anchor"]).stdout or ""
     print(out)
-    committed = 0
-    # "[N] ... 후보 M[ ⚠PII/secret]" 파싱 — M>0 만 commit.
-    # 같은 라인 꼬리(후보 뒤)에 render_summary_md 의 PII/secret flag 가 있으면 auto-commit SKIP
-    # (사람 직접 검토로 위임 — 원문 PII 자동 반영 방지). save_selected 재스캔 뒤 이중 백스톱.
+    staged = 0
+    # "[N] ... 후보 M[ ⚠PII/secret]" 파싱 — 회수돼 staging 대기 중인 후보 수 집계만. ledger commit 0.
     for m in re.finditer(r"\[(\d+)\].*?후보 (\d+)([^\n]*)", out):
-        n, cand, tail = m.group(1), int(m.group(2)), m.group(3)
-        if "PII/secret" in tail:
-            print("skip [%s]: PII/secret flagged — 자동 commit 제외(사람 검토)" % n)
-            continue
-        if cand > 0:
-            r = _run(["hosted", "pull", "--select", n, "--confirm", "LIVE SAVE " + n])
-            print(r.stdout)
-            if "applied=1" in (r.stdout or ""):
-                committed += 1
-    print("=== auto_pull 완료: %d 건 로컬 반영 ===" % committed)
-    _log("auto_pull done committed=%d" % committed)
+        cand, tail = int(m.group(2)), m.group(3)
+        if cand > 0 and "PII/secret" not in tail:
+            staged += 1
+    print("=== auto_pull 완료: %d 건 staging 회수(로컬 확정 대기 — PC 에서 'SAVE n') ===" % staged)
+    _log("auto_pull done staged=%d (staging-only · 사람 SAVE n 확정 대기)" % staged)
 
     # 2) owner 온톨로지 CrabAgent 스키마 동기화 — person_pack.json crab_auto_sync:true
     #    옵트인 시에만 live(없으면 DISABLED_AUTO)·변화 없으면 NO_CHANGE 로 네트워크 0.

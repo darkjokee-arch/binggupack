@@ -51,6 +51,8 @@
 | refers_to | 이 판단은 저 판단을 참조한다 |
 | current_state_of | 이 상태는 이 개념의 현재 상태다 |
 
+> **적용범위 교차 포인터**: 이 registry는 **hosted 전역 문서 그래프(off-repo 레퍼런스 빌더)** 전용이다. **개인 ledger 엣지의 정본은 `binggupack/schema/verb_edge.py`의 VERB_EDGES(6종: supports_judgment·contradicts·depends_on·blocks·enables·refines)** — 이 표와 별개 집합이며 병존한다. evidence_supports/근거 개념만 양쪽에 공통. 개인 ledger 저장·검증 시 relation 정본은 verb_edge.py를 따른다.
+
 - registry 추가 = owner 승인만. 미등록 동사는 무한 보류 금지 — 빌드가 자동 처리:
   alias 정규화 / 고영향만 top-N review / 저빈도는 배포 제외 candidate.
 - 매 배포 전 신규 predicate top-N 보고서 자동 생성.

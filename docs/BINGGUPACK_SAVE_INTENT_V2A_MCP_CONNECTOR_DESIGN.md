@@ -9,7 +9,7 @@
 > 작성 2026-06-12. owner A안 GO + 자물쇠 "읽기 동급" 선택.
 > 배경: V2-2/V2-3에서 금고(DO inbox)는 검증됐으나 **폰 claude.ai → 금고 호출선이 부재**.
 >   원인 = save worker가 커스텀 HMAC API라 MCP 커넥터가 등록 불가(initialize 400).
-> **설계만 — 구현/배포 별도. read 라인(62팩) 무접촉.**
+> **(2026-06-12 구현 상태) 구현됨: `hosted/workers/src/save_intent_mcp.ts` (운영 config `wrangler.save_mcp.prod.toml` · `/mcp2` 라우트 라이브 · `save_intent` 도구 tools/list 노출). read 라인(62팩) 무접촉(여전히 정확).**
 
 ## 0. 핵심 결정 (토론 C 반박 대응 포함)
 

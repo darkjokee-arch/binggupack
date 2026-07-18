@@ -66,8 +66,9 @@ python scripts/localbinggu_ingest_executor.py <real_pack.zip> --execute
 
 > 참고: 로컬 CLI(`opencrab ingest`)는 코드 차원의 plan 게이트가 없어 기술적으로는 plan과 무관하게 실행되지만, **역방향 인제스트 권한은 OpenCrab Expert plan 약관에 귀속**된다. 본 문서는 약관 기준(Expert 필요)을 정본으로 한다.
 
-## 7. HOLD (이번 전환 범위 밖)
+## 7. HOLD (이번 전환[2026-06-15] 범위 밖)
 
-- OpenCrab **Cloud** 실 업로드 / Cloud 원본화 / marketplace / 팀·공유·과금 — 계속 HOLD.
+- OpenCrab **Cloud** 실 업로드 — ✅ 2026-07 개통(정본: binggupack/pack/cloud_ingest_wire.py, topic_to_pack→opencrab-cloud 래퍼). 삼중 AND 게이트(dry_run 기본 + confirm + BINGGU_CLOUD_INGEST=1 셋 다 풀려야 live 네트워크). 전역 CLAUDE.md §3-3의 승인된 파이프라인.
+- HOLD 잔여: Cloud **원본화** / marketplace / 팀·공유·과금 — 계속 HOLD.
 - 폰 수집(hosted save-intent v2/mcp) — 별개 축(폰↔PC). 이번 작업 미수정.
 - "OpenCrab cloud 제거"와 "모든 cloud 제거"는 다르다 — 폰 동기화 통로는 보존.

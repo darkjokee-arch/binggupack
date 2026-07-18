@@ -1,6 +1,6 @@
 # BingguPack — 근거 사슬(Rationale Chain) 설계 (DRAFT, 2026-06-14)
 
-> **설계만 — 코드 0.** 구현은 owner 별도 GO 후. 정본(canonical 5종·predicate 매트릭스·evidence 의무·save_selected·preview·graph validation·정규식 classifier) **불변 — 추가만**.
+> **IMPLEMENTED — 정본 코드 binggupack/pack/rationale_suggest.py**(scripts/binggu_rationale_suggest.py 순수 로직을 byte-identical 이관). 이하 원안 설계 기록. 설계 불변(신규 predicate 0 등)은 코드 docstring에 유지. 정본(canonical 5종·predicate 매트릭스·evidence 의무·save_selected·preview·graph validation·정규식 classifier) **불변 — 추가만**.
 > 4cli 2회 수렴: 근거 사슬은 **신규 predicate를 만들지 않고** 기존 `supports_judgment`(verb "근거가_된다") + 기존 노드 종을 재사용한다(AIF 동형). semantic은 **엣지 후보 추천만**(자동 생성 0·사람 confirm·candidate).
 
 ---
