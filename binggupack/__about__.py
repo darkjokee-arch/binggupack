@@ -56,4 +56,4 @@ capture install(+--force)/--with-capture 옵트인 · owner sticky OFF 존중,
 저장소 보안 강화 병행(secret scanning · push protection · branch protection 필수검사 13 ·
 PyPI env admin bypass 차단). production 로직/스키마/의존성 변경 0(설치본 결함 수정·문구·게이트).
 """
-__version__ = "1.21.0"
+__version__ = "1.22.0.dev0"  # 릴리스 태그 v1.21.0(7560250) 이후 main 개발분 — 정식 출하 시 1.22.0
