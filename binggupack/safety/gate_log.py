@@ -39,6 +39,7 @@ try:
     from binggupack.safety.gate_text import (  # noqa: F401
         SAVE_TRIGGER_RE,
         _norm,
+        _strip_embedded_regions,
         parse_save_indices,
         sent_hash,
     )
@@ -48,6 +49,21 @@ except Exception:  # pragma: no cover - 폴백(외부 의존 없이 동일 정�
         re.IGNORECASE)
 
     _RANGE_CAP = 50
+
+    _FENCE_RE = re.compile(r"^\s*(?:```|~~~)")
+
+    def _strip_embedded_regions(text):
+        out, in_fence = [], False
+        for line in str(text).splitlines():
+            if _FENCE_RE.match(line):
+                in_fence = not in_fence
+                continue
+            if in_fence:
+                continue
+            if line.lstrip().startswith(">"):
+                continue
+            out.append(line)
+        return "\n".join(out)
 
     def _expand_indices(text):
         out, seen = [], set()
@@ -71,7 +87,7 @@ except Exception:  # pragma: no cover - 폴백(외부 의존 없이 동일 정�
         if SAVE_TRIGGER_RE.fullmatch(p):
             return _expand_indices(p)
         out, seen = [], set()
-        for line in p.splitlines():
+        for line in _strip_embedded_regions(p).splitlines():
             if line.strip() and SAVE_TRIGGER_RE.fullmatch(line):
                 idx = _expand_indices(line)
                 for i in idx or []:
@@ -365,11 +381,13 @@ def _expand_stamp_indices(text):
 
 
 def _stamp_chunks(pattern, prompt):
-    """정확형 인식 공통부 — 발화 전체 fullmatch 또는 줄 단위 fullmatch 된 조각 리스트."""
+    """정확형 인식 공통부 — 발화 전체 fullmatch 또는 (fenced/blockquote 제거 후) 줄 단위 fullmatch 조각.
+    save 도장과 동일 계약(2026-07-18 P0 수정): 붙여넣은 예시 안 '히트/승격 n' 독립줄은 도장 아님."""
     p = str(prompt or "")
     if pattern.fullmatch(p):
         return [p]
-    return [ln for ln in p.splitlines() if ln.strip() and pattern.fullmatch(ln)]
+    return [ln for ln in _strip_embedded_regions(p).splitlines()
+            if ln.strip() and pattern.fullmatch(ln)]
 
 
 def parse_hit_stamps(prompt):
