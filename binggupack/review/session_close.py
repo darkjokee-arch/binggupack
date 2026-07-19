@@ -317,6 +317,43 @@ def _build_recall_hits(home=None, ledger_path=None):
                 "note": "히트 후보 로드 실패(graceful 생략)"}
 
 
+# ---------------- 2d. AI 제안 L1 명제 (hybrid_agi · 승인 대기 · 화자축 분리 · read-only) ----------------
+
+def _build_l1_proposals(home=None):
+    """이번 세션 AI 제안 L1 명제(hybrid_agi · 승인 대기 · ai_inferred · owner candidate 와 분리).
+    hag_l1_bridge.list_pending 재사용(모듈/스토어 부재 → count 0 graceful). owner 승인(도장) 전
+    비영구 — 운영 ledger write 0. 화자축 분리: owner 후보 큐(capture_buffer)와 물리 별도 파일.
+    반환 {available, count, items:[{idx,proposition,source}], note}."""
+    try:
+        import sys as _sys
+        _hag = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "scripts", "hybrid_agi")
+        if _hag not in _sys.path:
+            _sys.path.insert(0, _hag)
+        import hag_l1_bridge as HB
+    except Exception:
+        return {"available": False, "count": 0, "items": [],
+                "note": "hag_l1_bridge 모듈 미사용(AI 제안 생략)"}
+    try:
+        db = HB.l1_db_path(home)
+        if not os.path.exists(db):
+            return {"available": True, "count": 0, "items": [],
+                    "note": "AI 제안 명제 없음(binggu l1-propose 로 적재)"}
+        conn = HB.open_l1_db(db)
+        try:
+            pend = HB.list_pending(conn)
+        finally:
+            conn.close()
+        items = [{"idx": i + 1, "proposition": p["proposition"], "source": p["l0_raw"]}
+                 for i, p in enumerate(pend)]
+        return {"available": True, "count": len(items), "items": items,
+                "note": "AI 제안(ai_inferred) — owner 승인 전 비영구·owner 후보와 화자축 분리(자동 0)"}
+    except Exception:
+        return {"available": False, "count": 0, "items": [],
+                "note": "AI 제안 로드 실패(graceful 생략)"}
+
+
 # ---------------- 3. 거버넌스 요약 빌드 (대비 기록·적중률 · read-only · 신호 전용) ----------------
 
 class _RoLedger:
@@ -397,6 +434,7 @@ def build_close_summary(home=None, cwd=None, ledger_path=None, session_id=None, 
     return {
         "preview": _build_preview(home, session_id=session_id),
         "recall_hits": _build_recall_hits(home, ledger_path),
+        "l1_proposals": _build_l1_proposals(home),
         "governance": _build_governance(home, cwd, ledger_path),
         "save_action": {
             "auto_save": False,
@@ -406,6 +444,26 @@ def build_close_summary(home=None, cwd=None, ledger_path=None, session_id=None, 
 
 
 # ---------------- 4. 렌더링 (결정적 마크다운 · 저장 0) ----------------
+
+def _build_paste_block(summary):
+    """저장·히트 후보를 owner 가 한 번에 복붙할 단일 블록(각 줄 = 게이트 정확 문법).
+
+    게이트 _stamp_chunks(gate_log.py)가 발화의 **줄 단위 fullmatch** 로 각 줄을 개별
+    인식하고 SAVE/히트/승격 트리거는 서로소라, owner 가 이 블록을 한 메시지로 붙여넣으면
+    통합 파서 없이 각 줄이 자기 종류로 도장된다(4cli+Fable5 수렴 — 통합 파서는 fullmatch
+    계약 위반이라 기각). L1 제안(P)은 destination(단계2) 미배선이라 제외(죽은 명령 방지).
+    각 줄 문법은 gate_log 정규식 정합: SAVE `\\d+`·히트 `\\d+`(H 접두 금지 — 도장 증발 버그)."""
+    block = []
+    pv = summary.get("preview", {}) or {}
+    if pv.get("available") and pv.get("count"):
+        block.append("SAVE %s" % ",".join(str(i) for i in range(1, pv["count"] + 1)))
+    rh = summary.get("recall_hits", {}) or {}
+    if rh.get("available") and rh.get("count"):
+        idxs = [str(it["idx"]) for it in rh.get("items", []) if it.get("idx") is not None]
+        if idxs:
+            block.append("히트 %s" % ",".join(idxs))
+    return block
+
 
 def render_close_md(summary):
     """세션 마무리 요약 → 사람이 읽는 마크다운(결정적 · LLM 0 · 저장 0).
@@ -436,10 +494,25 @@ def render_close_md(summary):
             cat = (" [%s]" % it["category"]) if it.get("category") else ""
             rank = (" score=%.2f" % it["rank"]) if isinstance(it.get("rank"), (int, float)) else ""
             claim = it.get("claim") or "(원문 미상)"
-            lines.append("- H%d. %s%s%s" % (it["idx"], claim, cat, rank))
+            lines.append("- %d. %s%s%s" % (it["idx"], claim, cat, rank))
         lines.append("> %s" % rh.get("note", "도움된 회상만 도장 — 자동 0"))
     else:
         lines.append("- (이번 세션 미판정 회상 없음 — trace OFF 거나 회상 0)")
+
+    # 2-b) AI 제안 L1 명제 (hybrid_agi · 승인 대기 · owner 후보와 화자축 분리)
+    lp1 = summary.get("l1_proposals", {}) or {}
+    lines.append("")
+    lines.append("### 2-b) AI 제안 명제 (hybrid_agi · 승인 대기 · owner 후보와 분리)")
+    if lp1.get("available") and lp1.get("count"):
+        for it in lp1.get("items", []):
+            lines.append("- P%d. %s" % (it["idx"], it["proposition"]))
+            src = it.get("source")
+            if src:
+                s = " ".join(str(src).split())
+                lines.append("    ↳ 출처: %s" % (s if len(s) <= 60 else s[:59] + "…"))
+        lines.append("> %s" % lp1.get("note", "AI 제안 — owner 승인 전 비영구"))
+    else:
+        lines.append("- (AI 제안 명제 없음)")
 
     # 3) 거버넌스
     gv = summary.get("governance", {}) or {}
@@ -462,9 +535,22 @@ def render_close_md(summary):
     lines.append("")
     lines.append("### 4) 한 줄로 도장 (안 하면 넘어감 · 강제 0)")
     lines.append("- 저장: `SAVE n` — 예 `SAVE 1,2`(여러 개 한 번) 또는 `SAVE all`")
-    lines.append("- 히트: `히트 H1,H2` — 도움된 회상만(여러 개 한 줄)")
+    lines.append("- 히트: `히트 1,2` — 도움된 회상만(여러 개 한 줄)")
     lines.append("- 자동저장: **0** · 자동도장: **0** (헌법 — 사람 앵커·actor=human 만)")
     lines.append("- %s" % sa.get("how", "저장·도장은 사람이 직접."))
+
+    # 5) 한 번에 복사 저장 (복붙 블록 · 게이트 줄단위 인식 · 통합 파서 불요)
+    paste = _build_paste_block(summary)
+    lines.append("")
+    lines.append("### 5) 한 번에 저장 — 아래 블록을 복사해 한 메시지로 붙여넣기")
+    if paste:
+        lines.append("```")
+        lines.extend(paste)
+        lines.append("```")
+        lines.append("> 각 줄이 게이트에 개별 인식 — 한 번 붙여넣기로 전 종류 저장(원하는 줄만 남겨 부분 저장도 가능). "
+                     "AI 제안(P)은 저장 경로 준비 중(단계2)이라 블록에서 제외.")
+    else:
+        lines.append("- (저장·히트 후보 없음 — 복사할 블록 0)")
 
     # (§supersede 2026-07-16 owner) 구 "당일 owner 지적 후보" 섹션 폐지 — 판정은 논쟁이
     # 실측으로 판가름 난 순간 `binggu verdict` 즉시 기록(개방 기록 트랙·의식 0)으로 대체.
@@ -719,10 +805,11 @@ def _selftest():
                   "T20b review snapshot 저장(H N → trace/node 고정 · mark N-shift 안전)")
             s_rh = build_close_summary(home=str(home_rh), ledger_path=str(led_rh))
             md_rh = render_close_md(s_rh)
-            check("이번 세션 회상" in md_rh and "H1." in md_rh
-                  and "히트 H1,H2" in md_rh and "SAVE 1,2" in md_rh
+            check("이번 세션 회상" in md_rh and "- 1. " in md_rh
+                  and "히트 1,2" in md_rh and "SAVE 1,2" in md_rh
+                  and "### 5) 한 번에 저장" in md_rh
                   and "자동저장: **0**" in md_rh,
-                  "T21 render: 회상 히트 섹션(H1.) + 간결 도장 안내(히트/SAVE 배치) + 자동 0")
+                  "T21 render: 회상 히트 숫자 라벨(H버그 수정·게이트 정합) + 복붙 블록 + 도장 안내 + 자동 0")
             rh0 = _build_recall_hits(home=str(tmp / ".binggupack_rh0"))
             check(rh0["count"] == 0,
                   "T21b trace 부재 home → 히트 후보 0(graceful · 운영홈 미접촉)")
