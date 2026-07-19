@@ -285,6 +285,38 @@ def _build_outcome_candidates(home=None, today=None):
                 "note": "당일 후보 로드 실패(graceful 생략)"}
 
 
+# ---------------- 2c. 이번 세션 회상 히트 후보 (recall_trace · read-only · owner 도장만) ----------------
+
+def _build_recall_hits(home=None, ledger_path=None):
+    """이번 세션 미판정 회상 노드 = '히트 후보'(도움된 기억에 owner 가 도장할 대상).
+    recall_trace.list_pending 재사용(trace store 부재/OFF → count 0 graceful). 번호(H N)는
+    save_review_snapshot 로 (trace_id,node_id) 고정 → owner 'binggu trace mark N used' N-shift 안전.
+
+    ★축 구분(MF3): 여기 '히트'=회상 효용(recall_outcomes used, usefulness) — use_count(ledger,
+    recall --record)와 다른 축. 도장은 owner actor=human 게이트(AI 자동 0). trace store 는
+    ledger.sqlite sibling(운영 ledger 불변). claim 은 ledger read-only join 표시용(store 원문 0).
+    반환 {available, count, items:[{idx,category,rank,claim}], note}."""
+    try:
+        from binggupack.pack import recall_trace as RT
+    except Exception:
+        return {"available": False, "count": 0, "items": [],
+                "note": "recall_trace 모듈 미사용(히트 후보 생략)"}
+    try:
+        lp = ledger_path or _ledger_path(home)
+        pending = RT.list_pending(home=home, ledger_path=lp)
+        if not pending:
+            return {"available": True, "count": 0, "items": [],
+                    "note": "이번 세션 미판정 회상 없음(trace OFF 거나 회상 0 — binggu trace enable 로 켜짐)"}
+        RT.save_review_snapshot(pending, home=home)  # H N → (trace_id,node_id) 고정(mark N-shift 안전)
+        items = [{"idx": p["idx"], "category": p.get("category"),
+                  "rank": p.get("rank"), "claim": p.get("claim")} for p in pending]
+        return {"available": True, "count": len(items), "items": items,
+                "note": "도움된 회상에 owner '히트 N'(actor=human) — use_count 아닌 회상효용 축(MF3)·자동 0"}
+    except Exception:
+        return {"available": False, "count": 0, "items": [],
+                "note": "히트 후보 로드 실패(graceful 생략)"}
+
+
 # ---------------- 3. 거버넌스 요약 빌드 (대비 기록·적중률 · read-only · 신호 전용) ----------------
 
 class _RoLedger:
@@ -360,14 +392,15 @@ def build_close_summary(home=None, cwd=None, ledger_path=None, session_id=None, 
     session_id 지정 시 preview 를 그 세션 발화로 한정(세션 경계). today 파라미터는 하위호환
     유지(구 지적 후보 필터용 — §supersede: 지적 후보 섹션은 2026-07-16 owner 지시로 폐지,
     판정은 binggu verdict 즉시 기록으로 대체 — 세션마무리 배치 확인 의식 0).
-    반환 {preview, governance, save_action}."""
+    반환 {preview, recall_hits, governance, save_action}."""
     _ = today  # 하위호환(구 시그니처 호출자 무해)
     return {
         "preview": _build_preview(home, session_id=session_id),
+        "recall_hits": _build_recall_hits(home, ledger_path),
         "governance": _build_governance(home, cwd, ledger_path),
         "save_action": {
             "auto_save": False,
-            "how": "저장은 사람이 직접 — preview 번호(1번/2번)를 보고 **이 세션 채팅에** `SAVE n`(정확한 번호) 발화 시 앵커 생성→저장. 로컬 터미널 별도 실행 안내 금지(이 세션에서 SAVE n 으로 완결)·빙구팩 자동저장 0.",
+            "how": "저장은 사람이 직접 — preview 번호를 보고 **이 세션 채팅에** `SAVE 1,2`(여러 개 한 번) 발화 시 앵커 생성→저장. 도움된 회상은 `히트 H1,H2`(여러 개 한 줄). 안 하면 넘어감(강제 0). 로컬 터미널 별도 실행 안내 금지(이 세션에서 완결)·빙구팩 자동저장/자동도장 0.",
         },
     }
 
@@ -376,12 +409,13 @@ def build_close_summary(home=None, cwd=None, ledger_path=None, session_id=None, 
 
 def render_close_md(summary):
     """세션 마무리 요약 → 사람이 읽는 마크다운(결정적 · LLM 0 · 저장 0).
-    저장 preview(candidate-only) + 거버넌스 정리(적중률 신호) + '저장은 사람' 안내."""
-    lines = ["## 세션 마무리 — 저장 preview + 거버넌스 정리 (저장 0 · 사람이 SAVE)"]
+    저장 preview(candidate) + 이번 세션 회상 히트 후보 + 거버넌스(적중률) + 한 줄 도장 안내."""
+    lines = ["## 세션 마무리 — 저장 preview + 회상 히트 + 거버넌스 (저장 0 · 사람이 SAVE/도장)"]
 
+    # 1) 저장 후보
     pv = summary.get("preview", {}) or {}
     lines.append("")
-    lines.append("### 1) 저장 preview (candidate · active 아님)")
+    lines.append("### 1) 저장 후보 (candidate · active 아님)")
     if pv.get("available") and pv.get("count"):
         for it in pv.get("items", []):
             lines.append("- " + str(it.get("label", it.get("text", ""))))
@@ -393,9 +427,24 @@ def render_close_md(summary):
         lines.append("- ⚠️ 긴 발화 %d건 자동 제외(붙여넣기·대화 덩어리·AI 응답문 — 화자축 오염 방지). "
                      "진짜 저장하려면 그 내용에 `이거 저장해` 명시." % bv)
 
+    # 2) 이번 세션 회상 히트 후보 (recall_trace 통합 · MF3 회상효용 축 · owner 도장)
+    rh = summary.get("recall_hits", {}) or {}
+    lines.append("")
+    lines.append("### 2) 이번 세션 회상 — 도움된 기억에 히트 (회상효용 · owner 도장)")
+    if rh.get("available") and rh.get("count"):
+        for it in rh.get("items", []):
+            cat = (" [%s]" % it["category"]) if it.get("category") else ""
+            rank = (" score=%.2f" % it["rank"]) if isinstance(it.get("rank"), (int, float)) else ""
+            claim = it.get("claim") or "(원문 미상)"
+            lines.append("- H%d. %s%s%s" % (it["idx"], claim, cat, rank))
+        lines.append("> %s" % rh.get("note", "도움된 회상만 도장 — 자동 0"))
+    else:
+        lines.append("- (이번 세션 미판정 회상 없음 — trace OFF 거나 회상 0)")
+
+    # 3) 거버넌스
     gv = summary.get("governance", {}) or {}
     lines.append("")
-    lines.append("### 2) 거버넌스 정리 — 대비 기록·적중률 (신호 · 상관≠인과)")
+    lines.append("### 3) 거버넌스 정리 — 대비 기록·적중률 (신호 · 상관≠인과)")
     if gv.get("available"):
         ov = gv.get("overall", {}) or {}
         owner = (ov.get("owner") or {})
@@ -408,15 +457,17 @@ def render_close_md(summary):
     else:
         lines.append("- %s" % gv.get("note", "거버넌스 요약 없음"))
 
+    # 4) 한 줄로 도장 (간결 UX · 안 하면 넘어감 · 강제 0)
     sa = summary.get("save_action", {}) or {}
     lines.append("")
-    lines.append("### 3) 저장")
-    lines.append("- 자동저장: **0** (헌법 — candidate-only · 사람 승인 게이트)")
-    lines.append("- %s" % sa.get("how", "저장은 사람이 직접 `SAVE n` 타이핑."))
+    lines.append("### 4) 한 줄로 도장 (안 하면 넘어감 · 강제 0)")
+    lines.append("- 저장: `SAVE n` — 예 `SAVE 1,2`(여러 개 한 번) 또는 `SAVE all`")
+    lines.append("- 히트: `히트 H1,H2` — 도움된 회상만(여러 개 한 줄)")
+    lines.append("- 자동저장: **0** · 자동도장: **0** (헌법 — 사람 앵커·actor=human 만)")
+    lines.append("- %s" % sa.get("how", "저장·도장은 사람이 직접."))
 
     # (§supersede 2026-07-16 owner) 구 "당일 owner 지적 후보" 섹션 폐지 — 판정은 논쟁이
     # 실측으로 판가름 난 순간 `binggu verdict` 즉시 기록(개방 기록 트랙·의식 0)으로 대체.
-    # 세션마무리 배치 확인·컨슘 도장 의식 0. 정정은 owner "뒤집어 N" → verdict --overturn.
 
     return "\n".join(lines)
 
@@ -638,6 +689,46 @@ def _selftest():
         check(callable(_build_outcome_candidates)
               and "DEPRECATED" in (_build_outcome_candidates.__doc__ or ""),
               "T19 구 빌더는 호출부 0·DEPRECATED 마킹 보존(이력)")
+
+        # ── T20~T21 이번 세션 회상 히트 후보(recall_trace 통합 · MF3 회상효용 축 · owner 도장) ──
+        rh_ok = True
+        try:
+            from binggu_schema import apply_schema
+            from binggupack.pack import recall_trace as RT
+            home_rh = tmp / ".binggupack_rh"
+            home_rh.mkdir(parents=True)
+            RT.set_trace_flag(True, home=str(home_rh))
+            led_rh = home_rh / "ledger.sqlite"
+            lcon = sqlite3.connect(str(led_rh))
+            apply_schema(lcon)
+            lcon.execute("INSERT INTO nodes(node_id,node_type,sentence,candidate,state,content_hash,"
+                         "created_at,semantic_subtype,use_count) VALUES"
+                         "('node:CONV:h1','judgment','배포 전 live endpoint 확인',0,'active','h',"
+                         "'2026-06-27T00:00:00Z','교훈',0)")
+            lcon.commit()
+            lcon.close()
+            recalled = [{"node_id": "node:CONV:h1", "semantic_subtype": "교훈",
+                         "rank_score": 0.9, "relevance": 0.8}]
+            RT.record_trace("배포 점검", "why_search", recalled, "2026-06-27T00:00:00Z", home=str(home_rh))
+            rh = _build_recall_hits(home=str(home_rh), ledger_path=str(led_rh))
+            check(rh["available"] and rh["count"] == 1
+                  and rh["items"][0]["claim"] == "배포 전 live endpoint 확인"
+                  and rh["items"][0]["idx"] == 1,
+                  "T20 회상 히트 후보 빌드(recall_trace list_pending 통합·claim join·idx)")
+            check((home_rh / "recall_trace_review.json").exists(),
+                  "T20b review snapshot 저장(H N → trace/node 고정 · mark N-shift 안전)")
+            s_rh = build_close_summary(home=str(home_rh), ledger_path=str(led_rh))
+            md_rh = render_close_md(s_rh)
+            check("이번 세션 회상" in md_rh and "H1." in md_rh
+                  and "히트 H1,H2" in md_rh and "SAVE 1,2" in md_rh
+                  and "자동저장: **0**" in md_rh,
+                  "T21 render: 회상 히트 섹션(H1.) + 간결 도장 안내(히트/SAVE 배치) + 자동 0")
+            rh0 = _build_recall_hits(home=str(tmp / ".binggupack_rh0"))
+            check(rh0["count"] == 0,
+                  "T21b trace 부재 home → 히트 후보 0(graceful · 운영홈 미접촉)")
+        except Exception as e:
+            rh_ok = False
+            check(rh_ok, "T20~T21 회상 히트 통합 예외: %s" % type(e).__name__)
 
         print("\nGATE=%s" % ("GO" if ok else "NO-GO"))
         return ok
