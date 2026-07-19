@@ -317,6 +317,43 @@ def _build_recall_hits(home=None, ledger_path=None):
                 "note": "히트 후보 로드 실패(graceful 생략)"}
 
 
+# ---------------- 2d. AI 제안 L1 명제 (hybrid_agi · 승인 대기 · 화자축 분리 · read-only) ----------------
+
+def _build_l1_proposals(home=None):
+    """이번 세션 AI 제안 L1 명제(hybrid_agi · 승인 대기 · ai_inferred · owner candidate 와 분리).
+    hag_l1_bridge.list_pending 재사용(모듈/스토어 부재 → count 0 graceful). owner 승인(도장) 전
+    비영구 — 운영 ledger write 0. 화자축 분리: owner 후보 큐(capture_buffer)와 물리 별도 파일.
+    반환 {available, count, items:[{idx,proposition,source}], note}."""
+    try:
+        import sys as _sys
+        _hag = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "scripts", "hybrid_agi")
+        if _hag not in _sys.path:
+            _sys.path.insert(0, _hag)
+        import hag_l1_bridge as HB
+    except Exception:
+        return {"available": False, "count": 0, "items": [],
+                "note": "hag_l1_bridge 모듈 미사용(AI 제안 생략)"}
+    try:
+        db = HB.l1_db_path(home)
+        if not os.path.exists(db):
+            return {"available": True, "count": 0, "items": [],
+                    "note": "AI 제안 명제 없음(binggu l1-propose 로 적재)"}
+        conn = HB.open_l1_db(db)
+        try:
+            pend = HB.list_pending(conn)
+        finally:
+            conn.close()
+        items = [{"idx": i + 1, "proposition": p["proposition"], "source": p["l0_raw"]}
+                 for i, p in enumerate(pend)]
+        return {"available": True, "count": len(items), "items": items,
+                "note": "AI 제안(ai_inferred) — owner 승인 전 비영구·owner 후보와 화자축 분리(자동 0)"}
+    except Exception:
+        return {"available": False, "count": 0, "items": [],
+                "note": "AI 제안 로드 실패(graceful 생략)"}
+
+
 # ---------------- 3. 거버넌스 요약 빌드 (대비 기록·적중률 · read-only · 신호 전용) ----------------
 
 class _RoLedger:
@@ -397,6 +434,7 @@ def build_close_summary(home=None, cwd=None, ledger_path=None, session_id=None, 
     return {
         "preview": _build_preview(home, session_id=session_id),
         "recall_hits": _build_recall_hits(home, ledger_path),
+        "l1_proposals": _build_l1_proposals(home),
         "governance": _build_governance(home, cwd, ledger_path),
         "save_action": {
             "auto_save": False,
@@ -440,6 +478,21 @@ def render_close_md(summary):
         lines.append("> %s" % rh.get("note", "도움된 회상만 도장 — 자동 0"))
     else:
         lines.append("- (이번 세션 미판정 회상 없음 — trace OFF 거나 회상 0)")
+
+    # 2-b) AI 제안 L1 명제 (hybrid_agi · 승인 대기 · owner 후보와 화자축 분리)
+    lp1 = summary.get("l1_proposals", {}) or {}
+    lines.append("")
+    lines.append("### 2-b) AI 제안 명제 (hybrid_agi · 승인 대기 · owner 후보와 분리)")
+    if lp1.get("available") and lp1.get("count"):
+        for it in lp1.get("items", []):
+            lines.append("- P%d. %s" % (it["idx"], it["proposition"]))
+            src = it.get("source")
+            if src:
+                s = " ".join(str(src).split())
+                lines.append("    ↳ 출처: %s" % (s if len(s) <= 60 else s[:59] + "…"))
+        lines.append("> %s" % lp1.get("note", "AI 제안 — owner 승인 전 비영구"))
+    else:
+        lines.append("- (AI 제안 명제 없음)")
 
     # 3) 거버넌스
     gv = summary.get("governance", {}) or {}
