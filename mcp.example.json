@@ -1,10 +1,10 @@
 {
-  "_comment": "BingguPack local MCP server 등록 예시(후보). 서버/스크립트 prefix openbinggu_ 는 레거시 내부 코드네임. 실제 등록/공개는 owner 결정 후. read/dry-run 도구만 노출.",
+  "_comment": "BingguPack 로컬 MCP 등록 예시. pip install binggupack 후 canonical 진입점 'binggupack-mcp' 로 clone 없이 등록(정본: INSTALL.md). 기본 core profile — 상태·회상·근거·목록·검토·미리보기 + 승인 기반 저장/페어/폐기/교체(mutation 은 owner SAVE 앵커 게이트). BINGGU_HOME 으로 장부 위치를 지정(미설정 시 ~/.binggupack). '--serve' 인자는 파일 접근 허용 루트(경로 게이트 allow_root). Windows 에서 진입점 .exe stub 이 tools/list timeout 나면 python 절대경로로 scripts/openbinggu_mcp_server.py 직접 실행(INSTALL.md §Windows 주의).",
   "mcpServers": {
-    "openbinggu": {
-      "command": "python",
-      "args": ["scripts/openbinggu_mcp_server.py", "--serve", "."],
-      "env": { "OPENBINGGU_MODE": "local_readonly" }
+    "binggupack": {
+      "command": "binggupack-mcp",
+      "args": ["--serve", "."],
+      "env": { "BINGGU_HOME": "${HOME}/.binggupack" }
     }
   }
 }
