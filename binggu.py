@@ -603,29 +603,40 @@ def cmd_trace(a):
         print("회상 효용 trace 기록 OFF (기록 0)")
         return 0
     if a1 == "mark":
-        try:
-            n = int(a.a2)
-        except (TypeError, ValueError):
-            print("사용법: binggu trace mark <N> <used|ignored|corrected> [--note <reason_code>]")
-            return 2
+        # 배치 도장(간결 UX): "1,2,3" 콤마 여러 개 → 각각 판정(도움된 회상 한 줄 도장).
+        # 단일 "N" 은 이전과 동일. owner '히트 H1,H2' 발화가 이 배치 경로로 소비된다.
         verdict = a.a3
         if verdict not in RT.VALID_VERDICTS:
             print("verdict 는 used|ignored|corrected (받음: %r)" % verdict)
             return 2
+        try:
+            ns = [int(x) for x in str(a.a2).split(",") if str(x).strip()]
+        except (TypeError, ValueError):
+            ns = []
+        if not ns:
+            print("사용법: binggu trace mark <N[,N...]> <used|ignored|corrected> [--note <reason_code>]")
+            return 2
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        res = RT.mark_by_index(n, verdict, _resolve_human_ctx(a.ledger, None), ts,
-                               reason_code=getattr(a, "note", None), home=home)   # P1-A.1 fail-closed
-        if res["recorded"]:
-            note = (" · note=%s" % res["reason_code"]) if res.get("reason_code") else ""
-            print("판정 기록: #%d → %s%s (actor=human)" % (n, verdict, note))
-            return 0
-        hint = {"need_review": "먼저 binggu trace review 로 목록을 보세요.",
-                "bad_index": "그 번호의 회상이 없습니다(review 재실행).",
-                "dup_outcome": "이미 판정된 회상(첫 판정 보존).",
-                "invalid_reason_code": "note 는 정해진 코드만: %s" % _reason_hint(verdict),
-                "trace_not_found": "trace 를 찾을 수 없습니다.",
-                "G4_no_auto": "actor=human 만 판정 가능(헌법)."}.get(res["reason"], res["reason"])
-        print("판정 안 됨(%s): %s" % (res["reason"], hint))
+        ctx = _resolve_human_ctx(a.ledger, None)   # P1-A.1 fail-closed
+        hints = {"need_review": "먼저 binggu trace review 로 목록을 보세요.",
+                 "bad_index": "그 번호의 회상이 없습니다(review 재실행).",
+                 "dup_outcome": "이미 판정된 회상(첫 판정 보존).",
+                 "invalid_reason_code": "note 는 정해진 코드만: %s" % _reason_hint(verdict),
+                 "trace_not_found": "trace 를 찾을 수 없습니다.",
+                 "G4_no_auto": "actor=human 만 판정 가능(헌법)."}
+        ok_cnt = 0
+        for n in ns:
+            res = RT.mark_by_index(n, verdict, ctx, ts,
+                                   reason_code=getattr(a, "note", None), home=home)
+            if res["recorded"]:
+                ok_cnt += 1
+                note = (" · note=%s" % res["reason_code"]) if res.get("reason_code") else ""
+                print("판정 기록: #%d → %s%s (actor=human)" % (n, verdict, note))
+            else:
+                print("판정 안 됨 #%d(%s): %s"
+                      % (n, res["reason"], hints.get(res["reason"], res["reason"])))
+        if len(ns) > 1:
+            print("→ %d/%d 건 판정 기록(actor=human · 자동 0)" % (ok_cnt, len(ns)))
         return 0
     if a1 in (None, "review"):
         return _trace_review(RT, ledger, home)
