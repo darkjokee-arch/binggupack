@@ -445,6 +445,26 @@ def build_close_summary(home=None, cwd=None, ledger_path=None, session_id=None, 
 
 # ---------------- 4. 렌더링 (결정적 마크다운 · 저장 0) ----------------
 
+def _build_paste_block(summary):
+    """저장·히트 후보를 owner 가 한 번에 복붙할 단일 블록(각 줄 = 게이트 정확 문법).
+
+    게이트 _stamp_chunks(gate_log.py)가 발화의 **줄 단위 fullmatch** 로 각 줄을 개별
+    인식하고 SAVE/히트/승격 트리거는 서로소라, owner 가 이 블록을 한 메시지로 붙여넣으면
+    통합 파서 없이 각 줄이 자기 종류로 도장된다(4cli+Fable5 수렴 — 통합 파서는 fullmatch
+    계약 위반이라 기각). L1 제안(P)은 destination(단계2) 미배선이라 제외(죽은 명령 방지).
+    각 줄 문법은 gate_log 정규식 정합: SAVE `\\d+`·히트 `\\d+`(H 접두 금지 — 도장 증발 버그)."""
+    block = []
+    pv = summary.get("preview", {}) or {}
+    if pv.get("available") and pv.get("count"):
+        block.append("SAVE %s" % ",".join(str(i) for i in range(1, pv["count"] + 1)))
+    rh = summary.get("recall_hits", {}) or {}
+    if rh.get("available") and rh.get("count"):
+        idxs = [str(it["idx"]) for it in rh.get("items", []) if it.get("idx") is not None]
+        if idxs:
+            block.append("히트 %s" % ",".join(idxs))
+    return block
+
+
 def render_close_md(summary):
     """세션 마무리 요약 → 사람이 읽는 마크다운(결정적 · LLM 0 · 저장 0).
     저장 preview(candidate) + 이번 세션 회상 히트 후보 + 거버넌스(적중률) + 한 줄 도장 안내."""
@@ -474,7 +494,7 @@ def render_close_md(summary):
             cat = (" [%s]" % it["category"]) if it.get("category") else ""
             rank = (" score=%.2f" % it["rank"]) if isinstance(it.get("rank"), (int, float)) else ""
             claim = it.get("claim") or "(원문 미상)"
-            lines.append("- H%d. %s%s%s" % (it["idx"], claim, cat, rank))
+            lines.append("- %d. %s%s%s" % (it["idx"], claim, cat, rank))
         lines.append("> %s" % rh.get("note", "도움된 회상만 도장 — 자동 0"))
     else:
         lines.append("- (이번 세션 미판정 회상 없음 — trace OFF 거나 회상 0)")
@@ -515,9 +535,22 @@ def render_close_md(summary):
     lines.append("")
     lines.append("### 4) 한 줄로 도장 (안 하면 넘어감 · 강제 0)")
     lines.append("- 저장: `SAVE n` — 예 `SAVE 1,2`(여러 개 한 번) 또는 `SAVE all`")
-    lines.append("- 히트: `히트 H1,H2` — 도움된 회상만(여러 개 한 줄)")
+    lines.append("- 히트: `히트 1,2` — 도움된 회상만(여러 개 한 줄)")
     lines.append("- 자동저장: **0** · 자동도장: **0** (헌법 — 사람 앵커·actor=human 만)")
     lines.append("- %s" % sa.get("how", "저장·도장은 사람이 직접."))
+
+    # 5) 한 번에 복사 저장 (복붙 블록 · 게이트 줄단위 인식 · 통합 파서 불요)
+    paste = _build_paste_block(summary)
+    lines.append("")
+    lines.append("### 5) 한 번에 저장 — 아래 블록을 복사해 한 메시지로 붙여넣기")
+    if paste:
+        lines.append("```")
+        lines.extend(paste)
+        lines.append("```")
+        lines.append("> 각 줄이 게이트에 개별 인식 — 한 번 붙여넣기로 전 종류 저장(원하는 줄만 남겨 부분 저장도 가능). "
+                     "AI 제안(P)은 저장 경로 준비 중(단계2)이라 블록에서 제외.")
+    else:
+        lines.append("- (저장·히트 후보 없음 — 복사할 블록 0)")
 
     # (§supersede 2026-07-16 owner) 구 "당일 owner 지적 후보" 섹션 폐지 — 판정은 논쟁이
     # 실측으로 판가름 난 순간 `binggu verdict` 즉시 기록(개방 기록 트랙·의식 0)으로 대체.
@@ -772,10 +805,11 @@ def _selftest():
                   "T20b review snapshot 저장(H N → trace/node 고정 · mark N-shift 안전)")
             s_rh = build_close_summary(home=str(home_rh), ledger_path=str(led_rh))
             md_rh = render_close_md(s_rh)
-            check("이번 세션 회상" in md_rh and "H1." in md_rh
-                  and "히트 H1,H2" in md_rh and "SAVE 1,2" in md_rh
+            check("이번 세션 회상" in md_rh and "- 1. " in md_rh
+                  and "히트 1,2" in md_rh and "SAVE 1,2" in md_rh
+                  and "### 5) 한 번에 저장" in md_rh
                   and "자동저장: **0**" in md_rh,
-                  "T21 render: 회상 히트 섹션(H1.) + 간결 도장 안내(히트/SAVE 배치) + 자동 0")
+                  "T21 render: 회상 히트 숫자 라벨(H버그 수정·게이트 정합) + 복붙 블록 + 도장 안내 + 자동 0")
             rh0 = _build_recall_hits(home=str(tmp / ".binggupack_rh0"))
             check(rh0["count"] == 0,
                   "T21b trace 부재 home → 히트 후보 0(graceful · 운영홈 미접촉)")
