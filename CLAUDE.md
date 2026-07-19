@@ -5,7 +5,7 @@
 
 ## 🔴 절대 경계 (위반 = 작업 중단)
 1. **운영홈은 repo 밖:** `~/.binggupack/` (`BINGGU_HOME` env 우선), 본체 = `~/.binggupack/ledger.sqlite`. **모든 테스트·preflight는 임시 BINGGU_HOME 격리** — 작업 후 운영홈 ledger 본체 mtime 불변 실측이 관례. repo 안 `_binggu_*_home/`·`_fc_home/`은 샌드박스(운영 아님).
-2. **저장은 사장님 SAVE만:** owner 발화 저장은 preview 제시 → 사장님이 직접 SAVE/confirm. AI가 `binggu pair/save --confirm`을 Bash로 대행 = 승인 위조 (박제 `feedback_binggupack_never_ai_execute_save`). owner 발화는 `pair`로만(평면 save BLOCK)·원문 그대로. 상세 정본: 전역 §8-1 ⑥.
+2. **저장은 사장님 SAVE만:** owner 발화 저장은 preview 제시 → 사장님이 직접 SAVE/confirm. AI가 `binggu pair/save --confirm`을 Bash로 대행 = 승인 위조 (정본 [[feedback_binggupack_save_master]] §4). owner 발화는 `pair`로만(평면 save BLOCK)·원문 그대로. 상세 정본: 전역 §8-1 ⑥.
 3. **PyPI 승인 대행 금지:** publish.yml `environment: pypi` 승인은 **owner 직접** — AI 대신 승인 0.
 4. **거버넌스 자산 write 0:** 빙구팩이 박제/CLAUDE.md/정책파일 직접 수정 금지 (전역 §8-1). `policies/binggu_policy.json`은 sha256 무결성 쌍으로 관리.
 
