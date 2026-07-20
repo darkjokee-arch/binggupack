@@ -962,7 +962,9 @@ def cmd_pair(a):
     ai_text 생략 = owner 단독(순수 직감·억지 ai 금지). relation: accepts/refutes/revises.
     --confirm 생략 = 결합 미리보기 스테이징(저장 0) — 양축 후보를 한 preview(연속 번호:
     owner 1..N · ai N+1..)에 담아 사람 도장 1회('세이브 o,a')로 양축 ref 가 함께 기록되게
-    한다(축별 preview+도장 2회 마찰 제거 · 도장=사람 키보드만 원칙 불변)."""
+    한다(축별 preview+도장 2회 마찰 제거 · 도장=사람 키보드만 원칙 불변).
+    저장 성공 시 owner 반응 노드는 owner_accepted 자동 편승(2트랙 통합·별도 ACCEPT 도장 면제,
+    2026-07-20) — --tentative 로 수용 보류. ai/중립 노드는 미수용(단일 게이지 오염 방지)."""
     from binggupack.storage import save_paired   # 트랙 C: storage facade 경유
     rel = getattr(a, "by", "ai") + "_" + a.relation  # 반응 주체: ai(AI가 사용자 발화를) / owner(사용자가 AI 발화를)
     if a.confirm is None:
@@ -1028,10 +1030,12 @@ def cmd_pair(a):
     r = save_paired(db, a.owner_text, a.ai_text, ctx,
                     snap_dir, relation_kind=rel, owner_pick=a.owner_pick, ai_pick=a.ai_pick, due_date=a.due)
     acc_note = ""
-    if r.get("applied") and getattr(a, "accept", False):
-        # 저장과 동시에 owner_accepted 확정 — 별도 ACCEPT 문구 면제(PAIR confirm 이 이미 사람 확인)
+    if r.get("applied") and not getattr(a, "tentative", False):
+        # 저장 도장과 동시에 owner_accepted 확정 — 별도 ACCEPT 문구 면제(SAVE 도장이 이미 사람 확인).
+        # owner 반응 노드(owner_node_id)만 수용 — ai/중립 노드는 미수용(단일 게이지 오염 방지·R1-1).
+        # --tentative 면 보류(기록만). ctx["actor"]=검증된 저장 actor 재사용(fresh human 위조 금지·P1-A.1).
         ar = accept_by_node_id(db, r["owner_node_id"],
-                               "pair --accept 통합 확정(PAIR confirm 편승)", {"actor": ctx["actor"]})   # P1-A.1: 검증된 actor 재사용
+                               "pair 저장 편승 확정(SAVE 도장=수용)", {"actor": ctx["actor"]})
         acc_note = " · 확정 OK" if ar.get("applied") else (" · 확정 실패(%s)" % ar.get("reason"))
     db.close()
     _reindex_after_write(a.ledger)   # LFI 증분 갱신(best-effort · ledger write 0)
@@ -2265,7 +2269,9 @@ def main():
     pp.add_argument("--ai-pick", type=int, default=1, dest="ai_pick")
     # --confirm 생략 = 결합 미리보기 스테이징(저장 0·도장 1회 흐름). 저장은 confirm 정확문구+사람 도장.
     pp.add_argument("--confirm", default=None); pp.add_argument("--due", default=None)
-    pp.add_argument("--accept", action="store_true")  # 저장과 동시에 owner_accepted 확정(별도 ACCEPT 문구 면제)
+    # 2트랙 통합(2026-07-20): SAVE 도장 = 저장 + owner 반응 노드 수용(기본 ON). 별도 ACCEPT 문구 면제.
+    # --tentative = 수용 보류(기록만). ai/중립 노드는 애초 미수용(게이지 오염 방지).
+    pp.add_argument("--tentative", action="store_true")  # owner 반응 노드 수용 보류(기본은 편승 확정)
     sbp = sub.add_parser("save-batch")   # 세션 마무리 candidate 번호 배치 저장(발화별 반복 UX 제거)
     sbp.add_argument("--confirm", default=None)   # "SAVE 6,11,13" 정확형(owner SAVE 앵커 검증)
     tp = sub.add_parser("trust"); tp.add_argument("--subtype", default=None)  # 양방향 신뢰도(read-only)
