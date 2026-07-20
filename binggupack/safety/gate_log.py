@@ -531,22 +531,28 @@ def stamp_record_ref(pref, idxs, stamp, domain, ts=None, source="user_prompt", p
     return 1
 
 
-def stamp_record_from_prompt(prompt, recall_path=None, promote_path=None, gate_path=None, ts=None):
+def stamp_record_from_prompt(prompt, recall_path=None, promote_path=None, gate_path=None,
+                             ts=None, skip_recall=False):
     """스탬프 hook 진입점 — 발화가 히트/미스/승격 정확형이면 해당 staging 의 idx 를 게이트에 기록.
     ref 는 staging 의 ref 필드가 아니라 rows 에서 재계산(도장 시점부터 저장 필드 미신뢰).
-    staging 부재/파손/idx 불일치 → 기록 0(무해). 반환 append 된 ref 레코드 행 수."""
+    staging 부재/파손/idx 불일치 → 기록 0(무해). 반환 append 된 ref 레코드 행 수.
+
+    skip_recall=True → 회수(히트/미스) 분기 생략(승격 분기는 유지). 세션 마무리 preview 히트를
+    recall_trace 효용 장부(mark_by_index)로 도장할 때, hook 이 last_recall 이중 기록을 막으려
+    사용한다(같은 발화가 두 장부로 가는 것 차단 — owner '단일 통합' 의도)."""
     n = 0
-    hs = parse_hit_stamps(prompt)
-    if hs:
-        st = load_last_recall(recall_path) or {}
-        rows = st.get("items") or []
-        by_idx = {r.get("idx"): r.get("node_id") for r in rows}
-        if rows:
-            ref = recall_gate_ref(rows)
-            for verdict in ("hit", "miss"):
-                matched = [i for i in (hs.get(verdict) or []) if by_idx.get(i)]
-                if matched:
-                    n += stamp_record_ref(ref, matched, verdict, "recall", ts=ts, path=gate_path)
+    if not skip_recall:
+        hs = parse_hit_stamps(prompt)
+        if hs:
+            st = load_last_recall(recall_path) or {}
+            rows = st.get("items") or []
+            by_idx = {r.get("idx"): r.get("node_id") for r in rows}
+            if rows:
+                ref = recall_gate_ref(rows)
+                for verdict in ("hit", "miss"):
+                    matched = [i for i in (hs.get(verdict) or []) if by_idx.get(i)]
+                    if matched:
+                        n += stamp_record_ref(ref, matched, verdict, "recall", ts=ts, path=gate_path)
     pidx = parse_promote_indices(prompt)
     if pidx:
         st = load_last_promote(promote_path) or {}

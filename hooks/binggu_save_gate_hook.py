@@ -24,6 +24,7 @@ import json
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 # 스탬프 빠른 차단(프리필터) — '<트리거>\s*숫자' 형태일 때만 게이트 모듈 로드. 단순 substring 검사는
@@ -57,6 +58,24 @@ def _gate_log_module(scripts_dir):
         return None
 
 
+def _recall_trace_module(scripts_dir):
+    """recall_trace(효용 장부) import — gate_log 로더와 동일 패턴. 실패 시 None(무해).
+    세션 마무리 preview 히트를 owner '히트 N' 발화로 recall_outcomes(효용)에 도장하는 경로."""
+    try:
+        from binggupack.pack import recall_trace
+        return recall_trace
+    except Exception:
+        pass
+    try:
+        root = str(Path(scripts_dir).resolve().parent)
+        if root not in sys.path:
+            sys.path.insert(0, root)
+        from binggupack.pack import recall_trace
+        return recall_trace
+    except Exception:
+        return None
+
+
 def _run(data):
     try:
         if (data.get("hook_event_name") or "") != "UserPromptSubmit":
@@ -79,12 +98,36 @@ def _run(data):
                 sgate.gate_record_from_prompt(prompt)
             except Exception:
                 pass
-        # 분기 ② 히트/미스/승격 스탬프 — 같은 save_gate_log.jsonl 에 도메인 접두 ref 로 기록
+        # 분기 ② 히트/미스/승격 스탬프
+        #   ②-a 세션 마무리 preview 히트 → 효용 장부(recall_trace) 우선. review snapshot 이
+        #       신선(GATE_WINDOW 이내)하면 owner '히트/미스 N' 을 recall_outcomes(actor=human)로
+        #       도장(어제 빠진 hook→효용장부 배선 · owner '단일 통합' 완결). idx 는 snapshot 기준.
+        #   ②-b 그 컨텍스트에선 last_recall 회수 스탬프를 skip_recall 로 생략(이중 장부 차단),
+        #       승격 분기만 유지. snapshot 없거나 stale = 대화중 회상이라 기존 경로 전체.
         if has_stamp:
+            gl = _gate_log_module(sd)
+            snap = None
             try:
-                gl = _gate_log_module(sd)
+                rt = _recall_trace_module(sd)
+                if rt is not None and gl is not None:
+                    sp = rt.review_snapshot_path()
+                    win = getattr(gl, "GATE_WINDOW_SEC", 3600) or 3600
+                    if os.path.exists(sp) and (time.time() - os.path.getmtime(sp)) <= win:
+                        snap = rt._load_review_snapshot()
+                    if snap:
+                        hs = gl.parse_hit_stamps(prompt)
+                        if hs:
+                            snap_idx = {s.get("idx") for s in snap}
+                            ts = time.time()
+                            for vkey, verdict in (("hit", "used"), ("miss", "ignored")):
+                                for i in (hs.get(vkey) or []):
+                                    if i in snap_idx:
+                                        rt.mark_by_index(i, verdict, {"actor": "human"}, ts)
+            except Exception:
+                snap = None
+            try:
                 if gl is not None:
-                    gl.stamp_record_from_prompt(prompt)
+                    gl.stamp_record_from_prompt(prompt, skip_recall=bool(snap))
             except Exception:
                 pass
     except Exception:
@@ -277,6 +320,56 @@ def _selftest():
             check(r.returncode == 0 and r.stdout.strip() == "", "T17 '%s' → exit 0 · 침묵" % _p)
         check(gate_log.read_text(encoding="utf-8") == before,
               "T17e 비정확형 3종 후 gate 기록 불변(오도장 0)")
+
+        # ---- T18~T18b 세션 마무리 회상 효용 장부(recall_trace) 통합 도장 (어제 증발 버그 해소) ----
+        rt_ok = True
+        try:
+            import sqlite3 as _sq
+            from binggu_schema import apply_schema
+            from binggupack.pack import recall_trace as RT
+            RT.set_trace_flag(True, home=str(home))
+            led = home / "ledger.sqlite"
+            lcon = _sq.connect(str(led))
+            apply_schema(lcon)
+            lcon.execute("INSERT INTO nodes(node_id,node_type,sentence,candidate,state,"
+                         "content_hash,created_at,semantic_subtype,use_count) VALUES"
+                         "('node:CONV:hk1','judgment','최신 유지 원칙',0,'active','h',"
+                         "'2026-07-20T00:00:00Z','교훈',0)")
+            lcon.commit()
+            lcon.close()
+            recalled = [{"node_id": "node:CONV:hk1", "semantic_subtype": "교훈",
+                         "rank_score": 0.9, "relevance": 0.8}]
+            RT.record_trace("최신 유지", "why_search", recalled,
+                            "2026-07-20T00:00:00Z", home=str(home))
+            pend = RT.list_pending(home=str(home), ledger_path=str(led))
+            RT.save_review_snapshot(pend, home=str(home))
+            # 발화 '히트 1' → hook → recall_trace 효용 장부(used) 도장 (owner 안 쓰는 CLI 불요)
+            r = call({"hook_event_name": "UserPromptSubmit", "prompt": "히트 1", "cwd": "x"})
+            used = RT.aggregate(home=str(home))["overall"].get("used", 0)
+            check(r.returncode == 0 and r.stdout.strip() == "" and used == 1,
+                  "T18 snapshot 신선 → '히트 1' 이 recall_trace 효용 장부 used 도장(증발 버그 해소)")
+            # T18b 이중 방지 — 같은 컨텍스트에서 last_recall(hit_events 축)에는 안 감(skip_recall)
+            rp2 = home / "last_recall_candidates.json"
+            gl.write_last_recall(["node:CONV:hk1"], query="x", path=str(rp2))
+            rows2 = gl.load_last_recall(str(rp2))["items"]
+            before_v = gl.recall_stamp_verdicts(rows2, path=str(gate_log))
+            r = call({"hook_event_name": "UserPromptSubmit", "prompt": "히트 1", "cwd": "x"})
+            after_v = gl.recall_stamp_verdicts(rows2, path=str(gate_log))
+            check(r.returncode == 0 and after_v == before_v,
+                  "T18b snapshot 컨텍스트 → last_recall 회수 스탬프 미기록(효용 장부 단일·이중 차단)")
+            # T18c stale snapshot(창 밖) → 대화중 회상으로 폴백(last_recall 경로 복귀)
+            old = time.time() - (getattr(gl, "GATE_WINDOW_SEC", 3600) + 100)
+            os.utime(str(RT.review_snapshot_path(str(home))), (old, old))
+            rp3 = home / "last_recall_candidates.json"
+            gl.write_last_recall(["node:CONV:zz9"], query="y", path=str(rp3))
+            rows3 = gl.load_last_recall(str(rp3))["items"]
+            r = call({"hook_event_name": "UserPromptSubmit", "prompt": "히트 1", "cwd": "x"})
+            check(r.returncode == 0
+                  and gl.recall_stamp_verdicts(rows3, path=str(gate_log)) == {1: "hit"},
+                  "T18c stale snapshot → last_recall 폴백(대화중 회상 경로 보존)")
+        except Exception as e:
+            rt_ok = False
+            check(rt_ok, "T18~T18c recall_trace 통합 예외: %s" % type(e).__name__)
 
         print(f"\nGATE={'GO' if ok else 'NO-GO'}")
         return 0 if ok else 1
