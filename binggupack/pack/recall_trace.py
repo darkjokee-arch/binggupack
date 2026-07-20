@@ -257,7 +257,7 @@ def record_outcome(trace_id, node_id, verdict, ctx, ts, *, reason_code=None, hom
 
 # ---------------- T0 자동 관측: 그래프 편입 = 채택 (헌법 v2 · owner 신호) ----------------
 
-def auto_observe_adoption(ts, *, home=None, ledger_path=None):
+def auto_observe_adoption(ts, *, home=None, ledger_path=None, dry_run=False):
     """T0 자동 효용 관측 — 미판정 회상 노드가 '회상 이후 생성된 새 엣지'의 source/target 로
     편입됐으면 used 자동 도장(actor=ai_observation). owner 신호: 노드·엣지·증거 연결 시작=채택.
 
@@ -302,13 +302,44 @@ def auto_observe_adoption(ts, *, home=None, ledger_path=None):
                     (nid, nid, trace_ts)).fetchone()
                 if not row:
                     continue
+                if dry_run:  # 미리보기 — 실제 도장 0(owner 확인용)
+                    stamped.append({"trace_id": trace_id, "node_id": nid})
+                    judged.add((trace_id, nid))
+                    continue
                 res = record_outcome(trace_id, nid, "used", {"actor": "ai_observation"}, ts, home=home)
                 if res.get("recorded"):
                     stamped.append({"trace_id": trace_id, "node_id": nid})
                     judged.add((trace_id, nid))
     finally:
         lcon.close()
-    return {"observed": len(stamped), "stamped": stamped}
+    return {"observed": len(stamped), "stamped": stamped, "dry_run": dry_run}
+
+
+# ---------------- T0 자동관측 opt-in 플래그 (기본 OFF · 첫 실행 안전) ----------------
+
+def _auto_observe_flag_path(home=None):
+    base = home or _plat.binggu_home()
+    return os.path.join(base, "auto_observe_enabled")
+
+
+def auto_observe_enabled(home=None):
+    """T0 자동관측 hook 활성 여부 — 파일플래그(기본 OFF). dry-run 미리보기 후 owner 가 켠다.
+    헌법 T0(auto_fact_observation)는 허용이나, 첫 대량 도장 방지를 위한 운영 opt-in(안전 기본값)."""
+    return os.path.exists(_auto_observe_flag_path(home))
+
+
+def set_auto_observe_flag(enable, home=None):
+    """T0 자동관측 hook 플래그 ON/OFF(binggu observe --enable/--disable). 반환 {enabled, flag_path}."""
+    p = _auto_observe_flag_path(home)
+    if enable:
+        d = os.path.dirname(p)
+        if d:
+            os.makedirs(d, exist_ok=True)
+        with open(p, "w", encoding="utf-8") as f:
+            f.write("1")
+    elif os.path.exists(p):
+        os.remove(p)
+    return {"enabled": enable, "flag_path": p}
 
 
 # ---------------- review / mark (수동 outcome 명령 — binggu trace) ----------------
@@ -748,6 +779,39 @@ def _selftest():
         ck(auto_observe_adoption(TS_LATER, home=home6, ledger_path=led6)["observed"] == 0,
            "자동 관측 멱등: 이미 도장된 것 재도장 0(dup 차단)")
 
+        # ── dry_run 미리보기(도장 0) + opt-in 플래그(기본 OFF · 첫 실행 안전) ──
+        home7 = os.path.join(tmp, ".binggupack7")
+        os.makedirs(home7, exist_ok=True)
+        set_trace_flag(True, home=home7)
+        ck(auto_observe_enabled(home7) is False, "auto_observe 플래그 기본 OFF(첫 실행 안전)")
+        set_auto_observe_flag(True, home=home7)
+        ck(auto_observe_enabled(home7) is True and os.path.exists(_auto_observe_flag_path(home7)),
+           "set_auto_observe_flag(True) → 플래그 ON")
+        set_auto_observe_flag(False, home=home7)
+        ck(auto_observe_enabled(home7) is False, "set_auto_observe_flag(False) → OFF 복귀")
+        led7 = os.path.join(home7, "ledger.sqlite")
+        lcon7 = sqlite3.connect(led7)
+        apply_schema(lcon7)
+        lcon7.execute("INSERT INTO nodes(node_id,node_type,sentence,candidate,state,content_hash,"
+                      "created_at,semantic_subtype,use_count) VALUES"
+                      "('node:CONV:h1','judgment','문장',0,'active','h',?, '교훈',0)", (TS,))
+        lcon7.execute("INSERT INTO edges(edge_id,relation,source,target,candidate,state,created_at)"
+                      " VALUES('e7','supports_judgment','node:CONV:x','node:CONV:h1',0,'active',?)",
+                      (TS_LATER,))
+        lcon7.commit()
+        lcon7.close()
+        record_trace("dry 점검", "preflight",
+                     [{"node_id": "node:CONV:h1", "semantic_subtype": "교훈",
+                       "rank_score": 0.8, "relevance": 0.7}], TS, home=home7)
+        dry = auto_observe_adoption(TS_LATER, home=home7, ledger_path=led7, dry_run=True)
+        ck(dry["observed"] == 1 and dry["dry_run"] is True,
+           "dry_run: 편입 1건 감지(미리보기)")
+        ck(aggregate(home=home7)["overall"]["outcomes"] == 0,
+           "dry_run: 실제 도장 0(미리보기만 · store 에 outcome 없음)")
+        real7 = auto_observe_adoption(TS_LATER, home=home7, ledger_path=led7)
+        ck(real7["observed"] == 1 and aggregate(home=home7)["overall"]["used"] == 1,
+           "dry_run 후 실제 실행 → used 1 도장")
+
         # ── 운영 ledger sentinel 미접촉 ──
         ck(os.path.exists(ledger) and os.path.getmtime(ledger) == ledger_mt0,
            "운영 ledger.sqlite sentinel 미접촉(별도 store · write 0)")
@@ -769,5 +833,14 @@ if __name__ == "__main__":
         import json as _json
         print(_json.dumps(aggregate(), ensure_ascii=False, indent=2))
         sys.exit(0)
-    print("usage: binggu_recall_trace.py [--selftest | --aggregate]")
+    if sys.argv[1] == "--observe-dry-run":
+        # 운영 홈 T0 자동관측 미리보기(도장 0 · owner 확인용) — 실시간 ts(실행 기록 목적)
+        from datetime import datetime, timezone
+        _h = _plat.binggu_home()
+        _res = auto_observe_adoption(datetime.now(timezone.utc).isoformat(),
+                                     home=_h, ledger_path=os.path.join(_h, "ledger.sqlite"),
+                                     dry_run=True)
+        print(json.dumps(_res, ensure_ascii=False, indent=2))
+        sys.exit(0)
+    print("usage: binggu_recall_trace.py [--selftest | --aggregate | --observe-dry-run]")
     sys.exit(2)

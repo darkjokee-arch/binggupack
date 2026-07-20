@@ -438,7 +438,7 @@ def build_close_summary(home=None, cwd=None, ledger_path=None, session_id=None, 
         "governance": _build_governance(home, cwd, ledger_path),
         "save_action": {
             "auto_save": False,
-            "how": "저장은 사람이 직접 — preview 번호를 보고 **이 세션 채팅에** `SAVE 1,2`(여러 개 한 번) 발화 시 앵커 생성→저장. 도움된 회상은 `히트 H1,H2`(여러 개 한 줄). 안 하면 넘어감(강제 0). 로컬 터미널 별도 실행 안내 금지(이 세션에서 완결)·빙구팩 자동저장/자동도장 0.",
+            "how": "저장은 사람이 직접 — preview 번호를 보고 **이 세션 채팅에** `SAVE 1,2`(여러 개 한 번) 발화 시 앵커 생성→저장. 도움된 회상은 `히트 H1,H2`(여러 개 한 줄). 안 하면 넘어감(강제 0). 로컬 터미널 별도 실행 안내 금지(이 세션에서 완결)·빙구팩 자동저장 0(저장 확정=사람 · T2). 효용 도장은 사람 히트 + T0 그래프편입 자동관측(opt-in · 헌법 v2 · used only).",
         },
     }
 
