@@ -311,7 +311,7 @@ def _build_recall_hits(home=None, ledger_path=None):
         items = [{"idx": p["idx"], "category": p.get("category"),
                   "rank": p.get("rank"), "claim": p.get("claim")} for p in pending]
         return {"available": True, "count": len(items), "items": items,
-                "note": "도움된 회상에 owner '히트 N'(actor=human) — use_count 아닌 회상효용 축(MF3)·자동 0"}
+                "note": "도움됐으면 `히트 N`, 헛다리면 `미스 N`(actor=human) — 양쪽 다 도장해야 usefulness 정직(히트만 = 100% 가짜)·자동 0"}
     except Exception:
         return {"available": False, "count": 0, "items": [],
                 "note": "히트 후보 로드 실패(graceful 생략)"}
@@ -438,7 +438,7 @@ def build_close_summary(home=None, cwd=None, ledger_path=None, session_id=None, 
         "governance": _build_governance(home, cwd, ledger_path),
         "save_action": {
             "auto_save": False,
-            "how": "저장은 사람이 직접 — preview 번호를 보고 **이 세션 채팅에** `SAVE 1,2`(여러 개 한 번) 발화 시 앵커 생성→저장. 도움된 회상은 `히트 H1,H2`(여러 개 한 줄). 안 하면 넘어감(강제 0). 로컬 터미널 별도 실행 안내 금지(이 세션에서 완결)·빙구팩 자동저장 0(저장 확정=사람 · T2). 효용 도장은 사람 히트 + T0 그래프편입 자동관측(opt-in · 헌법 v2 · used only).",
+            "how": "저장은 사람이 직접 — preview 번호를 보고 **이 세션 채팅에** `SAVE 1,2`(여러 개 한 번) 발화 시 앵커 생성→저장. 도움된 회상은 `히트 1,2`·헛다리는 `미스 3`(H 접두 금지 — 게이트는 `히트/미스 \\d+` 만 인식). 안 하면 넘어감(강제 0). 로컬 터미널 별도 실행 안내 금지(이 세션에서 완결)·빙구팩 자동저장 0(저장 확정=사람 · T2). 효용 도장은 사람 히트/미스 + T0 그래프편입 자동관측(opt-in · 헌법 v2 · used only).",
         },
     }
 
@@ -457,11 +457,8 @@ def _build_paste_block(summary):
     pv = summary.get("preview", {}) or {}
     if pv.get("available") and pv.get("count"):
         block.append("SAVE %s" % ",".join(str(i) for i in range(1, pv["count"] + 1)))
-    rh = summary.get("recall_hits", {}) or {}
-    if rh.get("available") and rh.get("count"):
-        idxs = [str(it["idx"]) for it in rh.get("items", []) if it.get("idx") is not None]
-        if idxs:
-            block.append("히트 %s" % ",".join(idxs))
+    # 회상 판정(히트/미스)은 복붙 블록에 자동으로 넣지 않는다 — owner 가 도움/헛다리를
+    # 골라 직접 도장(전체 자동 '히트 <전체>' = usefulness 100% 편향의 기계적 근원). SAVE 만 자동.
     return block
 
 
@@ -488,14 +485,14 @@ def render_close_md(summary):
     # 2) 이번 세션 회상 히트 후보 (recall_trace 통합 · MF3 회상효용 축 · owner 도장)
     rh = summary.get("recall_hits", {}) or {}
     lines.append("")
-    lines.append("### 2) 이번 세션 회상 — 도움된 기억에 히트 (회상효용 · owner 도장)")
+    lines.append("### 2) 이번 세션 회상 — 판정 (도움=`히트 N` / 헛다리=`미스 N` · owner 도장)")
     if rh.get("available") and rh.get("count"):
         for it in rh.get("items", []):
             cat = (" [%s]" % it["category"]) if it.get("category") else ""
             rank = (" score=%.2f" % it["rank"]) if isinstance(it.get("rank"), (int, float)) else ""
             claim = it.get("claim") or "(원문 미상)"
             lines.append("- %d. %s%s%s" % (it["idx"], claim, cat, rank))
-        lines.append("> %s" % rh.get("note", "도움된 회상만 도장 — 자동 0"))
+        lines.append("> %s" % rh.get("note", "도움=히트 N·헛다리=미스 N — 양쪽 다 도장해야 정직·안 치면 pending 유지·자동 0"))
     else:
         lines.append("- (이번 세션 미판정 회상 없음 — trace OFF 거나 회상 0)")
 
@@ -535,7 +532,8 @@ def render_close_md(summary):
     lines.append("")
     lines.append("### 4) 한 줄로 도장 (안 하면 넘어감 · 강제 0)")
     lines.append("- 저장: `SAVE n` — 예 `SAVE 1,2`(여러 개 한 번) 또는 `SAVE all`")
-    lines.append("- 히트: `히트 1,2` — 도움된 회상만(여러 개 한 줄)")
+    lines.append("- 히트: `히트 1,2` — 도움된 회상 / 미스: `미스 3` — 헛다리·안 도움된 회상(여러 개 한 줄)")
+    lines.append("  (양쪽 다 도장해야 usefulness 정직 — 히트만 = 100% 가짜·안 치면 pending 유지)")
     lines.append("- 자동저장: **0** · 자동도장: **0** (헌법 — 사람 앵커·actor=human 만)")
     lines.append("- %s" % sa.get("how", "저장·도장은 사람이 직접."))
 
@@ -548,6 +546,7 @@ def render_close_md(summary):
         lines.extend(paste)
         lines.append("```")
         lines.append("> 각 줄이 게이트에 개별 인식 — 한 번 붙여넣기로 전 종류 저장(원하는 줄만 남겨 부분 저장도 가능). "
+                     "회상 판정(히트/미스)은 자동으로 안 넣음 — §2 보고 도움=`히트 N`·헛다리=`미스 N` 직접(편향 방지). "
                      "AI 제안(P)은 저장 경로 준비 중(단계2)이라 블록에서 제외.")
     else:
         lines.append("- (저장·히트 후보 없음 — 복사할 블록 0)")
@@ -805,11 +804,14 @@ def _selftest():
                   "T20b review snapshot 저장(H N → trace/node 고정 · mark N-shift 안전)")
             s_rh = build_close_summary(home=str(home_rh), ledger_path=str(led_rh))
             md_rh = render_close_md(s_rh)
+            # 복붙 블록엔 SAVE 만(자동 '히트 <전체>' 제거 = 편향 근원 차단) · §2·§4 는 히트/미스 양자 유도
+            paste_rh = _build_paste_block(s_rh)
             check("이번 세션 회상" in md_rh and "- 1. " in md_rh
-                  and "히트 1,2" in md_rh and "SAVE 1,2" in md_rh
+                  and "미스 N" in md_rh and "미스 3" in md_rh and "SAVE 1,2" in md_rh
                   and "### 5) 한 번에 저장" in md_rh
-                  and "자동저장: **0**" in md_rh,
-                  "T21 render: 회상 히트 숫자 라벨(H버그 수정·게이트 정합) + 복붙 블록 + 도장 안내 + 자동 0")
+                  and "자동저장: **0**" in md_rh
+                  and all(not ln.startswith("히트") for ln in paste_rh),
+                  "T21 render: 회상 판정 히트/미스 양자 유도 + 복붙 SAVE only(자동 전체히트 제거) + 자동 0")
             rh0 = _build_recall_hits(home=str(tmp / ".binggupack_rh0"))
             check(rh0["count"] == 0,
                   "T21b trace 부재 home → 히트 후보 0(graceful · 운영홈 미접촉)")
