@@ -1046,6 +1046,18 @@ def cmd_pair(a):
     return _show(r)
 
 
+def _anchor_session_id(anchor_path):
+    """저장 앵커(last_preview_candidates.json)에 마무리 hook 이 심은 session_id(있으면).
+    save-batch 가 마무리 preview 와 동일 세션 목록을 재현하기 위한 힌트 — 부재/손상/구형(필드
+    없음) → None(전체 목록·하위호환). read-only(원문 미접근)."""
+    try:
+        import json as _json
+        with open(anchor_path, "r", encoding="utf-8") as f:
+            return _json.load(f).get("session_id")
+    except Exception:
+        return None
+
+
 def cmd_save_batch(a):
     """세션 마무리 candidate 번호 배치 저장 — preview(앵커) / --confirm 저장 2단계.
 
@@ -1055,14 +1067,20 @@ def cmd_save_batch(a):
     from binggu_save_batch import stage_batch_anchor, render_batch_preview, save_candidates_batch
     from binggu_capture_persist import PersistentCaptureBuffer
     home = os.path.dirname(os.path.abspath(a.ledger))
-    items = PersistentCaptureBuffer(home=home).render_preview().get("items", [])
+    anchor_path = os.path.join(home, "last_preview_candidates.json")
+    # ★소스 단일화: 마무리 hook 이 앵커에 심은 session_id 가 있으면 그 세션 발화로 필터
+    #   (마무리 preview 와 동일 목록·idx·pref) → owner 'SAVE n' 앵커와 일치·오저장 방지.
+    #   앵커 부재/구형(session_id 없음) → 전체 목록(하위호환).
+    _sid = _anchor_session_id(anchor_path)
+    buf = PersistentCaptureBuffer(home=home)
+    items = (buf.render_preview(session_id=_sid) if _sid is not None
+             else buf.render_preview()).get("items", [])
     if not items:
         print("배치 저장 후보 0건 — 세션 마무리 candidate 가 없습니다.")
         return 0
-    anchor_path = os.path.join(home, "last_preview_candidates.json")
     if a.confirm is None:
-        # preview + 번호축 앵커 생성(owner 'SAVE n' 발화 대조용 · 저장 0)
-        stage_batch_anchor(items, path=anchor_path)
+        # preview + 번호축 앵커 생성(owner 'SAVE n' 발화 대조용 · 저장 0 · session_id 보존)
+        stage_batch_anchor(items, path=anchor_path, session_id=_sid)
         print(render_batch_preview(items))
         return 0
     # confirm: 'SAVE 6,11,13' → 저장

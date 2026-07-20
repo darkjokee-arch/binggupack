@@ -48,8 +48,21 @@ def main():
         return 0
     try:
         from binggupack.review.session_close import process
-        out = process({"utterance": prompt, "session_id": data.get("session_id")}, cwd=data.get("cwd"))
+        sid = data.get("session_id")
+        out = process({"utterance": prompt, "session_id": sid}, cwd=data.get("cwd"))
         if out.get("is_close") and out.get("rendered"):
+            # ★소스 단일화: 마무리 preview 목록(session_id 필터)을 그대로 저장 앵커로 stage.
+            #   owner 'SAVE n' 대조 기준을 '눈에 본 preview'로 통일(앵커가 딴 목록이면 오저장 —
+            #   이원화 버그). session_id 를 앵커에 심어 save-batch 저장이 동일 세션 목록을 재현.
+            #   저장 0(hash 만)·best-effort(실패해도 preview 표시엔 무영향).
+            try:
+                pv = (out.get("summary") or {}).get("preview") or {}
+                items = pv.get("items") or []
+                if items:
+                    from binggu_save_batch import stage_batch_anchor
+                    stage_batch_anchor(items, session_id=sid)
+            except Exception:
+                pass
             block = out["rendered"] + (
                 "\n\n> ★세션 마무리 감지 — 위 preview 번호로 **사장님이** `SAVE n`/`PAIR ...` 직접 "
                 "선택하세요(빙구팩 자동저장 0 · AI 임의저장 금지 · G4).")

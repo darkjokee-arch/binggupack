@@ -33,11 +33,14 @@ def _anchor_candidates(buffer_items):
     return [{"sentence": it.get("text", "")} for it in (buffer_items or [])]
 
 
-def stage_batch_anchor(buffer_items, path=None):
+def stage_batch_anchor(buffer_items, path=None, session_id=None):
     """세션 마무리 candidate 목록을 번호축 앵커(last_preview_candidates.json)로 기록.
-    owner 의 'SAVE n' 발화가 이 앵커와 대조돼 human 승격된다(저장 0 · hash 만). 반환 rows 수."""
+    owner 의 'SAVE n' 발화가 이 앵커와 대조돼 human 승격된다(저장 0 · hash 만). 반환 rows 수.
+    session_id 지정 시 앵커에 심어 저장 경로(cmd_save_batch)가 동일 세션 목록을 재현하도록 한다
+    (마무리 preview·앵커·저장 3자 idx/pref 통일 — 이원화 오저장 방지)."""
     from binggupack.safety.gate_log import write_last_preview
-    return write_last_preview(_anchor_candidates(buffer_items), path=path, explicit=True)
+    return write_last_preview(_anchor_candidates(buffer_items), path=path,
+                              explicit=True, session_id=session_id)
 
 
 def render_batch_preview(buffer_items):
