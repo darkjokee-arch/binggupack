@@ -63,7 +63,26 @@ def main():
                     stage_batch_anchor(items, session_id=sid)
             except Exception:
                 pass
-            block = out["rendered"] + (
+            # ★T0 그래프편입 자동관측(헌법 v2) — opt-in ON 일 때만. 회상 노드가 '회상 이후 새 엣지'로
+            #   편입됐으면 used 자동 도장(사람 도장 불요). ledger read-only(sibling recall_trace 만
+            #   append)·best-effort·예외 흡수. 기본 OFF(auto_observe_enabled) — dry-run 확인 후 owner 가
+            #   켠다(첫 대량도장 방지). session_close(표시)는 read-only 유지 — write 는 이 hook 레벨만.
+            observe_note = ""
+            try:
+                from binggupack.pack import recall_trace as _RT
+                _h = _home()
+                if _RT.auto_observe_enabled(_h):
+                    from datetime import datetime, timezone
+                    _ao = _RT.auto_observe_adoption(
+                        datetime.now(timezone.utc).isoformat(),
+                        home=_h, ledger_path=os.path.join(_h, "ledger.sqlite"))
+                    _n = _ao.get("observed", 0)
+                    if _n:
+                        observe_note = ("\n\n> ✅ 회상 %d건이 새 엣지로 편입돼 자동 채택(used) 관측됨 "
+                                        "(T0 자율 · owner 도장 불요 · 운영 ledger 불변)." % _n)
+            except Exception:
+                pass
+            block = out["rendered"] + observe_note + (
                 "\n\n> ★세션 마무리 감지 — 위 preview 번호로 **사장님이** `SAVE n`/`PAIR ...` 직접 "
                 "선택하세요(빙구팩 자동저장 0 · AI 임의저장 금지 · G4).")
             sys.stdout.buffer.write((block + "\n").encode("utf-8"))
