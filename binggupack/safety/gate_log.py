@@ -214,17 +214,23 @@ def preview_ref_for_candidates(candidates):
     return preview_ref_for_rows(_preview_rows(candidates))
 
 
-def write_last_preview(candidates, path=None, explicit=False):
+def write_last_preview(candidates, path=None, explicit=False, session_id=None):
     """capture_preview 후보 → idx+sentence_hash 영속(원문 미저장, hash만). SAVE hook 이 대조용으로 읽음.
     매 preview 마다 덮어씀(직전 1건만 유효). pref=save-n 참조 바인딩용 preview_ref,
-    explicit=후보 재도출 모드 — save/pair/core 재승격이 기록된 모드로 동일 재계산(pref 패리티)."""
+    explicit=후보 재도출 모드 — save/pair/core 재승격이 기록된 모드로 동일 재계산(pref 패리티).
+    session_id=세션 경계 목록 재현 힌트(save-batch 저장이 동일 session_id 로 render_preview 필터해
+    앵커·마무리 preview·저장 목록 축을 통일 — 이원화 오저장 방지). pref 계산 미포함이라
+    하위호환·pref 패리티 불변(session_id 없으면 필드 자체 미기록 = 구 앵커와 byte 동일)."""
     path = path or last_preview_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
     rows = _preview_rows(candidates)
+    payload = {"ts": time.time(), "pref": preview_ref_for_rows(rows),
+               "explicit": bool(explicit), "items": rows}
+    if session_id is not None:
+        payload["session_id"] = session_id
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump({"ts": time.time(), "pref": preview_ref_for_rows(rows),
-                   "explicit": bool(explicit), "items": rows}, f, ensure_ascii=False)
+        json.dump(payload, f, ensure_ascii=False)
     os.replace(tmp, path)  # atomic
     return len(rows)
 
