@@ -2,7 +2,8 @@
 """binggu_p1_config — P1 안전벨트(헌법) + 설정값 + 가치관 로더 (backward-compatible thin wrapper).
 
 v1.16 strangler Phase2: 순수 정본(🔒 SAFETY_BELT 안전벨트 상수 + 헬퍼 confirm_actor/
-is_confirm_actor/assert_human/preserves_unsupported_notes/auto_value_judgment_allowed,
+is_confirm_actor/assert_human/preserves_unsupported_notes/auto_value_judgment_allowed
++ v2 자율성 티어 auto_fact_observation_allowed/auto_signal_ranking_direct_forbidden/t1_negative_gate_enabled,
 ⚙️ DEFAULT_CONFIG + _coerce_*/load_user_config/접근자, 👤 가치관 로더)은
 binggupack.safety.p1_config 로 byte-identical 이관됐고, 이 파일은 공개 심볼이 동일한 thin
 wrapper 다. 기존 호출처(import binggu_p1_config — recall/contrast/realpack/a0_node/p1_ranking
@@ -37,6 +38,9 @@ from binggupack.safety.p1_config import (  # noqa: E402,F401  (전체 명시 re-
     assert_human,
     preserves_unsupported_notes,
     auto_value_judgment_allowed,
+    auto_fact_observation_allowed,
+    auto_signal_ranking_direct_forbidden,
+    t1_negative_gate_enabled,
     DEFAULT_CONFIG,
     _RECALL_KEYS,
     _RANKING_KEYS,
@@ -109,6 +113,30 @@ def _selftest():
         save_user_config({"confirm_actor": "auto"}, home=home)  # 설정에 넣어도
         check(confirm_actor() == "human", "T1g 설정에 confirm_actor 넣어도 안전벨트 불변")
         config_path(home).unlink()  # 정리
+
+        # --- 1층 v2 자율성 티어(T0/T1) + T0↔T2 격리 불변식(2026-07-20 owner GO) ---
+        check(auto_fact_observation_allowed() is True,
+              "T1h T0 효용사실 자동관측 허용(v2)")
+        check(auto_signal_ranking_direct_forbidden() is True,
+              "T1i T0 자동신호 랭킹 직접반영 금지(인기편향 방어)")
+        check(t1_negative_gate_enabled() is True,
+              "T1j T1 국소판단 자율+사후부정 게이트(v2)")
+        # ★격리 핵심: T0/T1 이 열려도 T2 확정 게이트는 불변 — 자율이 저장확정을 못 연다
+        check(confirm_actor() == "human" and not is_confirm_actor("auto"),
+              "T1k [격리] T0/T1 열려도 confirm_actor==human 불변")
+        try:
+            assert_human("auto")
+            check(False, "T1l [격리] 자율 티어에도 assert_human(auto) → PermissionError")
+        except PermissionError:
+            check(True, "T1l [격리] 자율 티어에도 assert_human(auto) → PermissionError(fail-closed)")
+        # ★가치/사실 축 분리: 효용 '사실' 관측은 열려도 '가치' 자동판정은 여전히 금지
+        check(auto_fact_observation_allowed() is True and auto_value_judgment_allowed() is False,
+              "T1m [축분리] 사실관측 허용 ∧ 가치판정 금지 동시 성립")
+        # 안전벨트 신규 키도 설정으로 못 끈다(불변)
+        save_user_config({"auto_fact_observation": False, "t1_negative_gate": False}, home=home)
+        check(auto_fact_observation_allowed() is True and t1_negative_gate_enabled() is True,
+              "T1n 설정에 자율 키 False 넣어도 안전벨트 불변")
+        config_path(home).unlink()
 
         # --- 2층 설정값: 없을 때 기본값 ---
         check(not config_path(home).exists(), "T2a 설정파일 없음(초기)")

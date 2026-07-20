@@ -7,10 +7,15 @@ owner 31노드·owner 경로 하드코딩 0 — 기본값 + 사용자별 설정�
 3층 분리(owner 확정):
   1. 🔒 안전벨트(코드 고정·전 사용자 공통, 헌법): SAFETY_BELT 상수 + 헬퍼.
      다른 모듈이 import 해 강제한다. 설정/가치관으로도 못 바꾼다(불변).
-       - AI 는 추천만 · 확정은 사람(actor=human)
-       - 근거 없는 직감 메모도 검열·자동폐기 금지(보존)
-       - AI 자동 가치관 판정 금지
-       - 가치관 코드 동결 금지(빙구팩은 경로/로더만, 내용은 각 사용자 것)
+     v2 자율성 티어(2026-07-20 owner 승인) — 위험도(가역성)별 차등:
+       [T2 비가역·사람만] AI 는 추천만·확정은 사람(actor=human) / 가치관 자동판정 금지 /
+                         직감메모 보존 / 가치관 코드동결 금지  ← v1 이래 불변
+       [T0 가역·AI 자율]  효용 '사실'(회상채택·노출빈도) 자동 관측 허용 —
+                         단 랭킹 직접반영 금지(그림자만·인기편향 방어)
+       [T1 국소·AI 자율]  후보·규칙 제안 자율 실행, 사람은 '틀렸다'만 개입 —
+                         T1→T2 승격은 여전히 confirm_actor(=human)
+     핵심: 자율은 '사실 축'에서만. '가치 축'과 T2(비가역)는 영원히 사람.
+           T0/T1 이 열려도 confirm_actor/assert_human 은 1바이트도 안 바뀐다(격리).
   2. ⚙️ 설정값(기본값 제공·사용자별 조정): challenge_threshold · 랭킹 가중치 · 외부소스목록.
      <binggu_home>/binggu_config.json 에서 로드, 없으면 DEFAULT_CONFIG. 코드 하드코딩 고정 아님.
   3. 👤 가치관 로더: user_ontology(또는 사용자 지정 파일)를 "읽는 자리"만 제공.
@@ -42,6 +47,7 @@ except ImportError:  # pragma: no cover
 #    설정/가치관 어떤 값으로도 못 바꾼다. 다른 모듈이 import 해 강제.
 # ============================================================
 SAFETY_BELT = {
+    # === T2 (비가역 · 사람 확정만) — v1 이래 불변, 강제력 동일 ===
     # AI 는 추천만 — 영구화·확정은 사람만(actor 화이트리스트 = human 단일).
     "confirm_actor": "human",
     # 근거 없는 직감/짧은 메모도 검열하거나 자동폐기하지 않는다(보존). discard 는 사람 손에만.
@@ -50,6 +56,17 @@ SAFETY_BELT = {
     "no_auto_value_judgment": True,
     # 가치관은 코드에 동결하지 않는다 — 빙구팩은 경로/로더만, 내용은 각 사용자 것.
     "no_frozen_values": True,
+    # === T0 (가역·무해 사실관측 · AI 자율) — v2 자율성 티어(2026-07-20 owner GO) ===
+    # AI 가 효용 '사실'(회상 채택·노출빈도)을 사람 도장 없이 자동 관측·기록할 수 있다.
+    # 이는 '사실 관측'이지 '가치 판정'이 아니다 — no_auto_value_judgment(가치)는 위에서 불변.
+    "auto_fact_observation": True,
+    # 단 자동 관측 신호를 랭킹 정렬 key 에 '직접' 넣는 것은 금지(인기편향·오기억 상위화 차단).
+    # 그림자/약신호로만. hit_stats.assert_not_ranking_input 정신 계승.
+    "auto_signal_not_ranking_direct": True,
+    # === T1 (국소 판단 · AI 자율 실행 + 사후 부정만) — v2 ===
+    # 후보·규칙 제안 등은 AI 자율 생성, 사람은 '틀렸다'(부정)만 개입.
+    # T1→T2(영구 저장) 승격은 여전히 confirm_actor(=human) — 자율은 T2 를 침범하지 않는다.
+    "t1_negative_gate": True,
 }
 
 
@@ -81,6 +98,26 @@ def preserves_unsupported_notes():
 def auto_value_judgment_allowed():
     """AI 자동 가치관 판정 허용 여부. 항상 False(헌법)."""
     return not SAFETY_BELT["no_auto_value_judgment"]
+
+
+# --- v2 자율성 티어 접근자 (T0/T1 · 2026-07-20 owner GO) ---
+# 아래 셋이 열려도 confirm_actor()/assert_human()(T2 확정 게이트)은 조금도 안 바뀐다(격리 불변식).
+def auto_fact_observation_allowed():
+    """T0 — AI 가 효용 '사실'(회상 채택·노출빈도)을 사람 도장 없이 자동 관측·기록하는가.
+    True(v2). '사실 관측'이지 '가치 판정'이 아니다 — auto_value_judgment_allowed()는 불변 False."""
+    return SAFETY_BELT["auto_fact_observation"]
+
+
+def auto_signal_ranking_direct_forbidden():
+    """T0 방어 — 자동 관측 신호를 랭킹 정렬 key 에 '직접' 넣는 것을 금지하는가.
+    True(인기편향·오기억 상위화 차단). 자동 신호는 그림자/약신호로만."""
+    return SAFETY_BELT["auto_signal_not_ranking_direct"]
+
+
+def t1_negative_gate_enabled():
+    """T1 — 국소 판단(후보·규칙 제안)을 AI 자율 실행하되 사람은 '틀렸다'(부정)만 개입하는가.
+    True(v2). T1→T2(영구 저장) 승격은 여전히 confirm_actor(=human) — 자율은 T2 를 침범 안 함."""
+    return SAFETY_BELT["t1_negative_gate"]
 
 
 # ============================================================

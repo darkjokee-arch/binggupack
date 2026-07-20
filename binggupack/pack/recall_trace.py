@@ -214,13 +214,23 @@ def trace_from_preflight(query, result, ts, *, domain=None, home=None):
 # ---------------- 기록: 사후 효용 판정 (actor=human 게이트) ----------------
 
 def record_outcome(trace_id, node_id, verdict, ctx, ts, *, reason_code=None, home=None):
-    """회상 노드 1개에 대한 사후 효용 판정. actor=human 만(헌법). verdict∈used/ignored/corrected.
+    """회상 노드 1개에 대한 사후 효용 판정. verdict∈used/ignored/corrected.
+
+    actor 게이트(헌법 v2 자율성 티어 · 2026-07-20 owner GO):
+      - human          : used/ignored/corrected 전부 허용(기존 경로 · 강제력 불변).
+      - ai_observation : T0 자동 관측 — verdict='used' 만 허용(auto_fact_observation 게이트).
+        owner 신호('노드·엣지·증거 연결 시작 = 채택')의 자동 도장. ignored/corrected(부정·교정)는
+        여전히 human 만 — 오판·인기편향 방지(negative-only 는 사람). actor 원문 보존(사람 위장 0).
 
     reason_code: note 대용 — 자유 원문 금지(PII 차단), REASON_CODES[verdict] 화이트리스트만.
       None 은 항상 허용. used 에 코드 명시는 거부(used 사유 불요).
-    node_id='*' 는 trace 전체에 대한 판정(개별 노드 미지정). 같은 (trace_id,node_id)는
-    UNIQUE — 재판정은 갱신(REPLACE)이 아니라 무시(이중계상 차단 · 첫 판정 보존)."""
-    if (ctx or {}).get("actor", "").strip().lower() != "human":
+    같은 (trace_id,node_id)는 UNIQUE — 재판정은 무시(이중계상 차단 · 첫 판정 보존)."""
+    actor = (ctx or {}).get("actor", "").strip().lower()
+    if actor == "human":
+        pass  # 기존 경로(전 verdict)
+    elif actor == "ai_observation" and verdict == "used" and CFG.auto_fact_observation_allowed():
+        pass  # T0 자동 관측(used only · 헌법 v2 · auto_fact_observation)
+    else:
         return {"recorded": False, "reason": "G4_no_auto"}
     if verdict not in VALID_VERDICTS:
         return {"recorded": False, "reason": "invalid_verdict"}
@@ -238,11 +248,67 @@ def record_outcome(trace_id, node_id, verdict, ctx, ts, *, reason_code=None, hom
             return {"recorded": False, "reason": "dup_outcome"}
         con.execute(
             "INSERT INTO recall_outcomes(outcome_id,trace_id,node_id,verdict,reason_code,actor,ts)"
-            " VALUES(?,?,?,?,?,?,?)", (oid, trace_id, node_id, verdict, reason_code, "human", ts))
+            " VALUES(?,?,?,?,?,?,?)", (oid, trace_id, node_id, verdict, reason_code, actor, ts))
         con.commit()
     finally:
         con.close()
-    return {"recorded": True, "outcome_id": oid, "reason_code": reason_code}
+    return {"recorded": True, "outcome_id": oid, "reason_code": reason_code, "actor": actor}
+
+
+# ---------------- T0 자동 관측: 그래프 편입 = 채택 (헌법 v2 · owner 신호) ----------------
+
+def auto_observe_adoption(ts, *, home=None, ledger_path=None):
+    """T0 자동 효용 관측 — 미판정 회상 노드가 '회상 이후 생성된 새 엣지'의 source/target 로
+    편입됐으면 used 자동 도장(actor=ai_observation). owner 신호: 노드·엣지·증거 연결 시작=채택.
+
+    - auto_fact_observation OFF(헌법상 항상 True·방어) / ledger 부재 / trace store 부재 → no-op.
+    - 자기증빙(evidence_supports) 엣지는 제외 — 노드 저장시 자동 생성되는 자기 엣지라 '채택' 아님.
+    - used 만 자동. ignored/corrected(부정·교정)는 손대지 않음(사람 negative-only).
+    - ledger 는 read-only(mode=ro) 조회만 — 운영 장부 write 0. recall_outcomes(sibling)만 append.
+    - signal_only — recall_outcomes 집계는 golden/use_count/랭킹 자동수정에 진입 안 함(기존 라벨 유지).
+    반환 {observed, stamped:[{trace_id,node_id}], reason?}."""
+    if not CFG.auto_fact_observation_allowed():
+        return {"observed": 0, "stamped": [], "reason": "auto_fact_observation_off"}
+    if not ledger_path or not os.path.exists(ledger_path):
+        return {"observed": 0, "stamped": [], "reason": "no_ledger"}
+    if not os.path.exists(trace_store_path(home)):
+        return {"observed": 0, "stamped": [], "reason": "no_trace_store"}
+    con = _open_store(home)
+    try:
+        judged = set(con.execute("SELECT trace_id, node_id FROM recall_outcomes").fetchall())
+        rows = con.execute("SELECT trace_id, recalled_json, ts FROM recall_traces").fetchall()
+    finally:
+        con.close()
+    lcon = sqlite3.connect(
+        "file:%s?mode=ro" % os.path.abspath(ledger_path).replace("\\", "/"), uri=True)
+    stamped = []
+    try:
+        for trace_id, rj, trace_ts in rows:
+            if not trace_ts:
+                continue  # 회상 시점 모르면 이후 편입 판정 불가(보수)
+            try:
+                nodes = json.loads(rj) if rj else []
+            except Exception:
+                nodes = []
+            for n in nodes:
+                nid = n.get("node_id")
+                if not nid or (trace_id, nid) in judged:
+                    continue
+                # 회상 이후 생성된 '관계' 엣지(자기증빙 제외)에 이 노드가 편입됐나 — read-only
+                row = lcon.execute(
+                    "SELECT 1 FROM edges WHERE (source=? OR target=?)"
+                    " AND relation != 'evidence_supports'"
+                    " AND created_at IS NOT NULL AND created_at > ? LIMIT 1",
+                    (nid, nid, trace_ts)).fetchone()
+                if not row:
+                    continue
+                res = record_outcome(trace_id, nid, "used", {"actor": "ai_observation"}, ts, home=home)
+                if res.get("recorded"):
+                    stamped.append({"trace_id": trace_id, "node_id": nid})
+                    judged.add((trace_id, nid))
+    finally:
+        lcon.close()
+    return {"observed": len(stamped), "stamped": stamped}
 
 
 # ---------------- review / mark (수동 outcome 명령 — binggu trace) ----------------
@@ -615,6 +681,72 @@ def _selftest():
         agg5 = aggregate(home=home5)
         ck(agg5["per_node"]["node:CONV:p2"]["reasons"].get("stale") == 1,
            "aggregate per_node reasons 분포(p2: stale 1) — golden 보정 방향")
+
+        # ── T0 자동 관측: 그래프 편입 = 채택(헌법 v2 · owner 신호) ──
+        home6 = os.path.join(tmp, ".binggupack6")
+        os.makedirs(home6, exist_ok=True)
+        set_trace_flag(True, home=home6)
+        led6 = os.path.join(home6, "ledger.sqlite")
+        lcon6 = sqlite3.connect(led6)
+        apply_schema(lcon6)
+        for nid in ("node:CONV:g1", "node:CONV:g2"):
+            lcon6.execute("INSERT INTO nodes(node_id,node_type,sentence,candidate,state,content_hash,"
+                          "created_at,semantic_subtype,use_count) VALUES"
+                          "(?,'judgment','문장',0,'active','h',?, '교훈',0)", (nid, TS))
+        lcon6.commit()
+        lcon6.close()
+        adopt_recalled = [
+            {"node_id": "node:CONV:g1", "semantic_subtype": "교훈", "rank_score": 0.8, "relevance": 0.7},
+            {"node_id": "node:CONV:g2", "semantic_subtype": "교훈", "rank_score": 0.7, "relevance": 0.6},
+        ]
+        rt6 = record_trace("그래프 편입 점검", "preflight", adopt_recalled, TS, home=home6)
+        tid6 = rt6["trace_id"]
+
+        # ai_observation 은 used 만 자동 — ignored/corrected 거부(부정 판정은 사람 negative-only)
+        ck(record_outcome(tid6, "node:CONV:g1", "ignored", {"actor": "ai_observation"}, TS,
+                          home=home6)["reason"] == "G4_no_auto",
+           "ai_observation ignored → 거부(부정 판정은 사람만)")
+        ck(record_outcome(tid6, "node:CONV:g1", "corrected", {"actor": "ai_observation"}, TS,
+                          home=home6)["reason"] == "G4_no_auto", "ai_observation corrected → 거부")
+
+        # 편입 전: 관계 엣지 없음 → 자동 도장 0
+        TS_LATER = "2026-06-27T02:00:00Z"
+        ck(auto_observe_adoption(TS_LATER, home=home6, ledger_path=led6)["observed"] == 0,
+           "편입 전(관계 엣지 없음) → 자동 도장 0")
+
+        lcon6 = sqlite3.connect(led6)
+        # g1: 회상 이후 생성된 관계 엣지(supports_judgment)의 target 로 편입 → 채택 신호
+        lcon6.execute("INSERT INTO edges(edge_id,relation,source,target,candidate,state,created_at)"
+                      " VALUES('e6a','supports_judgment','node:CONV:new1','node:CONV:g1',0,'active',?)",
+                      (TS_LATER,))
+        # g2: 회상 이전 엣지에만(created_at < trace_ts) → 신호 아님
+        lcon6.execute("INSERT INTO edges(edge_id,relation,source,target,candidate,state,created_at)"
+                      " VALUES('e6b','supports_judgment','node:CONV:old','node:CONV:g2',0,'active',"
+                      "'2026-06-26T00:00:00Z')")
+        # g2: 자기증빙(evidence_supports)은 회상 이후라도 신호 아님(자기 엣지 제외)
+        lcon6.execute("INSERT INTO edges(edge_id,relation,source,target,candidate,state,created_at)"
+                      " VALUES('e6c','evidence_supports','EVC-CONV-g2','node:CONV:g2',0,'active',?)",
+                      (TS_LATER,))
+        lcon6.commit()
+        led6_mt = os.path.getmtime(led6)
+        lcon6.close()
+
+        adopt = auto_observe_adoption(TS_LATER, home=home6, ledger_path=led6)
+        ck(adopt["observed"] == 1 and adopt["stamped"][0]["node_id"] == "node:CONV:g1",
+           "자동 관측: g1(회상 후 관계 엣지 편입) → used 1건 자동 도장")
+        agg6 = aggregate(home=home6)
+        ck(agg6["per_node"].get("node:CONV:g1", {}).get("used") == 1
+           and "node:CONV:g2" not in agg6["per_node"],
+           "g1 만 used(회상 이전 엣지·자기증빙은 신호 아님)")
+        con6 = _open_store(home6)
+        act6 = con6.execute("SELECT actor FROM recall_outcomes WHERE trace_id=? AND node_id=?",
+                            (tid6, "node:CONV:g1")).fetchone()[0]
+        con6.close()
+        ck(act6 == "ai_observation", "자동 도장 actor=ai_observation(사람 위장 0)")
+        ck(os.path.getmtime(led6) == led6_mt,
+           "auto_observe_adoption: ledger read-only(mode=ro · mtime 불변)")
+        ck(auto_observe_adoption(TS_LATER, home=home6, ledger_path=led6)["observed"] == 0,
+           "자동 관측 멱등: 이미 도장된 것 재도장 0(dup 차단)")
 
         # ── 운영 ledger sentinel 미접촉 ──
         ck(os.path.exists(ledger) and os.path.getmtime(ledger) == ledger_mt0,
