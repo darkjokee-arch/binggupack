@@ -503,6 +503,13 @@ def render_close_md(summary):
     if pv.get("available") and pv.get("count"):
         for it in pv.get("items", []):
             lines.append("- " + str(it.get("label", it.get("text", ""))))
+            # B-2(대화쌍): 직전 AI말 발췌를 2줄로 노출 — owner 가 SAVE 하면 save_paired 로
+            #   owner 발화 ↔ AI 말 pair(노드2+엣지1) 저장(별도 경로 신설 없음 · 재료 표시만).
+            ai_ctx = it.get("ai_context")
+            if ai_ctx:
+                s = " ".join(str(ai_ctx).split())
+                lines.append("    ↳ 직전 AI말(대화쌍 재료 · SAVE 시 pair 저장): %s"
+                             % (s if len(s) <= 80 else s[:79] + "…"))
         lines.append("> %s" % pv.get("note", "owner 승인 전 candidate"))
     else:
         lines.append("- (수집된 candidate 없음 — 표시할 preview 0)")
@@ -719,6 +726,19 @@ def _selftest():
         except Exception:
             buf_ok = False  # 버퍼 모듈 흐름 변경 시 graceful 실패 표시
         check(buf_ok, "T9 candidate 적재 후 preview 표시 · ledger 미생성(candidate-only · 저장 0)")
+
+        # T9b B-2: dialectic 발화(prev_turn) → preview 대화쌍 노출 + render 에 직전 AI말 2줄
+        pair_ok = True
+        try:
+            b.feed("아니 그게 아니라 A안이 맞다", "C:/Users/fixture-user/binggupack",
+                   prev_turn="B안을 추천합니다")
+            pv2 = _build_preview(home=home)
+            has_ctx = any(it.get("ai_context") for it in pv2.get("items", []))
+            md_pair = render_close_md({"preview": pv2, "save_action": {"auto_save": False}})
+            pair_ok = has_ctx and "대화쌍 재료" in md_pair and "B안을 추천합니다" in md_pair
+        except Exception:
+            pair_ok = False
+        check(pair_ok, "T9b dialectic → preview ai_context 노출 + render '대화쌍 재료' 직전 AI말 표시")
 
         # T10 거버넌스 요약(hit_events 있는 ledger) — signal_only 표지 + 저장 0
         gov_ok = True
