@@ -396,6 +396,12 @@ def _selftest():
               "T16c 범위 상한 50(1-50 허용·1-51/1-9999 무효)")
         check(gl.parse_hit_stamps("히트 2\n미스 2") == {"hit": [], "miss": [2]},
               "T16d 같은 idx 재도장 → 나중 줄 승리(정정 허용)")
+        # T16e ★한 줄에 히트/미스 혼합(owner 자연발화 '히트 4,7,8 미스 1,9,11,12') — 종전 None 도장증발
+        check(gl.parse_hit_stamps("히트 4,7,8 미스 1,9,11,12")
+              == {"hit": [4, 7, 8], "miss": [1, 9, 11, 12]}
+              and gl.parse_hit_stamps("미스 1 히트 2") == {"hit": [2], "miss": [1]}
+              and gl.parse_hit_stamps("히트 3 미스 3") == {"hit": [], "miss": [3]},
+              "T16e 한 줄 히트/미스 혼합 → 세그먼트별 파싱(혼합 마지막 승리)")
 
         # T17 비정확형 발화 e2e — hook 이 기록 0(gate 파일 불변)
         before = gate_log.read_text(encoding="utf-8")

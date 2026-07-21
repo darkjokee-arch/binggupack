@@ -351,9 +351,12 @@ def gate_record_from_prompt(prompt, preview_path=None, gate_path=None, ts=None):
 
 # 회수 스탬프: 'HIT 1' / '히트 1,3' / 'MISS 2' / '미스 1-3'. SAVE 도장과 동일 계약 —
 # 발화 전체 또는 한 줄 전체 정확형(fullmatch)만 인정(부분문자열·인용문 무시).
-HIT_TRIGGER_RE = re.compile(
-    r"\s*(?:HIT|히트|MISS|미스)\s*\d+(\s*[-~]\s*\d+)?(\s*,\s*\d+(\s*[-~]\s*\d+)?)*\s*",
-    re.IGNORECASE)
+# ★2026-07-22: 한 줄에 히트/미스 세그먼트 혼합 허용('히트 4,7,8 미스 1,9,11,12') — owner 가
+#   자연스럽게 한 줄로 섞어 발화하면 종전 단일-세그먼트 fullmatch 가 None 반환해 도장 전부 증발
+#   (owner 실측 재발). 줄 = 세그먼트(히트/미스+인덱스) 1+ 로 인정하고 parse 에서 세그먼트별 판별.
+_HIT_SEG_PAT = r"(?:HIT|히트|MISS|미스)\s*\d+(?:\s*[-~]\s*\d+)?(?:\s*,\s*\d+(?:\s*[-~]\s*\d+)?)*"
+_HIT_SEG_RE = re.compile(_HIT_SEG_PAT, re.IGNORECASE)
+HIT_TRIGGER_RE = re.compile(r"\s*(?:%s\s*)+" % _HIT_SEG_PAT, re.IGNORECASE)  # 줄 = 세그먼트 1+ (혼합 OK)
 
 # 승격 스탬프: 'PROMOTE 1' / '승격 1,3-5'. 계약 동일(fullmatch·줄단위).
 PROMOTE_TRIGGER_RE = re.compile(
@@ -402,12 +405,16 @@ def parse_hit_stamps(prompt):
     문장 속 언급("그거 히트 3 어쩌고")은 줄 일부라 무시(SAVE 도장과 동일 오도장 차단 계약)."""
     verdicts = {}
     for chunk in _stamp_chunks(HIT_TRIGGER_RE, prompt):
-        idx = _expand_stamp_indices(chunk)
-        if not idx:
-            continue
-        v = "hit" if _HIT_WORD_RE.match(chunk) else "miss"
-        for i in idx:
-            verdicts[i] = v
+        # 한 줄에 히트/미스 세그먼트가 여러 개 섞일 수 있다(owner 자연발화 '히트 4,7,8 미스 1,9,11,12').
+        #   세그먼트별로 verdict 판별 — 같은 idx 재도장은 나중 세그먼트가 이긴다(정정 허용).
+        for seg in _HIT_SEG_RE.finditer(chunk):
+            segtext = seg.group(0)
+            idx = _expand_stamp_indices(segtext)
+            if not idx:
+                continue
+            v = "hit" if _HIT_WORD_RE.match(segtext) else "miss"
+            for i in idx:
+                verdicts[i] = v
     if not verdicts:
         return None
     out = {"hit": [], "miss": []}
