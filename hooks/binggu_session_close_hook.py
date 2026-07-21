@@ -85,7 +85,18 @@ def main():
             block = out["rendered"] + observe_note + (
                 "\n\n> ★세션 마무리 감지 — 위 preview 번호로 **사장님이** `SAVE n`/`PAIR ...` 직접 "
                 "선택하세요(빙구팩 자동저장 0 · AI 임의저장 금지 · G4).")
-            sys.stdout.buffer.write((block + "\n").encode("utf-8"))
+            # ★owner 표시 배선(2026-07-21 owner 실측 "preview 가 나한테 안 보인다"): UserPromptSubmit
+            #   hook 의 plain stdout 은 Claude context(additionalContext)로만 주입돼 owner 화면 미표시.
+            #   systemMessage 필드로 내보내야 owner 가 직접 본다(공식 hooks JSON 스키마). additionalContext
+            #   는 Claude 용으로 병행 — 도장은 여전히 사람(G4 불변 · 표시 경로만 수정 · 저장/도장 로직 불변).
+            payload = json.dumps({
+                "systemMessage": block,
+                "hookSpecificOutput": {
+                    "hookEventName": "UserPromptSubmit",
+                    "additionalContext": block,
+                },
+            }, ensure_ascii=False)
+            sys.stdout.buffer.write((payload + "\n").encode("utf-8"))
             sys.stdout.buffer.flush()
     except Exception:
         pass  # 모든 예외 흡수 — 세션 방해 0
