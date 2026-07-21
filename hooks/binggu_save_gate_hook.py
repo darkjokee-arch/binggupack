@@ -76,6 +76,46 @@ def _recall_trace_module(scripts_dir):
         return None
 
 
+def _outcome_attribution_module(scripts_dir):
+    """outcome_attribution(결과-귀속 장부) import — recall_trace 로더와 동일 패턴. 실패 시 None(무해).
+    히트 도장(applied)을 recall_run_outcomes 에 결과-귀속 관찰로 append 하는 경로(C · 2026-07-21)."""
+    try:
+        from binggupack.pack import outcome_attribution
+        return outcome_attribution
+    except Exception:
+        pass
+    try:
+        root = str(Path(scripts_dir).resolve().parent)
+        if root not in sys.path:
+            sys.path.insert(0, root)
+        from binggupack.pack import outcome_attribution
+        return outcome_attribution
+    except Exception:
+        return None
+
+
+def _stamp_run_applied(oa, snap, idx, ts):
+    """히트 도장 1건(idx) → 결과-귀속 관찰 append(best-effort · 실패 침묵 · hook 무방해).
+
+    owner '히트 N' 이 트리거이자 증거(evidence_kind='user' · SAVE 불요 · trust=ai_observation).
+    applied_node_ids = owner 가 히트한 노드(owner 선택 · AI 자동판정 0 — B 와 동일 원리).
+    result='unknown'(작업 결과는 이 시점 관찰 불가 · outcome_attribution 인과단정 스키마 배제와 정합).
+    evidence_digest 는 (trace,node) 결정적 → 같은 히트 재도장은 dup_outcome 로 1건 유지(recall_outcomes
+    UNIQUE 와 대칭). B 히트가 쌓이는 만큼 C(결과-귀속)가 자연히 흐른다(owner 논증 2026-07-21)."""
+    try:
+        import hashlib
+        item = next((s for s in snap if s.get("idx") == idx), None)
+        if not item or not item.get("trace_id") or not item.get("node_id"):
+            return
+        digest = hashlib.sha256(
+            ("hit-applied|%s|%s" % (item["trace_id"], item["node_id"])).encode("utf-8", "replace")
+        ).hexdigest()[:16]
+        oa.record_run_outcome(item["trace_id"], [item["node_id"]],
+                              "applied", "unknown", "user", digest, ts)
+    except Exception:
+        pass
+
+
 def _run(data):
     try:
         if (data.get("hook_event_name") or "") != "UserPromptSubmit":
@@ -119,10 +159,15 @@ def _run(data):
                         if hs:
                             snap_idx = {s.get("idx") for s in snap}
                             ts = time.time()
+                            oa = _outcome_attribution_module(sd)
                             for vkey, verdict in (("hit", "used"), ("miss", "ignored")):
                                 for i in (hs.get(vkey) or []):
                                     if i in snap_idx:
                                         rt.mark_by_index(i, verdict, {"actor": "human"}, ts)
+                                        # C(결과-귀속): 히트 = applied 관찰 → record_run_outcome
+                                        #   (evidence-gated 자동 append · owner 히트가 트리거·증거).
+                                        if vkey == "hit" and oa is not None:
+                                            _stamp_run_applied(oa, snap, i, ts)
             except Exception:
                 snap = None
             try:
@@ -348,6 +393,15 @@ def _selftest():
             used = RT.aggregate(home=str(home))["overall"].get("used", 0)
             check(r.returncode == 0 and r.stdout.strip() == "" and used == 1,
                   "T18 snapshot 신선 → '히트 1' 이 recall_trace 효용 장부 used 도장(증발 버그 해소)")
+            # T18d(C 결과-귀속): 같은 '히트 1' 이 recall_run_outcomes 에 applied 관찰도 append.
+            #   B(히트=used) 가 쌓이는 만큼 C(applied)가 자연히 흐른다(owner 논증 2026-07-21).
+            con_run = RT._open_store_ro(str(home))
+            n_run = con_run.execute(
+                "SELECT COUNT(*) FROM recall_run_outcomes"
+                " WHERE application='applied' AND result='unknown'").fetchone()[0]
+            con_run.close()
+            check(n_run == 1,
+                  "T18d 히트 도장 → C 결과-귀속 applied 1건 append(evidence-gated · owner 히트 트리거 · AI 자동판정 0)")
             # T18b 이중 방지 — 같은 컨텍스트에서 last_recall(hit_events 축)에는 안 감(skip_recall)
             rp2 = home / "last_recall_candidates.json"
             gl.write_last_recall(["node:CONV:hk1"], query="x", path=str(rp2))

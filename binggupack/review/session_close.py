@@ -287,34 +287,60 @@ def _build_outcome_candidates(home=None, today=None):
 
 # ---------------- 2c. 이번 세션 회상 히트 후보 (recall_trace · read-only · owner 도장만) ----------------
 
-def _build_recall_hits(home=None, ledger_path=None):
-    """이번 세션 미판정 회상 노드 = '히트 후보'(도움된 기억에 owner 가 도장할 대상).
-    recall_trace.list_pending 재사용(trace store 부재/OFF → count 0 graceful). 번호(H N)는
-    save_review_snapshot 로 (trace_id,node_id) 고정 → owner 'binggu trace mark N used' N-shift 안전.
+def _build_recall_hits(home=None, ledger_path=None, now_ts=None, top_n=12):
+    """이번 세션 회상 판정 후보 — AI 자동선별 소수(값 확정 0) + owner 도장.
 
-    ★축 구분(MF3): 여기 '히트'=회상 효용(recall_outcomes used, usefulness) — use_count(ledger,
-    recall --record)와 다른 축. 도장은 owner actor=human 게이트(AI 자동 0). trace store 는
-    ledger.sqlite sibling(운영 ledger 불변). claim 은 ledger read-only join 표시용(store 원문 0).
-    반환 {available, count, items:[{idx,category,rank,claim}], note}."""
+    실데이터 전량이 preflight 자동회상이라 미판정이 수백 건 누적된다(2026-07-21 실측: pending
+    425 = 100% preflight). owner 가 전부 도장할 수 없으므로 AI 가 **미스 후보(오래됨·그래프
+    미편입 = recall_trace.list_miss_candidates)를 우선 정렬**해 top_n 만 제시한다. 선별=조회+신호
+    (자동 OK), 값 확정(recall_outcomes used/ignored)은 owner actor=human 도장만(헌법 정합 · owner
+    논증 2026-07-21: 후보 제시 ≠ 판정). 번호(N)는 save_review_snapshot 으로 선별목록에 고정 →
+    owner '히트 N'/'미스 N' N-shift 안전. now_ts 미지정 → 미스 선별 생략(최신 미판정 top_n).
+
+    ★축 구분(MF3): '히트'=회상 효용(recall_outcomes used, usefulness) — use_count(ledger)와 다른
+    축. trace store 는 ledger.sqlite sibling(운영 ledger 불변). claim 은 read-only join(원문 0).
+    반환 {available, count, total_pending, items:[{idx,category,rank,claim,flag,age_hours}], note}."""
     try:
         from binggupack.pack import recall_trace as RT
     except Exception:
-        return {"available": False, "count": 0, "items": [],
-                "note": "recall_trace 모듈 미사용(히트 후보 생략)"}
+        return {"available": False, "count": 0, "total_pending": 0, "items": [],
+                "note": "recall_trace 모듈 미사용(회상 후보 생략)"}
     try:
         lp = ledger_path or _ledger_path(home)
         pending = RT.list_pending(home=home, ledger_path=lp)
+        total = len(pending)
         if not pending:
-            return {"available": True, "count": 0, "items": [],
+            return {"available": True, "count": 0, "total_pending": 0, "items": [],
                     "note": "이번 세션 미판정 회상 없음(trace OFF 거나 회상 0 — binggu trace enable 로 켜짐)"}
-        RT.save_review_snapshot(pending, home=home)  # H N → (trace_id,node_id) 고정(mark N-shift 안전)
-        items = [{"idx": p["idx"], "category": p.get("category"),
-                  "rank": p.get("rank"), "claim": p.get("claim")} for p in pending]
-        return {"available": True, "count": len(items), "items": items,
-                "note": "도움됐으면 `히트 N`, 헛다리면 `미스 N`(actor=human) — 양쪽 다 도장해야 usefulness 정직(히트만 = 100% 가짜)·자동 0"}
+        # AI 자동선별: 미스 후보(오래됨·미편입) 우선 → 나머지는 최신 회상으로 채움(top_n 컷)
+        miss = RT.list_miss_candidates(now_ts, home=home, ledger_path=lp, top_n=top_n) if now_ts else []
+        seen = {(m["trace_id"], m["node_id"]) for m in miss}
+        selected = [dict(m, flag="miss") for m in miss]
+        if len(selected) < top_n:
+            for p in reversed(pending):  # list_pending 은 ts asc → 뒤가 최신
+                k = (p["trace_id"], p["node_id"])
+                if k in seen:
+                    continue
+                seen.add(k)
+                selected.append({"trace_id": p["trace_id"], "node_id": p["node_id"],
+                                 "category": p.get("category"), "rank": p.get("rank"),
+                                 "claim": p.get("claim"), "flag": "recent"})
+                if len(selected) >= top_n:
+                    break
+        for i, s in enumerate(selected, 1):
+            s["idx"] = i
+        RT.save_review_snapshot(selected, home=home)  # N → (trace_id,node_id) 고정(N-shift 안전)
+        items = [{"idx": s["idx"], "category": s.get("category"), "rank": s.get("rank"),
+                  "claim": s.get("claim"), "flag": s.get("flag"),
+                  "age_hours": s.get("age_hours")} for s in selected]
+        miss_n = sum(1 for s in selected if s.get("flag") == "miss")
+        return {"available": True, "count": len(items), "total_pending": total, "items": items,
+                "note": ("미판정 %d건 중 AI 가 %d건 선별(⚠미스 후보 %d = 오래됨·그래프 미편입 우선). "
+                         "도움=`히트 N`·헛다리=`미스 N`(actor=human) — 선별=조회, 도장=사람(자동 0)"
+                         % (total, len(items), miss_n))}
     except Exception:
-        return {"available": False, "count": 0, "items": [],
-                "note": "히트 후보 로드 실패(graceful 생략)"}
+        return {"available": False, "count": 0, "total_pending": 0, "items": [],
+                "note": "회상 후보 로드 실패(graceful 생략)"}
 
 
 # ---------------- 2d. AI 제안 L1 명제 (hybrid_agi · 승인 대기 · 화자축 분리 · read-only) ----------------
@@ -424,16 +450,19 @@ def _build_governance(home=None, cwd=None, ledger_path=None):
         ro.close()
 
 
-def build_close_summary(home=None, cwd=None, ledger_path=None, session_id=None, today=None):
+def build_close_summary(home=None, cwd=None, ledger_path=None, session_id=None,
+                        today=None, now_ts=None):
     """세션 마무리 표시용 요약 빌드(저장 0 · read-only). preview + 거버넌스 묶음.
     session_id 지정 시 preview 를 그 세션 발화로 한정(세션 경계). today 파라미터는 하위호환
     유지(구 지적 후보 필터용 — §supersede: 지적 후보 섹션은 2026-07-16 owner 지시로 폐지,
     판정은 binggu verdict 즉시 기록으로 대체 — 세션마무리 배치 확인 의식 0).
+    now_ts(ISO · 호출자 주입 · Date.now 미사용): 회상 미스 후보 나이 판정용 — 미지정 시
+    미스 자동선별 생략(최신 미판정만 · graceful).
     반환 {preview, recall_hits, governance, save_action}."""
     _ = today  # 하위호환(구 시그니처 호출자 무해)
     return {
         "preview": _build_preview(home, session_id=session_id),
-        "recall_hits": _build_recall_hits(home, ledger_path),
+        "recall_hits": _build_recall_hits(home, ledger_path, now_ts=now_ts),
         "l1_proposals": _build_l1_proposals(home),
         "governance": _build_governance(home, cwd, ledger_path),
         "save_action": {
@@ -491,7 +520,13 @@ def render_close_md(summary):
             cat = (" [%s]" % it["category"]) if it.get("category") else ""
             rank = (" score=%.2f" % it["rank"]) if isinstance(it.get("rank"), (int, float)) else ""
             claim = it.get("claim") or "(원문 미상)"
-            lines.append("- %d. %s%s%s" % (it["idx"], claim, cat, rank))
+            if it.get("flag") == "miss":
+                ah = it.get("age_hours")
+                age = (" · %.0fh 안 쓰임" % ah) if isinstance(ah, (int, float)) else ""
+                mark = " ⚠미스후보"
+            else:
+                age = mark = ""
+            lines.append("- %d.%s %s%s%s%s" % (it["idx"], mark, claim, cat, rank, age))
         lines.append("> %s" % rh.get("note", "도움=히트 N·헛다리=미스 N — 양쪽 다 도장해야 정직·안 치면 pending 유지·자동 0"))
     else:
         lines.append("- (이번 세션 미판정 회상 없음 — trace OFF 거나 회상 0)")
@@ -580,7 +615,9 @@ def process(signal, home=None, cwd=None, ledger_path=None):
     if not det["is_close"]:
         return {**det, "summary": None, "rendered": None}
     sid = signal.get("session_id") if isinstance(signal, dict) else None
-    summary = build_close_summary(home, cwd, ledger_path, session_id=sid)
+    import time
+    now_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())  # hook 운영 진입점 — 미스 후보 나이 판정용
+    summary = build_close_summary(home, cwd, ledger_path, session_id=sid, now_ts=now_ts)
     return {**det, "summary": summary, "rendered": render_close_md(summary)}
 
 
