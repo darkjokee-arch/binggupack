@@ -21,6 +21,10 @@ from pathlib import Path
 from binggu_capture_classifier import EXPLICIT_SAVE, PREVIEW_TRIGGER, _any, classify
 
 TEXT_CAP = 1000         # 자동수집 버퍼 발화 보존 상한 = capture_preview.MAX_NODE_SENTENCE 정합(owner GO 2026-06-15).
+AI_CONTEXT_CAP = 400    # B(대화쌍) pair 재료(직전 AI말) 발췌 상한 — 전문 저장 금지(§3-2 원문 write0 원리).
+# dialectic 판정: owner 발화가 직전 AI 말에 대한 반응(반박·질문)일 때만 그 AI말을 pair 재료로 보관.
+#   좁게 시작(명시 dialectic 신호만) — 분류기 완화=노이즈 범람(2026-07-21 traj F) 경계.
+DIALECTIC_SIGNALS = frozenset({"약한교정(맥락1턴)", "AI교정"})
                         # 문장 전체 보존(80자 발췌 폐기 — 개인 온톨로지 정체성). 1000 초과 = 대화 덩어리 → 절단(원문=대화 전문 저장 금지).
 DEFAULT_TTL_DAYS = 7    # TTL 자동 폐기 기본값
 
@@ -184,7 +188,8 @@ class PersistentCaptureBuffer:
                 state TEXT NOT NULL DEFAULT 'captured_candidate',
                 captured_at REAL NOT NULL,
                 cwd TEXT,
-                session_id TEXT)"""
+                session_id TEXT,
+                ai_context TEXT)"""
         )
         # 대화 덩어리 veto 카운트(무음 폐기 방지 — preview 에 "긴 발화 n건 제외" 노출). 원문 미저장(길이만).
         c.execute(
@@ -200,6 +205,9 @@ class PersistentCaptureBuffer:
             cols = [r[1] for r in c.execute("PRAGMA table_info(capture_candidates)")]
             if "session_id" not in cols:
                 c.execute("ALTER TABLE capture_candidates ADD COLUMN session_id TEXT")
+                c.commit()
+            if "ai_context" not in cols:  # B(대화쌍) pair 재료 컬럼 — 하위호환 마이그레이션(2026-07-21)
+                c.execute("ALTER TABLE capture_candidates ADD COLUMN ai_context TEXT")
                 c.commit()
         except Exception:
             pass
@@ -239,14 +247,21 @@ class PersistentCaptureBuffer:
         truncated = len(text) > TEXT_CAP
         if truncated:
             text = text[:TEXT_CAP]  # 원문 전문 저장 금지
+        # B(2026-07-21 owner "대화쌍 통째"): owner 발화가 직전 AI 말에 대한 반응(dialectic)이면
+        #   그 AI 말 발췌를 pair 재료로 candidate 에 보관(저장 아님). owner 가 PAIR 로 확정할 때
+        #   save_paired(owner_text, ai_text, relation)의 ai_text 재료가 된다. 발췌 cap(전문 금지) +
+        #   dialectic 신호일 때만(무분별 AI말 저장 회피 · 분류기 완화=노이즈 traj F 경계).
+        ai_ctx = None
+        if prev_turn and (DIALECTIC_SIGNALS & set(v.get("signals") or [])):
+            ai_ctx = str(prev_turn).strip()[:AI_CONTEXT_CAP]
         c = self._conn()
         try:
             c.execute(
-                "INSERT INTO capture_candidates(text,pinned,confidence,signals,state,captured_at,cwd,session_id)"
-                " VALUES(?,?,?,?,?,?,?,?)",
+                "INSERT INTO capture_candidates(text,pinned,confidence,signals,state,captured_at,cwd,session_id,ai_context)"
+                " VALUES(?,?,?,?,?,?,?,?,?)",
                 (text, 1 if v["pinned"] else 0, v["confidence"],
                  json.dumps(list(v["signals"]), ensure_ascii=False),
-                 "captured_candidate", now, str(cwd), session_id),
+                 "captured_candidate", now, str(cwd), session_id, ai_ctx),
             )
             c.commit()
             self._purge(now, conn=c)
@@ -711,6 +726,20 @@ def _selftest():
         r = buf5.feed("가" * 2100, repo_cwd)
         check(r["action"] == "bulk_veto",
               "T34 2000자+ 줄바꿈0 → HARD veto(단일행 초장문)")
+
+        # T35 B(대화쌍): dialectic 발화(AI교정/약한교정 signal + prev_turn) → 직전 AI말 발췌를
+        #     ai_context 로 보관(pair 재료) · 독립판단(prev_turn 있어도)·무맥락(prev_turn 없음)은 NULL
+        import sqlite3 as _sq
+        buf6 = PersistentCaptureBuffer(home=home)
+        buf6.feed("아니 그게 아니라 A가 맞다", repo_cwd, prev_turn="B안을 추천합니다")  # dialectic
+        buf6.feed("C로 결정한다", repo_cwd, prev_turn="B안을 추천합니다")            # 독립판단(방향결정)
+        buf6.feed("이게 더 맞다", repo_cwd)                                         # prev_turn 없음
+        _con = _sq.connect(str(buf6.db_path))
+        _rows = _con.execute(
+            "SELECT ai_context FROM capture_candidates WHERE ai_context IS NOT NULL").fetchall()
+        _con.close()
+        check(len(_rows) == 1 and _rows[0][0] == "B안을 추천합니다",
+              "T35 dialectic 만 ai_context(직전 AI말 발췌) 저장 · 독립판단/무맥락은 NULL")
 
         gate = "GO" if ok else "NO-GO"
         print(f"\nGATE={gate}")
