@@ -22,9 +22,10 @@ from binggu_capture_classifier import EXPLICIT_SAVE, PREVIEW_TRIGGER, _any, clas
 
 TEXT_CAP = 1000         # 자동수집 버퍼 발화 보존 상한 = capture_preview.MAX_NODE_SENTENCE 정합(owner GO 2026-06-15).
 AI_CONTEXT_CAP = 400    # B(대화쌍) pair 재료(직전 AI말) 발췌 상한 — 전문 저장 금지(§3-2 원문 write0 원리).
-# dialectic 판정: owner 발화가 직전 AI 말에 대한 반응(반박·질문)일 때만 그 AI말을 pair 재료로 보관.
+# dialectic 판정: owner 발화가 직전 AI 말에 대한 반응(반박·반문·수정)일 때만 그 AI말을 pair 재료로 보관.
+#   설계 §9 Phase3·§5 L6 정합 — 반문/AI교정/약한교정 = why 발화 = 대화쌍 후보.
 #   좁게 시작(명시 dialectic 신호만) — 분류기 완화=노이즈 범람(2026-07-21 traj F) 경계.
-DIALECTIC_SIGNALS = frozenset({"약한교정(맥락1턴)", "AI교정"})
+DIALECTIC_SIGNALS = frozenset({"약한교정(맥락1턴)", "AI교정", "반문"})
                         # 문장 전체 보존(80자 발췌 폐기 — 개인 온톨로지 정체성). 1000 초과 = 대화 덩어리 → 절단(원문=대화 전문 저장 금지).
 DEFAULT_TTL_DAYS = 7    # TTL 자동 폐기 기본값
 
@@ -731,15 +732,16 @@ def _selftest():
         #     ai_context 로 보관(pair 재료) · 독립판단(prev_turn 있어도)·무맥락(prev_turn 없음)은 NULL
         import sqlite3 as _sq
         buf6 = PersistentCaptureBuffer(home=home)
-        buf6.feed("아니 그게 아니라 A가 맞다", repo_cwd, prev_turn="B안을 추천합니다")  # dialectic
-        buf6.feed("C로 결정한다", repo_cwd, prev_turn="B안을 추천합니다")            # 독립판단(방향결정)
-        buf6.feed("이게 더 맞다", repo_cwd)                                         # prev_turn 없음
+        buf6.feed("아니 그게 아니라 A가 맞다", repo_cwd, prev_turn="B안 추천")      # dialectic(AI교정)
+        buf6.feed("여긴 왜 이렇게 진행하지", repo_cwd, prev_turn="C안 설명")        # dialectic(반문·설계 §9 Phase3)
+        buf6.feed("C로 결정한다", repo_cwd, prev_turn="B안 추천")                # 독립판단(방향결정)
+        buf6.feed("이게 더 맞다", repo_cwd)                                     # prev_turn 없음
         _con = _sq.connect(str(buf6.db_path))
         _rows = _con.execute(
-            "SELECT ai_context FROM capture_candidates WHERE ai_context IS NOT NULL").fetchall()
+            "SELECT ai_context FROM capture_candidates WHERE ai_context IS NOT NULL ORDER BY id").fetchall()
         _con.close()
-        check(len(_rows) == 1 and _rows[0][0] == "B안을 추천합니다",
-              "T35 dialectic 만 ai_context(직전 AI말 발췌) 저장 · 독립판단/무맥락은 NULL")
+        check([r[0] for r in _rows] == ["B안 추천", "C안 설명"],
+              "T35 dialectic(AI교정·반문 §9 Phase3) 만 ai_context 저장 · 독립판단/무맥락 NULL")
 
         gate = "GO" if ok else "NO-GO"
         print(f"\nGATE={gate}")
