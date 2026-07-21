@@ -116,6 +116,41 @@ def _stamp_run_applied(oa, snap, idx, ts):
         pass
 
 
+def _stamp_use_count(snap, idx):
+    """세션 마무리 preview 히트(사람) → 운영 ledger use_count++ (best-effort · 실패 침묵 · hook 무방해).
+
+    owner '히트 N' = "이 회상 유용했다" 사람 신호 → CLI `--record`/`mark-hit --from-recall`
+    (binggu.py _mark_from_recall)와 동일 의미(preflight.py:121). 지금까지 채팅 히트는
+    recall_outcomes(효용 장부)에만 도장되고 use_count(랭킹 utility 축 · p1_ranking.node_rank_score)
+    로는 안 이어졌다 — 2026-07-21 4cli+Fable5 실측: 히트 5건 ↔ use_count>0 5건의 node 교집합 0
+    = 연결선 끊김. 이 함수가 그 소비 스텝을 hook 에 배선한다(owner '단일 통합').
+
+    adoption_key 로 같은 날 반복은 멱등(use_events UNIQUE · 단기 반복 정렬오염 차단 · Fable5 D).
+    자동 관측(ai_observation)이 아니라 사람 도장만 진입 — SAFETY_BELT auto_signal_not_ranking_direct
+    무관(use_count 는 적중률 신호와 달리 합법 causal 입력 · adoption_key docstring 정합)."""
+    try:
+        item = next((s for s in (snap or []) if s.get("idx") == idx), None)
+        if not item or not item.get("node_id"):
+            return
+        sd = str(_scripts_dir())
+        if sd not in sys.path:
+            sys.path.insert(0, sd)
+        from binggupack.pack import p1_ranking as RANK
+        from binggupack.workspace import platform as _plat
+        from openbinggu_owner_accept_ux import open_accept
+        ledger = os.path.join(_plat.binggu_home(), "ledger.sqlite")
+        if not os.path.exists(ledger):
+            return
+        db = open_accept(ledger)
+        try:
+            RANK.record_use(db, item["node_id"],
+                            use_key=RANK.adoption_key("__session_close__", None))
+        finally:
+            db.close()
+    except Exception:
+        pass
+
+
 def _run(data):
     try:
         if (data.get("hook_event_name") or "") != "UserPromptSubmit":
@@ -164,10 +199,14 @@ def _run(data):
                                 for i in (hs.get(vkey) or []):
                                     if i in snap_idx:
                                         rt.mark_by_index(i, verdict, {"actor": "human"}, ts)
-                                        # C(결과-귀속): 히트 = applied 관찰 → record_run_outcome
-                                        #   (evidence-gated 자동 append · owner 히트가 트리거·증거).
-                                        if vkey == "hit" and oa is not None:
-                                            _stamp_run_applied(oa, snap, i, ts)
+                                        if vkey == "hit":
+                                            # 히트(사람) → 운영 ledger use_count++ (랭킹 utility 축 연결
+                                            #   · 2026-07-21 4cli+Fable5: 히트↔use_count 끊김 배선).
+                                            _stamp_use_count(snap, i)
+                                            # C(결과-귀속): 히트 = applied 관찰 → record_run_outcome
+                                            #   (evidence-gated 자동 append · owner 히트가 트리거·증거).
+                                            if oa is not None:
+                                                _stamp_run_applied(oa, snap, i, ts)
             except Exception:
                 snap = None
             try:
@@ -382,6 +421,13 @@ def _selftest():
                          "'2026-07-20T00:00:00Z','교훈',0)")
             lcon.commit()
             lcon.close()
+
+            def _uc(nid):
+                _c = _sq.connect("file:%s?mode=ro" % str(led).replace("\\", "/"), uri=True)
+                _v = _c.execute("SELECT use_count FROM nodes WHERE node_id=?", (nid,)).fetchone()
+                _c.close()
+                return _v[0] if _v else None
+
             recalled = [{"node_id": "node:CONV:hk1", "semantic_subtype": "교훈",
                          "rank_score": 0.9, "relevance": 0.8}]
             RT.record_trace("최신 유지", "why_search", recalled,
@@ -402,6 +448,10 @@ def _selftest():
             con_run.close()
             check(n_run == 1,
                   "T18d 히트 도장 → C 결과-귀속 applied 1건 append(evidence-gated · owner 히트 트리거 · AI 자동판정 0)")
+            # T18e(2026-07-21 히트↔use_count 끊김 수정): 같은 '히트 1' 이 운영 ledger use_count++ 도
+            #   배선한다(랭킹 utility 축 연결 · CLI --record 와 동일 의미 · 사람 도장만 진입).
+            check(_uc("node:CONV:hk1") == 1,
+                  "T18e 히트 → 운영 ledger use_count++ 배선(랭킹 utility 축 · 사람 도장만)")
             # T18b 이중 방지 — 같은 컨텍스트에서 last_recall(hit_events 축)에는 안 감(skip_recall)
             rp2 = home / "last_recall_candidates.json"
             gl.write_last_recall(["node:CONV:hk1"], query="x", path=str(rp2))
@@ -411,6 +461,10 @@ def _selftest():
             after_v = gl.recall_stamp_verdicts(rows2, path=str(gate_log))
             check(r.returncode == 0 and after_v == before_v,
                   "T18b snapshot 컨텍스트 → last_recall 회수 스탬프 미기록(효용 장부 단일·이중 차단)")
+            # T18f 같은 날 재히트('히트 1' 재발화) → adoption_key day-bucket 멱등(use_events UNIQUE)
+            #   → use_count 불변(단기 반복 정렬오염 차단 · Fable5 D).
+            check(_uc("node:CONV:hk1") == 1,
+                  "T18f 같은 날 재히트 → use_count 멱등 유지(단기 반복 정렬오염 차단 · Fable5 D)")
             # T18c stale snapshot(창 밖) → 대화중 회상으로 폴백(last_recall 경로 복귀)
             old = time.time() - (getattr(gl, "GATE_WINDOW_SEC", 3600) + 100)
             os.utime(str(RT.review_snapshot_path(str(home))), (old, old))
