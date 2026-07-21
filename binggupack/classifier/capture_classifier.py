@@ -71,6 +71,11 @@ OPS_IMPERATIVE = [OPS_VERBS + r".{0,6}(해라|하라|하세요|해\s*줘|해\s*�
 OPS_REPORT = [OPS_VERBS + r".{0,8}(완료|했[다어]\b|함\b|끝났|성공|실패|마쳤|마무리)"]
 META_CONFIRM = [r"할까요\s*\??$", r"할까\s*\??$", r"괜찮(아|을까|나)\s*\??$",
                 r"확인했[어나]\s*\??$", r"맞(나|아|지)\s*\??$", r"될까\s*\??$", r"해도\s*(돼|될까|되나)\s*\??$"]
+# ★C(2026-07-21): META_CONFIRM 중 확언성 확인 어미("맞나/맞아/맞지?")는 직전 AI 판단에 대한
+#   owner 반문(dialectic)일 수 있다 — prev_turn 이 AI 제안/판단이면 veto 해제(약한교정 signal).
+#   "할까요/괜찮나/될까/확인했어?"류(순수 진행확인)는 반문 대상 아님 → 그대로 veto.
+META_CONFIRM_REBUTTABLE = [r"맞(나|아|지)\s*\??$"]
+PREV_AI_STANCE = r"(제안|추천|할까요|어떨까|봐야|판단|하자|낫[다겠까]|것\s*같|권장|추정|하는\s*게)"
 # 반복기준(영구 규칙) 동반 시 운영 veto 면제 — "배포는 항상 두 번 확인해라" 같은 규칙은 후보로 통과.
 GENERALIZE_EXEMPT = [r"항상", r"무조건", r"매번", r"늘\s", r"언제나"]
 
@@ -113,9 +118,18 @@ def classify(utterance, prev_turn=None):
     #      명시 규칙으로 거른다. 반복기준 동반(항상/무조건…)이면 영구 규칙으로 보고 면제.
     generalized = bool(_any(text, GENERALIZE_EXEMPT))
     if _any(text, META_CONFIRM):
-        vetoes.append("meta_confirm")
-        reasons.append("ops/meta noise veto")
-        return out
+        # ★C(2026-07-21 prev_turn 정밀조정): "이게 맞나/맞아/맞지?"류 확언성 어미는 직전 AI
+        #   판단·제안에 대한 owner 반문(dialectic)일 수 있다 → prev_turn 이 AI 제안/판단이면 veto
+        #   해제하고 약한교정(맥락1턴) signal 로 포착(설계 §9 Phase3·§5 L6·dialectic ai_context).
+        #   "할까요/괜찮나/될까/확인했어?"류·prev_turn 없음/무관은 그대로 veto. 좁게(노이즈 회피):
+        #   반문 가능 어미 + prev_turn AI판단, 둘 다 성립할 때만 해제.
+        if _any(text, META_CONFIRM_REBUTTABLE) and prev_turn and re.search(PREV_AI_STANCE, prev_turn):
+            signals.append("약한교정(맥락1턴)")
+            reasons.append("meta_confirm→반문(prev_turn AI판단)")
+        else:
+            vetoes.append("meta_confirm")
+            reasons.append("ops/meta noise veto")
+            return out
     if not generalized and (_any(text, OPS_IMPERATIVE) or _any(text, OPS_REPORT)):
         vetoes.append("ops_imperative" if _any(text, OPS_IMPERATIVE) else "ops_report")
         reasons.append("ops noise veto")
@@ -127,7 +141,7 @@ def classify(utterance, prev_turn=None):
     vetoes.extend(_hits(text, VETO_PATTERNS))
     # 단순 질문: ?로 끝 + 판단신호 0 (단, 직전이 AI 제안이면 약한 교정 보류 — 무상태 1턴)
     if text.endswith("?") and not signals:
-        if prev_turn and re.search(r"(제안|추천|할까요|어떨까|봐야)", prev_turn):
+        if prev_turn and re.search(PREV_AI_STANCE, prev_turn):
             signals.append("약한교정(맥락1턴)")
         else:
             vetoes.append("단순질문")
@@ -197,6 +211,12 @@ def _selftest():
         ("속도보다 안정성이 더 중요하다", None, dict(state="captured_candidate"), "선택판단(더 중요)"),
         ("이런 경우는 먼저 로그를 확인해야 한다", None, dict(state="captured_candidate"), "교훈규범(먼저 …를 확인)"),
         ("늘 백업을 먼저 잡는다", None, dict(state="captured_candidate"), "반복기준(독립 '늘 ')"),
+        # --- ★C prev_turn 정밀조정: "맞나?"류 = 직전 AI판단이면 반문(dialectic), 없으면 진행확인 veto ---
+        ("이게 맞나?", "B안을 추천합니다", dict(state="captured_candidate"), "반문(prev AI제안)→약한교정"),
+        ("이게 맞나?", None, dict(state="ignored"), "진행확인(prev 없음)→veto 유지"),
+        ("이게 맞나?", "상태를 보여드릴게요", dict(state="ignored"), "prev AI판단 무관→veto 유지"),
+        ("할까요?", "B안을 추천합니다", dict(state="ignored"), "순수 진행확인(할까요)=prev 있어도 veto"),
+        ("확인했어?", "B안을 추천합니다", dict(state="ignored"), "확인질문=rebuttable 아님 veto"),
     ]
     passed = 0
     for i, (utt, prev, expect, note) in enumerate(cases, 1):

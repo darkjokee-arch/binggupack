@@ -26,6 +26,23 @@ AI_CONTEXT_CAP = 400    # B(대화쌍) pair 재료(직전 AI말) 발췌 상한 �
 #   설계 §9 Phase3·§5 L6 정합 — 반문/AI교정/약한교정 = why 발화 = 대화쌍 후보.
 #   좁게 시작(명시 dialectic 신호만) — 분류기 완화=노이즈 범람(2026-07-21 traj F) 경계.
 DIALECTIC_SIGNALS = frozenset({"약한교정(맥락1턴)", "AI교정", "반문"})
+
+# B-3(2026-07-21): dialectic 신호 → owner↔AI 관계 제안값(owner 가 SAVE 로 수용 · 틀리면 재저장
+#   교정). AI 발화가 먼저·owner 가 반응 주체라 전부 owner_* (save_paired: owner_ prefix=source).
+#   정확한 관계는 owner 판단 — 이건 '제안'이고 SAVE 앵커가 owner 승인(§8-1 정체성 축 자동확정 금지).
+DIALECTIC_RELATION = {"AI교정": "owner_refutes", "반문": "owner_refutes",
+                      "약한교정(맥락1턴)": "owner_revises"}
+DEFAULT_PAIR_RELATION = "owner_revises"   # 신호 매핑 실패 시 중립(수정) 기본
+
+
+def relation_from_signals(signals):
+    """dialectic 신호 목록 → owner↔AI 관계 제안(owner_refutes/owner_revises). refutes(교정·반문)
+    우선 → revises(약한교정) → 매치 없으면 중립 DEFAULT_PAIR_RELATION. AI 자동확정 아님(제안)."""
+    sset = set(signals or [])
+    for sig in ("AI교정", "반문", "약한교정(맥락1턴)"):
+        if sig in sset:
+            return DIALECTIC_RELATION[sig]
+    return DEFAULT_PAIR_RELATION
                         # 문장 전체 보존(80자 발췌 폐기 — 개인 온톨로지 정체성). 1000 초과 = 대화 덩어리 → 절단(원문=대화 전문 저장 금지).
 DEFAULT_TTL_DAYS = 7    # TTL 자동 폐기 기본값
 
@@ -321,22 +338,32 @@ class PersistentCaptureBuffer:
             self._purge(now, conn=c)
             if session_id is not None:
                 rows = c.execute(
-                    "SELECT text,pinned,confidence,cwd FROM capture_candidates WHERE session_id=? "
-                    "ORDER BY pinned DESC, id ASC", (session_id,)).fetchall()
+                    "SELECT text,pinned,confidence,cwd,ai_context,signals FROM capture_candidates "
+                    "WHERE session_id=? ORDER BY pinned DESC, id ASC", (session_id,)).fetchall()
             else:
                 rows = c.execute(
-                    "SELECT text,pinned,confidence,cwd FROM capture_candidates ORDER BY pinned DESC, id ASC"
+                    "SELECT text,pinned,confidence,cwd,ai_context,signals FROM capture_candidates "
+                    "ORDER BY pinned DESC, id ASC"
                 ).fetchall()
             bulk_vetoed = self._bulk_veto_count(now, session_id, conn=c)
         finally:
             c.close()
         items = []
-        for i, (text, pinned, conf, cwd) in enumerate(rows, 1):
+        for i, (text, pinned, conf, cwd, ai_ctx, sig_json) in enumerate(rows, 1):
             tags = []
             if pinned:
                 tags.append("PINNED")
             if conf == "weak":
                 tags.append("약함")
+            # B-2/B-3(대화쌍): 직전 AI말 발췌(ai_context) 보유 후보 = SAVE 시 save_paired pair
+            #   저장 대상. 관계는 dialectic 신호로 제안(pair_relation) — owner SAVE 가 승인.
+            pair_rel = None
+            if ai_ctx:
+                tags.append("대화쌍")
+                try:
+                    pair_rel = relation_from_signals(json.loads(sig_json) if sig_json else [])
+                except Exception:
+                    pair_rel = DEFAULT_PAIR_RELATION
             # 출처(Fable5-A 권장): candidate 가 명시 배제(deny) cwd 에서 유입됐으면 SAVE 식별용 경고
             #   태그. explicit bypass 가 deny 를 존중하므로 대개 안 뜸(과거/global 데이터 대비). cwd
             #   필드는 소비처가 출처를 참고하도록 데이터로 상시 노출(label 소음은 최소).
@@ -346,7 +373,7 @@ class PersistentCaptureBuffer:
             tag = f" [{' · '.join(tags)}]" if tags else ""
             items.append({
                 "idx": i, "text": text, "pinned": bool(pinned), "confidence": conf,
-                "cwd": cwd, "foreign": foreign,
+                "cwd": cwd, "foreign": foreign, "ai_context": ai_ctx, "pair_relation": pair_rel,
                 "label": f"{i}. {text}{tag}", "state": "captured_candidate",
             })
         if self.scope.semantic_preview():
@@ -742,6 +769,23 @@ def _selftest():
         _con.close()
         check([r[0] for r in _rows] == ["B안 추천", "C안 설명"],
               "T35 dialectic(AI교정·반문 §9 Phase3) 만 ai_context 저장 · 독립판단/무맥락 NULL")
+
+        # T36 B-2: render_preview 가 대화쌍 후보(ai_context 보유)를 노출 + '대화쌍' 태그.
+        #     save_paired ai_text 재료를 세션 마무리 preview 가 owner 에게 보여준다(저장 0·표시만).
+        _pvB = buf6.render_preview()
+        _pair = [it for it in _pvB["items"] if it.get("ai_context")]
+        check(len(_pair) == 2 and all("대화쌍" in it["label"] for it in _pair)
+              and sorted(it["ai_context"] for it in _pair) == ["B안 추천", "C안 설명"],
+              "T36 render_preview 대화쌍 후보 노출(ai_context 필드 + '대화쌍' 태그)")
+
+        # T37 B-3: 신호→관계 매핑(제안값) + render_preview pair_relation 노출
+        check(relation_from_signals(["AI교정"]) == "owner_refutes"
+              and relation_from_signals(["반문"]) == "owner_refutes"
+              and relation_from_signals(["약한교정(맥락1턴)"]) == "owner_revises"
+              and relation_from_signals([]) == "owner_revises",
+              "T37 신호→관계 매핑(교정/반문=refutes · 약한=revises · 무매치=중립 revises)")
+        check(all(it.get("pair_relation") in ("owner_refutes", "owner_revises") for it in _pair),
+              "T37b render_preview 대화쌍 후보에 pair_relation(관계 제안) 노출")
 
         gate = "GO" if ok else "NO-GO"
         print(f"\nGATE={gate}")
