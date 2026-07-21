@@ -315,6 +315,99 @@ def auto_observe_adoption(ts, *, home=None, ledger_path=None, dry_run=False):
     return {"observed": len(stamped), "stamped": stamped, "dry_run": dry_run}
 
 
+# ---------------- 미스 후보 자동선별 (auto_observe 의 부정 거울 · read-only · 값 확정 0) ----------------
+
+def _parse_iso_utc(ts):
+    """ISO 'YYYY-MM-DDTHH:MM:SSZ' → aware datetime(UTC). 파싱 실패 → None(graceful)."""
+    if not ts:
+        return None
+    import datetime as _dt
+    try:
+        return _dt.datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def list_miss_candidates(now_ts, *, home=None, ledger_path=None,
+                         min_age_hours=24, top_n=10):
+    """미스(헛다리) 후보 자동선별 — auto_observe_adoption 의 부정 거울(순수 SELECT · 값 확정 0).
+
+    회상됐으나 (a) now_ts 기준 min_age_hours 이상 경과 (b) 회상 이후 '관계 엣지' 미편입
+    = 오래도록 그래프에 안 쓰인 노드 → owner 가 '미스' 도장할 후보를 AI 가 정렬·상위 top_n 제시.
+
+    헌법 정합(owner 논증 · 2026-07-21): 후보 제시(조회+신호) ≠ 값 확정(판정). ignored 도장은
+    owner actor=human 만(record_outcome) — 본 함수는 recall_outcomes 를 한 바이트도 write 하지
+    않는다. auto_observe_adoption 이 '편입=used' 를 자동 도장하므로 편입 노드는 여기서 제외
+    (긍정/부정 거울 대칭 · used 와 겹치지 않음). ledger 는 read-only(mode=ro) 조회만.
+
+    now_ts : 호출자 제공 ISO 타임스탬프(결정성 · Date.now 미사용 정책).
+    정렬: age desc(오래된 순) → rank asc(낮은 관련도 우선) → trace_id → node_id(결정적).
+    반환 [{trace_id, node_id, category, rank, age_hours, claim}] (top_n 컷 · idx 미부여).
+    store/now_ts 파싱 실패 → [](graceful)."""
+    if not os.path.exists(trace_store_path(home)):
+        return []
+    now_dt = _parse_iso_utc(now_ts)
+    if now_dt is None:
+        return []
+    con = _open_store_ro(home)
+    try:
+        judged = set(con.execute("SELECT trace_id, node_id FROM recall_outcomes").fetchall())
+        rows = con.execute("SELECT trace_id, recalled_json, ts FROM recall_traces").fetchall()
+    finally:
+        con.close()
+
+    lcon = None
+    by_id = {}
+    if ledger_path and os.path.exists(ledger_path):
+        lcon = sqlite3.connect(
+            "file:%s?mode=ro" % os.path.abspath(ledger_path).replace("\\", "/"), uri=True)
+        try:
+            import binggu_recall as RC
+            by_id = RC._load_graph(ledger_path).get("by_id", {})
+        except Exception:
+            by_id = {}
+
+    cands = []
+    try:
+        for trace_id, rj, trace_ts in rows:
+            tdt = _parse_iso_utc(trace_ts)
+            if tdt is None:
+                continue  # 회상 시점 모르면 경과·편입 판정 불가(보수 제외)
+            age_h = (now_dt - tdt).total_seconds() / 3600.0
+            if age_h < min_age_hours:
+                continue  # 아직 신선 — 막 회상된 건 미스라 단정 못 함(판정 유예)
+            try:
+                nodes = json.loads(rj) if rj else []
+            except Exception:
+                nodes = []
+            for n in nodes:
+                nid = n.get("node_id")
+                if not nid or (trace_id, nid) in judged:
+                    continue
+                # 회상 이후 관계 엣지 편입? 편입됐으면 auto_observe 가 used 로 잡음 → 미스 후보 제외
+                if lcon is not None:
+                    row = lcon.execute(
+                        "SELECT 1 FROM edges WHERE (source=? OR target=?)"
+                        " AND relation != 'evidence_supports'"
+                        " AND created_at IS NOT NULL AND created_at > ? LIMIT 1",
+                        (nid, nid, trace_ts)).fetchone()
+                    if row:
+                        continue  # 편입됨(used 신호) → 부정 거울에서 제외
+                node = by_id.get(nid)
+                claim = (node["sentence"][:100] if node else None)
+                cands.append({"trace_id": trace_id, "node_id": nid,
+                              "category": n.get("category"), "rank": n.get("rank"),
+                              "age_hours": round(age_h, 1), "claim": claim})
+    finally:
+        if lcon is not None:
+            lcon.close()
+
+    cands.sort(key=lambda c: (-c["age_hours"],
+                              c["rank"] if c["rank"] is not None else 1.0,
+                              c["trace_id"], c["node_id"]))
+    return cands[:top_n]
+
+
 # ---------------- T0 자동관측 opt-in 플래그 (기본 OFF · 첫 실행 안전) ----------------
 
 def _auto_observe_flag_path(home=None):
@@ -811,6 +904,53 @@ def _selftest():
         real7 = auto_observe_adoption(TS_LATER, home=home7, ledger_path=led7)
         ck(real7["observed"] == 1 and aggregate(home=home7)["overall"]["used"] == 1,
            "dry_run 후 실제 실행 → used 1 도장")
+
+        # ── 미스 후보 자동선별(list_miss_candidates · auto_observe 부정 거울 · owner 논증 2026-07-21) ──
+        #    회상됐으나 오래도록 그래프 미편입 = owner 가 '미스' 도장할 후보. AI 선별=조회(값 확정 0).
+        home8 = os.path.join(tmp, ".binggupack8")
+        os.makedirs(home8, exist_ok=True)
+        set_trace_flag(True, home=home8)
+        led8 = os.path.join(home8, "ledger.sqlite")
+        lcon8 = sqlite3.connect(led8)
+        apply_schema(lcon8)
+        for nid in ("node:CONV:m1", "node:CONV:m2"):
+            lcon8.execute("INSERT INTO nodes(node_id,node_type,sentence,candidate,state,content_hash,"
+                          "created_at,semantic_subtype,use_count) VALUES"
+                          "(?,'judgment','오래 안 쓰인 회상',0,'active','h',?, '교훈',0)", (nid, TS))
+        lcon8.commit()
+        lcon8.close()
+        record_trace("오래된 회상", "preflight",
+                     [{"node_id": "node:CONV:m1", "semantic_subtype": "교훈",
+                       "rank_score": 0.5, "relevance": 0.4},
+                      {"node_id": "node:CONV:m2", "semantic_subtype": "버그패턴",
+                       "rank_score": 0.9, "relevance": 0.8}], TS, home=home8)
+        NOW8 = "2026-06-29T00:00:00Z"  # TS(06-27) + 48h
+        led8_mt = os.path.getmtime(led8)
+        miss8 = list_miss_candidates(NOW8, home=home8, ledger_path=led8, min_age_hours=24)
+        ck(len(miss8) == 2 and {m["node_id"] for m in miss8} == {"node:CONV:m1", "node:CONV:m2"}
+           and all(m["age_hours"] >= 24 for m in miss8),
+           "list_miss_candidates: 오래됨·미편입 → 미스 후보(owner 도장 대상 · AI 값 확정 0)")
+        ck(miss8[0]["node_id"] == "node:CONV:m1",
+           "미스 후보 정렬: 같은 나이면 낮은 관련도(rank) 우선")
+        ck(aggregate(home=home8)["overall"]["outcomes"] == 0,
+           "list_miss_candidates 는 recall_outcomes write 0(선별=조회 ≠ 판정 · 헌법 정합)")
+        ck(os.path.getmtime(led8) == led8_mt,
+           "list_miss_candidates: ledger read-only(mode=ro · mtime 불변)")
+        ck(len(list_miss_candidates("2026-06-27T06:00:00Z", home=home8,
+                                    ledger_path=led8, min_age_hours=24)) == 0,
+           "신선 회상(<24h) → 미스 후보 제외(판정 유예)")
+        lcon8 = sqlite3.connect(led8)
+        lcon8.execute("INSERT INTO edges(edge_id,relation,source,target,candidate,state,created_at)"
+                      " VALUES('e8','supports_judgment','node:CONV:z','node:CONV:m1',0,'active',?)",
+                      (TS_LATER,))
+        lcon8.commit()
+        lcon8.close()
+        ck({m["node_id"] for m in list_miss_candidates(NOW8, home=home8, ledger_path=led8,
+                                                       min_age_hours=24)} == {"node:CONV:m2"},
+           "회상 후 관계엣지 편입 → 미스 후보 제외(긍정/부정 거울 대칭)")
+        ck(len(list_miss_candidates(NOW8, home=home8, ledger_path=led8,
+                                    min_age_hours=24, top_n=1)) == 1,
+           "top_n 컷(AI 선별 소수만 owner 에 제시 · 425 통짜 방지)")
 
         # ── 운영 ledger sentinel 미접촉 ──
         ck(os.path.exists(ledger) and os.path.getmtime(ledger) == ledger_mt0,
