@@ -349,12 +349,36 @@ def gate_record_from_prompt(prompt, preview_path=None, gate_path=None, ts=None):
 # 의존한다. 로컬 사용자 권한 프로세스가 gate 파일을 직접 쓰는 극단은 못 막음(사람 자기규율+사후감사),
 # CLAUDECODE env 는 소프트 신호. 승격 write 성사는 여전히 core 게이트(G4_no_auto 등) 몫.
 
-# 회수 스탬프: 'HIT 1' / '히트 1,3' / 'MISS 2' / '미스 1-3'. SAVE 도장과 동일 계약 —
+# reason 라벨(옵션·미스 세그먼트 끝) → (verdict, reason_code). recall_trace.REASON_CODES 화이트리스트와
+#   일치. hit(used)엔 reason 없음. 라벨 없으면 miss=ignored(기존 계약 불변). '틀림/낡음/맥락/최신'은
+#   corrected 계열이라 verdict 도 함께 승격(ignored→corrected) — record_outcome 화이트리스트 정합.
+_REASON_LABELS = {
+    "무관": ("ignored", "not_relevant"),
+    "이미앎": ("ignored", "already_known"),
+    "이미알아": ("ignored", "already_known"),
+    "약한신호": ("ignored", "low_signal"),
+    "약함": ("ignored", "low_signal"),
+    "낡음": ("corrected", "stale"),
+    "오래됨": ("corrected", "stale"),
+    "맥락어긋남": ("corrected", "wrong_context"),
+    "맥락": ("corrected", "wrong_context"),
+    "더최신": ("corrected", "superseded"),
+    "최신": ("corrected", "superseded"),
+    "틀림": ("corrected", "false_match"),
+    "틀렸": ("corrected", "false_match"),
+}
+# alternation 은 긴 라벨 먼저(regex 최장매칭 · '이미알아' > '알아' 부분겹침 방지).
+_REASON_ALT = "|".join(re.escape(k) for k in sorted(_REASON_LABELS, key=len, reverse=True))
+
+# 회수 스탬프: 'HIT 1' / '히트 1,3' / 'MISS 2 무관' / '미스 1-3 틀림'. SAVE 도장과 동일 계약 —
 # 발화 전체 또는 한 줄 전체 정확형(fullmatch)만 인정(부분문자열·인용문 무시).
 # ★2026-07-22: 한 줄에 히트/미스 세그먼트 혼합 허용('히트 4,7,8 미스 1,9,11,12') — owner 가
 #   자연스럽게 한 줄로 섞어 발화하면 종전 단일-세그먼트 fullmatch 가 None 반환해 도장 전부 증발
 #   (owner 실측 재발). 줄 = 세그먼트(히트/미스+인덱스) 1+ 로 인정하고 parse 에서 세그먼트별 판별.
-_HIT_SEG_PAT = r"(?:HIT|히트|MISS|미스)\s*\d+(?:\s*[-~]\s*\d+)?(?:\s*,\s*\d+(?:\s*[-~]\s*\d+)?)*"
+# ★2026-07-22(reason): 미스 세그먼트 끝 옵션 라벨('미스 3 무관')로 reason_code+verdict 세분(다리c 짝).
+_HIT_SEG_PAT = (r"(?:HIT|히트|MISS|미스)\s*\d+(?:\s*[-~]\s*\d+)?"
+                r"(?:\s*,\s*\d+(?:\s*[-~]\s*\d+)?)*"
+                r"(?:\s+(?:%s))?" % _REASON_ALT)
 _HIT_SEG_RE = re.compile(_HIT_SEG_PAT, re.IGNORECASE)
 HIT_TRIGGER_RE = re.compile(r"\s*(?:%s\s*)+" % _HIT_SEG_PAT, re.IGNORECASE)  # 줄 = 세그먼트 1+ (혼합 OK)
 
@@ -399,11 +423,24 @@ def _stamp_chunks(pattern, prompt):
             if ln.strip() and pattern.fullmatch(ln)]
 
 
+def _seg_reason(segtext):
+    """미스 세그먼트 끝의 reason 라벨 → (verdict, reason_code) 또는 None. 긴 라벨 우선(부분겹침 방지)."""
+    s = str(segtext).strip()
+    best = None
+    for label in _REASON_LABELS:
+        if s.endswith(label) and (best is None or len(label) > len(best)):
+            best = label
+    return _REASON_LABELS[best] if best else None
+
+
 def parse_hit_stamps(prompt):
-    """회수 도장 인식 — {"hit": [idx...], "miss": [idx...]} 또는 None.
+    """회수 도장 인식 — {"hit": [idx...], "miss": [idx...], "reason"?: {idx:(verdict,code)}} 또는 None.
     같은 메시지에서 같은 idx 를 재도장하면 나중 줄이 이긴다(정정 허용 — idx당 verdict 1개).
-    문장 속 언급("그거 히트 3 어쩌고")은 줄 일부라 무시(SAVE 도장과 동일 오도장 차단 계약)."""
+    문장 속 언급("그거 히트 3 어쩌고")은 줄 일부라 무시(SAVE 도장과 동일 오도장 차단 계약).
+    reason(옵션): 미스 세그먼트 끝 라벨('미스 3 무관')이면 idx→(verdict, reason_code). '틀림/낡음/맥락/
+    최신'은 verdict 를 corrected 로 승격(record_outcome 화이트리스트 정합). hit 라벨/재도장 무라벨은 해제."""
     verdicts = {}
+    reasons = {}
     for chunk in _stamp_chunks(HIT_TRIGGER_RE, prompt):
         # 한 줄에 히트/미스 세그먼트가 여러 개 섞일 수 있다(owner 자연발화 '히트 4,7,8 미스 1,9,11,12').
         #   세그먼트별로 verdict 판별 — 같은 idx 재도장은 나중 세그먼트가 이긴다(정정 허용).
@@ -412,14 +449,21 @@ def parse_hit_stamps(prompt):
             idx = _expand_stamp_indices(segtext)
             if not idx:
                 continue
-            v = "hit" if _HIT_WORD_RE.match(segtext) else "miss"
+            is_hit = bool(_HIT_WORD_RE.match(segtext))
+            rlabel = None if is_hit else _seg_reason(segtext)  # (verdict, code) or None
             for i in idx:
-                verdicts[i] = v
+                verdicts[i] = "hit" if is_hit else "miss"
+                if rlabel:
+                    reasons[i] = rlabel
+                elif i in reasons:
+                    del reasons[i]  # 나중 재도장이 라벨 없으면 reason 해제(정정 허용)
     if not verdicts:
         return None
     out = {"hit": [], "miss": []}
     for i, v in verdicts.items():
         out[v].append(i)
+    if reasons:
+        out["reason"] = reasons
     return out
 
 

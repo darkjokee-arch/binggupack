@@ -75,6 +75,31 @@ def test_stamp_chunks_fenced_ignored():
     assert parse_promote_indices("승격 1") == [1]
 
 
+# ---------------- reason 라벨(다리c 짝) — 미스 세그먼트 끝 라벨로 verdict/reason_code 세분 ----------------
+def test_miss_reason_labels_parsed():
+    from binggupack.safety.gate_log import parse_hit_stamps
+    # 무관 → ignored/not_relevant (miss 리스트는 유지 · 두번째 소비자 호환)
+    r = parse_hit_stamps("미스 3 무관")
+    assert r["miss"] == [3] and r["reason"][3] == ("ignored", "not_relevant")
+    # 틀림 → verdict 를 corrected 로 승격 + false_match
+    assert parse_hit_stamps("미스 3 틀림")["reason"][3] == ("corrected", "false_match")
+    assert parse_hit_stamps("미스 5 낡음")["reason"][5] == ("corrected", "stale")
+    # 라벨 없으면 reason 키 자체가 없음(기존 계약 완전 불변)
+    assert parse_hit_stamps("미스 3") == {"hit": [], "miss": [3]}
+    assert parse_hit_stamps("히트 1") == {"hit": [1], "miss": []}
+    # 혼합 한 줄: 히트(라벨 없음) + 미스 라벨 — 세그먼트별 판별
+    r3 = parse_hit_stamps("히트 4,7 미스 1 무관")
+    assert set(r3["hit"]) == {4, 7} and r3["miss"] == [1]
+    assert r3["reason"] == {1: ("ignored", "not_relevant")}
+    # hit 세그먼트 라벨은 무시(used 엔 reason 없음)
+    r4 = parse_hit_stamps("히트 2 무관")
+    assert r4["hit"] == [2] and "reason" not in r4
+    # 콤마 다중 idx 에 라벨 → 세그먼트 전 idx 에 동일 reason
+    r5 = parse_hit_stamps("미스 1,2 이미알아")
+    assert set(r5["miss"]) == {1, 2}
+    assert r5["reason"][1] == ("ignored", "already_known") and r5["reason"][2] == ("ignored", "already_known")
+
+
 # ---------------- end-to-end: 격리 home 에서 fenced 입력은 승인 기록 0 ----------------
 def test_fenced_input_does_not_record_human_approval(monkeypatch):
     from binggupack.safety import gate_log as gl

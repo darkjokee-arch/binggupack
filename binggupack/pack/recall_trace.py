@@ -57,6 +57,34 @@ REASON_CODES = {
     "corrected": ("stale", "wrong_context", "superseded", "false_match"),
 }
 
+# ── situation(v3, 다리c) — 회상 시점의 '의도 상황' 축(§9 Layer1) ──────────────────
+# domain(cwd 프로젝트)과 직교하는 "무슨 상황에서 회상했나". reason_code(왜 무시/교정)와도 직교.
+# PII 0 — 자유 원문 아닌 enum 라벨만 저장(recall_traces 원문 0 규칙 유지).
+VALID_SITUATIONS = ("lookup", "decision", "change", "ambiguous")
+
+# 키워드 신호 근사(자연어 이해 아님 · 1인 점진구현 §13 B9 — 실로그로 보정).
+# 우선순위 = §9 혼합규칙: decision > change > lookup(결정+변경→결정 우선·조회+변경→변경 우선).
+_SIT_DECISION = ("할까", "할까요", "될까", "되는건가", "되나", "맞나", "맞을까", "맞아?",
+                 "검토", "방향", "의견", "어때", "어떨까", "좋을까", "괜찮을까", "응찰", "판단해")
+_SIT_CHANGE = ("정리", "수정", "삭제", "등록", "발송", "발행", "적용", "추가", "고쳐", "고침",
+               "만들", "생성", "바꿔", "변경", "지워", "제거", "올려", "배포", "커밋", "머지",
+               "실행", "돌려", "설치", "착수", "해결", "해줘", "해라", "하자")
+_SIT_LOOKUP = ("보여", "확인", "상태", "뭐야", "뭔가", "어디", "알려", "조회", "찾아", "검색",
+               "보자", "궁금", "무엇")
+
+
+def classify_situation(prompt):
+    """회상 시점 prompt → 의도 상황 라벨(∈ VALID_SITUATIONS). 키워드 신호 근사.
+    우선순위(§9 혼합규칙): decision > change > lookup > ambiguous. 미매치는 ambiguous."""
+    p = str(prompt or "")
+    if any(k in p for k in _SIT_DECISION):
+        return "decision"
+    if any(k in p for k in _SIT_CHANGE):
+        return "change"
+    if any(k in p for k in _SIT_LOOKUP):
+        return "lookup"
+    return "ambiguous"
+
 # signal_only 라벨 — 집계 반환이 golden set 을 자동수정하는 입력으로 쓰이지 못하게 명시(헌법).
 _SIGNAL_NOTE = ("이 수치는 표시 신호일 뿐 — golden set/fixture 자동수정 근거 아님. "
                 "사람이 후보를 보고 recall_golden.json 을 직접 보정한다(자동결정 0).")
@@ -166,7 +194,7 @@ def _trace_id(kind, query_sha, node_ids, ts):
 
 # ---------------- 기록: recall/preflight 결과 → trace (opt-in) ----------------
 
-def record_trace(query, kind, recalled_nodes, ts, *, domain=None,
+def record_trace(query, kind, recalled_nodes, ts, *, domain=None, situation=None,
                  risk_level=None, needs_question=None, home=None):
     """회상 결과 1건을 trace store 에 적재(opt-in). PII 0 — query=sha16, 노드=메타만.
 
@@ -185,9 +213,10 @@ def record_trace(query, kind, recalled_nodes, ts, *, domain=None,
     try:
         con.execute(
             "INSERT OR IGNORE INTO recall_traces"
-            "(trace_id,kind,query_sha,domain,recalled_json,top1_node_id,risk_level,needs_question,ts)"
-            " VALUES(?,?,?,?,?,?,?,?,?)",
+            "(trace_id,kind,query_sha,domain,situation,recalled_json,top1_node_id,risk_level,needs_question,ts)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?)",
             (tid, kind, qsha, domain,
+             situation if situation in VALID_SITUATIONS else None,
              json.dumps(scrubbed, ensure_ascii=False, sort_keys=True),
              node_ids[0] if node_ids else None, risk_level,
              None if needs_question is None else int(bool(needs_question)), ts))
@@ -198,16 +227,16 @@ def record_trace(query, kind, recalled_nodes, ts, *, domain=None,
             "node_ids": node_ids}  # node_ids: outcome staging(preflight hook)이 재사용(비파괴 확장)
 
 
-def trace_from_why_search(query, result, ts, *, domain=None, home=None):
+def trace_from_why_search(query, result, ts, *, domain=None, situation=None, home=None):
     """why_search 반환 dict 를 그대로 받아 trace 기록(호출측 편의 · recall.py 비침습)."""
     return record_trace(query, "why_search", result.get("relevant_nodes", []), ts,
-                        domain=domain, home=home)
+                        domain=domain, situation=situation, home=home)
 
 
-def trace_from_preflight(query, result, ts, *, domain=None, home=None):
+def trace_from_preflight(query, result, ts, *, domain=None, situation=None, home=None):
     """preflight_context 반환 dict 를 받아 trace 기록(remember + 위험도/반문 메타)."""
     return record_trace(query, "preflight", result.get("remember", []), ts,
-                        domain=domain, risk_level=result.get("risk_level"),
+                        domain=domain, situation=situation, risk_level=result.get("risk_level"),
                         needs_question=result.get("needs_question"), home=home)
 
 
@@ -743,6 +772,31 @@ def _selftest():
         set_trace_flag(False, home=home4)
         ck(trace_enabled(home4) is False and not os.path.exists(_flag_path(home4)),
            "set_trace_flag(False) → 파일 삭제·OFF 복귀")
+
+        # ── situation(v3, 다리c): 분류기 4분기 + 기록/화이트리스트 ──
+        ck(classify_situation("이거 삭제해줘") == "change", "classify_situation → change(행동동사)")
+        ck(classify_situation("이렇게 하는 게 맞나?") == "decision", "classify_situation → decision(결정)")
+        ck(classify_situation("현재 상태 보여줘") == "lookup", "classify_situation → lookup(조회)")
+        ck(classify_situation("음 그렇군") == "ambiguous", "classify_situation → ambiguous(미매치)")
+        ck(classify_situation("이거 삭제하는 게 맞나?") == "decision",
+           "classify_situation 결정+변경 혼합 → decision 우선(§9)")
+        home_sit = os.path.join(tmp, ".binggupack_sit")  # 고유 home(기존 home5 재사용 금지 — 격리)
+        os.makedirs(home_sit, exist_ok=True)
+        set_trace_flag(True, home=home_sit)
+        r_sit = trace_from_preflight("배포 결정 질의", res_pf, TS,
+                                     domain="proj", situation="decision", home=home_sit)
+        con = _open_store(home_sit)
+        s_row = con.execute("SELECT situation, domain FROM recall_traces WHERE trace_id=?",
+                            (r_sit["trace_id"],)).fetchone()
+        con.close()
+        ck(s_row == ("decision", "proj"), "trace_from_preflight → situation+domain 함께 기록(다리c)")
+        r_bad_sit = trace_from_preflight("다른 질의 xyz", res_pf, "2026-06-27T09:00:00Z",
+                                         situation="INVALID_SIT", home=home_sit)
+        con = _open_store(home_sit)
+        sb = con.execute("SELECT situation FROM recall_traces WHERE trace_id=?",
+                        (r_bad_sit["trace_id"],)).fetchone()[0]
+        con.close()
+        ck(sb is None, "situation 화이트리스트 밖 → NULL(오타/원문 차단)")
 
         # ── reason_code 화이트리스트(PII 차단) ──
         set_trace_flag(True, home=home4)
