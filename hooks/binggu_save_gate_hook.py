@@ -195,10 +195,15 @@ def _run(data):
                             snap_idx = {s.get("idx") for s in snap}
                             ts = time.time()
                             oa = _outcome_attribution_module(sd)
-                            for vkey, verdict in (("hit", "used"), ("miss", "ignored")):
+                            reason_map = hs.get("reason") or {}  # {idx: (verdict, reason_code)} — 미스 라벨 세분
+                            for vkey, default_verdict in (("hit", "used"), ("miss", "ignored")):
                                 for i in (hs.get(vkey) or []):
                                     if i in snap_idx:
-                                        rt.mark_by_index(i, verdict, {"actor": "human"}, ts)
+                                        rv = reason_map.get(i)  # '미스 3 무관/틀림' → verdict 승격 + reason_code
+                                        verdict = rv[0] if rv else default_verdict
+                                        rcode = rv[1] if rv else None
+                                        rt.mark_by_index(i, verdict, {"actor": "human"}, ts,
+                                                         reason_code=rcode)
                                         if vkey == "hit":
                                             # 히트(사람) → 운영 ledger use_count++ (랭킹 utility 축 연결
                                             #   · 2026-07-21 4cli+Fable5: 히트↔use_count 끊김 배선).
@@ -481,6 +486,30 @@ def _selftest():
             check(r.returncode == 0
                   and gl.recall_stamp_verdicts(rows3, path=str(gate_log)) == {1: "hit"},
                   "T18c stale snapshot → last_recall 폴백(대화중 회상 경로 보존)")
+            # T18g(reason 라벨·다리c 짝): '미스 N 틀림' → recall_outcomes verdict 승격(corrected)+reason_code.
+            #   라벨 없는 miss=ignored(reason NULL)와 달리, 미스 세그먼트 끝 라벨이 세분 신호를 채운다.
+            lcon = _sq.connect(str(led))
+            lcon.execute("INSERT INTO nodes(node_id,node_type,sentence,candidate,state,"
+                         "content_hash,created_at,semantic_subtype,use_count) VALUES"
+                         "('node:CONV:rs1','judgment','reason 라벨 테스트',0,'active','h2',"
+                         "'2026-07-20T00:00:00Z','교훈',0)")
+            lcon.commit()
+            lcon.close()
+            RT.record_trace("리즌 라벨", "why_search",
+                            [{"node_id": "node:CONV:rs1", "semantic_subtype": "교훈",
+                              "rank_score": 0.5, "relevance": 0.5}],
+                            "2026-07-20T01:00:00Z", home=str(home))
+            pend_r = RT.list_pending(home=str(home), ledger_path=str(led))
+            RT.save_review_snapshot(pend_r, home=str(home))
+            rs_idx = next(p["idx"] for p in pend_r if p["node_id"] == "node:CONV:rs1")
+            r = call({"hook_event_name": "UserPromptSubmit",
+                      "prompt": "미스 %d 틀림" % rs_idx, "cwd": "x"})
+            con_o = RT._open_store_ro(str(home))
+            row_o = con_o.execute("SELECT verdict, reason_code FROM recall_outcomes"
+                                  " WHERE node_id='node:CONV:rs1'").fetchone()
+            con_o.close()
+            check(r.returncode == 0 and row_o == ("corrected", "false_match"),
+                  "T18g '미스 N 틀림' → recall_outcomes corrected/false_match(다리c reason 배선)")
         except Exception as e:
             rt_ok = False
             check(rt_ok, "T18~T18c recall_trace 통합 예외: %s" % type(e).__name__)
