@@ -186,7 +186,10 @@ def _run(data):
                 rt = _recall_trace_module(sd)
                 if rt is not None and gl is not None:
                     sp = rt.review_snapshot_path()
-                    win = getattr(gl, "GATE_WINDOW_SEC", 3600) or 3600
+                    # 세션 마무리 preview 는 긴 세션·배선 수정으로 preview~도장 간격이 길 수 있어
+                    # (2026-07-24 실측 74분 > 기본 60분 초과 → 도장 증발) 신선도 창을 넉넉히(6h).
+                    # SAVE 신선도(옛 자동저장 방지)와 별개 — 마무리 회상 도장은 세션 내 언제든 유효.
+                    win = max(getattr(gl, "GATE_WINDOW_SEC", 3600) or 3600, 6 * 3600)
                     if os.path.exists(sp) and (time.time() - os.path.getmtime(sp)) <= win:
                         snap = rt._load_review_snapshot()
                     if snap:
