@@ -382,6 +382,12 @@ _HIT_SEG_PAT = (r"(?:HIT|히트|MISS|미스)\s*\d+(?:\s*[-~]\s*\d+)?"
 _HIT_SEG_RE = re.compile(_HIT_SEG_PAT, re.IGNORECASE)
 HIT_TRIGGER_RE = re.compile(r"\s*(?:%s\s*)+" % _HIT_SEG_PAT, re.IGNORECASE)  # 줄 = 세그먼트 1+ (혼합 OK)
 
+# ★2026-07-24: owner 가 저장+히트+미스를 한 줄로 침('저장1,2 히트2,4 미스1,3') — SAVE 세그 동반
+#   허용(줄 판정만). 추출은 _HIT_SEG_RE(HIT/MISS 전용)라 SAVE 세그는 chunk 인정에만 쓰이고 verdict
+#   에 안 섞인다. gate_text 의 혼합 줄 SAVE 지원과 대칭(양 파서가 서로의 세그 이물질 취급하던 해소).
+_SAVE_SEG_PAT = (r"(?:SAVE|저장|세이브)\s*\d+(?:\s*[-~]\s*\d+)?(?:\s*,\s*\d+(?:\s*[-~]\s*\d+)?)*")
+_MIXED_STAMP_RE = re.compile(r"\s*(?:(?:%s|%s)\s*)+" % (_HIT_SEG_PAT, _SAVE_SEG_PAT), re.IGNORECASE)
+
 # 승격 스탬프: 'PROMOTE 1' / '승격 1,3-5'. 계약 동일(fullmatch·줄단위).
 PROMOTE_TRIGGER_RE = re.compile(
     r"\s*(?:PROMOTE|승격)\s*\d+(\s*[-~]\s*\d+)?(\s*,\s*\d+(\s*[-~]\s*\d+)?)*\s*",
@@ -441,8 +447,9 @@ def parse_hit_stamps(prompt):
     최신'은 verdict 를 corrected 로 승격(record_outcome 화이트리스트 정합). hit 라벨/재도장 무라벨은 해제."""
     verdicts = {}
     reasons = {}
-    for chunk in _stamp_chunks(HIT_TRIGGER_RE, prompt):
+    for chunk in _stamp_chunks(_MIXED_STAMP_RE, prompt):
         # 한 줄에 히트/미스 세그먼트가 여러 개 섞일 수 있다(owner 자연발화 '히트 4,7,8 미스 1,9,11,12').
+        # 선두/동반 SAVE 세그('저장1,2 히트...')는 _MIXED_STAMP_RE 로 줄만 인정, 아래 _HIT_SEG_RE 추출서 제외.
         #   세그먼트별로 verdict 판별 — 같은 idx 재도장은 나중 세그먼트가 이긴다(정정 허용).
         for seg in _HIT_SEG_RE.finditer(chunk):
             segtext = seg.group(0)
