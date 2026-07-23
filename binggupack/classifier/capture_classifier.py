@@ -47,6 +47,10 @@ SIGNAL_PATTERNS = {
                  r"재발\s*방지", r"놓치지\s*않", r"잊지\s*않", r"또\s*안\s*밟", r"안\s*밟", r"또\s*밟",
                  r"먼저\s*[가-힣을를\s]{0,8}(본다|봐야|확인|점검|챙긴다|챙긴|손댄다|손대|해야|둔다|들인다)",
                  r"미리\s*[가-힣]{0,6}(본다|봐야|확인|점검|챙긴다|해\s*둔다|둔다)"],
+    # owner 원칙/단정 경계 표명 (2026-07-23): "확정하는건 없다·확정지을 수도 없다" 류 메타 판단.
+    #   classify 가 no_signal 로 배제해 owner 원칙이 버퍼에 안 담기던 결함 수정(owner 반복 지적).
+    #   좁게(확정/단정 + 없) — "확정 못했다"(완료 보고)는 '못'이라 미포착(오탐 회피). 실로그 보정.
+    "원칙단정": [r"확정.{0,12}없", r"단정.{0,10}(않|없|마|말|못)"],
 }
 
 # 추측 마커 (단독이면 ignored, 판단신호 동반이면 weak)
@@ -217,6 +221,10 @@ def _selftest():
         ("이게 맞나?", "상태를 보여드릴게요", dict(state="ignored"), "prev AI판단 무관→veto 유지"),
         ("할까요?", "B안을 추천합니다", dict(state="ignored"), "순수 진행확인(할까요)=prev 있어도 veto"),
         ("확인했어?", "B안을 추천합니다", dict(state="ignored"), "확인질문=rebuttable 아님 veto"),
+        # --- ★원칙단정 (2026-07-23 owner 원칙 미포착 결함 수정) ---
+        ("확정하는건 없다. 그리고 상한이라고 확정지을 수도 없다", None, dict(state="captured_candidate"), "원칙단정(확정…없)"),
+        ("단정할 수 없다", None, dict(state="captured_candidate"), "원칙단정(단정…없)"),
+        ("아직 확정 못했다", None, dict(state="ignored"), "일회성 보고(확정 못=원칙단정 오탐 아님)"),
     ]
     passed = 0
     for i, (utt, prev, expect, note) in enumerate(cases, 1):
