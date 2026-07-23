@@ -285,11 +285,14 @@ def _build_outcome_candidates(home=None, today=None):
                 "note": "당일 후보 로드 실패(graceful 생략)"}
 
 
-# ---------------- 2c. 이번 세션 회상 히트 후보 (recall_trace · read-only · owner 도장만) ----------------
+# ---------------- 2c. 누적 미판정 회상 정리 후보 (recall_trace · 세션 무관 · read-only · owner 도장만) ----------------
 
 def _build_recall_hits(home=None, ledger_path=None, now_ts=None, top_n=12):
-    """이번 세션 회상 판정 후보 — AI 자동선별 소수(값 확정 0) + owner 도장.
+    """누적 미판정 회상 정리 후보(세션 무관) — AI 자동선별 소수(값 확정 0) + owner 도장.
 
+    ★세션 필터 없음(2026-07-22 owner 지적 정직화): recall_traces 에 session_id 컬럼이 없어
+    '이번 세션'만 거르지 못한다 — list_pending 은 전체 누적 미판정을 반환한다. 따라서 이 섹션은
+    '이번 세션 도움된 회상'이 아니라 '누적 미판정 중 청소 시급분'이다(라벨을 진실에 맞춤).
     실데이터 전량이 preflight 자동회상이라 미판정이 수백 건 누적된다(2026-07-21 실측: pending
     425 = 100% preflight). owner 가 전부 도장할 수 없으므로 AI 가 **미스 후보(오래됨·그래프
     미편입 = recall_trace.list_miss_candidates)를 우선 정렬**해 top_n 만 제시한다. 선별=조회+신호
@@ -311,7 +314,7 @@ def _build_recall_hits(home=None, ledger_path=None, now_ts=None, top_n=12):
         total = len(pending)
         if not pending:
             return {"available": True, "count": 0, "total_pending": 0, "items": [],
-                    "note": "이번 세션 미판정 회상 없음(trace OFF 거나 회상 0 — binggu trace enable 로 켜짐)"}
+                    "note": "누적 미판정 회상 없음(trace OFF 거나 회상 0 — binggu trace enable 로 켜짐)"}
         # AI 자동선별: 미스 후보(오래됨·미편입) 우선 → 나머지는 최신 회상으로 채움(top_n 컷)
         miss = RT.list_miss_candidates(now_ts, home=home, ledger_path=lp, top_n=top_n) if now_ts else []
         seen = {(m["trace_id"], m["node_id"]) for m in miss}
@@ -335,7 +338,8 @@ def _build_recall_hits(home=None, ledger_path=None, now_ts=None, top_n=12):
                   "age_hours": s.get("age_hours")} for s in selected]
         miss_n = sum(1 for s in selected if s.get("flag") == "miss")
         return {"available": True, "count": len(items), "total_pending": total, "items": items,
-                "note": ("미판정 %d건 중 AI 가 %d건 선별(⚠미스 후보 %d = 오래됨·그래프 미편입 우선). "
+                "note": ("이번 세션이 아니라 전체 누적 미판정 %d건 중 청소 시급분 %d건 선별"
+                         "(⚠미스 후보 %d = 오래됨·그래프 미편입 우선). "
                          "도움=`히트 N`·헛다리=`미스 N`(actor=human) — 선별=조회, 도장=사람(자동 0)"
                          % (total, len(items), miss_n))}
     except Exception:
@@ -493,7 +497,7 @@ def _build_paste_block(summary):
 
 def render_close_md(summary):
     """세션 마무리 요약 → 사람이 읽는 마크다운(결정적 · LLM 0 · 저장 0).
-    저장 preview(candidate) + 이번 세션 회상 히트 후보 + 거버넌스(적중률) + 한 줄 도장 안내."""
+    저장 preview(candidate) + 누적 미판정 회상 정리 후보(세션 무관) + 거버넌스(적중률) + 한 줄 도장 안내."""
     lines = ["## 세션 마무리 — 저장 preview + 회상 히트 + 거버넌스 (저장 0 · 사람이 SAVE/도장)"]
 
     # 1) 저장 후보
@@ -518,10 +522,10 @@ def render_close_md(summary):
         lines.append("- ⚠️ 긴 발화 %d건 자동 제외(붙여넣기·대화 덩어리·AI 응답문 — 화자축 오염 방지). "
                      "진짜 저장하려면 그 내용에 `이거 저장해` 명시." % bv)
 
-    # 2) 이번 세션 회상 히트 후보 (recall_trace 통합 · MF3 회상효용 축 · owner 도장)
+    # 2) 누적 미판정 회상 정리 후보 (recall_trace 통합 · 세션 무관 · MF3 회상효용 축 · owner 도장)
     rh = summary.get("recall_hits", {}) or {}
     lines.append("")
-    lines.append("### 2) 이번 세션 회상 — 판정 (도움=`히트 N` / 헛다리=`미스 N` · owner 도장)")
+    lines.append("### 2) 누적 미판정 회상 — 정리 (세션 무관 · 오래됨/미편입 우선 · 도움=`히트 N` / 헛다리=`미스 N`)")
     if rh.get("available") and rh.get("count"):
         for it in rh.get("items", []):
             cat = (" [%s]" % it["category"]) if it.get("category") else ""
@@ -536,7 +540,7 @@ def render_close_md(summary):
             lines.append("- %d.%s %s%s%s%s" % (it["idx"], mark, claim, cat, rank, age))
         lines.append("> %s" % rh.get("note", "도움=히트 N·헛다리=미스 N — 양쪽 다 도장해야 정직·안 치면 pending 유지·자동 0"))
     else:
-        lines.append("- (이번 세션 미판정 회상 없음 — trace OFF 거나 회상 0)")
+        lines.append("- (누적 미판정 회상 없음 — trace OFF 거나 회상 0)")
 
     # 2-b) AI 제안 L1 명제 (hybrid_agi · 승인 대기 · owner 후보와 화자축 분리)
     lp1 = summary.get("l1_proposals", {}) or {}
@@ -863,7 +867,7 @@ def _selftest():
             md_rh = render_close_md(s_rh)
             # 복붙 블록엔 SAVE 만(자동 '히트 <전체>' 제거 = 편향 근원 차단) · §2·§4 는 히트/미스 양자 유도
             paste_rh = _build_paste_block(s_rh)
-            check("이번 세션 회상" in md_rh and "- 1. " in md_rh
+            check("누적 미판정 회상" in md_rh and "- 1. " in md_rh
                   and "미스 N" in md_rh and "미스 3" in md_rh and "SAVE 1,2" in md_rh
                   and "### 5) 한 번에 저장" in md_rh
                   and "자동저장: **0**" in md_rh
