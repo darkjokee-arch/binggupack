@@ -287,12 +287,13 @@ def _build_outcome_candidates(home=None, today=None):
 
 # ---------------- 2c. 누적 미판정 회상 정리 후보 (recall_trace · 세션 무관 · read-only · owner 도장만) ----------------
 
-def _build_recall_hits(home=None, ledger_path=None, now_ts=None, top_n=12):
+def _build_recall_hits(home=None, ledger_path=None, now_ts=None, top_n=12, session_id=None):
     """누적 미판정 회상 정리 후보(세션 무관) — AI 자동선별 소수(값 확정 0) + owner 도장.
 
-    ★세션 필터 없음(2026-07-22 owner 지적 정직화): recall_traces 에 session_id 컬럼이 없어
-    '이번 세션'만 거르지 못한다 — list_pending 은 전체 누적 미판정을 반환한다. 따라서 이 섹션은
-    '이번 세션 도움된 회상'이 아니라 '누적 미판정 중 청소 시급분'이다(라벨을 진실에 맞춤).
+    ★v4(2026-07-25 owner 지적 해결): session_id 주어지면 '이번 세션 실제 회상'을 우선 표시(효용
+    판정 대상 — 도움=`히트`/헛다리=`미스`). 이번 세션 회상이 없으면(구세션·session_id NULL) 아래 폴백:
+    누적 미판정 중 청소 시급분(오래됨·미편입 우선). recall_traces.session_id(v4)가 이번 세션 필터를 가능케 함.
+    (구 한계 2026-07-22: session_id 컬럼 부재로 '이번 세션'을 못 걸러 누적만 표시 → v4로 해소.)
     실데이터 전량이 preflight 자동회상이라 미판정이 수백 건 누적된다(2026-07-21 실측: pending
     425 = 100% preflight). owner 가 전부 도장할 수 없으므로 AI 가 **미스 후보(오래됨·그래프
     미편입 = recall_trace.list_miss_candidates)를 우선 정렬**해 top_n 만 제시한다. 선별=조회+신호
@@ -310,6 +311,28 @@ def _build_recall_hits(home=None, ledger_path=None, now_ts=None, top_n=12):
                 "note": "recall_trace 모듈 미사용(회상 후보 생략)"}
     try:
         lp = ledger_path or _ledger_path(home)
+        # v4(owner 2026-07-25): 이번 세션 실제 회상 우선 — 도움 판정 대상은 '이번 세션 인출 회상'이다.
+        #   session_id 주어지고 이번 세션 회상이 있으면 그것(효용 판정), 없으면(구세션·NULL) 누적 청소분 폴백.
+        session_pending = (RT.list_pending(home=home, ledger_path=lp, session_id=session_id)
+                           if session_id else [])
+        if session_pending:
+            sel = []
+            for p in reversed(session_pending):  # list_pending 은 ts asc → 뒤가 최신
+                sel.append({"trace_id": p["trace_id"], "node_id": p["node_id"],
+                            "category": p.get("category"), "rank": p.get("rank"),
+                            "claim": p.get("claim"), "flag": "session"})
+                if len(sel) >= top_n:
+                    break
+            for i, s in enumerate(sel, 1):
+                s["idx"] = i
+            RT.save_review_snapshot(sel, home=home)  # N → (trace_id,node_id) 고정(N-shift 안전)
+            items = [{"idx": s["idx"], "category": s.get("category"), "rank": s.get("rank"),
+                      "claim": s.get("claim"), "flag": s.get("flag")} for s in sel]
+            return {"available": True, "count": len(items), "total_pending": len(session_pending),
+                    "items": items, "scope": "session",
+                    "note": ("이번 세션 실제 회상 %d건 중 %d건 — 도움됐으면 `히트 N`·안 도움이면 `미스 N`"
+                             "(actor=human). 이번 세션 인출 회상의 효용 판정(v4 session_id 필터)."
+                             % (len(session_pending), len(items)))}
         pending = RT.list_pending(home=home, ledger_path=lp)
         total = len(pending)
         if not pending:
@@ -466,7 +489,7 @@ def build_close_summary(home=None, cwd=None, ledger_path=None, session_id=None,
     _ = today  # 하위호환(구 시그니처 호출자 무해)
     return {
         "preview": _build_preview(home, session_id=session_id),
-        "recall_hits": _build_recall_hits(home, ledger_path, now_ts=now_ts),
+        "recall_hits": _build_recall_hits(home, ledger_path, now_ts=now_ts, session_id=session_id),
         "l1_proposals": _build_l1_proposals(home),
         "governance": _build_governance(home, cwd, ledger_path),
         "save_action": {
@@ -876,6 +899,18 @@ def _selftest():
             rh0 = _build_recall_hits(home=str(tmp / ".binggupack_rh0"))
             check(rh0["count"] == 0,
                   "T21b trace 부재 home → 히트 후보 0(graceful · 운영홈 미접촉)")
+            # T21c(v4 session_id): 이번 세션 회상 우선(scope=session) vs 폴백(누적)
+            home_sc = tmp / ".binggupack_sc"
+            RT.set_trace_flag(True, home=str(home_sc))
+            RT.record_trace("이번세션회상", "preflight", [{"node_id": "node:CONV:sc1"}],
+                            "2026-07-25T01:00:00Z", session_id="SC_NOW", home=str(home_sc))
+            RT.record_trace("구세션회상", "preflight", [{"node_id": "node:CONV:sc2"}],
+                            "2026-07-24T01:00:00Z", session_id="SC_OLD", home=str(home_sc))
+            rh_now = _build_recall_hits(home=str(home_sc), session_id="SC_NOW")
+            rh_fb = _build_recall_hits(home=str(home_sc))
+            check(rh_now.get("scope") == "session" and rh_now["count"] == 1
+                  and rh_fb.get("scope") != "session" and rh_fb["total_pending"] == 2,
+                  "T21c(v4) session_id → 이번 세션 회상 우선(scope=session·1건) · 폴백=누적(2건)")
         except Exception as e:
             rh_ok = False
             check(rh_ok, "T20~T21 회상 히트 통합 예외: %s" % type(e).__name__)
