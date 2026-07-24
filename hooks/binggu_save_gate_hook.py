@@ -32,6 +32,12 @@ from pathlib import Path
 # 휴리스틱일 뿐 — 정밀 판정(fullmatch·줄단위)은 gate_log 파서 몫이라 오기록 0(로드 비용만).
 _STAMP_FAST_RE = re.compile(r"(?:HIT|히트|MISS|미스|PROMOTE|승격)\s*\d", re.IGNORECASE)
 
+# 세션 마무리 회상 preview 도장 신선도 창 — 긴 세션(배선 수정 등)으로 preview~도장 간격이
+# 기본 GATE_WINDOW(60분)를 넘어도(2026-07-24 실측 74분) 도장이 유효하도록 넉넉히(6h).
+# SAVE 신선도(옛 자동저장 방지)와 별개 축 — 마무리 회상 도장은 세션 내 언제든 유효.
+# 정본 상수: hook 의 win 계산과 selftest T18c 의 stale 기준이 이 값 하나를 공유한다.
+_REVIEW_SNAPSHOT_WINDOW_SEC = 6 * 3600
+
 
 def _scripts_dir():
     env = os.environ.get("BINGGU_SCRIPTS")
@@ -186,10 +192,8 @@ def _run(data):
                 rt = _recall_trace_module(sd)
                 if rt is not None and gl is not None:
                     sp = rt.review_snapshot_path()
-                    # 세션 마무리 preview 는 긴 세션·배선 수정으로 preview~도장 간격이 길 수 있어
-                    # (2026-07-24 실측 74분 > 기본 60분 초과 → 도장 증발) 신선도 창을 넉넉히(6h).
-                    # SAVE 신선도(옛 자동저장 방지)와 별개 — 마무리 회상 도장은 세션 내 언제든 유효.
-                    win = max(getattr(gl, "GATE_WINDOW_SEC", 3600) or 3600, 6 * 3600)
+                    # 신선도 창 = max(GATE_WINDOW, _REVIEW_SNAPSHOT_WINDOW_SEC) — 상세는 상수 정의 참조.
+                    win = max(getattr(gl, "GATE_WINDOW_SEC", 3600) or 3600, _REVIEW_SNAPSHOT_WINDOW_SEC)
                     if os.path.exists(sp) and (time.time() - os.path.getmtime(sp)) <= win:
                         snap = rt._load_review_snapshot()
                     if snap:
@@ -480,7 +484,8 @@ def _selftest():
             check(_uc("node:CONV:hk1") == 1,
                   "T18f 같은 날 재히트 → use_count 멱등 유지(단기 반복 정렬오염 차단 · Fable5 D)")
             # T18c stale snapshot(창 밖) → 대화중 회상으로 폴백(last_recall 경로 복귀)
-            old = time.time() - (getattr(gl, "GATE_WINDOW_SEC", 3600) + 100)
+            # stale 기준 = hook 의 실제 신선도 창(max(GATE_WINDOW, _REVIEW_SNAPSHOT_WINDOW_SEC)) 밖.
+            old = time.time() - (max(getattr(gl, "GATE_WINDOW_SEC", 3600) or 3600, _REVIEW_SNAPSHOT_WINDOW_SEC) + 100)
             os.utime(str(RT.review_snapshot_path(str(home))), (old, old))
             rp3 = home / "last_recall_candidates.json"
             gl.write_last_recall(["node:CONV:zz9"], query="y", path=str(rp3))
