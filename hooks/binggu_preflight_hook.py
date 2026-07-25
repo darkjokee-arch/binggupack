@@ -312,7 +312,14 @@ def _render_stamp_footer(res, prompt):
             safe_q = ""  # 정화기 부재 → 원문 미영속(보수적 blank · 멱등키만 약화)
         GL.write_last_recall([nid for nid, _c in ordered], query=safe_q,
                              surface="preflight_hook")
-        lines = ['## 회상 도장 번호 (유용했으면 채팅 정확형 1줄 "히트 N" · 아니면 "미스 N")']
+        # ★Claude 렌더 강제(2026-07-25 owner 지적): 이 블록은 컨텍스트 주입일 뿐 owner 화면에 안 뜬다.
+        #   AI 가 옮기지 않으면 owner 는 무엇이 회상됐는지 못 보고 히트/미스 도장도 못 한다
+        #   (실측: 한 세션 회상 17회 전부 미노출). PR#105 가 마무리 preview 만 고치고 남긴 절반.
+        lines = ['[Claude 필수 — 회상 노출] 아래 회상을 **답변 첫머리**에 '
+                 '`🧠 회상 N. <요지>` 한 줄씩 그대로 옮겨 owner 에게 보여라. '
+                 '이 블록은 owner 화면에 안 뜬다(요약·생략·"위 참조" 금지). '
+                 '안 옮기면 owner 가 히트/미스 도장을 못 해 회상 효용 측정이 멈춘다.',
+                 '## 회상 도장 번호 (유용했으면 채팅 정확형 1줄 "히트 N" · 아니면 "미스 N")']
         for i, (_nid, claim) in enumerate(ordered, 1):
             lines.append("  %d. %s" % (i, claim))
         lines.append("(도장 후 소비: binggu mark-hit --from-recall --index N — 자동 기록 0 · 사람 도장만)")
@@ -786,6 +793,11 @@ def _selftest():
               and all(i.get("idx") == n + 1 for n, i in enumerate(stg_items))
               and "node:CONV:aa01" not in r.stdout,
               "T26 조언 표시 → 도장 번호 푸터 + staging 기록(idx=번호·raw node_id 미노출)")
+        # T26c(2026-07-25 owner 지적 회귀방지): 회상 블록은 owner 화면에 안 뜨므로 AI 렌더 지시가
+        #   반드시 동봉돼야 한다. 지시가 빠지면 owner 는 회상을 못 보고 히트/미스 도장도 못 한다
+        #   (실측: 한 세션 회상 17회 전부 미노출 → 효용 측정 정지).
+        check("[Claude 필수 — 회상 노출]" in r.stdout and "답변 첫머리" in r.stdout,
+              "T26c 회상 푸터에 Claude 렌더 지시 동봉(owner 미노출 재발 차단)")
         # T26b 회상 표면의 write 는 staging 뿐 — ledger 는 여전히 불변(read-only 불변 유지)
         mt26 = (ledger.stat().st_mtime_ns, ledger.stat().st_size)
         call({"hook_event_name": "UserPromptSubmit", "prompt": MATCH, "cwd": repo_cwd})
