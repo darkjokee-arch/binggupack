@@ -548,7 +548,14 @@ def render_close_md(summary):
     # 2) 누적 미판정 회상 정리 후보 (recall_trace 통합 · 세션 무관 · MF3 회상효용 축 · owner 도장)
     rh = summary.get("recall_hits", {}) or {}
     lines.append("")
-    lines.append("### 2) 누적 미판정 회상 — 정리 (세션 무관 · 오래됨/미편입 우선 · 도움=`히트 N` / 헛다리=`미스 N`)")
+    # ★제목은 실제 scope 를 따른다(2026-07-25 owner 지적): v4 session 필터가 걸렸는데도 제목이
+    #   "세션 무관"이면 owner 가 "이게 이번 세션 회상 맞냐"를 알 수 없다(note 만 고치고 제목을 안 고친 결함).
+    if rh.get("scope") == "session":
+        lines.append("### 2) 이번 세션 회상 — 효용 판정 "
+                     "(이 세션에서 실제 인출된 회상 · 도움=`히트 N` / 헛다리=`미스 N`)")
+    else:
+        lines.append("### 2) 누적 미판정 회상 — 정리 "
+                     "(세션 무관 · 오래됨/미편입 우선 · 도움=`히트 N` / 헛다리=`미스 N`)")
     if rh.get("available") and rh.get("count"):
         for it in rh.get("items", []):
             cat = (" [%s]" % it["category"]) if it.get("category") else ""
@@ -911,6 +918,15 @@ def _selftest():
             check(rh_now.get("scope") == "session" and rh_now["count"] == 1
                   and rh_fb.get("scope") != "session" and rh_fb["total_pending"] == 2,
                   "T21c(v4) session_id → 이번 세션 회상 우선(scope=session·1건) · 폴백=누적(2건)")
+            # T21d(2026-07-25 owner 지적 회귀방지): 제목이 실제 scope 를 따라야 한다.
+            #   note 만 '이번 세션'이고 제목이 '세션 무관'이면 owner 가 무엇을 판정하는지 알 수 없다.
+            t_now = [ln for ln in render_close_md({"recall_hits": rh_now}).splitlines()
+                     if ln.startswith("### 2)")]
+            t_fb = [ln for ln in render_close_md({"recall_hits": rh_fb}).splitlines()
+                    if ln.startswith("### 2)")]
+            check(bool(t_now) and "이번 세션 회상" in t_now[0]
+                  and bool(t_fb) and "누적 미판정" in t_fb[0],
+                  "T21d 제목이 scope 를 따름(session=이번 세션 회상 / 폴백=누적 미판정)")
         except Exception as e:
             rh_ok = False
             check(rh_ok, "T20~T21 회상 히트 통합 예외: %s" % type(e).__name__)
