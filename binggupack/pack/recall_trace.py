@@ -195,7 +195,7 @@ def _trace_id(kind, query_sha, node_ids, ts):
 # ---------------- 기록: recall/preflight 결과 → trace (opt-in) ----------------
 
 def record_trace(query, kind, recalled_nodes, ts, *, domain=None, situation=None,
-                 risk_level=None, needs_question=None, home=None):
+                 risk_level=None, needs_question=None, session_id=None, home=None):
     """회상 결과 1건을 trace store 에 적재(opt-in). PII 0 — query=sha16, 노드=메타만.
 
     kind        : 'why_search' | 'preflight'.
@@ -213,10 +213,11 @@ def record_trace(query, kind, recalled_nodes, ts, *, domain=None, situation=None
     try:
         con.execute(
             "INSERT OR IGNORE INTO recall_traces"
-            "(trace_id,kind,query_sha,domain,situation,recalled_json,top1_node_id,risk_level,needs_question,ts)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?)",
+            "(trace_id,kind,query_sha,domain,situation,session_id,recalled_json,top1_node_id,risk_level,needs_question,ts)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
             (tid, kind, qsha, domain,
              situation if situation in VALID_SITUATIONS else None,
+             session_id,
              json.dumps(scrubbed, ensure_ascii=False, sort_keys=True),
              node_ids[0] if node_ids else None, risk_level,
              None if needs_question is None else int(bool(needs_question)), ts))
@@ -227,16 +228,17 @@ def record_trace(query, kind, recalled_nodes, ts, *, domain=None, situation=None
             "node_ids": node_ids}  # node_ids: outcome staging(preflight hook)이 재사용(비파괴 확장)
 
 
-def trace_from_why_search(query, result, ts, *, domain=None, situation=None, home=None):
+def trace_from_why_search(query, result, ts, *, domain=None, situation=None, session_id=None, home=None):
     """why_search 반환 dict 를 그대로 받아 trace 기록(호출측 편의 · recall.py 비침습)."""
     return record_trace(query, "why_search", result.get("relevant_nodes", []), ts,
-                        domain=domain, situation=situation, home=home)
+                        domain=domain, situation=situation, session_id=session_id, home=home)
 
 
-def trace_from_preflight(query, result, ts, *, domain=None, situation=None, home=None):
+def trace_from_preflight(query, result, ts, *, domain=None, situation=None, session_id=None, home=None):
     """preflight_context 반환 dict 를 받아 trace 기록(remember + 위험도/반문 메타)."""
     return record_trace(query, "preflight", result.get("remember", []), ts,
-                        domain=domain, situation=situation, risk_level=result.get("risk_level"),
+                        domain=domain, situation=situation, session_id=session_id,
+                        risk_level=result.get("risk_level"),
                         needs_question=result.get("needs_question"), home=home)
 
 
@@ -466,20 +468,26 @@ def set_auto_observe_flag(enable, home=None):
 
 # ---------------- review / mark (수동 outcome 명령 — binggu trace) ----------------
 
-def list_pending(home=None, ledger_path=None):
+def list_pending(home=None, ledger_path=None, session_id=None):
     """미판정 (trace,node) 펼침 목록 + ledger claim join(표시용 · store 원문 0 유지).
 
     claim 은 ledger(read-only)에서 node_id 로 조회한 표시 텍스트일 뿐 — trace store 엔
     여전히 미저장(PII 0). ledger 부재/노드 부재면 claim=None(graceful).
     정렬: ts asc → trace_id → node_id (결정적 · 새 trace 는 뒤에 붙어 앞 순번 불변).
+    session_id(v4): 지정 시 그 세션 회상만(마무리 preview §2 '이번 세션 회상' 필터) · None=전체 누적.
     반환 [{idx, trace_id, node_id, category, rank, kind, claim}] (idx=1부터)."""
     if not os.path.exists(trace_store_path(home)):
         return []
     con = _open_store(home)
     try:
         judged = set(con.execute("SELECT trace_id, node_id FROM recall_outcomes").fetchall())
-        rows = con.execute(
-            "SELECT trace_id, kind, recalled_json, ts FROM recall_traces ORDER BY ts, trace_id").fetchall()
+        if session_id:
+            rows = con.execute(
+                "SELECT trace_id, kind, recalled_json, ts FROM recall_traces"
+                " WHERE session_id=? ORDER BY ts, trace_id", (session_id,)).fetchall()
+        else:
+            rows = con.execute(
+                "SELECT trace_id, kind, recalled_json, ts FROM recall_traces ORDER BY ts, trace_id").fetchall()
     finally:
         con.close()
 
@@ -790,6 +798,20 @@ def _selftest():
                             (r_sit["trace_id"],)).fetchone()
         con.close()
         ck(s_row == ("decision", "proj"), "trace_from_preflight → situation+domain 함께 기록(다리c)")
+        # ── session_id(v4): 이번 세션 회상 필터(마무리 preview §2 도움 판정 대상) ──
+        home_sid = os.path.join(tmp, ".binggupack_sid")  # 고유 home(격리 · home_sit 재사용 금지)
+        os.makedirs(home_sid, exist_ok=True)
+        set_trace_flag(True, home=home_sid)
+        record_trace("세션A질의1", "preflight", [{"node_id": "node:SA1"}], "2026-07-25T01:00:00Z",
+                     session_id="SID_A", home=home_sid)
+        record_trace("세션A질의2", "preflight", [{"node_id": "node:SA2"}], "2026-07-25T02:00:00Z",
+                     session_id="SID_A", home=home_sid)
+        record_trace("세션B질의", "preflight", [{"node_id": "node:SB1"}], "2026-07-25T03:00:00Z",
+                     session_id="SID_B", home=home_sid)
+        pend_a = list_pending(home=home_sid, session_id="SID_A")
+        pend_all = list_pending(home=home_sid)
+        ck(len(pend_a) == 2 and len(pend_all) == 3,
+           "session_id(v4) → list_pending 이번 세션 필터(SID_A 2 / 전체 누적 3)")
         r_bad_sit = trace_from_preflight("다른 질의 xyz", res_pf, "2026-06-27T09:00:00Z",
                                          situation="INVALID_SIT", home=home_sit)
         con = _open_store(home_sit)
