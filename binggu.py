@@ -558,6 +558,57 @@ def _judgment_trace_show(ledger, node_id):
     return 0
 
 
+# AI 자기신고 도장이 올린 use_count 를 되돌릴 수 있어야 하므로 **고정 키**(day-bucket 금지).
+# adoption_key 는 날짜가 섞여 있어, AI 가 어제 찍고 owner 가 오늘 뒤집으면 어제 몫을 못 찾는다.
+# 고정 키라 (node_id, use_key) UNIQUE 로 노드당 1회만 계상된다 = 자기강화 루프도 함께 억제.
+_AI_STAMP_USE_KEY = "use-aistamp"
+
+
+def _ai_stamp_use_count(ledger, res, verdict, use_ai):
+    """AI 자기신고 도장의 랭킹(use_count) 반영 + owner 덮어쓰기 시 회수. best-effort(실패 침묵).
+
+    2026-07-27 owner 결정 "AI 도장도 바로 반영" — 종전엔 사람 도장만 use_count 로 이어졌고
+    (`hooks/binggu_save_gate_hook.py::_stamp_use_count`) AI 도장은 효용 장부에만 남았다.
+    use_count 0/468 병목을 푸는 대신 **AI 자기신고가 랭킹을 직접 움직이는** 되먹임이 생기므로,
+    되돌림을 같이 둔다:
+      · AI 가 used 로 찍음            → record_use(+1 · 고정 키라 노드당 1회)
+      · owner 가 그 항목을 used 아닌 것으로 덮어씀 → revoke_use(AI 몫만 −1)
+    owner 가 used 로 확인해준 경우는 결론이 같으므로 그대로 둔다(카운트 흔들지 않음).
+    사람이 올린 몫은 use_key 가 달라 이 경로에서 절대 건드려지지 않는다.
+
+    반환 (use_count, action) — action ∈ {"record","revoke","error(...)",None}.
+    ★실패를 조용히 넘기지 않는다(§13 B10) — 예외는 "error(타입)" 로 돌려 CLI 가 화면에 표시한다.
+    2026-07-27 실사용 1차에서 RANK 지연 import 누락(NameError)을 except 가 삼켜 **12건 도장이
+    전부 무증상 미반영**됐다. 그때 화면엔 아무 표시도 없었다 — 그래서 사유를 반환값에 싣는다.
+    """
+    node_id = res.get("node_id")
+    if not node_id:
+        return None, None
+    try:
+        # ★ RANK 는 이 모듈의 전역이 아니다 — 다른 경로들(cmd_recall·_mark_from_recall)도
+        # 함수 안에서 지연 import 한다. 여기서도 반드시 지역 import 할 것.
+        import binggu_p1_ranking as RANK
+        from binggupack.pack import recall_trace as _RT
+        if use_ai and verdict == "used":
+            action = "record"
+        elif (res.get("overwrote") == _RT.AI_STAMP_ACTOR
+                and res.get("prev_verdict") == "used" and verdict != "used"):
+            action = "revoke"
+        else:
+            return None, None
+        db, _ = _open(ledger)
+        try:
+            if action == "record":
+                n = RANK.record_use(db, node_id, use_key=_AI_STAMP_USE_KEY)
+            else:
+                n = RANK.revoke_use(db, node_id, _AI_STAMP_USE_KEY)
+        finally:
+            db.close()
+        return n, action
+    except Exception as e:
+        return None, "error(%s)" % type(e).__name__
+
+
 def _trace_review(RT, ledger, home):
     """미판정 회상 목록 + 번호→(trace,node) 스냅샷 저장(원문 0). 효용 판정 대기."""
     pend = RT.list_pending(home=home, ledger_path=ledger)
@@ -565,7 +616,9 @@ def _trace_review(RT, ledger, home):
         print("미판정 회상이 없습니다.")
         print("(preflight 자동주입이 일어나고 opt-in 이 켜져 있어야 쌓입니다 — binggu trace enable)")
         return 0
-    RT.save_review_snapshot(pend, home=home)
+    # scope="all" 명시 — 마무리 preview(scope="session")와 같은 파일을 쓰므로, 이 목록으로
+    # 덮은 뒤 세션 번호로 도장하면 오도장이 난다. mark 가 expect_scope 로 대조해 막는다.
+    RT.save_review_snapshot(pend, home=home, scope="all")
     print("# 미판정 회상 %d건 — 효용 판정 대기 (candidate · 사람 판정만)" % len(pend))
     for p in pend:
         cat = (" [%s]" % p["category"]) if p["category"] else ""
@@ -604,6 +657,7 @@ def cmd_trace(a):
         return 0
     if a1 == "mark":
         # 배치 도장(간결 UX): "1,2,3" 콤마 여러 개 → 각각 판정(도움된 회상 한 줄 도장).
+        touched_use = False
         # 단일 "N" 은 이전과 동일. owner '히트 H1,H2' 발화가 이 배치 경로로 소비된다.
         verdict = a.a3
         if verdict not in RT.VALID_VERDICTS:
@@ -617,26 +671,45 @@ def cmd_trace(a):
             print("사용법: binggu trace mark <N[,N...]> <used|ignored|corrected> [--note <reason_code>]")
             return 2
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        ctx = _resolve_human_ctx(a.ledger, None)   # P1-A.1 fail-closed
+        # --ai: AI 자기신고 도장(owner 지시 · 히트/미스 한정). 그 외는 기존 fail-closed 경로.
+        use_ai = bool(getattr(a, "ai", False))
+        ctx = ({"actor": RT.AI_STAMP_ACTOR} if use_ai else _resolve_human_ctx(a.ledger, None))
+        actor_label = RT.AI_STAMP_ACTOR if use_ai else "human"
         hints = {"need_review": "먼저 binggu trace review 로 목록을 보세요.",
                  "bad_index": "그 번호의 회상이 없습니다(review 재실행).",
                  "dup_outcome": "이미 판정된 회상(첫 판정 보존).",
                  "invalid_reason_code": "note 는 정해진 코드만: %s" % _reason_hint(verdict),
                  "trace_not_found": "trace 를 찾을 수 없습니다.",
-                 "G4_no_auto": "actor=human 만 판정 가능(헌법)."}
+                 "stale_snapshot": "다른 목록이 스냅샷을 덮었습니다 — 대상 목록을 다시 띄우세요(오도장 차단).",
+                 "G4_no_auto": "actor=human 만 판정 가능(헌법 · AI 는 --ai 로 ai_stamp 기록)."}
         ok_cnt = 0
         for n in ns:
             res = RT.mark_by_index(n, verdict, ctx, ts,
-                                   reason_code=getattr(a, "note", None), home=home)
+                                   reason_code=getattr(a, "note", None), home=home,
+                                   expect_scope=getattr(a, "expect_scope", None),
+                                   expect_session=getattr(a, "expect_session", None))
             if res["recorded"]:
                 ok_cnt += 1
                 note = (" · note=%s" % res["reason_code"]) if res.get("reason_code") else ""
-                print("판정 기록: #%d → %s%s (actor=human)" % (n, verdict, note))
+                over = (" · %s 도장 덮어씀" % res["overwrote"]) if res.get("overwrote") else ""
+                uc, act = _ai_stamp_use_count(ledger, res, verdict, use_ai)
+                if act in ("record", "revoke"):
+                    touched_use = True
+                    rank = " · use_count=%s(%s)" % (
+                        uc, "AI 반영" if act == "record" else "AI 몫 회수")
+                elif act:
+                    rank = " · ⚠ 랭킹 반영 실패(%s)" % act   # silent drop 금지(§13 B10)
+                else:
+                    rank = ""
+                print("판정 기록: #%d → %s%s (actor=%s)%s%s"
+                      % (n, verdict, note, actor_label, over, rank))
             else:
                 print("판정 안 됨 #%d(%s): %s"
                       % (n, res["reason"], hints.get(res["reason"], res["reason"])))
         if len(ns) > 1:
-            print("→ %d/%d 건 판정 기록(actor=human · 자동 0)" % (ok_cnt, len(ns)))
+            print("→ %d/%d 건 판정 기록(actor=%s)" % (ok_cnt, len(ns), actor_label))
+        if touched_use:
+            _reindex_after_write(ledger)   # use_count 변화 → fresh_index rank 반영(기존 규약)
         return 0
     if a1 in (None, "review"):
         return _trace_review(RT, ledger, home)
@@ -2202,6 +2275,12 @@ def main():
     tp.add_argument("a2", nargs="?", default=None)   # mark:N | show:node_id
     tp.add_argument("a3", nargs="?", default=None)   # mark:verdict
     tp.add_argument("--note", default=None)          # reason_code(화이트리스트)
+    # AI 자기신고 도장(2026-07-27 owner 지시 — 히트/미스만 열외). actor=ai_stamp 로 원문 보존,
+    # human 을 참칭하지 않는다. owner 가 나중에 같은 항목을 찍으면 사람 판정이 덮어쓴다.
+    tp.add_argument("--ai", action="store_true")
+    # 스냅샷 출처 대조(오도장 차단) — 세션 목록 기준으로 찍을 때 지정
+    tp.add_argument("--expect-scope", default=None, dest="expect_scope")
+    tp.add_argument("--expect-session", default=None, dest="expect_session")
     pfp = sub.add_parser("preflight")
     pfp.add_argument("--prompt", default=None)
     pfp.add_argument("--cwd", default=None)

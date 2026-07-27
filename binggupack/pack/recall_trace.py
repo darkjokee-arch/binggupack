@@ -45,6 +45,10 @@ import binggu_platform as _plat  # binggu_home(BINGGU_HOME 존중 · 격리 폴�
 
 VALID_VERDICTS = ("used", "ignored", "corrected")
 
+# AI 자기신고 도장 actor (2026-07-27 owner 명시 지시 — 히트/미스만 열외).
+# 사람 위장 0: actor 원문을 그대로 남겨 집계에서 human 과 분리한다(aggregate.by_actor).
+AI_STAMP_ACTOR = "ai_stamp"
+
 # reason_code 화이트리스트 — note 는 자유 원문 금지(PII 차단), verdict 별 enum 만 허용.
 # golden_drift 분석에 그대로 쓰이는 구조화 신호(왜 무시/교정됐나 → fixture 보정 방향).
 #   ignored : not_relevant(무관) · already_known(이미 앎) · low_signal(약한 신호)
@@ -56,6 +60,34 @@ REASON_CODES = {
     "ignored": ("not_relevant", "already_known", "low_signal"),
     "corrected": ("stale", "wrong_context", "superseded", "false_match"),
 }
+
+# ── situation(v3, 다리c) — 회상 시점의 '의도 상황' 축(§9 Layer1) ──────────────────
+# domain(cwd 프로젝트)과 직교하는 "무슨 상황에서 회상했나". reason_code(왜 무시/교정)와도 직교.
+# PII 0 — 자유 원문 아닌 enum 라벨만 저장(recall_traces 원문 0 규칙 유지).
+VALID_SITUATIONS = ("lookup", "decision", "change", "ambiguous")
+
+# 키워드 신호 근사(자연어 이해 아님 · 1인 점진구현 §13 B9 — 실로그로 보정).
+# 우선순위 = §9 혼합규칙: decision > change > lookup(결정+변경→결정 우선·조회+변경→변경 우선).
+_SIT_DECISION = ("할까", "할까요", "될까", "되는건가", "되나", "맞나", "맞을까", "맞아?",
+                 "검토", "방향", "의견", "어때", "어떨까", "좋을까", "괜찮을까", "응찰", "판단해")
+_SIT_CHANGE = ("정리", "수정", "삭제", "등록", "발송", "발행", "적용", "추가", "고쳐", "고침",
+               "만들", "생성", "바꿔", "변경", "지워", "제거", "올려", "배포", "커밋", "머지",
+               "실행", "돌려", "설치", "착수", "해결", "해줘", "해라", "하자")
+_SIT_LOOKUP = ("보여", "확인", "상태", "뭐야", "뭔가", "어디", "알려", "조회", "찾아", "검색",
+               "보자", "궁금", "무엇")
+
+
+def classify_situation(prompt):
+    """회상 시점 prompt → 의도 상황 라벨(∈ VALID_SITUATIONS). 키워드 신호 근사.
+    우선순위(§9 혼합규칙): decision > change > lookup > ambiguous. 미매치는 ambiguous."""
+    p = str(prompt or "")
+    if any(k in p for k in _SIT_DECISION):
+        return "decision"
+    if any(k in p for k in _SIT_CHANGE):
+        return "change"
+    if any(k in p for k in _SIT_LOOKUP):
+        return "lookup"
+    return "ambiguous"
 
 # signal_only 라벨 — 집계 반환이 golden set 을 자동수정하는 입력으로 쓰이지 못하게 명시(헌법).
 _SIGNAL_NOTE = ("이 수치는 표시 신호일 뿐 — golden set/fixture 자동수정 근거 아님. "
@@ -166,8 +198,8 @@ def _trace_id(kind, query_sha, node_ids, ts):
 
 # ---------------- 기록: recall/preflight 결과 → trace (opt-in) ----------------
 
-def record_trace(query, kind, recalled_nodes, ts, *, domain=None,
-                 risk_level=None, needs_question=None, home=None):
+def record_trace(query, kind, recalled_nodes, ts, *, domain=None, situation=None,
+                 risk_level=None, needs_question=None, session_id=None, home=None):
     """회상 결과 1건을 trace store 에 적재(opt-in). PII 0 — query=sha16, 노드=메타만.
 
     kind        : 'why_search' | 'preflight'.
@@ -185,9 +217,11 @@ def record_trace(query, kind, recalled_nodes, ts, *, domain=None,
     try:
         con.execute(
             "INSERT OR IGNORE INTO recall_traces"
-            "(trace_id,kind,query_sha,domain,recalled_json,top1_node_id,risk_level,needs_question,ts)"
-            " VALUES(?,?,?,?,?,?,?,?,?)",
+            "(trace_id,kind,query_sha,domain,situation,session_id,recalled_json,top1_node_id,risk_level,needs_question,ts)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
             (tid, kind, qsha, domain,
+             situation if situation in VALID_SITUATIONS else None,
+             session_id,
              json.dumps(scrubbed, ensure_ascii=False, sort_keys=True),
              node_ids[0] if node_ids else None, risk_level,
              None if needs_question is None else int(bool(needs_question)), ts))
@@ -198,16 +232,17 @@ def record_trace(query, kind, recalled_nodes, ts, *, domain=None,
             "node_ids": node_ids}  # node_ids: outcome staging(preflight hook)이 재사용(비파괴 확장)
 
 
-def trace_from_why_search(query, result, ts, *, domain=None, home=None):
+def trace_from_why_search(query, result, ts, *, domain=None, situation=None, session_id=None, home=None):
     """why_search 반환 dict 를 그대로 받아 trace 기록(호출측 편의 · recall.py 비침습)."""
     return record_trace(query, "why_search", result.get("relevant_nodes", []), ts,
-                        domain=domain, home=home)
+                        domain=domain, situation=situation, session_id=session_id, home=home)
 
 
-def trace_from_preflight(query, result, ts, *, domain=None, home=None):
+def trace_from_preflight(query, result, ts, *, domain=None, situation=None, session_id=None, home=None):
     """preflight_context 반환 dict 를 받아 trace 기록(remember + 위험도/반문 메타)."""
     return record_trace(query, "preflight", result.get("remember", []), ts,
-                        domain=domain, risk_level=result.get("risk_level"),
+                        domain=domain, situation=situation, session_id=session_id,
+                        risk_level=result.get("risk_level"),
                         needs_question=result.get("needs_question"), home=home)
 
 
@@ -221,6 +256,14 @@ def record_outcome(trace_id, node_id, verdict, ctx, ts, *, reason_code=None, hom
       - ai_observation : T0 자동 관측 — verdict='used' 만 허용(auto_fact_observation 게이트).
         owner 신호('노드·엣지·증거 연결 시작 = 채택')의 자동 도장. ignored/corrected(부정·교정)는
         여전히 human 만 — 오판·인기편향 방지(negative-only 는 사람). actor 원문 보존(사람 위장 0).
+      - ai_stamp       : **AI 자기신고 도장**(2026-07-27 owner 명시 지시 "히트/미스만 자동으로
+        찍어, 나머지는 사람 손"). used/ignored/corrected 전부 허용 — 회상을 실제로 쓴 시점의
+        정보는 AI 가 가장 많고, 세션 끝 목록만 보는 owner 보다 판정이 정확하다는 owner 판단.
+        ★ai_observation 과 **분리 유지**: 저쪽은 그래프 편입이라는 객관 신호, 이쪽은 자기신고라
+        성질이 다르다. 한 칸에 섞으면 "AI 가 스스로 유용했다고 한 것"과 "owner 가 인정한 것"을
+        나중에 구분할 수 없고 기존 사람 도장 신뢰도까지 흐려진다(집계는 actor 별 분리 · aggregate).
+        ★owner 덮어쓰기: ai_stamp 판정은 human 판정이 오면 **교체**된다(아래 dup 분기).
+        저장(SAVE)·승격·배포·파괴 작업은 이 예외와 무관 — 사람 손 그대로.
 
     reason_code: note 대용 — 자유 원문 금지(PII 차단), REASON_CODES[verdict] 화이트리스트만.
       None 은 항상 허용. used 에 코드 명시는 거부(used 사유 불요).
@@ -230,6 +273,8 @@ def record_outcome(trace_id, node_id, verdict, ctx, ts, *, reason_code=None, hom
         pass  # 기존 경로(전 verdict)
     elif actor == "ai_observation" and verdict == "used" and CFG.auto_fact_observation_allowed():
         pass  # T0 자동 관측(used only · 헌법 v2 · auto_fact_observation)
+    elif actor == AI_STAMP_ACTOR:
+        pass  # AI 자기신고 도장(2026-07-27 owner 명시 지시 — 히트/미스만 열외·↓ 주석)
     else:
         return {"recorded": False, "reason": "G4_no_auto"}
     if verdict not in VALID_VERDICTS:
@@ -243,16 +288,29 @@ def record_outcome(trace_id, node_id, verdict, ctx, ts, *, reason_code=None, hom
         # trace 존재 확인(dangling outcome 방지 — 없는 trace 판정은 분모 오염)
         if not con.execute("SELECT 1 FROM recall_traces WHERE trace_id=?", (trace_id,)).fetchone():
             return {"recorded": False, "reason": "trace_not_found"}
-        if con.execute("SELECT 1 FROM recall_outcomes WHERE trace_id=? AND node_id=?",
-                       (trace_id, node_id)).fetchone():
-            return {"recorded": False, "reason": "dup_outcome"}
+        prev = con.execute("SELECT outcome_id, actor, verdict FROM recall_outcomes"
+                           " WHERE trace_id=? AND node_id=?", (trace_id, node_id)).fetchone()
+        if prev:
+            # owner 덮어쓰기: AI 자기신고 도장은 사람 판정이 오면 교체(사람 > AI · 기본값 성격).
+            # 그 외 조합(human→*, ai→ai)은 기존대로 첫 판정 보존(이중계상 차단).
+            if not (prev[1] == AI_STAMP_ACTOR and actor == "human"):
+                return {"recorded": False, "reason": "dup_outcome", "prev_actor": prev[1]}
+            con.execute(
+                "UPDATE recall_outcomes SET outcome_id=?,verdict=?,reason_code=?,actor=?,ts=?"
+                " WHERE trace_id=? AND node_id=?",
+                (oid, verdict, reason_code, actor, ts, trace_id, node_id))
+            con.commit()
+            return {"recorded": True, "outcome_id": oid, "reason_code": reason_code,
+                    "actor": actor, "overwrote": prev[1], "node_id": node_id,
+                    "prev_verdict": prev[2]}
         con.execute(
             "INSERT INTO recall_outcomes(outcome_id,trace_id,node_id,verdict,reason_code,actor,ts)"
             " VALUES(?,?,?,?,?,?,?)", (oid, trace_id, node_id, verdict, reason_code, actor, ts))
         con.commit()
     finally:
         con.close()
-    return {"recorded": True, "outcome_id": oid, "reason_code": reason_code, "actor": actor}
+    return {"recorded": True, "outcome_id": oid, "reason_code": reason_code,
+            "actor": actor, "node_id": node_id}
 
 
 # ---------------- T0 자동 관측: 그래프 편입 = 채택 (헌법 v2 · owner 신호) ----------------
@@ -315,6 +373,99 @@ def auto_observe_adoption(ts, *, home=None, ledger_path=None, dry_run=False):
     return {"observed": len(stamped), "stamped": stamped, "dry_run": dry_run}
 
 
+# ---------------- 미스 후보 자동선별 (auto_observe 의 부정 거울 · read-only · 값 확정 0) ----------------
+
+def _parse_iso_utc(ts):
+    """ISO 'YYYY-MM-DDTHH:MM:SSZ' → aware datetime(UTC). 파싱 실패 → None(graceful)."""
+    if not ts:
+        return None
+    import datetime as _dt
+    try:
+        return _dt.datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def list_miss_candidates(now_ts, *, home=None, ledger_path=None,
+                         min_age_hours=24, top_n=10):
+    """미스(헛다리) 후보 자동선별 — auto_observe_adoption 의 부정 거울(순수 SELECT · 값 확정 0).
+
+    회상됐으나 (a) now_ts 기준 min_age_hours 이상 경과 (b) 회상 이후 '관계 엣지' 미편입
+    = 오래도록 그래프에 안 쓰인 노드 → owner 가 '미스' 도장할 후보를 AI 가 정렬·상위 top_n 제시.
+
+    헌법 정합(owner 논증 · 2026-07-21): 후보 제시(조회+신호) ≠ 값 확정(판정). ignored 도장은
+    owner actor=human 만(record_outcome) — 본 함수는 recall_outcomes 를 한 바이트도 write 하지
+    않는다. auto_observe_adoption 이 '편입=used' 를 자동 도장하므로 편입 노드는 여기서 제외
+    (긍정/부정 거울 대칭 · used 와 겹치지 않음). ledger 는 read-only(mode=ro) 조회만.
+
+    now_ts : 호출자 제공 ISO 타임스탬프(결정성 · Date.now 미사용 정책).
+    정렬: age desc(오래된 순) → rank asc(낮은 관련도 우선) → trace_id → node_id(결정적).
+    반환 [{trace_id, node_id, category, rank, age_hours, claim}] (top_n 컷 · idx 미부여).
+    store/now_ts 파싱 실패 → [](graceful)."""
+    if not os.path.exists(trace_store_path(home)):
+        return []
+    now_dt = _parse_iso_utc(now_ts)
+    if now_dt is None:
+        return []
+    con = _open_store_ro(home)
+    try:
+        judged = set(con.execute("SELECT trace_id, node_id FROM recall_outcomes").fetchall())
+        rows = con.execute("SELECT trace_id, recalled_json, ts FROM recall_traces").fetchall()
+    finally:
+        con.close()
+
+    lcon = None
+    by_id = {}
+    if ledger_path and os.path.exists(ledger_path):
+        lcon = sqlite3.connect(
+            "file:%s?mode=ro" % os.path.abspath(ledger_path).replace("\\", "/"), uri=True)
+        try:
+            import binggu_recall as RC
+            by_id = RC._load_graph(ledger_path).get("by_id", {})
+        except Exception:
+            by_id = {}
+
+    cands = []
+    try:
+        for trace_id, rj, trace_ts in rows:
+            tdt = _parse_iso_utc(trace_ts)
+            if tdt is None:
+                continue  # 회상 시점 모르면 경과·편입 판정 불가(보수 제외)
+            age_h = (now_dt - tdt).total_seconds() / 3600.0
+            if age_h < min_age_hours:
+                continue  # 아직 신선 — 막 회상된 건 미스라 단정 못 함(판정 유예)
+            try:
+                nodes = json.loads(rj) if rj else []
+            except Exception:
+                nodes = []
+            for n in nodes:
+                nid = n.get("node_id")
+                if not nid or (trace_id, nid) in judged:
+                    continue
+                # 회상 이후 관계 엣지 편입? 편입됐으면 auto_observe 가 used 로 잡음 → 미스 후보 제외
+                if lcon is not None:
+                    row = lcon.execute(
+                        "SELECT 1 FROM edges WHERE (source=? OR target=?)"
+                        " AND relation != 'evidence_supports'"
+                        " AND created_at IS NOT NULL AND created_at > ? LIMIT 1",
+                        (nid, nid, trace_ts)).fetchone()
+                    if row:
+                        continue  # 편입됨(used 신호) → 부정 거울에서 제외
+                node = by_id.get(nid)
+                claim = (node["sentence"][:100] if node else None)
+                cands.append({"trace_id": trace_id, "node_id": nid,
+                              "category": n.get("category"), "rank": n.get("rank"),
+                              "age_hours": round(age_h, 1), "claim": claim})
+    finally:
+        if lcon is not None:
+            lcon.close()
+
+    cands.sort(key=lambda c: (-c["age_hours"],
+                              c["rank"] if c["rank"] is not None else 1.0,
+                              c["trace_id"], c["node_id"]))
+    return cands[:top_n]
+
+
 # ---------------- T0 자동관측 opt-in 플래그 (기본 OFF · 첫 실행 안전) ----------------
 
 def _auto_observe_flag_path(home=None):
@@ -344,20 +495,32 @@ def set_auto_observe_flag(enable, home=None):
 
 # ---------------- review / mark (수동 outcome 명령 — binggu trace) ----------------
 
-def list_pending(home=None, ledger_path=None):
+def list_pending(home=None, ledger_path=None, session_id=None, include_ai_stamped=False):
     """미판정 (trace,node) 펼침 목록 + ledger claim join(표시용 · store 원문 0 유지).
 
     claim 은 ledger(read-only)에서 node_id 로 조회한 표시 텍스트일 뿐 — trace store 엔
     여전히 미저장(PII 0). ledger 부재/노드 부재면 claim=None(graceful).
     정렬: ts asc → trace_id → node_id (결정적 · 새 trace 는 뒤에 붙어 앞 순번 불변).
-    반환 [{idx, trace_id, node_id, category, rank, kind, claim}] (idx=1부터)."""
+    session_id(v4): 지정 시 그 세션 회상만(마무리 preview §2 '이번 세션 회상' 필터) · None=전체 누적.
+    include_ai_stamped(2026-07-27): True 면 **AI 자기신고 도장(ai_stamp)이 찍힌 것도 목록에 남긴다**
+      — owner 가 마무리 preview 에서 보고 다르게 찍어 덮어쓸 수 있어야 하므로(사람 > AI).
+      사람 판정(human)·T0 관측은 그대로 제외(확정분).
+    반환 [{idx, trace_id, node_id, category, rank, kind, claim, ai_verdict}] (idx=1부터)."""
     if not os.path.exists(trace_store_path(home)):
         return []
     con = _open_store(home)
     try:
-        judged = set(con.execute("SELECT trace_id, node_id FROM recall_outcomes").fetchall())
-        rows = con.execute(
-            "SELECT trace_id, kind, recalled_json, ts FROM recall_traces ORDER BY ts, trace_id").fetchall()
+        judged = {}
+        for t, n, v, rc, a in con.execute(
+                "SELECT trace_id, node_id, verdict, reason_code, actor FROM recall_outcomes"):
+            judged[(t, n)] = {"verdict": v, "reason_code": rc, "actor": a}
+        if session_id:
+            rows = con.execute(
+                "SELECT trace_id, kind, recalled_json, ts FROM recall_traces"
+                " WHERE session_id=? ORDER BY ts, trace_id", (session_id,)).fetchall()
+        else:
+            rows = con.execute(
+                "SELECT trace_id, kind, recalled_json, ts FROM recall_traces ORDER BY ts, trace_id").fetchall()
     finally:
         con.close()
 
@@ -378,23 +541,43 @@ def list_pending(home=None, ledger_path=None):
             nodes = []
         for n in nodes:
             nid = n.get("node_id")
-            if not nid or (trace_id, nid) in judged:
+            if not nid:
                 continue
+            prev = judged.get((trace_id, nid))
+            if prev and not (include_ai_stamped and prev["actor"] == AI_STAMP_ACTOR):
+                continue                      # 사람 판정·T0 관측은 확정 → 목록에서 제외
             node = by_id.get(nid)
             claim = (node["sentence"][:100] if node else None)
             pending.append({"trace_id": trace_id, "node_id": nid,
                             "category": n.get("category"), "rank": n.get("rank"),
-                            "kind": kind, "claim": claim})
+                            "kind": kind, "claim": claim,
+                            "ai_verdict": (prev["verdict"] if prev else None),
+                            "ai_reason_code": (prev["reason_code"] if prev else None)})
     # 결정적 정렬 후 idx 부여
     for i, p in enumerate(pending, 1):
         p["idx"] = i
     return pending
 
 
-def save_review_snapshot(pending, home=None):
-    """review 번호→(trace_id,node_id) 매핑만 저장(원문 0). mark 가 N 을 안전 역참조."""
-    snap = [{"idx": p["idx"], "trace_id": p["trace_id"], "node_id": p["node_id"]}
-            for p in pending]
+SNAPSHOT_SCHEMA = "recall_review_snapshot_v2"
+
+
+def save_review_snapshot(pending, home=None, *, scope=None, session_id=None, ts=None):
+    """review 번호→(trace_id,node_id) 매핑 저장(원문 0). mark 가 N 을 안전 역참조.
+
+    ★v2(2026-07-27): items 배열만 저장하던 것을 **출처 메타와 함께** 저장한다.
+    스냅샷 파일은 하나인데 쓰는 곳이 넷이다 — `binggu trace review`(전체 누적)·마무리 preview
+    (세션 필터)·save_gate hook 2곳. 마지막에 쓴 쪽이 이기므로, owner 가 마무리 화면의 번호를
+    보고 나중에 도장하면 **그 사이 누가 덮었는지에 따라 엉뚱한 회상에 찍힌다**(2026-07-27 실측:
+    세션 12건 목록이 전체 1,756건 목록으로 덮인 상태 재현).
+    → scope/session_id 를 함께 남기고 `mark_by_index(expect_*)` 가 대조해 stale 이면 거부한다.
+    박제 정합: "저장이 도장의 단일 원천이고 표시와 빌더는 저장값만 읽어야 발산이 없다".
+
+    구형(리스트) 파일도 계속 읽힌다(_load_review_snapshot 하위호환)."""
+    snap = {"schema": SNAPSHOT_SCHEMA, "scope": scope, "session_id": session_id, "ts": ts,
+            "items": [{"idx": p["idx"], "trace_id": p["trace_id"], "node_id": p["node_id"],
+                       "ai_verdict": p.get("ai_verdict")}
+                      for p in pending]}
     p = review_snapshot_path(home)
     d = os.path.dirname(p)
     if d:
@@ -405,24 +588,38 @@ def save_review_snapshot(pending, home=None):
 
 
 def _load_review_snapshot(home=None):
+    """{schema,scope,session_id,ts,items} 반환. 구형 리스트 파일은 메타 None 으로 감싼다."""
     p = review_snapshot_path(home)
     if not os.path.exists(p):
         return None
     try:
         with open(p, encoding="utf-8") as f:
-            return json.load(f)
+            raw = json.load(f)
     except Exception:
         return None
+    if isinstance(raw, list):                      # v1 하위호환(메타 없음 → 대조 skip)
+        return {"schema": "recall_review_snapshot_v1", "scope": None,
+                "session_id": None, "ts": None, "items": raw}
+    return raw
 
 
-def mark_by_index(n, verdict, ctx, ts, *, reason_code=None, home=None):
+def mark_by_index(n, verdict, ctx, ts, *, reason_code=None, home=None,
+                  expect_scope=None, expect_session=None):
     """review 스냅샷의 N 번 항목을 판정(binggu trace mark N verdict). N shift 방지.
 
-    스냅샷 부재 → need_review(먼저 binggu trace review). N 범위 밖 → bad_index."""
+    스냅샷 부재 → need_review(먼저 binggu trace review). N 범위 밖 → bad_index.
+    expect_scope/expect_session 지정 시 스냅샷 출처와 대조 — 불일치면 **stale_snapshot**
+    (다른 목록이 덮어쓴 뒤의 오도장 차단). 구형 v1 스냅샷은 메타가 없어 대조를 건너뛴다."""
     snap = _load_review_snapshot(home)
     if not snap:
         return {"recorded": False, "reason": "need_review"}
-    hit = next((s for s in snap if s.get("idx") == n), None)
+    if expect_scope and snap.get("scope") and snap["scope"] != expect_scope:
+        return {"recorded": False, "reason": "stale_snapshot",
+                "snapshot_scope": snap.get("scope"), "expected": expect_scope}
+    if expect_session and snap.get("session_id") and snap["session_id"] != expect_session:
+        return {"recorded": False, "reason": "stale_snapshot",
+                "snapshot_session": snap.get("session_id"), "expected": expect_session}
+    hit = next((s for s in snap["items"] if s.get("idx") == n), None)
     if not hit:
         return {"recorded": False, "reason": "bad_index"}
     return record_outcome(hit["trace_id"], hit["node_id"], verdict, ctx, ts,
@@ -442,20 +639,30 @@ def aggregate(home=None):
     if not os.path.exists(trace_store_path(home)):
         return {"overall": {"traces": 0, "outcomes": 0, "used": 0, "ignored": 0,
                             "corrected": 0, "usefulness_rate": None},
-                "per_node": {}, "golden_drift_candidates": [],
+                "per_node": {}, "by_actor": {}, "golden_drift_candidates": [],
                 "signal_only": True, "note": _SIGNAL_NOTE}
     con = _open_store_ro(home)  # read-only 집계 — apply_schema/makedirs 미경유(store write 0)
     try:
         n_traces = con.execute("SELECT COUNT(*) FROM recall_traces").fetchone()[0]
-        rows = con.execute("SELECT node_id, verdict, reason_code FROM recall_outcomes").fetchall()
+        rows = con.execute("SELECT node_id, verdict, reason_code, actor"
+                           " FROM recall_outcomes").fetchall()
     finally:
         con.close()
 
     per = {}
     tot = {"used": 0, "ignored": 0, "corrected": 0}
-    for node_id, verdict, reason in rows:
+    # ★actor 분리(2026-07-27): AI 자기신고 도장(ai_stamp)과 사람 도장을 한 칸에 섞지 않는다.
+    # 섞으면 "AI 가 스스로 유용했다고 한 것"과 "owner 가 인정한 것"을 구분 못 하고, 그 순간
+    # 기존 사람 도장의 신뢰도까지 같이 흐려진다. 나눠두면 둘의 일치율(AI 도장이 owner 판정과
+    # 얼마나 맞았나)도 나중에 잴 수 있다 — 적중률 축과 같은 방식.
+    by_actor = {}
+    for node_id, verdict, reason, actor in rows:
         if verdict not in VALID_VERDICTS:
             continue
+        a = by_actor.setdefault(actor or "unknown",
+                                {"used": 0, "ignored": 0, "corrected": 0, "total": 0})
+        a[verdict] += 1
+        a["total"] += 1
         tot[verdict] += 1
         d = per.setdefault(node_id, {"used": 0, "ignored": 0, "corrected": 0, "reasons": {}})
         d[verdict] += 1
@@ -479,9 +686,11 @@ def aggregate(home=None):
     drift.sort(key=lambda x: (-x["bad_ratio"], -x["total"], x["node_id"]))
 
     n_out = tot["used"] + tot["ignored"] + tot["corrected"]
+    for a in by_actor.values():
+        a["usefulness_rate"] = round(a["used"] / a["total"], 4) if a["total"] else None
     overall = {"traces": n_traces, "outcomes": n_out, **tot,
                "usefulness_rate": round(tot["used"] / n_out, 4) if n_out else None}
-    return {"overall": overall, "per_node": per_node,
+    return {"overall": overall, "per_node": per_node, "by_actor": by_actor,
             "golden_drift_candidates": drift, "signal_only": True, "note": _SIGNAL_NOTE}
 
 
@@ -651,6 +860,45 @@ def _selftest():
         ck(trace_enabled(home4) is False and not os.path.exists(_flag_path(home4)),
            "set_trace_flag(False) → 파일 삭제·OFF 복귀")
 
+        # ── situation(v3, 다리c): 분류기 4분기 + 기록/화이트리스트 ──
+        ck(classify_situation("이거 삭제해줘") == "change", "classify_situation → change(행동동사)")
+        ck(classify_situation("이렇게 하는 게 맞나?") == "decision", "classify_situation → decision(결정)")
+        ck(classify_situation("현재 상태 보여줘") == "lookup", "classify_situation → lookup(조회)")
+        ck(classify_situation("음 그렇군") == "ambiguous", "classify_situation → ambiguous(미매치)")
+        ck(classify_situation("이거 삭제하는 게 맞나?") == "decision",
+           "classify_situation 결정+변경 혼합 → decision 우선(§9)")
+        home_sit = os.path.join(tmp, ".binggupack_sit")  # 고유 home(기존 home5 재사용 금지 — 격리)
+        os.makedirs(home_sit, exist_ok=True)
+        set_trace_flag(True, home=home_sit)
+        r_sit = trace_from_preflight("배포 결정 질의", res_pf, TS,
+                                     domain="proj", situation="decision", home=home_sit)
+        con = _open_store(home_sit)
+        s_row = con.execute("SELECT situation, domain FROM recall_traces WHERE trace_id=?",
+                            (r_sit["trace_id"],)).fetchone()
+        con.close()
+        ck(s_row == ("decision", "proj"), "trace_from_preflight → situation+domain 함께 기록(다리c)")
+        # ── session_id(v4): 이번 세션 회상 필터(마무리 preview §2 도움 판정 대상) ──
+        home_sid = os.path.join(tmp, ".binggupack_sid")  # 고유 home(격리 · home_sit 재사용 금지)
+        os.makedirs(home_sid, exist_ok=True)
+        set_trace_flag(True, home=home_sid)
+        record_trace("세션A질의1", "preflight", [{"node_id": "node:SA1"}], "2026-07-25T01:00:00Z",
+                     session_id="SID_A", home=home_sid)
+        record_trace("세션A질의2", "preflight", [{"node_id": "node:SA2"}], "2026-07-25T02:00:00Z",
+                     session_id="SID_A", home=home_sid)
+        record_trace("세션B질의", "preflight", [{"node_id": "node:SB1"}], "2026-07-25T03:00:00Z",
+                     session_id="SID_B", home=home_sid)
+        pend_a = list_pending(home=home_sid, session_id="SID_A")
+        pend_all = list_pending(home=home_sid)
+        ck(len(pend_a) == 2 and len(pend_all) == 3,
+           "session_id(v4) → list_pending 이번 세션 필터(SID_A 2 / 전체 누적 3)")
+        r_bad_sit = trace_from_preflight("다른 질의 xyz", res_pf, "2026-06-27T09:00:00Z",
+                                         situation="INVALID_SIT", home=home_sit)
+        con = _open_store(home_sit)
+        sb = con.execute("SELECT situation FROM recall_traces WHERE trace_id=?",
+                        (r_bad_sit["trace_id"],)).fetchone()[0]
+        con.close()
+        ck(sb is None, "situation 화이트리스트 밖 → NULL(오타/원문 차단)")
+
         # ── reason_code 화이트리스트(PII 차단) ──
         set_trace_flag(True, home=home4)
         rc4 = record_trace("리뷰 작업", "why_search", recalled, TS, home=home4)
@@ -708,6 +956,77 @@ def _selftest():
            "mark 2 corrected(--note stale) → p2 판정(N-shift 안전: 스냅샷 역참조)")
         ck(mark_by_index(9, "used", {"actor": "human"}, TS, home=home5)["reason"] == "bad_index",
            "범위 밖 mark → bad_index")
+
+        # ── AI 자기신고 도장(ai_stamp) + 스냅샷 출처 대조 (2026-07-27 owner 지시) ──
+        # ★home 이름은 기존 test 와 겹치지 않게(home5~home8 사용 중). 겹치면 남의 outcome 을
+        #   오염시켜 엉뚱한 케이스가 FAIL 한다(2026-07-22 home5 충돌과 동형 · 실제로 한 번 밟음).
+        home_ai = os.path.join(tmp, ".binggupack_aistamp")
+        os.makedirs(home_ai, exist_ok=True)
+        set_trace_flag(True, home=home_ai)
+        led_ai = os.path.join(home_ai, "ledger.sqlite")
+        lc_ai = sqlite3.connect(led_ai)
+        apply_schema(lc_ai)
+        for nid, sent in (("node:CONV:s1", "회상 A"), ("node:CONV:s2", "회상 B")):
+            lc_ai.execute("INSERT INTO nodes(node_id,node_type,sentence,candidate,state,content_hash,"
+                          "created_at,semantic_subtype,use_count) VALUES(?,'judgment',?,0,'active','h',?,'교훈',0)",
+                          (nid, sent, TS))
+        lc_ai.commit()
+        lc_ai.close()
+        record_trace("도장 대상", "preflight",
+                     [{"node_id": "node:CONV:s1", "semantic_subtype": "교훈", "rank_score": 0.8,
+                       "relevance": 0.7},
+                      {"node_id": "node:CONV:s2", "semantic_subtype": "교훈", "rank_score": 0.7,
+                       "relevance": 0.6}],
+                     TS, session_id="SESS_X", home=home_ai)
+        p_ai = list_pending(home=home_ai, ledger_path=led_ai, session_id="SESS_X")
+        save_review_snapshot(p_ai, home=home_ai, scope="session", session_id="SESS_X", ts=TS)
+
+        # AI 는 부정 판정도 찍을 수 있다(기존 ai_observation 은 used only — 그쪽은 불변)
+        a_st = mark_by_index(1, "ignored", {"actor": AI_STAMP_ACTOR}, TS,
+                             reason_code="not_relevant", home=home_ai)
+        ck(a_st["recorded"] and a_st["actor"] == AI_STAMP_ACTOR,
+           "ai_stamp → ignored 기록(AI 자기신고 도장 · owner 2026-07-27 지시)")
+        ck(record_outcome(p_ai[0]["trace_id"], "node:CONV:s2", "ignored",
+                          {"actor": "ai_observation"}, TS, home=home_ai)["reason"] == "G4_no_auto",
+           "ai_observation ignored 는 여전히 거부(두 actor 분리 유지)")
+
+        # owner 덮어쓰기: 사람 판정이 ai_stamp 를 교체
+        ov = mark_by_index(1, "used", {"actor": "human"}, TS, home=home_ai)
+        ck(ov["recorded"] and ov.get("overwrote") == AI_STAMP_ACTOR,
+           "human 도장 → ai_stamp 판정 덮어씀(사람 > AI)")
+        ck(mark_by_index(1, "ignored", {"actor": AI_STAMP_ACTOR}, TS, home=home_ai)["reason"]
+           == "dup_outcome", "사람 판정을 AI 가 되돌리지 못함(역방향 덮어쓰기 금지)")
+
+        # include_ai_stamped: AI 도장분은 목록에 남아야 owner 가 보고 덮어쓸 수 있다
+        mark_by_index(2, "ignored", {"actor": AI_STAMP_ACTOR}, TS, home=home_ai)
+        ck(len(list_pending(home=home_ai, ledger_path=led_ai, session_id="SESS_X")) == 0,
+           "기본 list_pending 은 판정분 제외(0건)")
+        inc = list_pending(home=home_ai, ledger_path=led_ai, session_id="SESS_X",
+                           include_ai_stamped=True)
+        ck(len(inc) == 1 and inc[0]["ai_verdict"] == "ignored",
+           "include_ai_stamped → AI 도장분만 목록 유지(사람 판정분은 확정이라 제외)")
+
+        # 스냅샷 출처 대조 — 전체 목록이 덮은 뒤 세션 번호로 찍으면 stale_snapshot
+        save_review_snapshot(p_ai, home=home_ai, scope="all", ts=TS)
+        st = mark_by_index(1, "used", {"actor": "human"}, TS, home=home_ai,
+                           expect_scope="session", expect_session="SESS_X")
+        ck(not st["recorded"] and st["reason"] == "stale_snapshot",
+           "다른 목록이 덮은 스냅샷 → stale_snapshot(오도장 차단 · 2026-07-27 실측 사고)")
+        ck(_load_review_snapshot(home=home_ai)["scope"] == "all", "스냅샷 v2 메타(scope) 왕복")
+
+        # 구형 v1(리스트) 파일 하위호환 — 메타 없으면 대조 skip
+        with open(review_snapshot_path(home_ai), "w", encoding="utf-8") as f:
+            json.dump([{"idx": 1, "trace_id": p_ai[0]["trace_id"],
+                        "node_id": p_ai[0]["node_id"]}], f)
+        v1 = _load_review_snapshot(home=home_ai)
+        ck(v1["schema"].endswith("v1") and len(v1["items"]) == 1 and v1["scope"] is None,
+           "구형 리스트 스냅샷 → v1 로 감싸 읽힘(하위호환 · 대조 skip)")
+
+        # 집계 actor 분리 — AI 도장과 사람 도장이 한 칸에 섞이지 않는다
+        agg_ai = aggregate(home=home_ai)
+        ck(agg_ai["by_actor"].get(AI_STAMP_ACTOR, {}).get("total") == 1
+           and agg_ai["by_actor"].get("human", {}).get("total") == 1,
+           "aggregate.by_actor → ai_stamp 1 · human 1 분리 집계(신뢰도 오염 차단)")
         # 집계 reasons 분포
         agg5 = aggregate(home=home5)
         ck(agg5["per_node"]["node:CONV:p2"]["reasons"].get("stale") == 1,
@@ -811,6 +1130,53 @@ def _selftest():
         real7 = auto_observe_adoption(TS_LATER, home=home7, ledger_path=led7)
         ck(real7["observed"] == 1 and aggregate(home=home7)["overall"]["used"] == 1,
            "dry_run 후 실제 실행 → used 1 도장")
+
+        # ── 미스 후보 자동선별(list_miss_candidates · auto_observe 부정 거울 · owner 논증 2026-07-21) ──
+        #    회상됐으나 오래도록 그래프 미편입 = owner 가 '미스' 도장할 후보. AI 선별=조회(값 확정 0).
+        home8 = os.path.join(tmp, ".binggupack8")
+        os.makedirs(home8, exist_ok=True)
+        set_trace_flag(True, home=home8)
+        led8 = os.path.join(home8, "ledger.sqlite")
+        lcon8 = sqlite3.connect(led8)
+        apply_schema(lcon8)
+        for nid in ("node:CONV:m1", "node:CONV:m2"):
+            lcon8.execute("INSERT INTO nodes(node_id,node_type,sentence,candidate,state,content_hash,"
+                          "created_at,semantic_subtype,use_count) VALUES"
+                          "(?,'judgment','오래 안 쓰인 회상',0,'active','h',?, '교훈',0)", (nid, TS))
+        lcon8.commit()
+        lcon8.close()
+        record_trace("오래된 회상", "preflight",
+                     [{"node_id": "node:CONV:m1", "semantic_subtype": "교훈",
+                       "rank_score": 0.5, "relevance": 0.4},
+                      {"node_id": "node:CONV:m2", "semantic_subtype": "버그패턴",
+                       "rank_score": 0.9, "relevance": 0.8}], TS, home=home8)
+        NOW8 = "2026-06-29T00:00:00Z"  # TS(06-27) + 48h
+        led8_mt = os.path.getmtime(led8)
+        miss8 = list_miss_candidates(NOW8, home=home8, ledger_path=led8, min_age_hours=24)
+        ck(len(miss8) == 2 and {m["node_id"] for m in miss8} == {"node:CONV:m1", "node:CONV:m2"}
+           and all(m["age_hours"] >= 24 for m in miss8),
+           "list_miss_candidates: 오래됨·미편입 → 미스 후보(owner 도장 대상 · AI 값 확정 0)")
+        ck(miss8[0]["node_id"] == "node:CONV:m1",
+           "미스 후보 정렬: 같은 나이면 낮은 관련도(rank) 우선")
+        ck(aggregate(home=home8)["overall"]["outcomes"] == 0,
+           "list_miss_candidates 는 recall_outcomes write 0(선별=조회 ≠ 판정 · 헌법 정합)")
+        ck(os.path.getmtime(led8) == led8_mt,
+           "list_miss_candidates: ledger read-only(mode=ro · mtime 불변)")
+        ck(len(list_miss_candidates("2026-06-27T06:00:00Z", home=home8,
+                                    ledger_path=led8, min_age_hours=24)) == 0,
+           "신선 회상(<24h) → 미스 후보 제외(판정 유예)")
+        lcon8 = sqlite3.connect(led8)
+        lcon8.execute("INSERT INTO edges(edge_id,relation,source,target,candidate,state,created_at)"
+                      " VALUES('e8','supports_judgment','node:CONV:z','node:CONV:m1',0,'active',?)",
+                      (TS_LATER,))
+        lcon8.commit()
+        lcon8.close()
+        ck({m["node_id"] for m in list_miss_candidates(NOW8, home=home8, ledger_path=led8,
+                                                       min_age_hours=24)} == {"node:CONV:m2"},
+           "회상 후 관계엣지 편입 → 미스 후보 제외(긍정/부정 거울 대칭)")
+        ck(len(list_miss_candidates(NOW8, home=home8, ledger_path=led8,
+                                    min_age_hours=24, top_n=1)) == 1,
+           "top_n 컷(AI 선별 소수만 owner 에 제시 · 425 통짜 방지)")
 
         # ── 운영 ledger sentinel 미접촉 ──
         ck(os.path.exists(ledger) and os.path.getmtime(ledger) == ledger_mt0,

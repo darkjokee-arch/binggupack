@@ -32,6 +32,12 @@ from pathlib import Path
 # 휴리스틱일 뿐 — 정밀 판정(fullmatch·줄단위)은 gate_log 파서 몫이라 오기록 0(로드 비용만).
 _STAMP_FAST_RE = re.compile(r"(?:HIT|히트|MISS|미스|PROMOTE|승격)\s*\d", re.IGNORECASE)
 
+# 세션 마무리 회상 preview 도장 신선도 창 — 긴 세션(배선 수정 등)으로 preview~도장 간격이
+# 기본 GATE_WINDOW(60분)를 넘어도(2026-07-24 실측 74분) 도장이 유효하도록 넉넉히(6h).
+# SAVE 신선도(옛 자동저장 방지)와 별개 축 — 마무리 회상 도장은 세션 내 언제든 유효.
+# 정본 상수: hook 의 win 계산과 selftest T18c 의 stale 기준이 이 값 하나를 공유한다.
+_REVIEW_SNAPSHOT_WINDOW_SEC = 6 * 3600
+
 
 def _scripts_dir():
     env = os.environ.get("BINGGU_SCRIPTS")
@@ -76,6 +82,81 @@ def _recall_trace_module(scripts_dir):
         return None
 
 
+def _outcome_attribution_module(scripts_dir):
+    """outcome_attribution(결과-귀속 장부) import — recall_trace 로더와 동일 패턴. 실패 시 None(무해).
+    히트 도장(applied)을 recall_run_outcomes 에 결과-귀속 관찰로 append 하는 경로(C · 2026-07-21)."""
+    try:
+        from binggupack.pack import outcome_attribution
+        return outcome_attribution
+    except Exception:
+        pass
+    try:
+        root = str(Path(scripts_dir).resolve().parent)
+        if root not in sys.path:
+            sys.path.insert(0, root)
+        from binggupack.pack import outcome_attribution
+        return outcome_attribution
+    except Exception:
+        return None
+
+
+def _stamp_run_applied(oa, snap, idx, ts):
+    """히트 도장 1건(idx) → 결과-귀속 관찰 append(best-effort · 실패 침묵 · hook 무방해).
+
+    owner '히트 N' 이 트리거이자 증거(evidence_kind='user' · SAVE 불요 · trust=ai_observation).
+    applied_node_ids = owner 가 히트한 노드(owner 선택 · AI 자동판정 0 — B 와 동일 원리).
+    result='unknown'(작업 결과는 이 시점 관찰 불가 · outcome_attribution 인과단정 스키마 배제와 정합).
+    evidence_digest 는 (trace,node) 결정적 → 같은 히트 재도장은 dup_outcome 로 1건 유지(recall_outcomes
+    UNIQUE 와 대칭). B 히트가 쌓이는 만큼 C(결과-귀속)가 자연히 흐른다(owner 논증 2026-07-21)."""
+    try:
+        import hashlib
+        item = next((s for s in snap if s.get("idx") == idx), None)
+        if not item or not item.get("trace_id") or not item.get("node_id"):
+            return
+        digest = hashlib.sha256(
+            ("hit-applied|%s|%s" % (item["trace_id"], item["node_id"])).encode("utf-8", "replace")
+        ).hexdigest()[:16]
+        oa.record_run_outcome(item["trace_id"], [item["node_id"]],
+                              "applied", "unknown", "user", digest, ts)
+    except Exception:
+        pass
+
+
+def _stamp_use_count(snap, idx):
+    """세션 마무리 preview 히트(사람) → 운영 ledger use_count++ (best-effort · 실패 침묵 · hook 무방해).
+
+    owner '히트 N' = "이 회상 유용했다" 사람 신호 → CLI `--record`/`mark-hit --from-recall`
+    (binggu.py _mark_from_recall)와 동일 의미(preflight.py:121). 지금까지 채팅 히트는
+    recall_outcomes(효용 장부)에만 도장되고 use_count(랭킹 utility 축 · p1_ranking.node_rank_score)
+    로는 안 이어졌다 — 2026-07-21 4cli+Fable5 실측: 히트 5건 ↔ use_count>0 5건의 node 교집합 0
+    = 연결선 끊김. 이 함수가 그 소비 스텝을 hook 에 배선한다(owner '단일 통합').
+
+    adoption_key 로 같은 날 반복은 멱등(use_events UNIQUE · 단기 반복 정렬오염 차단 · Fable5 D).
+    자동 관측(ai_observation)이 아니라 사람 도장만 진입 — SAFETY_BELT auto_signal_not_ranking_direct
+    무관(use_count 는 적중률 신호와 달리 합법 causal 입력 · adoption_key docstring 정합)."""
+    try:
+        item = next((s for s in (snap or []) if s.get("idx") == idx), None)
+        if not item or not item.get("node_id"):
+            return
+        sd = str(_scripts_dir())
+        if sd not in sys.path:
+            sys.path.insert(0, sd)
+        from binggupack.pack import p1_ranking as RANK
+        from binggupack.workspace import platform as _plat
+        from openbinggu_owner_accept_ux import open_accept
+        ledger = os.path.join(_plat.binggu_home(), "ledger.sqlite")
+        if not os.path.exists(ledger):
+            return
+        db = open_accept(ledger)
+        try:
+            RANK.record_use(db, item["node_id"],
+                            use_key=RANK.adoption_key("__session_close__", None))
+        finally:
+            db.close()
+    except Exception:
+        pass
+
+
 def _run(data):
     try:
         if (data.get("hook_event_name") or "") != "UserPromptSubmit":
@@ -111,18 +192,42 @@ def _run(data):
                 rt = _recall_trace_module(sd)
                 if rt is not None and gl is not None:
                     sp = rt.review_snapshot_path()
-                    win = getattr(gl, "GATE_WINDOW_SEC", 3600) or 3600
+                    # 신선도 창 = max(GATE_WINDOW, _REVIEW_SNAPSHOT_WINDOW_SEC) — 상세는 상수 정의 참조.
+                    win = max(getattr(gl, "GATE_WINDOW_SEC", 3600) or 3600, _REVIEW_SNAPSHOT_WINDOW_SEC)
                     if os.path.exists(sp) and (time.time() - os.path.getmtime(sp)) <= win:
                         snap = rt._load_review_snapshot()
                     if snap:
+                        # v2 스냅샷은 {schema,scope,session_id,ts,items} — 구형(list)도 _load 가
+                        # 감싸 주므로 items 만 보면 된다(2026-07-27).
+                        snap_items = snap.get("items") or []
                         hs = gl.parse_hit_stamps(prompt)
                         if hs:
-                            snap_idx = {s.get("idx") for s in snap}
+                            snap_idx = {s.get("idx") for s in snap_items}
+                            # 오도장 차단: 스냅샷이 세션 목록이면 그 세션에서만 유효.
+                            # (전체 누적 목록이 덮어쓴 뒤 세션 번호로 찍는 사고를 막는다 — 2026-07-27 실측)
+                            exp_scope = snap.get("scope")
+                            exp_sess = snap.get("session_id")
                             ts = time.time()
-                            for vkey, verdict in (("hit", "used"), ("miss", "ignored")):
+                            oa = _outcome_attribution_module(sd)
+                            reason_map = hs.get("reason") or {}  # {idx: (verdict, reason_code)} — 미스 라벨 세분
+                            for vkey, default_verdict in (("hit", "used"), ("miss", "ignored")):
                                 for i in (hs.get(vkey) or []):
                                     if i in snap_idx:
-                                        rt.mark_by_index(i, verdict, {"actor": "human"}, ts)
+                                        rv = reason_map.get(i)  # '미스 3 무관/틀림' → verdict 승격 + reason_code
+                                        verdict = rv[0] if rv else default_verdict
+                                        rcode = rv[1] if rv else None
+                                        rt.mark_by_index(i, verdict, {"actor": "human"}, ts,
+                                                         reason_code=rcode,
+                                                         expect_scope=exp_scope,
+                                                         expect_session=exp_sess)
+                                        if vkey == "hit":
+                                            # 히트(사람) → 운영 ledger use_count++ (랭킹 utility 축 연결
+                                            #   · 2026-07-21 4cli+Fable5: 히트↔use_count 끊김 배선).
+                                            _stamp_use_count(snap_items, i)
+                                            # C(결과-귀속): 히트 = applied 관찰 → record_run_outcome
+                                            #   (evidence-gated 자동 append · owner 히트가 트리거·증거).
+                                            if oa is not None:
+                                                _stamp_run_applied(oa, snap_items, i, ts)
             except Exception:
                 snap = None
             try:
@@ -312,6 +417,12 @@ def _selftest():
               "T16c 범위 상한 50(1-50 허용·1-51/1-9999 무효)")
         check(gl.parse_hit_stamps("히트 2\n미스 2") == {"hit": [], "miss": [2]},
               "T16d 같은 idx 재도장 → 나중 줄 승리(정정 허용)")
+        # T16e ★한 줄에 히트/미스 혼합(owner 자연발화 '히트 4,7,8 미스 1,9,11,12') — 종전 None 도장증발
+        check(gl.parse_hit_stamps("히트 4,7,8 미스 1,9,11,12")
+              == {"hit": [4, 7, 8], "miss": [1, 9, 11, 12]}
+              and gl.parse_hit_stamps("미스 1 히트 2") == {"hit": [2], "miss": [1]}
+              and gl.parse_hit_stamps("히트 3 미스 3") == {"hit": [], "miss": [3]},
+              "T16e 한 줄 히트/미스 혼합 → 세그먼트별 파싱(혼합 마지막 승리)")
 
         # T17 비정확형 발화 e2e — hook 이 기록 0(gate 파일 불변)
         before = gate_log.read_text(encoding="utf-8")
@@ -337,6 +448,13 @@ def _selftest():
                          "'2026-07-20T00:00:00Z','교훈',0)")
             lcon.commit()
             lcon.close()
+
+            def _uc(nid):
+                _c = _sq.connect("file:%s?mode=ro" % str(led).replace("\\", "/"), uri=True)
+                _v = _c.execute("SELECT use_count FROM nodes WHERE node_id=?", (nid,)).fetchone()
+                _c.close()
+                return _v[0] if _v else None
+
             recalled = [{"node_id": "node:CONV:hk1", "semantic_subtype": "교훈",
                          "rank_score": 0.9, "relevance": 0.8}]
             RT.record_trace("최신 유지", "why_search", recalled,
@@ -348,6 +466,19 @@ def _selftest():
             used = RT.aggregate(home=str(home))["overall"].get("used", 0)
             check(r.returncode == 0 and r.stdout.strip() == "" and used == 1,
                   "T18 snapshot 신선 → '히트 1' 이 recall_trace 효용 장부 used 도장(증발 버그 해소)")
+            # T18d(C 결과-귀속): 같은 '히트 1' 이 recall_run_outcomes 에 applied 관찰도 append.
+            #   B(히트=used) 가 쌓이는 만큼 C(applied)가 자연히 흐른다(owner 논증 2026-07-21).
+            con_run = RT._open_store_ro(str(home))
+            n_run = con_run.execute(
+                "SELECT COUNT(*) FROM recall_run_outcomes"
+                " WHERE application='applied' AND result='unknown'").fetchone()[0]
+            con_run.close()
+            check(n_run == 1,
+                  "T18d 히트 도장 → C 결과-귀속 applied 1건 append(evidence-gated · owner 히트 트리거 · AI 자동판정 0)")
+            # T18e(2026-07-21 히트↔use_count 끊김 수정): 같은 '히트 1' 이 운영 ledger use_count++ 도
+            #   배선한다(랭킹 utility 축 연결 · CLI --record 와 동일 의미 · 사람 도장만 진입).
+            check(_uc("node:CONV:hk1") == 1,
+                  "T18e 히트 → 운영 ledger use_count++ 배선(랭킹 utility 축 · 사람 도장만)")
             # T18b 이중 방지 — 같은 컨텍스트에서 last_recall(hit_events 축)에는 안 감(skip_recall)
             rp2 = home / "last_recall_candidates.json"
             gl.write_last_recall(["node:CONV:hk1"], query="x", path=str(rp2))
@@ -357,8 +488,13 @@ def _selftest():
             after_v = gl.recall_stamp_verdicts(rows2, path=str(gate_log))
             check(r.returncode == 0 and after_v == before_v,
                   "T18b snapshot 컨텍스트 → last_recall 회수 스탬프 미기록(효용 장부 단일·이중 차단)")
+            # T18f 같은 날 재히트('히트 1' 재발화) → adoption_key day-bucket 멱등(use_events UNIQUE)
+            #   → use_count 불변(단기 반복 정렬오염 차단 · Fable5 D).
+            check(_uc("node:CONV:hk1") == 1,
+                  "T18f 같은 날 재히트 → use_count 멱등 유지(단기 반복 정렬오염 차단 · Fable5 D)")
             # T18c stale snapshot(창 밖) → 대화중 회상으로 폴백(last_recall 경로 복귀)
-            old = time.time() - (getattr(gl, "GATE_WINDOW_SEC", 3600) + 100)
+            # stale 기준 = hook 의 실제 신선도 창(max(GATE_WINDOW, _REVIEW_SNAPSHOT_WINDOW_SEC)) 밖.
+            old = time.time() - (max(getattr(gl, "GATE_WINDOW_SEC", 3600) or 3600, _REVIEW_SNAPSHOT_WINDOW_SEC) + 100)
             os.utime(str(RT.review_snapshot_path(str(home))), (old, old))
             rp3 = home / "last_recall_candidates.json"
             gl.write_last_recall(["node:CONV:zz9"], query="y", path=str(rp3))
@@ -367,6 +503,30 @@ def _selftest():
             check(r.returncode == 0
                   and gl.recall_stamp_verdicts(rows3, path=str(gate_log)) == {1: "hit"},
                   "T18c stale snapshot → last_recall 폴백(대화중 회상 경로 보존)")
+            # T18g(reason 라벨·다리c 짝): '미스 N 틀림' → recall_outcomes verdict 승격(corrected)+reason_code.
+            #   라벨 없는 miss=ignored(reason NULL)와 달리, 미스 세그먼트 끝 라벨이 세분 신호를 채운다.
+            lcon = _sq.connect(str(led))
+            lcon.execute("INSERT INTO nodes(node_id,node_type,sentence,candidate,state,"
+                         "content_hash,created_at,semantic_subtype,use_count) VALUES"
+                         "('node:CONV:rs1','judgment','reason 라벨 테스트',0,'active','h2',"
+                         "'2026-07-20T00:00:00Z','교훈',0)")
+            lcon.commit()
+            lcon.close()
+            RT.record_trace("리즌 라벨", "why_search",
+                            [{"node_id": "node:CONV:rs1", "semantic_subtype": "교훈",
+                              "rank_score": 0.5, "relevance": 0.5}],
+                            "2026-07-20T01:00:00Z", home=str(home))
+            pend_r = RT.list_pending(home=str(home), ledger_path=str(led))
+            RT.save_review_snapshot(pend_r, home=str(home))
+            rs_idx = next(p["idx"] for p in pend_r if p["node_id"] == "node:CONV:rs1")
+            r = call({"hook_event_name": "UserPromptSubmit",
+                      "prompt": "미스 %d 틀림" % rs_idx, "cwd": "x"})
+            con_o = RT._open_store_ro(str(home))
+            row_o = con_o.execute("SELECT verdict, reason_code FROM recall_outcomes"
+                                  " WHERE node_id='node:CONV:rs1'").fetchone()
+            con_o.close()
+            check(r.returncode == 0 and row_o == ("corrected", "false_match"),
+                  "T18g '미스 N 틀림' → recall_outcomes corrected/false_match(다리c reason 배선)")
         except Exception as e:
             rt_ok = False
             check(rt_ok, "T18~T18c recall_trace 통합 예외: %s" % type(e).__name__)
