@@ -34,6 +34,36 @@ def _home():
     return Path(env) if env else (Path.home() / ".binggupack")
 
 
+def _prev_assistant_text(transcript_path, cap=1500, tail=400):
+    """transcript(.jsonl)에서 직전 assistant turn의 마지막 text 추출.
+    classify 의 '직전이 AI 제안이면 약한 교정 보류'(무상태 1턴) 게이트에만 쓰인다 —
+    owner 의 dialectic 반응(AI 말에 대한 질문·반박)을 단순질문 veto 에서 살리는 맥락.
+    prev_turn 은 판정 보조일 뿐 candidate.text 로 저장되지 않음(원문 write 0 불변 유지).
+    learn-outcome.js scanRecall 의 assistant text 추출과 동일 규약(교환 축 · 2026-07-13)."""
+    try:
+        if not transcript_path or not os.path.exists(transcript_path):
+            return None
+        raw = Path(transcript_path).read_text(encoding="utf-8").split("\n")
+    except Exception:
+        return None
+    last_ai = None
+    for line in [ln for ln in raw if ln.strip()][-tail:]:
+        try:
+            o = json.loads(line)
+        except Exception:
+            continue
+        if (o.get("type") or o.get("role")) != "assistant":
+            continue
+        c = (o.get("message") or o).get("content")
+        if not isinstance(c, list):
+            continue
+        t = "".join(x.get("text", "") for x in c
+                    if isinstance(x, dict) and x.get("type") == "text").strip()
+        if t:
+            last_ai = t[:cap]  # 창 안 마지막 assistant text 유지(직전 turn)
+    return last_ai
+
+
 def _run(data):
     # 1) 기본 OFF 빠른 차단 (import 전 — 플래그 없으면 타 세션에 부담 0)
     try:
@@ -65,7 +95,13 @@ def _run(data):
             except Exception:
                 pass
         else:  # UserPromptSubmit
-            buf.feed(data.get("prompt", ""), cwd, session_id=data.get("session_id"))
+            # ★A(2026-07-21 owner "대화가 버려진다"): 직전 AI 응답을 prev_turn 으로 넘겨
+            #   classify 의 dialectic 게이트(AI 제안 → owner 질문/반박이면 단순질문 veto 해제)를
+            #   깨운다. 지금까진 hook 이 prev_turn 을 안 넘겨 이 게이트가 상시 죽어 있었음
+            #   (buffer/persist.feed 는 이미 prev_turn 파라미터 보유 — hook 만 미배선).
+            prev = _prev_assistant_text(data.get("transcript_path"))
+            buf.feed(data.get("prompt", ""), cwd,
+                     prev_turn=prev, session_id=data.get("session_id"))
     except Exception:
         return
 
@@ -153,6 +189,27 @@ def _selftest():
 
         # T8 candidate-only: ledger 미생성(write 0)
         check(not (home / "ledger.sqlite").exists(), "T8 ledger.sqlite 미생성(write 0)")
+
+        # T9 prev_turn 배선: 직전 AI 제안 → owner 질문이 dialectic 으로 살아남(단순질문 veto 해제)
+        tr = tmp / "tr.jsonl"
+        tr.write_text(json.dumps(
+            {"type": "assistant", "message": {"content": [
+                {"type": "text", "text": "B안을 추천합니다"}]}}) + "\n", encoding="utf-8")
+        before = size()
+        call({"hook_event_name": "UserPromptSubmit", "prompt": "그게 왜 나아?",
+              "cwd": repo_cwd, "transcript_path": str(tr)})
+        check(size() == before + 1, "T9 prev_turn(AI 제안) 배선 → owner 질문 dialectic 수집(+1)")
+
+        # T10 transcript 없음 → 같은 질문이 단순질문 veto(기존 동작 회귀 보존)
+        before2 = size()
+        call({"hook_event_name": "UserPromptSubmit", "prompt": "그게 왜 나아?", "cwd": repo_cwd})
+        check(size() == before2, "T10 transcript 없음 → 단순질문 veto(prev_turn 미배선 회귀 보존)")
+
+        # T11 candidate 에 prev_turn(AI 원문) 미저장 확인 — text 는 owner 발화만
+        import binggu_capture_persist as _bcp
+        items = _bcp.PersistentCaptureBuffer(home=home).render_preview().get("items", [])
+        texts = " ".join(it.get("text", "") for it in items)
+        check("B안을 추천합니다" not in texts, "T11 prev_turn(AI 원문) candidate 미저장(write 0 불변)")
 
         print(f"\nGATE={'GO' if ok else 'NO-GO'}")
         return 0 if ok else 1

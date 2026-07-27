@@ -4,7 +4,7 @@
 활용한 복붙 블록. owner 가 블록을 한 메시지로 붙여넣으면 각 줄이 자기 종류로 도장된다.
 """
 from binggupack.review import session_close as SC
-from binggupack.safety import gate_text, gate_log
+from binggupack.safety import gate_text
 
 
 def _summary():
@@ -20,13 +20,14 @@ def _summary():
     }
 
 
-def test_paste_block_one_utterance_multi_type():
-    """복붙 블록을 한 발화로 붙여넣으면 SAVE·히트가 각 줄로 동시 인식(통합 파서 불요)."""
+def test_paste_block_saves_only_no_auto_hit():
+    """복붙 블록엔 SAVE 만 — 회상 판정(히트/미스)은 usefulness 100% 편향 방지 위해 자동 미포함.
+    owner 가 §2 를 보고 도움=`히트 N`·헛다리=`미스 N` 을 골라 직접 도장(전체 자동 히트 제거)."""
     block = SC._build_paste_block(_summary())
-    assert block == ["SAVE 1,2", "히트 1,2"]
+    assert block == ["SAVE 1,2"]
+    assert not any(b.startswith("히트") or b.startswith("미스") for b in block)
     one_utterance = "\n".join(block)
     assert gate_text.parse_save_indices(one_utterance) == [1, 2]
-    assert gate_log.parse_hit_stamps(one_utterance)["hit"] == [1, 2]
 
 
 def test_hit_label_no_H_prefix():
