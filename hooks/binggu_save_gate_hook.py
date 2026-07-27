@@ -39,6 +39,28 @@ _STAMP_FAST_RE = re.compile(r"(?:HIT|히트|MISS|미스|PROMOTE|승격)\s*\d", r
 _REVIEW_SNAPSHOT_WINDOW_SEC = 6 * 3600
 
 
+def _note(stage, exc):
+    """예외 삼킴 금지 — 계약(stdout 침묵 · 항상 exit 0) 불변인 채 사유 1줄만 stderr 로 남긴다.
+
+    ★왜(2026-07-28 CodeQL py/empty-except 수리): 이 파일의 `except: pass` 들은 도장 배선이
+    끊겨도(예: p1_ranking 지연 import 누락 — 2026-07-27 실사고, 도장 12건 전량 미반영) 완전
+    무증상이었다. 예외는 밖으로 던지지 않아 세션은 절대 죽지 않고, 사유만 디버그 채널에 남는다.
+    본문은 예외 '타입'만 — 메시지엔 경로·프롬프트 원문이 섞일 수 있어 미출력(유출 0).
+    반환: 사유 문자열(호출부·셀프테스트 대조용). 정본 주석: binggu_capture_hook._note."""
+    reason = "%s: %s" % (stage, type(exc).__name__)
+    try:
+        line = "[binggu_save_gate_hook] %s\n" % reason
+        buf = getattr(sys.stderr, "buffer", None)
+        if buf is not None:   # cp949 콘솔에서도 UnicodeEncodeError 0(bytes 직결)
+            buf.write(line.encode("utf-8", "replace"))
+            buf.flush()
+        else:
+            sys.stderr.write(line)
+    except Exception:
+        return reason         # stderr 부재/닫힘 — 반환값으로만 사유 유지
+    return reason
+
+
 def _scripts_dir():
     env = os.environ.get("BINGGU_SCRIPTS")
     if env:
@@ -107,19 +129,22 @@ def _stamp_run_applied(oa, snap, idx, ts):
     applied_node_ids = owner 가 히트한 노드(owner 선택 · AI 자동판정 0 — B 와 동일 원리).
     result='unknown'(작업 결과는 이 시점 관찰 불가 · outcome_attribution 인과단정 스키마 배제와 정합).
     evidence_digest 는 (trace,node) 결정적 → 같은 히트 재도장은 dup_outcome 로 1건 유지(recall_outcomes
-    UNIQUE 와 대칭). B 히트가 쌓이는 만큼 C(결과-귀속)가 자연히 흐른다(owner 논증 2026-07-21)."""
+    UNIQUE 와 대칭). B 히트가 쌓이는 만큼 C(결과-귀속)가 자연히 흐른다(owner 논증 2026-07-21).
+
+    반환: None=append 완료 / 사유 문자열=미기록(skip 또는 실패 · 실패는 stderr 1줄 동반)."""
     try:
         import hashlib
         item = next((s for s in snap if s.get("idx") == idx), None)
         if not item or not item.get("trace_id") or not item.get("node_id"):
-            return
+            return "skip: snapshot idx %r 에 trace_id/node_id 없음" % (idx,)
         digest = hashlib.sha256(
             ("hit-applied|%s|%s" % (item["trace_id"], item["node_id"])).encode("utf-8", "replace")
         ).hexdigest()[:16]
         oa.record_run_outcome(item["trace_id"], [item["node_id"]],
                               "applied", "unknown", "user", digest, ts)
-    except Exception:
-        pass
+    except Exception as e:
+        # 결과-귀속 append 실패는 도장 자체를 막지 않는다(계속) — 다만 삼키지 않고 사유를 남긴다.
+        return _note("결과-귀속(applied) append 실패", e)
 
 
 def _stamp_use_count(snap, idx):
@@ -133,11 +158,15 @@ def _stamp_use_count(snap, idx):
 
     adoption_key 로 같은 날 반복은 멱등(use_events UNIQUE · 단기 반복 정렬오염 차단 · Fable5 D).
     자동 관측(ai_observation)이 아니라 사람 도장만 진입 — SAFETY_BELT auto_signal_not_ranking_direct
-    무관(use_count 는 적중률 신호와 달리 합법 causal 입력 · adoption_key docstring 정합)."""
+    무관(use_count 는 적중률 신호와 달리 합법 causal 입력 · adoption_key docstring 정합).
+
+    반환: None=use_count++ 완료 / 사유 문자열=미반영(skip 또는 실패 · 실패는 stderr 1줄 동반).
+    ★2026-07-27 실사고: 여기 지연 import 가 누락됐는데 `except: pass` 가 삼켜 도장 12건이
+      전량 미반영인 채 무증상이었다 — 사유를 남기는 형태로 교체(CodeQL py/empty-except)."""
     try:
         item = next((s for s in (snap or []) if s.get("idx") == idx), None)
         if not item or not item.get("node_id"):
-            return
+            return "skip: snapshot idx %r 에 node_id 없음" % (idx,)
         sd = str(_scripts_dir())
         if sd not in sys.path:
             sys.path.insert(0, sd)
@@ -146,15 +175,15 @@ def _stamp_use_count(snap, idx):
         from openbinggu_owner_accept_ux import open_accept
         ledger = os.path.join(_plat.binggu_home(), "ledger.sqlite")
         if not os.path.exists(ledger):
-            return
+            return "skip: ledger 없음(운영 홈 미초기화)"
         db = open_accept(ledger)
         try:
             RANK.record_use(db, item["node_id"],
                             use_key=RANK.adoption_key("__session_close__", None))
         finally:
             db.close()
-    except Exception:
-        pass
+    except Exception as e:
+        return _note("use_count 도장 실패", e)
 
 
 def _run(data):
@@ -177,8 +206,10 @@ def _run(data):
                     sys.path.insert(0, sd)
                 import binggu_save_gate as sgate
                 sgate.gate_record_from_prompt(prompt)
-            except Exception:
-                pass
+            except Exception as e:
+                # SAVE 도장 기록 실패 = owner 가 SAVE n 을 쳤는데 앵커가 안 남는 상태(무증상이면
+                # 저장이 조용히 사라진다). 세션은 막지 않되 사유는 반드시 남긴다.
+                _note("SAVE 도장 기록 실패", e)
         # 분기 ② 히트/미스/승격 스탬프
         #   ②-a 세션 마무리 preview 히트 → 효용 장부(recall_trace) 우선. review snapshot 이
         #       신선(GATE_WINDOW 이내)하면 owner '히트/미스 N' 을 recall_outcomes(actor=human)로
@@ -228,13 +259,16 @@ def _run(data):
                                             #   (evidence-gated 자동 append · owner 히트가 트리거·증거).
                                             if oa is not None:
                                                 _stamp_run_applied(oa, snap_items, i, ts)
-            except Exception:
+            except Exception as e:
+                # 마무리 preview 경로 실패 → 대화중 회상 경로로 폴백(snap=None · 기존 동작 불변).
+                # ★도장 증발이 이 자리에서 무증상으로 일어났다(2026-07) — 폴백하되 사유는 남긴다.
+                _note("마무리 preview 도장 경로 실패(대화중 회상 경로로 폴백)", e)
                 snap = None
             try:
                 if gl is not None:
                     gl.stamp_record_from_prompt(prompt, skip_recall=bool(snap))
-            except Exception:
-                pass
+            except Exception as e:
+                _note("회수/승격 스탬프 기록 실패", e)
     except Exception:
         return
 
@@ -273,10 +307,13 @@ def _selftest():
                     "BINGGU_SCRIPTS": scripts, "PYTHONUTF8": "1"}
 
         def call(payload, raw=None):
+            # encoding 명시: hook 의 사유 1줄(stderr)은 utf-8 bytes 직결이라 cp949 콘솔에서도
+            # 부모가 안전하게 디코드해야 한다(미명시 시 locale 디코드 → UnicodeDecodeError 위험).
             return subprocess.run(
                 [sys.executable, self_path],
                 input=(raw if raw is not None else json.dumps(payload)),
-                capture_output=True, text=True, env=base_env)
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                env=base_env)
 
         sys.path.insert(0, scripts)
         import binggu_save_gate as sgate
@@ -530,6 +567,20 @@ def _selftest():
         except Exception as e:
             rt_ok = False
             check(rt_ok, "T18~T18c recall_trace 통합 예외: %s" % type(e).__name__)
+
+        # ---- T19 예외 삼킴 0 (2026-07-28 CodeQL py/empty-except 수리 증명) ----
+        #   게이트 기록장 자리에 디렉터리를 두어 append 를 강제 실패시킨다. 계약(exit 0 · stdout
+        #   침묵)은 그대로고 사유만 stderr 1줄 — 종전 `except: pass` 는 완전 무증상이었다.
+        #   ※ gate_log 를 파괴하므로 반드시 마지막(이후 gate_log 를 읽는 검사 없음).
+        sgate.write_last_preview([{"sentence": SA}],
+                                 path=str(home / "last_preview_candidates.json"))
+        gate_log.unlink()
+        gate_log.mkdir()
+        r = call({"hook_event_name": "UserPromptSubmit", "prompt": "SAVE 1", "cwd": "x"})
+        check(r.returncode == 0 and r.stdout.strip() == ""
+              and "[binggu_save_gate_hook]" in (r.stderr or "")
+              and "SAVE 도장 기록 실패" in (r.stderr or ""),
+              "T19 게이트 기록 실패 → exit 0 · stdout 침묵 · stderr 사유 1줄(삼킴 0)")
 
         print(f"\nGATE={'GO' if ok else 'NO-GO'}")
         return 0 if ok else 1
