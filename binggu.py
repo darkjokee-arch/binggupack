@@ -565,7 +565,9 @@ def _trace_review(RT, ledger, home):
         print("미판정 회상이 없습니다.")
         print("(preflight 자동주입이 일어나고 opt-in 이 켜져 있어야 쌓입니다 — binggu trace enable)")
         return 0
-    RT.save_review_snapshot(pend, home=home)
+    # scope="all" 명시 — 마무리 preview(scope="session")와 같은 파일을 쓰므로, 이 목록으로
+    # 덮은 뒤 세션 번호로 도장하면 오도장이 난다. mark 가 expect_scope 로 대조해 막는다.
+    RT.save_review_snapshot(pend, home=home, scope="all")
     print("# 미판정 회상 %d건 — 효용 판정 대기 (candidate · 사람 판정만)" % len(pend))
     for p in pend:
         cat = (" [%s]" % p["category"]) if p["category"] else ""
@@ -617,26 +619,33 @@ def cmd_trace(a):
             print("사용법: binggu trace mark <N[,N...]> <used|ignored|corrected> [--note <reason_code>]")
             return 2
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        ctx = _resolve_human_ctx(a.ledger, None)   # P1-A.1 fail-closed
+        # --ai: AI 자기신고 도장(owner 지시 · 히트/미스 한정). 그 외는 기존 fail-closed 경로.
+        use_ai = bool(getattr(a, "ai", False))
+        ctx = ({"actor": RT.AI_STAMP_ACTOR} if use_ai else _resolve_human_ctx(a.ledger, None))
+        actor_label = RT.AI_STAMP_ACTOR if use_ai else "human"
         hints = {"need_review": "먼저 binggu trace review 로 목록을 보세요.",
                  "bad_index": "그 번호의 회상이 없습니다(review 재실행).",
                  "dup_outcome": "이미 판정된 회상(첫 판정 보존).",
                  "invalid_reason_code": "note 는 정해진 코드만: %s" % _reason_hint(verdict),
                  "trace_not_found": "trace 를 찾을 수 없습니다.",
-                 "G4_no_auto": "actor=human 만 판정 가능(헌법)."}
+                 "stale_snapshot": "다른 목록이 스냅샷을 덮었습니다 — 대상 목록을 다시 띄우세요(오도장 차단).",
+                 "G4_no_auto": "actor=human 만 판정 가능(헌법 · AI 는 --ai 로 ai_stamp 기록)."}
         ok_cnt = 0
         for n in ns:
             res = RT.mark_by_index(n, verdict, ctx, ts,
-                                   reason_code=getattr(a, "note", None), home=home)
+                                   reason_code=getattr(a, "note", None), home=home,
+                                   expect_scope=getattr(a, "expect_scope", None),
+                                   expect_session=getattr(a, "expect_session", None))
             if res["recorded"]:
                 ok_cnt += 1
                 note = (" · note=%s" % res["reason_code"]) if res.get("reason_code") else ""
-                print("판정 기록: #%d → %s%s (actor=human)" % (n, verdict, note))
+                over = (" · %s 도장 덮어씀" % res["overwrote"]) if res.get("overwrote") else ""
+                print("판정 기록: #%d → %s%s (actor=%s)%s" % (n, verdict, note, actor_label, over))
             else:
                 print("판정 안 됨 #%d(%s): %s"
                       % (n, res["reason"], hints.get(res["reason"], res["reason"])))
         if len(ns) > 1:
-            print("→ %d/%d 건 판정 기록(actor=human · 자동 0)" % (ok_cnt, len(ns)))
+            print("→ %d/%d 건 판정 기록(actor=%s)" % (ok_cnt, len(ns), actor_label))
         return 0
     if a1 in (None, "review"):
         return _trace_review(RT, ledger, home)
@@ -2202,6 +2211,12 @@ def main():
     tp.add_argument("a2", nargs="?", default=None)   # mark:N | show:node_id
     tp.add_argument("a3", nargs="?", default=None)   # mark:verdict
     tp.add_argument("--note", default=None)          # reason_code(화이트리스트)
+    # AI 자기신고 도장(2026-07-27 owner 지시 — 히트/미스만 열외). actor=ai_stamp 로 원문 보존,
+    # human 을 참칭하지 않는다. owner 가 나중에 같은 항목을 찍으면 사람 판정이 덮어쓴다.
+    tp.add_argument("--ai", action="store_true")
+    # 스냅샷 출처 대조(오도장 차단) — 세션 목록 기준으로 찍을 때 지정
+    tp.add_argument("--expect-scope", default=None, dest="expect_scope")
+    tp.add_argument("--expect-session", default=None, dest="expect_session")
     pfp = sub.add_parser("preflight")
     pfp.add_argument("--prompt", default=None)
     pfp.add_argument("--cwd", default=None)
