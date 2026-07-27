@@ -19,7 +19,8 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from openbinggu_conversation_capture_preview import capture_preview, _PREVIEW_PII_EXTRA  # 정본 재실행
-from openbinggu_staging_write_selftest import staging_apply, OPERATING_PATHS, _hash
+from openbinggu_staging_write_selftest import (staging_apply, OPERATING_PATHS, _hash,
+                                               loc_row, excerpt_sha)
 from openbinggu_deprecate_and_remind_g3 import open_g3, set_review_due
 import openbinggu_label_kind_map as lkmap
 import openbinggu_a0_node_dryrun as a0
@@ -29,6 +30,31 @@ from watcher_batch_m1 import scan_residual_pii
 
 def _sent_hash(s):
     return hashlib.sha256(re.sub(r"\s+", " ", s).strip().encode("utf-8")).hexdigest()[:8]
+
+
+# ── 앞막이(evidence_locator) — 저장 시점에 '어느 대화 어디' 를 동결한다 ─────────────
+# 지금 저장되는 owner 발화에 원본 좌표가 안 남으면, 세션 로그가 30일 롤링으로 사라진 뒤
+# 영구 회수 불가가 된다. 그래서 백필(과거)보다 앞막이(현재)가 먼저다(설계 S4 < S7).
+def _source_coords(origin, raw_text, sentence):
+    """(source_id, locator, container_sha) — §1 증거 3요소 중 위치 축.
+
+    origin(선택 dict): source_id | src_id | transcript_path | session_id | turn_uuid | src_sha.
+      capture buffer 가 채워 넣는 값(binggu_capture_persist 의 src_id/src_sha)이 그대로 들어온다.
+    origin 이 없어도 **빈칸을 남기지 않는다** — 원본 발화 자체를 좌표계로 삼아
+    (utterance:<hash>, off:<pos>:len:<n>, sha256(원문 전체)) 를 기록한다. 절단·요약 0.
+    """
+    o = origin or {}
+    raw = "" if raw_text is None else str(raw_text)
+    container = o.get("src_sha") or o.get("container_sha") or excerpt_sha(raw)
+    sid = (o.get("source_id") or o.get("src_id") or o.get("transcript_path")
+           or (("session:" + str(o["session_id"])) if o.get("session_id") else None)
+           or ("utterance:" + _hash(raw)))
+    turn = o.get("turn_uuid") or o.get("uuid")
+    if turn:
+        return str(sid), "uuid:%s" % turn, container
+    pos = raw.find(sentence)
+    loc = "off:%d:len:%d" % (pos, len(sentence)) if pos >= 0 else "sha:%s" % _sent_hash(sentence)
+    return str(sid), loc, container
 
 
 def _last_preview_mode(default=False):
@@ -71,7 +97,8 @@ def _maybe_promote_actor_by_gate(text, indices, ctx, explicit=False):
     return ctx
 
 
-def prepare_selected(db, text, indices, speaker=None, explicit=False, allow_review=False):
+def prepare_selected(db, text, indices, speaker=None, explicit=False, allow_review=False,
+                     origin=None):
     """★P1-B.1: 저장 컨텐츠 준비만(DB persistent write 0). save_selected(단건)과
     commit_bundle(묶음 crash-atomic)이 공유하는 순수 준비 단계 = Phase 1.
 
@@ -85,7 +112,8 @@ def prepare_selected(db, text, indices, speaker=None, explicit=False, allow_revi
       skipped_existing : 이미 저장돼 skip 된 수
       rejected         : {코드: n} — index/a0/pii 등 hard 거부(비면 idempotent 판정 가능)
       reason           : ok 이면 None, 아니면 'nothing_to_save'(caller 가 rejected/skipped 로 idempotent 판정)
-      saved_items      : 신규 항목 원자료(due 처리용)"""
+      saved_items      : 신규 항목 원자료(due 처리용)
+      loc_rows         : evidence_locator 앞막이 행(★pack dict 미오염 — MF2.7 별도 반환)"""
     pv = capture_preview(text, explicit=explicit)
     cands = pv["candidates"]
     saved_items, skipped, rejected, valid_node_ids = [], 0, {}, []
@@ -131,12 +159,12 @@ def prepare_selected(db, text, indices, speaker=None, explicit=False, allow_revi
     if not saved_items:
         return {"ok": False, "pack": None, "node_ids": valid_node_ids, "new_node_ids": [],
                 "skipped_existing": skipped, "rejected": rejected,
-                "reason": "nothing_to_save", "saved_items": []}
+                "reason": "nothing_to_save", "saved_items": [], "loc_rows": []}
 
     # mini-pack 조립 — 어휘 매핑 경유 + 자기증빙 prefix + ephemeral freshness 동결
     pack_content = "\n".join(sorted(it["sent"] for it in saved_items))
     pack_id = "conv_" + _hash(pack_content)[:8]
-    nodes, edges, evidence = [], [], []
+    nodes, edges, evidence, loc_rows = [], [], [], []
     for it in saved_items:
         # 도장 단일 원천: node_type = 분류 결과 5종 EN 라벨(doc/evidence/concept/state/judgment).
         # A0(LABEL_KINDS=5종 EN)가 이미 이 값으로 검증했으므로 저장값=검증값=표시값 3자 일치.
@@ -152,20 +180,29 @@ def prepare_selected(db, text, indices, speaker=None, explicit=False, allow_revi
                          "redaction_policy": "v1"})
         edges.append({"id": "edge:CONV:" + _sent_hash(it["sent"]), "relation": "evidence_supports",
                       "source": eid, "target": it["nid"], "evidence_refs": [eid]})
+        # 앞막이 — 증거(evidence_id)에 원본 좌표 부착(§1·MF2.6). pack 에는 넣지 않는다.
+        _sid, _loc, _cont = _source_coords(origin, text, it["sent"])
+        loc_rows.append(loc_row(eid, it["sent"], source_id=_sid, locator=_loc,
+                                container_sha=_cont, match_method="live_capture",
+                                confidence="T1", verified_by="auto",
+                                batch_id="save:" + pack_id))
     pack = {"pack_id": pack_id, "content": pack_content,
             "nodes": nodes, "edges": edges, "evidence": evidence}
     return {"ok": True, "pack": pack, "node_ids": valid_node_ids,
             "new_node_ids": [it["nid"] for it in saved_items],
             "skipped_existing": skipped, "rejected": rejected, "reason": None,
-            "saved_items": saved_items}
+            "saved_items": saved_items, "loc_rows": loc_rows}
 
 
-def save_selected(db, text, indices, ctx, snap_dir, due_date=None, speaker=None, explicit=False):
+def save_selected(db, text, indices, ctx, snap_dir, due_date=None, speaker=None, explicit=False,
+                  origin=None):
     """선택 후보만 staging 저장(단건). 반환 {applied, saved, skipped_existing, rejected, reason, pack_id}.
     진입 시 사람-발화 게이트로 actor 승격 후 기존 게이트(actor/confirm) → prepare_selected(컨텐츠 준비)
     → staging_apply(단건 트랜잭션·duplicate/backup/checksum/audit) 순. bundle 경로는 prepare_selected 를
     재사용하되 단일 트랜잭션 adapter(commit_bundle)를 쓴다 — 본 함수 동작은 불변.
-    speaker: 화자 축(owner=사용자 발화/ai=AI 요약). None=미지정(기존 호출 후방호환·NULL 적재)."""
+    speaker: 화자 축(owner=사용자 발화/ai=AI 요약). None=미지정(기존 호출 후방호환·NULL 적재).
+    origin: 앞막이 출처 dict(선택 · _source_coords 참조). 미지정이어도 원문 발화 기준 좌표를 남긴다.
+      locator 적재는 저장 성패에 절대 영향을 주지 않는다 — 결과는 반환 dict 의 'locator' 로만 보고."""
     ctx = _maybe_promote_actor_by_gate(text, indices, ctx, explicit)
     before = db.store_checksum()
 
@@ -185,7 +222,7 @@ def save_selected(db, text, indices, ctx, snap_dir, due_date=None, speaker=None,
 
     # 2) 컨텐츠 준비(DB write 0) — capture_preview 재실행·A0/PII/기존재 검사·pack 조립
     pr = prepare_selected(db, text, indices, speaker=speaker, explicit=explicit,
-                          allow_review=bool(ctx.get("allow_review")))
+                          allow_review=bool(ctx.get("allow_review")), origin=origin)
     if not pr["ok"]:
         db.audit_append(ctx.get("actor", "human"), "conv_save", "conv_noop", "BLOCK",
                         "nothing_to_save", before, before)
@@ -196,7 +233,7 @@ def save_selected(db, text, indices, ctx, snap_dir, due_date=None, speaker=None,
     # 3) staging_apply 경유 (duplicate·backup·transaction·checksum·audit 재사용)
     r = staging_apply(db, pack, {"actor": ctx.get("actor", "human"),
                                  **{k: v for k, v in ctx.items() if k in ("backup_fail", "wal_abort", "checksum_mismatch")}},
-                      snap_dir)
+                      snap_dir, loc_rows=pr.get("loc_rows"))
     if not r.get("applied"):
         db.audit_append(ctx.get("actor", "human"), "conv_save", pack["pack_id"], "BLOCK",
                         "staging_apply:" + str(r.get("reason")), before, db.store_checksum())
@@ -218,6 +255,7 @@ def save_selected(db, text, indices, ctx, snap_dir, due_date=None, speaker=None,
     return {"applied": True, "saved": len(pr["saved_items"]), "skipped_existing": pr["skipped_existing"],
             "rejected": pr["rejected"], "reason": None, "pack_id": pack["pack_id"],
             "snapshot": r.get("snapshot"), "due_set": due_set,
+            "locator": r.get("locator"),   # 앞막이 결과(사유 포함) — 저장 성패와 독립
             "node_ids": pr["new_node_ids"]}  # save --accept 통합용(저장 노드 id)
 
 
@@ -284,8 +322,13 @@ def _self_evidence(node):
 
 
 def save_paired(db, owner_text, ai_text, ctx, snap_dir,
-                relation_kind="ai_accepts", owner_pick=1, ai_pick=1, due_date=None):
-    """owner 발화 + ai 요약을 각각 독립 노드로 저장하고 연결 엣지로 묶는다(ai_text=None → owner 단독)."""
+                relation_kind="ai_accepts", owner_pick=1, ai_pick=1, due_date=None,
+                owner_origin=None, ai_origin=None):
+    """owner 발화 + ai 요약을 각각 독립 노드로 저장하고 연결 엣지로 묶는다(ai_text=None → owner 단독).
+
+    owner_origin/ai_origin: 앞막이 출처 dict(선택 · _source_coords). 각 화자 발화의 원본 좌표를
+    저장 시점에 동결한다. 미지정이어도 원문 발화 기준 좌표를 남기며, locator 적재 실패는
+    저장을 절대 롤백시키지 않는다(결과는 반환 dict 의 'locator')."""
     # 사람-발화 게이트 재승격 — save_selected 와 대칭(pair 만 빠져 있던 갭, 2026-07-13 owner 지적).
     # MCP/비터미널 경로도 사람이 'SAVE n(세이브 n)' 을 실제 발화했으면(훅 도장) human 승격.
     # all-or-nothing: owner 축 + (paired 면) ai 축 둘 다 도장돼야 승격(단축 승격 없음·fail-closed).
@@ -320,6 +363,8 @@ def save_paired(db, owner_text, ai_text, ctx, snap_dir,
     nodes_pack, edges_pack, ev_pack = [own], [], []
     ev, ed = _self_evidence(own)
     ev_pack.append(ev); edges_pack.append(ed)
+    # (evidence_id, 저장문장, 원문발화, origin) — pack_id 확정 후 loc_rows 로 조립(batch_id 필요)
+    loc_seed = [(ev["id"], own["sentence"], owner_text, owner_origin)]
 
     if paired:
         ain = _pick_one_node(ai_text, ai_pick, "ai", explicit=_mode)
@@ -330,6 +375,7 @@ def save_paired(db, owner_text, ai_text, ctx, snap_dir,
         nodes_pack.append(ain)
         ev2, ed2 = _self_evidence(ain)
         ev_pack.append(ev2); edges_pack.append(ed2)
+        loc_seed.append((ev2["id"], ain["sentence"], ai_text, ai_origin))
         # 페어 엣지 방향: relation prefix 가 반응 주체(source). 증빙 = source 노드 자기증빙(헌법: 전 엣지 evidence).
         if relation_kind.startswith("owner_"):
             _src, _tgt, _ev = own["id"], ain["id"], ev["id"]    # 사용자가 AI 발화를 수용/반박/수정
@@ -347,9 +393,16 @@ def save_paired(db, owner_text, ai_text, ctx, snap_dir,
     pack_content = "\n".join(sorted(nd["sentence"] for nd in nodes_pack))
     pack = {"pack_id": "pair_" + _hash(pack_content)[:8], "content": pack_content,
             "nodes": nodes_pack, "edges": edges_pack, "evidence": ev_pack}
+    # 앞막이 loc_rows — pack dict 미오염(MF2.7). 화자별 원문 발화가 각자의 좌표계다.
+    loc_rows = []
+    for _eid, _sent, _raw, _org in loc_seed:
+        _sid, _loc, _cont = _source_coords(_org, _raw, _sent)
+        loc_rows.append(loc_row(_eid, _sent, source_id=_sid, locator=_loc, container_sha=_cont,
+                                match_method="live_capture", confidence="T1", verified_by="auto",
+                                batch_id="save:" + pack["pack_id"]))
     r = staging_apply(db, pack, {"actor": ctx.get("actor", "human"),
                                  **{k: v for k, v in ctx.items() if k in ("backup_fail", "wal_abort", "checksum_mismatch")}},
-                      snap_dir)
+                      snap_dir, loc_rows=loc_rows)
     if not r.get("applied"):
         db.audit_append(ctx.get("actor", "human"), "conv_save_pair", pack["pack_id"], "BLOCK",
                         "staging_apply:" + str(r.get("reason")), before, db.store_checksum())
@@ -368,6 +421,7 @@ def save_paired(db, owner_text, ai_text, ctx, snap_dir,
     return {"applied": True, "saved": len(nodes_pack), "reason": None, "pack_id": pack["pack_id"],
             "paired": paired, "relation": relation_kind if paired else None,
             "owner_node_id": own["id"],   # pair --accept 통합용(저장 직후 확정 대상)
+            "locator": r.get("locator"),  # 앞막이 결과(사유 포함) — 저장 성패와 독립
             "snapshot": r.get("snapshot"), "due_set": due_set}
 
 
@@ -527,6 +581,65 @@ def run():
     rec(13, "긴 문장 전체 저장(발췌 0·node sentence=전체)",
         rl["applied"] and rl["saved"] == 1 and stored and stored[0] == LONG and len(LONG) > 80)
     db_long.close()
+
+    # ===== 20~22 앞막이(evidence_locator) — 저장 시점 원본 좌표 =====
+    from binggu_schema import evloc_env, has_table
+    from openbinggu_staging_write_selftest import evloc_mirror_path, verify_locator_tail
+
+    # 20. 테이블 부재(플래그 OFF·현 운영 기본) → 저장 정상 + 사유 반환 + mirror jsonl 유실 0
+    db_l0 = open_g3(os.path.join(tmp, "s_loc_off.sqlite"))
+    r20 = _ss(db_l0, CONVO, [1], {"actor": "human", "confirm": "SAVE 1"}, snap_dir, speaker="owner")
+    lc20 = r20.get("locator") or {}
+    mir20 = evloc_mirror_path(db_l0.path)
+    rec(20, "앞막이 OFF(테이블 부재) → 저장 정상 + reason=table_absent + mirror jsonl 보관",
+        r20["applied"] and r20["saved"] == 1
+        and not has_table(db_l0.con, "evidence_locator")
+        and lc20.get("reason") == "table_absent" and lc20.get("mirrored") == 1
+        and os.path.exists(mir20)); db_l0.close()
+
+    # 21. 테이블 실재 → evidence 1:1 locator 적재 + 좌표(원문 내 offset)·excerpt 동결 확인
+    with evloc_env(True):
+        db_l1 = open_g3(os.path.join(tmp, "s_loc_on.sqlite"))
+    r21 = _ss(db_l1, CONVO, [1, 5], {"actor": "human", "confirm": "SAVE 1,5"}, snap_dir,
+              speaker="owner", origin={"session_id": "S-21", "transcript_path": None})
+    _ev21 = {x[0] for x in db_l1.con.execute("SELECT evidence_id FROM evidence")}
+    _loc21 = db_l1.con.execute(
+        "SELECT evidence_id, source_id, locator, excerpt_text, container_sha, match_method,"
+        " batch_id FROM evidence_locator ORDER BY evidence_id").fetchall()
+    _sent21 = {x[0] for x in db_l1.con.execute("SELECT sentence FROM nodes")}
+    _off_ok = all(l[2].startswith("off:") and CONVO[int(l[2].split(":")[1]):].startswith(l[3])
+                  for l in _loc21)
+    rec(21, "앞막이 ON → evidence 전건 locator 적재(1:1) + 원문 offset 좌표 + excerpt 동결",
+        r21["applied"] and len(_loc21) == 2 and {l[0] for l in _loc21} == _ev21
+        and {l[3] for l in _loc21} == _sent21 and _off_ok
+        and all(l[1] == "session:S-21" and l[4] == excerpt_sha(CONVO)
+                and l[5] == "live_capture" and l[6] == "save:" + r21["pack_id"]
+                for l in _loc21)
+        and (r21.get("locator") or {}).get("inserted") == 2
+        and verify_locator_tail(db_l1.con))
+    rec(22, "앞막이 적재 후 audit chain·tail anchor 무손상(evloc 는 audit_log tail 미점유)",
+        db_l1.verify_chain() and db_l1.verify_tail_state())
+
+    # 23. 화자축 pair 저장도 owner/ai 양쪽 좌표 기록 + origin 별도 전달
+    rp23 = save_paired(db_l1, "이 건은 마진이 낮아 보류하는 편이 낫다.", "백필 작업이 진행 중인 상태이다.",
+                       {"actor": "human", "confirm": "PAIR ai_refutes owner:1 ai:1"}, snap_dir,
+                       relation_kind="ai_refutes",
+                       owner_origin={"source_id": "sess:OWN", "turn_uuid": "u-own"},
+                       ai_origin={"source_id": "sess:AI", "turn_uuid": "u-ai"})
+    _pl = dict((s, l) for s, l in db_l1.con.execute(
+        "SELECT source_id, locator FROM evidence_locator WHERE source_id LIKE 'sess:%'"))
+    rec(23, "pair 저장 앞막이 — owner/ai 각각 원본 좌표(turn uuid) 기록",
+        rp23["applied"] and (rp23.get("locator") or {}).get("inserted") == 2
+        and _pl == {"sess:OWN": "uuid:u-own", "sess:AI": "uuid:u-ai"}
+        and db_l1.verify_chain() and db_l1.verify_tail_state())
+    # 24. pack dict 오염 0 — excerpt/locator 키가 pack 에 타입상 들어갈 자리가 없다(MF2.7)
+    _pr24 = prepare_selected(db_l1, "새 판단 문장을 여기서 하나 만들어 저장한다.", [1], explicit=True,
+                             origin={"session_id": "S-24"})
+    rec(24, "loc_rows 는 pack dict 밖(MF2.7 — pack 키 화이트리스트 유지)",
+        _pr24["ok"] and set(_pr24["pack"]) == {"pack_id", "content", "nodes", "edges", "evidence"}
+        and len(_pr24["loc_rows"]) == 1
+        and not any("excerpt" in k or "locator" in k or "source_id" in k
+                    for k in _pr24["pack"])); db_l1.close()
 
     # 12. audit chain INTACT + 운영 store 불변
     intact = db.verify_chain()

@@ -11,6 +11,7 @@
 
 hook은 등록하지 않음(미래 별도 GO). 본 모듈은 should_capture 게이트 + 영속 store만 제공.
 """
+import hashlib
 import json
 import os
 import shutil
@@ -45,6 +46,41 @@ def relation_from_signals(signals):
     return DEFAULT_PAIR_RELATION
                         # 문장 전체 보존(80자 발췌 폐기 — 개인 온톨로지 정체성). 1000 초과 = 대화 덩어리 → 절단(원문=대화 전문 저장 금지).
 DEFAULT_TTL_DAYS = 7    # TTL 자동 폐기 기본값
+
+# ── capture 유실 방지(MF1.5) ──────────────────────────────────────────────────
+# 실패 시나리오(적대검토 실증): owner 발화 → hook 이 _conn() → 다른 프로세스가 buffer 를 잠금 →
+#   ALTER 가 OperationalError → 통짜 `except: pass` 가 삼킴 → 직후 INSERT 가 `no such column`
+#   으로 raise → feed() 전체 예외 → **그 발화가 버퍼에도 안 남고 사라진다**.
+# 방어 4겹: ① busy_timeout ② 컬럼별 개별 try ③ ALTER 후 PRAGMA 재조회로 INSERT 컬럼 동적 구성
+#   (신규 컬럼 부재 시 레거시 INSERT 자동 강등) ④ feed() 절대 raise 금지 + 최후 fallback jsonl.
+CAPTURE_BUSY_TIMEOUT_MS = 5000
+CAPTURE_FALLBACK_NAME = "capture_fallback.jsonl"   # <binggu_home>/ 하위(운영홈 리터럴 미사용)
+# 하위호환 ALTER 대상 — (컬럼명, DDL). 신규 홈은 CREATE TABLE 에 이미 포함돼 ALTER 0.
+_CAPTURE_ADDABLE = (
+    ("session_id", "session_id TEXT"),
+    ("ai_context", "ai_context TEXT"),
+)
+#   src_id/src_sha = 앞막이 좌표 재료(어느 세션/원문 전체 sha). 저장 경로(save_paired)의
+#   evidence_locator 가 이 값을 source_id/container_sha 로 받아 '어느 대화 어디' 를 동결한다.
+# ★ 이 2종은 **evloc 플래그 뒤**에 둔다. 이 파일이 저장되는 순간부터 hook(UserPromptSubmit)·
+#   MCP 가 _conn() 을 호출하므로, 게이트가 없으면 플래그 OFF 인데도 다음 프롬프트에 운영
+#   capture_buffer 가 ALTER 된다 = "OFF 면 기존 동작 불변" 최상위 제약 위반.
+#   컬럼이 없어도 저장은 정상이다 — _live_cols 동적 구성이 degraded_columns 로 흡수한다.
+_CAPTURE_ADDABLE_EVLOC = (
+    ("src_id", "src_id TEXT"),
+    ("src_sha", "src_sha TEXT"),
+)
+
+
+def _addable_columns():
+    """이번 open 에서 ALTER 를 시도할 컬럼 목록. evloc OFF 면 기존 2종만(운영 무접촉)."""
+    try:
+        from binggu_schema import evloc_enabled
+    except Exception:
+        return _CAPTURE_ADDABLE          # 스키마 모듈 미가용 = 보수적으로 OFF 취급
+    if evloc_enabled():
+        return _CAPTURE_ADDABLE + _CAPTURE_ADDABLE_EVLOC
+    return _CAPTURE_ADDABLE
 
 # 대화 덩어리/붙여넣기/AI 응답문 veto 임계 — 길이 단독 아닌 "길이 + 줄바꿈 밀도"(2026-07-10 Fable5 2각 수렴).
 #   실측(owner buffer 79건): owner 진짜 판단 med 91자·줄바꿈 med 0 / noise+AI응답 med 1000자·줄바꿈 med 17.
@@ -191,11 +227,20 @@ class PersistentCaptureBuffer:
         self.ttl_days = ttl_days
         self.db_path = self.home / "capture_buffer.sqlite"
         self.ledger_path = self.home / "ledger.sqlite"  # 미접촉 대상(경로 참조만)
+        self.fallback_path = self.home / CAPTURE_FALLBACK_NAME
+        self._live_cols = []      # 마지막 _conn() 시점 실재 컬럼(동적 INSERT/SELECT 구성용)
+        self._alter_errors = {}   # 컬럼별 ALTER 실패 사유(삼키지 않고 표면화)
 
     # ---- store ----
     def _conn(self):
         self.home.mkdir(parents=True, exist_ok=True)
         c = sqlite3.connect(str(self.db_path))
+        # ① 동시 접근 대비 — 다른 프로세스(MCP recall 등)가 잠근 순간 즉시 실패하지 않게.
+        #    journal_mode 는 건드리지 않는다(운영 buffer 파일 포맷을 바꾸는 영구 변경 회피).
+        try:
+            c.execute("PRAGMA busy_timeout=%d" % CAPTURE_BUSY_TIMEOUT_MS)
+        except sqlite3.Error:
+            pass
         c.execute(
             """CREATE TABLE IF NOT EXISTS capture_candidates(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -207,7 +252,9 @@ class PersistentCaptureBuffer:
                 captured_at REAL NOT NULL,
                 cwd TEXT,
                 session_id TEXT,
-                ai_context TEXT)"""
+                ai_context TEXT,
+                src_id TEXT,
+                src_sha TEXT)"""
         )
         # 대화 덩어리 veto 카운트(무음 폐기 방지 — preview 에 "긴 발화 n건 제외" 노출). 원문 미저장(길이만).
         c.execute(
@@ -218,23 +265,34 @@ class PersistentCaptureBuffer:
                 session_id TEXT,
                 length INTEGER)"""
         )
-        # 기존 테이블(session_id 컬럼 없음) 하위호환 마이그레이션 — 세션 경계(2026-07-10).
+        # ② 하위호환 ALTER — **컬럼별 개별 try**. 통짜 try/except 는 한 컬럼 실패가 뒤 컬럼을
+        #    통째로 건너뛰게 해 '컬럼 일부만 있는' 상태를 만든다. 실패는 사유를 남긴다(삼키지 않음).
+        have = {r[1] for r in c.execute("PRAGMA table_info(capture_candidates)")}
+        for name, ddl in _addable_columns():
+            if name in have:
+                self._alter_errors.pop(name, None)
+                continue
+            try:
+                c.execute("ALTER TABLE capture_candidates ADD COLUMN %s" % ddl)
+                c.commit()
+                self._alter_errors.pop(name, None)
+            except sqlite3.Error as ex:
+                self._alter_errors[name] = "%s: %s" % (type(ex).__name__, ex)
+        # ③ ALTER 결과를 **재조회** — INSERT/SELECT 컬럼을 실재 기준으로 구성한다(부재 시 자동 강등).
         try:
-            cols = [r[1] for r in c.execute("PRAGMA table_info(capture_candidates)")]
-            if "session_id" not in cols:
-                c.execute("ALTER TABLE capture_candidates ADD COLUMN session_id TEXT")
-                c.commit()
-            if "ai_context" not in cols:  # B(대화쌍) pair 재료 컬럼 — 하위호환 마이그레이션(2026-07-21)
-                c.execute("ALTER TABLE capture_candidates ADD COLUMN ai_context TEXT")
-                c.commit()
-        except Exception:
-            pass
+            self._live_cols = [r[1] for r in c.execute("PRAGMA table_info(capture_candidates)")]
+        except sqlite3.Error:
+            self._live_cols = []
         return c
 
-    def feed(self, utterance, cwd, prev_turn=None, now=None, session_id=None):
+    def feed(self, utterance, cwd, prev_turn=None, now=None, session_id=None, source_id=None):
         """발화 1건. 게이트 통과 + captured_candidate 만 영속.
         게이트 차단 시 classify 조차 호출 안 함(타 세션 발화 미분류).
-        session_id: 세션 경계용(세션 마무리 preview 가 그 세션 발화만 표시하도록 태깅)."""
+        session_id: 세션 경계용(세션 마무리 preview 가 그 세션 발화만 표시하도록 태깅).
+        source_id: 앞막이 출처 id(transcript 경로·세션 id 등). 미지정 시 session_id 로 파생.
+
+        ★이 함수는 **어떤 경우에도 raise 하지 않는다**(MF1.5) — 캡처 유실이 절단보다 큰 손실이다.
+        저장 실패 시 stored=False + store_note(사유)를 반환하고 fallback jsonl 에 원문을 남긴다."""
         now = time.time() if now is None else now
         # 시스템 주입 텍스트(task-notification·hook feedback·command 등)는 사용자 판단 아님 → 미수집.
         #   명시신호 우회보다 먼저 차단(task-notification 원문이 "저장" 포함해도 오염 안 되게).
@@ -272,20 +330,84 @@ class PersistentCaptureBuffer:
         ai_ctx = None
         if prev_turn and (DIALECTIC_SIGNALS & set(v.get("signals") or [])):
             ai_ctx = str(prev_turn).strip()[:AI_CONTEXT_CAP]
-        c = self._conn()
+        # 앞막이 좌표 재료 — src_sha 는 **절단 전 원문 전체**의 sha256(64hex). TEXT_CAP 로 잘려도
+        # '원래 무엇이었는지' 는 남는다(저장 문장 ↔ 원문 대조·회수 키).
+        src_sha = hashlib.sha256(str(utterance).encode("utf-8")).hexdigest()
+        src_id = source_id or (("session:" + str(session_id)) if session_id else None)
+        payload = {
+            "text": text, "pinned": 1 if v["pinned"] else 0, "confidence": v["confidence"],
+            "signals": json.dumps(list(v["signals"]), ensure_ascii=False),
+            "state": "captured_candidate", "captured_at": now, "cwd": str(cwd),
+            "session_id": session_id, "ai_context": ai_ctx,
+            "src_id": src_id, "src_sha": src_sha,
+        }
+        stored, note = self._store_candidate(payload, now)
+        out = {"action": "captured", "verdict": v, "stored": stored, "truncated": truncated}
+        if note:
+            out["store_note"] = note   # best-effort 는 침묵이 아니라 사유 반환
+        return out
+
+    def _store_candidate(self, payload, now):
+        """candidate 1행 영속. (stored, note) 반환 — **raise 하지 않는다**.
+
+        3단 방어: 동적 컬럼 INSERT → (실패) 레거시 최소 INSERT → (실패) fallback jsonl.
+        """
+        c = None
         try:
-            c.execute(
-                "INSERT INTO capture_candidates(text,pinned,confidence,signals,state,captured_at,cwd,session_id,ai_context)"
-                " VALUES(?,?,?,?,?,?,?,?,?)",
-                (text, 1 if v["pinned"] else 0, v["confidence"],
-                 json.dumps(list(v["signals"]), ensure_ascii=False),
-                 "captured_candidate", now, str(cwd), session_id, ai_ctx),
-            )
+            c = self._conn()
+            live = set(self._live_cols)
+            cols = [k for k in payload if k in live]
+            if not cols:
+                raise sqlite3.OperationalError("capture_candidates 컬럼 조회 실패(스키마 부재)")
+            c.execute("INSERT INTO capture_candidates(%s) VALUES(%s)"
+                      % (",".join(cols), ",".join("?" * len(cols))),
+                      [payload[k] for k in cols])
             c.commit()
             self._purge(now, conn=c)
+            missing = [k for k in payload if k not in live]
+            return True, ("degraded_columns:%s" % ",".join(missing)) if missing else None
+        except Exception as ex:
+            note = "%s: %s" % (type(ex).__name__, ex)
+            try:   # 최종 방어 1 — 텍스트만이라도 저장(NOT NULL 3컬럼)
+                if c is not None:
+                    c.execute("INSERT INTO capture_candidates(text,captured_at,state)"
+                              " VALUES(?,?,?)",
+                              (payload["text"], payload["captured_at"], payload["state"]))
+                    c.commit()
+                    return True, "minimal_insert(%s)" % note
+            except Exception as ex2:
+                note += " / minimal:%s" % type(ex2).__name__
+            fb = self._fallback_append(payload, note)   # 최종 방어 2 — ledger 미접촉 jsonl
+            return False, "fallback_jsonl(%s)%s" % (note, "" if fb else " [FALLBACK-WRITE-FAILED]")
         finally:
-            c.close()
-        return {"action": "captured", "verdict": v, "stored": True, "truncated": truncated}
+            if c is not None:
+                try:
+                    c.close()
+                except Exception:
+                    pass
+
+    def _fallback_append(self, payload, note):
+        """DB 저장 전멸 시 원문 보존 — <binggu_home>/capture_fallback.jsonl append. 성공 여부 반환."""
+        try:
+            self.home.mkdir(parents=True, exist_ok=True)
+            rec = dict(payload)
+            rec["_error"] = note
+            with open(self.fallback_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            return True
+        except Exception:
+            return False
+
+    def fallback_pending(self):
+        """fallback jsonl 에 대기 중인 복구 대상 건수(0=정상). render_preview 상단에 상시 노출한다 —
+        무음 유실 금지(적대검토 NEW2.11: '조용히 비는 SAVE 목록' 재발 방지)."""
+        try:
+            if not self.fallback_path.exists():
+                return 0
+            with open(self.fallback_path, "r", encoding="utf-8") as f:
+                return sum(1 for ln in f if ln.strip())
+        except Exception:
+            return 0
 
     def _record_bulk_veto(self, now, cwd, session_id, length):
         """대화 덩어리 veto 1건 카운트 기록(원문 미저장 — 길이만). preview 노출용·graceful."""
@@ -333,23 +455,27 @@ class PersistentCaptureBuffer:
         """captured 후보 목록. session_id 지정 시 그 세션 발화만(세션 경계 — 이전 세션 잔존 배제·
         2026-07-10). semantic 인자는 테스트 주입용(미지정 시 opt-in ON에서 lazy 생성)."""
         now = time.time() if now is None else now
+        # 동적 SELECT — 구 ledger(신규 컬럼 없음)에서 컬럼 하드코딩은 조용한 무동작/에러가 된다(R6).
+        _want = ["text", "pinned", "confidence", "cwd", "ai_context", "signals", "src_id", "src_sha"]
         c = self._conn()
         try:
             self._purge(now, conn=c)
-            if session_id is not None:
-                rows = c.execute(
-                    "SELECT text,pinned,confidence,cwd,ai_context,signals FROM capture_candidates "
-                    "WHERE session_id=? ORDER BY pinned DESC, id ASC", (session_id,)).fetchall()
+            live = set(self._live_cols)
+            sel = [col for col in _want if col in live]
+            base = "SELECT %s FROM capture_candidates " % ",".join(sel)
+            if session_id is not None and "session_id" in live:
+                rows = c.execute(base + "WHERE session_id=? ORDER BY pinned DESC, id ASC",
+                                 (session_id,)).fetchall()
             else:
-                rows = c.execute(
-                    "SELECT text,pinned,confidence,cwd,ai_context,signals FROM capture_candidates "
-                    "ORDER BY pinned DESC, id ASC"
-                ).fetchall()
+                rows = c.execute(base + "ORDER BY pinned DESC, id ASC").fetchall()
             bulk_vetoed = self._bulk_veto_count(now, session_id, conn=c)
         finally:
             c.close()
         items = []
-        for i, (text, pinned, conf, cwd, ai_ctx, sig_json) in enumerate(rows, 1):
+        for i, raw_row in enumerate(rows, 1):
+            r = dict(zip(sel, raw_row))
+            text, pinned, conf = r.get("text"), r.get("pinned"), r.get("confidence")
+            cwd, ai_ctx, sig_json = r.get("cwd"), r.get("ai_context"), r.get("signals")
             tags = []
             if pinned:
                 tags.append("PINNED")
@@ -374,12 +500,18 @@ class PersistentCaptureBuffer:
             items.append({
                 "idx": i, "text": text, "pinned": bool(pinned), "confidence": conf,
                 "cwd": cwd, "foreign": foreign, "ai_context": ai_ctx, "pair_relation": pair_rel,
+                # 앞막이 좌표 재료(저장 경로가 evidence_locator 로 넘긴다). 번호축·label 불변.
+                "src_id": r.get("src_id"), "src_sha": r.get("src_sha"),
                 "label": f"{i}. {text}{tag}", "state": "captured_candidate",
             })
         if self.scope.semantic_preview():
             self._attach_semantic(items, semantic)
         result = {"count": len(items), "items": items, "bulk_vetoed": bulk_vetoed,
                   "note": "owner 승인 전 candidate (active 아님)"}
+        _fb = self.fallback_pending()
+        if _fb:   # 무음 유실 금지 — 복구 대기분을 목록 위에 상시 노출
+            result["fallback_pending"] = _fb
+            result["note"] += " · ⚠ 저장 실패로 파일 대기 %d건(%s)" % (_fb, self.fallback_path.name)
         if self.scope.rationale_preview():
             self._attach_rationale(items, result)
         return result
@@ -786,6 +918,111 @@ def _selftest():
               "T37 신호→관계 매핑(교정/반문=refutes · 약한=revises · 무매치=중립 revises)")
         check(all(it.get("pair_relation") in ("owner_refutes", "owner_revises") for it in _pair),
               "T37b render_preview 대화쌍 후보에 pair_relation(관계 제안) 노출")
+
+        # ── T38~T43 MF1.5: ALTER 안전화 · 동적 INSERT/SELECT 강등 · feed no-raise · 유실 표면화 ──
+        # 홈 이름은 기존 selftest 홈(home/.binggupack)과 분리(과거 home5·home7 충돌로 남의 outcome
+        # 을 오염시킨 사고 2회 — 삽입 전 grep 확인 완료).
+        home_mf15 = tmp / "home_capture_mf15"
+        home_mf15.mkdir(parents=True)
+        CaptureScope(home=home_mf15).flag.write_text("1", encoding="utf-8")
+        (home_mf15 / "capture_scope.json").write_text(
+            json.dumps({"global": True, "allowed_cwd_prefixes": [], "denied_cwd_substrings": []}),
+            encoding="utf-8")
+
+        # T38 레거시 테이블(session_id/ai_context/src_* 전부 없음) → 컬럼별 ALTER 보강 + 기존 행 보존
+        legacy_db = home_mf15 / "capture_buffer.sqlite"
+        lc = sqlite3.connect(str(legacy_db))
+        lc.execute("""CREATE TABLE capture_candidates(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL,
+            pinned INTEGER NOT NULL DEFAULT 0, confidence TEXT, signals TEXT,
+            state TEXT NOT NULL DEFAULT 'captured_candidate', captured_at REAL NOT NULL, cwd TEXT)""")
+        lc.execute("INSERT INTO capture_candidates(text,captured_at) VALUES('옛 발화', ?)",
+                   (time.time(),))
+        lc.commit(); lc.close()
+        buf7 = PersistentCaptureBuffer(home=home_mf15)
+        r38 = buf7.feed("B안으로 결정한다", repo_cwd, session_id="S-MF15")
+        cols38 = [c[1] for c in sqlite3.connect(str(legacy_db)).execute(
+            "PRAGMA table_info(capture_candidates)")]
+        old38 = sqlite3.connect(str(legacy_db)).execute(
+            "SELECT text FROM capture_candidates WHERE id=1").fetchone()
+        check(r38["action"] == "captured" and r38["stored"] and not buf7._alter_errors
+              and all(cn in cols38 for cn in ("session_id", "ai_context", "src_id", "src_sha"))
+              and old38[0] == "옛 발화",
+              "T38 레거시 buffer → 컬럼별 ALTER 보강(4종) + 기존 행 보존 + 저장 정상")
+
+        # T39 앞막이 좌표 재료: src_id(세션)·src_sha(**절단 전 원문 전체** sha256) 적재 + preview 노출
+        raw39 = "이 방법이 더 낫다 " + ("가" * 1100)      # TEXT_CAP 초과 → text 는 잘려 저장
+        r39 = buf7.feed(raw39, repo_cwd, session_id="S-MF15")
+        it39 = next(it for it in buf7.render_preview()["items"] if it["text"].startswith("이 방법이"))
+        check(r39.get("truncated") and it39["src_id"] == "session:S-MF15"
+              and it39["src_sha"] == hashlib.sha256(raw39.encode("utf-8")).hexdigest()
+              and len(it39["text"]) == TEXT_CAP,
+              "T39 src_id/src_sha 적재+preview 노출(절단돼도 원문 전체 sha 보존)")
+
+        # T40 신규 컬럼을 만들 수 없는 환경 → INSERT/SELECT 동적 강등(레거시 저장 성공·raise 0)
+        home_deg = tmp / "home_capture_degraded"
+        home_deg.mkdir(parents=True)
+        CaptureScope(home=home_deg).flag.write_text("1", encoding="utf-8")
+        (home_deg / "capture_scope.json").write_text(json.dumps({"global": True}), encoding="utf-8")
+        dg = sqlite3.connect(str(home_deg / "capture_buffer.sqlite"))
+        dg.execute("""CREATE TABLE capture_candidates(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL,
+            pinned INTEGER NOT NULL DEFAULT 0, confidence TEXT, signals TEXT,
+            state TEXT NOT NULL DEFAULT 'captured_candidate', captured_at REAL NOT NULL, cwd TEXT)""")
+        dg.commit(); dg.close()
+        _orig_addable = globals()["_CAPTURE_ADDABLE"]
+        globals()["_CAPTURE_ADDABLE"] = ()      # ALTER 전멸 시뮬(잠금·권한으로 못 늘린 상태)
+        try:
+            buf8 = PersistentCaptureBuffer(home=home_deg)
+            r40 = buf8.feed("C안으로 결정한다", repo_cwd, session_id="S-DEG")
+            pv40 = buf8.render_preview()
+        finally:
+            globals()["_CAPTURE_ADDABLE"] = _orig_addable
+        check(r40["action"] == "captured" and r40["stored"]
+              and "degraded_columns" in (r40.get("store_note") or "")
+              and pv40["count"] == 1 and pv40["items"][0]["src_id"] is None
+              and pv40["items"][0]["text"] == "C안으로 결정한다",
+              "T40 신규 컬럼 부재 → 동적 INSERT/SELECT 강등 저장(raise 0 · 사유 반환)")
+
+        # T41 외부 프로세스가 EXCLUSIVE 잠금 → feed raise 0 · 원문은 fallback jsonl 로 보존
+        home_lock = tmp / "home_capture_locked"
+        home_lock.mkdir(parents=True)
+        CaptureScope(home=home_lock).flag.write_text("1", encoding="utf-8")
+        (home_lock / "capture_scope.json").write_text(json.dumps({"global": True}), encoding="utf-8")
+        buf9 = PersistentCaptureBuffer(home=home_lock)
+        buf9.feed("A안으로 결정한다", repo_cwd)          # 테이블 생성 선행
+        _orig_to = globals()["CAPTURE_BUSY_TIMEOUT_MS"]
+        globals()["CAPTURE_BUSY_TIMEOUT_MS"] = 150      # 셀프테스트 지연 억제(운영 기본값 불변)
+        blocker = sqlite3.connect(str(buf9.db_path))
+        try:
+            blocker.execute("BEGIN EXCLUSIVE")
+            blocker.execute("INSERT INTO capture_candidates(text,captured_at) VALUES('lock',?)",
+                            (time.time(),))
+            raised41 = None
+            try:
+                r41 = buf9.feed("D안으로 결정한다", repo_cwd, session_id="S-LOCK")
+            except Exception as ex:                      # feed 는 절대 raise 하면 안 된다
+                raised41, r41 = ex, {}
+        finally:
+            blocker.rollback(); blocker.close()
+            globals()["CAPTURE_BUSY_TIMEOUT_MS"] = _orig_to
+        fb_txt = buf9.fallback_path.read_text(encoding="utf-8") if buf9.fallback_path.exists() else ""
+        check(raised41 is None and r41.get("action") == "captured" and r41.get("stored") is False
+              and "fallback_jsonl" in (r41.get("store_note") or "")
+              and "D안으로 결정한다" in fb_txt,
+              "T41 외부 EXCLUSIVE 잠금 → feed raise 0 · 원문 fallback jsonl 보존")
+
+        # T42 유실 표면화(NEW2.11) — preview 상단에 '복구 대기 n건' 상시 노출
+        pv42 = buf9.render_preview()
+        check(pv42.get("fallback_pending") == 1 and "복구" not in pv42["note"]
+              and "대기 1건" in pv42["note"],
+              "T42 fallback 대기건수 preview 노출(무음 유실 금지)")
+
+        # T43 잠금 해제 후 정상 복귀(일시 실패가 영구 고장이 아님)
+        r43 = buf9.feed("E안으로 결정한다", repo_cwd, session_id="S-LOCK")
+        check(r43["stored"] and not r43.get("store_note")
+              and any(it["text"] == "E안으로 결정한다" for it in buf9.render_preview()["items"]),
+              "T43 잠금 해제 후 정상 저장 복귀")
 
         gate = "GO" if ok else "NO-GO"
         print(f"\nGATE={gate}")
