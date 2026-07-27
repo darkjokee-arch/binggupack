@@ -197,9 +197,16 @@ def _run(data):
                     if os.path.exists(sp) and (time.time() - os.path.getmtime(sp)) <= win:
                         snap = rt._load_review_snapshot()
                     if snap:
+                        # v2 스냅샷은 {schema,scope,session_id,ts,items} — 구형(list)도 _load 가
+                        # 감싸 주므로 items 만 보면 된다(2026-07-27).
+                        snap_items = snap.get("items") or []
                         hs = gl.parse_hit_stamps(prompt)
                         if hs:
-                            snap_idx = {s.get("idx") for s in snap}
+                            snap_idx = {s.get("idx") for s in snap_items}
+                            # 오도장 차단: 스냅샷이 세션 목록이면 그 세션에서만 유효.
+                            # (전체 누적 목록이 덮어쓴 뒤 세션 번호로 찍는 사고를 막는다 — 2026-07-27 실측)
+                            exp_scope = snap.get("scope")
+                            exp_sess = snap.get("session_id")
                             ts = time.time()
                             oa = _outcome_attribution_module(sd)
                             reason_map = hs.get("reason") or {}  # {idx: (verdict, reason_code)} — 미스 라벨 세분
@@ -210,15 +217,17 @@ def _run(data):
                                         verdict = rv[0] if rv else default_verdict
                                         rcode = rv[1] if rv else None
                                         rt.mark_by_index(i, verdict, {"actor": "human"}, ts,
-                                                         reason_code=rcode)
+                                                         reason_code=rcode,
+                                                         expect_scope=exp_scope,
+                                                         expect_session=exp_sess)
                                         if vkey == "hit":
                                             # 히트(사람) → 운영 ledger use_count++ (랭킹 utility 축 연결
                                             #   · 2026-07-21 4cli+Fable5: 히트↔use_count 끊김 배선).
-                                            _stamp_use_count(snap, i)
+                                            _stamp_use_count(snap_items, i)
                                             # C(결과-귀속): 히트 = applied 관찰 → record_run_outcome
                                             #   (evidence-gated 자동 append · owner 히트가 트리거·증거).
                                             if oa is not None:
-                                                _stamp_run_applied(oa, snap, i, ts)
+                                                _stamp_run_applied(oa, snap_items, i, ts)
             except Exception:
                 snap = None
             try:

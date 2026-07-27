@@ -313,26 +313,36 @@ def _build_recall_hits(home=None, ledger_path=None, now_ts=None, top_n=12, sessi
         lp = ledger_path or _ledger_path(home)
         # v4(owner 2026-07-25): 이번 세션 실제 회상 우선 — 도움 판정 대상은 '이번 세션 인출 회상'이다.
         #   session_id 주어지고 이번 세션 회상이 있으면 그것(효용 판정), 없으면(구세션·NULL) 누적 청소분 폴백.
-        session_pending = (RT.list_pending(home=home, ledger_path=lp, session_id=session_id)
+        # include_ai_stamped(2026-07-27): AI 자기신고 도장이 찍힌 것도 목록에 남겨 owner 가
+        # 보고 덮어쓸 수 있게 한다(사람 > AI). 사람 판정분은 확정이라 계속 제외.
+        session_pending = (RT.list_pending(home=home, ledger_path=lp, session_id=session_id,
+                                           include_ai_stamped=True)
                            if session_id else [])
         if session_pending:
             sel = []
             for p in reversed(session_pending):  # list_pending 은 ts asc → 뒤가 최신
                 sel.append({"trace_id": p["trace_id"], "node_id": p["node_id"],
                             "category": p.get("category"), "rank": p.get("rank"),
-                            "claim": p.get("claim"), "flag": "session"})
+                            "claim": p.get("claim"), "flag": "session",
+                            "ai_verdict": p.get("ai_verdict"),
+                            "ai_reason_code": p.get("ai_reason_code")})
                 if len(sel) >= top_n:
                     break
             for i, s in enumerate(sel, 1):
                 s["idx"] = i
-            RT.save_review_snapshot(sel, home=home)  # N → (trace_id,node_id) 고정(N-shift 안전)
+            # scope/session_id 를 함께 고정 — 다른 목록(전체 누적)이 스냅샷을 덮은 뒤의 오도장 차단
+            RT.save_review_snapshot(sel, home=home, scope="session", session_id=session_id,
+                                    ts=now_ts)
             items = [{"idx": s["idx"], "category": s.get("category"), "rank": s.get("rank"),
-                      "claim": s.get("claim"), "flag": s.get("flag")} for s in sel]
+                      "claim": s.get("claim"), "flag": s.get("flag"),
+                      "ai_verdict": s.get("ai_verdict"),
+                      "ai_reason_code": s.get("ai_reason_code")} for s in sel]
+            n_ai = sum(1 for s in sel if s.get("ai_verdict"))
             return {"available": True, "count": len(items), "total_pending": len(session_pending),
-                    "items": items, "scope": "session",
-                    "note": ("이번 세션 실제 회상 %d건 중 %d건 — 도움됐으면 `히트 N`·안 도움이면 `미스 N`"
-                             "(actor=human). 이번 세션 인출 회상의 효용 판정(v4 session_id 필터)."
-                             % (len(session_pending), len(items)))}
+                    "items": items, "scope": "session", "ai_stamped": n_ai,
+                    "note": ("이번 세션 실제 회상 %d건 중 %d건 — 도움됐으면 `히트 N`·안 도움이면 `미스 N`. "
+                             "AI 자동 기입 %d건(기본값 · 다르게 찍으면 owner 것이 덮어씀)."
+                             % (len(session_pending), len(items), n_ai))}
         pending = RT.list_pending(home=home, ledger_path=lp)
         total = len(pending)
         if not pending:
@@ -355,7 +365,8 @@ def _build_recall_hits(home=None, ledger_path=None, now_ts=None, top_n=12, sessi
                     break
         for i, s in enumerate(selected, 1):
             s["idx"] = i
-        RT.save_review_snapshot(selected, home=home)  # N → (trace_id,node_id) 고정(N-shift 안전)
+        # 폴백 경로는 전체 누적 목록 — scope="all" 로 표시해 세션 목록과 구분(오도장 차단)
+        RT.save_review_snapshot(selected, home=home, scope="all", ts=now_ts)
         items = [{"idx": s["idx"], "category": s.get("category"), "rank": s.get("rank"),
                   "claim": s.get("claim"), "flag": s.get("flag"),
                   "age_hours": s.get("age_hours")} for s in selected]
@@ -610,7 +621,9 @@ def render_close_md(summary):
     lines.append("- 저장: `SAVE n` — 예 `SAVE 1,2`(여러 개 한 번) 또는 `SAVE all`")
     lines.append("- 히트: `히트 1,2` — 도움된 회상 / 미스: `미스 3` — 헛다리·안 도움된 회상(여러 개 한 줄)")
     lines.append("  (양쪽 다 도장해야 usefulness 정직 — 히트만 = 100% 가짜·안 치면 pending 유지)")
-    lines.append("- 자동저장: **0** · 자동도장: **0** (헌법 — 사람 앵커·actor=human 만)")
+    # 2026-07-27 owner 지시로 회상 도장만 자동 열외 — 저장은 그대로 사람 앵커.
+    lines.append("- 자동저장: **0** (헌법 — 사람 앵커) · 회상 도장: **AI 자동 기입**"
+                 "(actor=ai_stamp · owner 가 다르게 찍으면 덮어씀)")
     lines.append("- %s" % sa.get("how", "저장·도장은 사람이 직접."))
 
     # 5) 한 번에 복사 저장 (복붙 블록 · 게이트 줄단위 인식 · 통합 파서 불요)
