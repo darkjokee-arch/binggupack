@@ -558,6 +558,51 @@ def _judgment_trace_show(ledger, node_id):
     return 0
 
 
+# AI 자기신고 도장이 올린 use_count 를 되돌릴 수 있어야 하므로 **고정 키**(day-bucket 금지).
+# adoption_key 는 날짜가 섞여 있어, AI 가 어제 찍고 owner 가 오늘 뒤집으면 어제 몫을 못 찾는다.
+# 고정 키라 (node_id, use_key) UNIQUE 로 노드당 1회만 계상된다 = 자기강화 루프도 함께 억제.
+_AI_STAMP_USE_KEY = "use-aistamp"
+
+
+def _ai_stamp_use_count(ledger, res, verdict, use_ai):
+    """AI 자기신고 도장의 랭킹(use_count) 반영 + owner 덮어쓰기 시 회수. best-effort(실패 침묵).
+
+    2026-07-27 owner 결정 "AI 도장도 바로 반영" — 종전엔 사람 도장만 use_count 로 이어졌고
+    (`hooks/binggu_save_gate_hook.py::_stamp_use_count`) AI 도장은 효용 장부에만 남았다.
+    use_count 0/468 병목을 푸는 대신 **AI 자기신고가 랭킹을 직접 움직이는** 되먹임이 생기므로,
+    되돌림을 같이 둔다:
+      · AI 가 used 로 찍음            → record_use(+1 · 고정 키라 노드당 1회)
+      · owner 가 그 항목을 used 아닌 것으로 덮어씀 → revoke_use(AI 몫만 −1)
+    owner 가 used 로 확인해준 경우는 결론이 같으므로 그대로 둔다(카운트 흔들지 않음).
+    사람이 올린 몫은 use_key 가 달라 이 경로에서 절대 건드려지지 않는다.
+
+    반환 (use_count, action) — action ∈ {"record","revoke",None}. 해당 없으면 (None, None).
+    """
+    node_id = res.get("node_id")
+    if not node_id:
+        return None, None
+    try:
+        from binggupack.pack import recall_trace as _RT
+        if use_ai and verdict == "used":
+            action = "record"
+        elif (res.get("overwrote") == _RT.AI_STAMP_ACTOR
+                and res.get("prev_verdict") == "used" and verdict != "used"):
+            action = "revoke"
+        else:
+            return None, None
+        db, _ = _open(ledger)
+        try:
+            if action == "record":
+                n = RANK.record_use(db, node_id, use_key=_AI_STAMP_USE_KEY)
+            else:
+                n = RANK.revoke_use(db, node_id, _AI_STAMP_USE_KEY)
+        finally:
+            db.close()
+        return n, action
+    except Exception:
+        return None, None
+
+
 def _trace_review(RT, ledger, home):
     """미판정 회상 목록 + 번호→(trace,node) 스냅샷 저장(원문 0). 효용 판정 대기."""
     pend = RT.list_pending(home=home, ledger_path=ledger)
@@ -606,6 +651,7 @@ def cmd_trace(a):
         return 0
     if a1 == "mark":
         # 배치 도장(간결 UX): "1,2,3" 콤마 여러 개 → 각각 판정(도움된 회상 한 줄 도장).
+        touched_use = False
         # 단일 "N" 은 이전과 동일. owner '히트 H1,H2' 발화가 이 배치 경로로 소비된다.
         verdict = a.a3
         if verdict not in RT.VALID_VERDICTS:
@@ -640,12 +686,20 @@ def cmd_trace(a):
                 ok_cnt += 1
                 note = (" · note=%s" % res["reason_code"]) if res.get("reason_code") else ""
                 over = (" · %s 도장 덮어씀" % res["overwrote"]) if res.get("overwrote") else ""
-                print("판정 기록: #%d → %s%s (actor=%s)%s" % (n, verdict, note, actor_label, over))
+                uc, act = _ai_stamp_use_count(ledger, res, verdict, use_ai)
+                if act:
+                    touched_use = True
+                rank = ("" if not act else
+                        " · use_count=%s(%s)" % (uc, "AI 반영" if act == "record" else "AI 몫 회수"))
+                print("판정 기록: #%d → %s%s (actor=%s)%s%s"
+                      % (n, verdict, note, actor_label, over, rank))
             else:
                 print("판정 안 됨 #%d(%s): %s"
                       % (n, res["reason"], hints.get(res["reason"], res["reason"])))
         if len(ns) > 1:
             print("→ %d/%d 건 판정 기록(actor=%s)" % (ok_cnt, len(ns), actor_label))
+        if touched_use:
+            _reindex_after_write(ledger)   # use_count 변화 → fresh_index rank 반영(기존 규약)
         return 0
     if a1 in (None, "review"):
         return _trace_review(RT, ledger, home)
