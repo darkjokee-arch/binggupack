@@ -150,7 +150,10 @@ def test_insert_locators_never_raises_and_reports_reason(tmp_path):
         try:
             rep = insert_locators(db2.con, _rows_of("X"), db_path=db2.path)
             assert rep["reason"] == "table_absent" and rep["skipped"] is True
-            assert rep["mirrored"] == 3        # skip 해도 원문은 남는다
+            # ★ D2/D13: 기능이 꺼진 상태(table_absent)면 미러도 안 쓴다 — 꺼둔 기능의
+            #   산출물이 운영홈에 쌓이면 "OFF = 기존 동작 불변" 이 깨진다(excerpt 평문·
+            #   TTL/회전 없음). 이중 보관은 '테이블은 있는데 INSERT 가 실패/폐기된' 경우 전용.
+            assert rep["mirrored"] == 0 and rep.get("mirror_skipped") == "table_absent"
         finally:
             db2.close()
     finally:

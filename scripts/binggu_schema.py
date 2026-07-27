@@ -654,6 +654,36 @@ def _connect_source_readonly(path):
         return con, "query_only"
 
 
+def _begin_read_snapshot(src_con):
+    """src 를 **읽기 트랜잭션에 고정**(BEGIN + 첫 read 로 스냅샷 확정). (pinned, note) 반환.
+
+    ★ 왜 필요한가(D3): src 는 autocommit 이라 매 쿼리가 **그 시점 최신 커밋**을 본다. 고정하지
+    않으면 `src.backup(dst)` 가 끝난 뒤 `_backup_verify` 가 읽는 원본이 사본보다 앞서 나가고,
+    동시 write 1건에 '행수 불일치' 로 raise 한다. 이 ledger 엔 StagingDB.write_lock(파일락)
+    **밖**에서 쓰는 경로가 실재한다 — p1_ranking→use_events · mark_hit→hit_events ·
+    recall→recall_traces. 그러면 staging_apply 가 backup_create_failed 로 **owner SAVE 를
+    차단**한다(구 shutil.copy2 경로엔 없던 실패 모드).
+    sqlite 의 BEGIN 은 deferred 라 **첫 읽기 문장이 실행돼야** 스냅샷이 잡힌다 — BEGIN 만 걸고
+    두면 backup 과 verify 가 여전히 다른 시점을 볼 수 있다.
+    실측: WAL 은 고정 중에도 외부 write 를 막지 않고(사본 = 고정 시점), rollback-journal 은
+    백업 동안만 writer 를 대기시킨다(일관 사본의 대가 · 백업은 밀리초 단위).
+    """
+    try:
+        src_con.execute("BEGIN")
+        src_con.execute("SELECT count(*) FROM sqlite_master").fetchone()
+        return True, None
+    except sqlite3.Error as ex:      # 고정 실패는 치명 아님 — 구 동작(비고정)으로 강등하되 침묵 금지
+        return False, "%s: %s" % (type(ex).__name__, ex)
+
+
+def _end_read_snapshot(src_con):
+    """읽기 트랜잭션 해제. src 는 write 0(mode=ro/query_only)이라 rollback 으로 충분."""
+    try:
+        src_con.rollback()
+    except sqlite3.Error:
+        pass
+
+
 def _backup_verify(src_con, dst_path):
     """사본이 원본과 같은지 검증. 불일치면 BackupVerifyError raise. 통과 시 요약 dict 반환.
 
@@ -709,7 +739,11 @@ def safe_backup(src_path, dst_path, *, overwrite=True, verify=True):
     트랜잭션을 잡고 있으면 checkpoint 가 busy 로 실패하고(반환값을 버리면 무음) main 파일만
     복사돼 **조용히 잘린 백업**이 만들어진다(실증: 501행 중 1행). Online Backup API 는 WAL
     잔존분을 포함하고 잠금 안전하다.
-    반환: {"src","dst","mode","verified", ...행수 요약}
+
+    ★ 백업과 검증은 **같은 스냅샷**에서 한다(D3) — src 를 읽기 트랜잭션에 먼저 고정하지 않으면
+    백업 직후 타 커넥션의 write 1건만으로 검증이 '행수 불일치' 를 내고, 그 오경보가
+    staging_apply 의 backup_create_failed 가 되어 owner SAVE 를 차단한다.
+    반환: {"src","dst","mode","verified","snapshot_pinned", ...행수 요약}
     """
     src_path, dst_path = os.path.abspath(str(src_path)), os.path.abspath(str(dst_path))
     if not os.path.exists(src_path):
@@ -726,15 +760,23 @@ def safe_backup(src_path, dst_path, *, overwrite=True, verify=True):
                 os.remove(p)
     src, mode = _connect_source_readonly(src_path)
     try:
-        dst = sqlite3.connect(dst_path)
+        pinned, pin_note = _begin_read_snapshot(src)
         try:
-            src.backup(dst)
+            dst = sqlite3.connect(dst_path)
+            try:
+                src.backup(dst)
+            finally:
+                dst.close()
+            summary = _backup_verify(src, dst_path) if verify else {}
         finally:
-            dst.close()
-        summary = _backup_verify(src, dst_path) if verify else {}
+            if pinned:
+                _end_read_snapshot(src)
     finally:
         src.close()
-    summary.update({"src": src_path, "dst": dst_path, "mode": mode, "verified": bool(verify)})
+    summary.update({"src": src_path, "dst": dst_path, "mode": mode, "verified": bool(verify),
+                    "snapshot_pinned": pinned})
+    if pin_note:
+        summary["snapshot_pin_error"] = pin_note   # best-effort 강등은 침묵이 아니라 사유 반환
     return summary
 
 
@@ -1050,6 +1092,42 @@ def _selftest() -> int:
     reader.rollback()
     reader.close()
     w.close()
+
+    # 18b) D3 회귀 앵커 — 백업 **후** 타 커넥션이 1행 INSERT 해도 검증이 오경보하면 안 된다.
+    #      이 ledger 엔 write_lock(파일락) 밖 write 경로가 실재한다: p1_ranking→use_events ·
+    #      mark_hit→hit_events · recall→recall_traces. 고정이 없으면 그 1행이 BackupVerifyError
+    #      → staging_apply 가 backup_create_failed 로 owner SAVE 를 차단한다.
+    race = os.path.join(tmp, "race.sqlite")
+    rw = sqlite3.connect(race)
+    rw.execute("PRAGMA journal_mode=WAL")
+    rw.execute("CREATE TABLE hit_events(event_id INTEGER PRIMARY KEY, node_id TEXT)")
+    rw.executemany("INSERT INTO hit_events(node_id) VALUES(?)", [("n%d" % i,) for i in range(10)])
+    rw.commit()
+    _orig_verify = globals()["_backup_verify"]
+
+    def _verify_after_race(src_con, dst_path):
+        """백업 종료 ~ 검증 사이에 동시 write 1건을 결정적으로 끼워 넣는다."""
+        w2 = sqlite3.connect(race)
+        w2.execute("INSERT INTO hit_events(node_id) VALUES('late')")
+        w2.commit()
+        w2.close()
+        return _orig_verify(src_con, dst_path)
+
+    globals()["_backup_verify"] = _verify_after_race
+    race_err = None
+    try:
+        r_summ = safe_backup(race, os.path.join(tmp, "race_snap.sqlite"))
+        race_ok = bool(r_summ["snapshot_pinned"]) and r_summ["counts"]["hit_events"] == 10
+    except Exception as ex:      # noqa: BLE001
+        race_ok = False
+        race_err = "%s: %s" % (type(ex).__name__, ex)
+    finally:
+        globals()["_backup_verify"] = _orig_verify
+    ck("safe_backup: 백업 후 동시 write 1건에도 검증 오경보 0(읽기 스냅샷 고정·D3)%s"
+       % (" [%s]" % race_err if race_err else ""), race_ok)
+    ck("safe_backup: 동시 write 는 원본에만 반영(사본 = 고정 시점)",
+       rw.execute("SELECT count(*) FROM hit_events").fetchone()[0] == 11)
+    rw.close()
 
     # 19) 플래그 원복 확인 — selftest 가 프로세스 env 를 오염시키지 않는다
     ck("selftest 종료 시 %s 원복" % EVLOC_FLAG_ENV,

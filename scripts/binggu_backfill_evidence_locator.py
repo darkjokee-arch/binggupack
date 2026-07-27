@@ -12,6 +12,8 @@
   ② `--apply` 는 `--batch-id` 필수 + **safe_backup 선행 필수**(Online Backup API · MF1.1).
      운영 ledger 가 대상이면 `--confirm-operating <batch-id>` 라는 **사람의 명시 앵커**가 추가로
      필요하다(§C-11 승인 대행 금지 — 이 스크립트가 스스로 운영에 손대지 않는다).
+     운영 판정은 경로 축(BINGGU_HOME 반영 + 실제 사용자 홈)과 식별자 축(audit_meta.ledger_id)의
+     OR 이라 env 하나로 우회되지 않는다(D6). 사본도 ledger_id 를 물려받으면 앵커가 필요하다.
   ③ **기존 행 UPDATE/DELETE 0**. nodes/edges/evidence 는 읽기만. 적재는 신규 2테이블뿐이고,
      적용 전후 `integrity_probe()` 동일을 게이트로 강제한다(다르면 NO-GO).
   ④ **테이블 삭제(DROP) 금지**(MF1.3). 롤백은 `evidence_locator_<batch>.jsonl` 전량 export → 행수
@@ -41,9 +43,11 @@ import sys
 import time
 from datetime import datetime, timezone
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
+_HERE = os.path.dirname(os.path.abspath(__file__))          # <repo>/scripts
+_ROOT = os.path.dirname(_HERE)                              # <repo>
+for _p in (_ROOT, _HERE):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)                              # binggupack 패키지 + 형제 bare-name
 
 import binggu_platform as _plat  # noqa: E402
 from binggu_schema import (  # noqa: E402
@@ -51,6 +55,13 @@ from binggu_schema import (  # noqa: E402
 )
 from openbinggu_staging_write_selftest import (  # noqa: E402
     StagingDB, evloc_mirror_path, excerpt_sha, insert_locators, loc_row, verify_locator_tail,
+)
+
+# 등급 정본은 이 파일이 아니라 패키지에 있다(D10) — 앞막이(openbinggu_conversation_candidate_save)
+# 와 백필이 같은 표를 봐야 `match_method IN PRIMARY_METHODS` 집계와 `confidence=='T1'` 집계가
+# 갈리지 않는다. 아래 3 심볼은 기존 호출처 호환을 위한 **re-export**다(정의는 패키지 1곳).
+from binggupack.schema.evidence_grade import (  # noqa: E402,F401
+    GRADE, METHOD_RANK as _METHOD_RANK, PRIMARY_METHODS, is_primary_source,
 )
 
 PARSER_ID = "binggu_backfill_evidence_locator/v1"
@@ -67,23 +78,6 @@ AUDIT_ROLLBACK = "evidence_locator_rollback"
 # 회수 원본 기본 경로(실측 기반 · 사용자 환경). 둘 다 CLI 로 교체 가능.
 DEFAULT_SESSION_ROOT = os.path.join(os.path.expanduser("~"), ".claude", "projects")
 DEFAULT_DOC_ROOTS = (os.path.join(os.path.expanduser("~"), ".claude", "memory"),)
-
-# 등급 정본 — 분자/분모를 섞지 않기 위해 '1차 출처'는 session_exact/session_norm 둘뿐이다.
-PRIMARY_METHODS = ("session_exact", "session_norm")
-GRADE = {
-    # match_method            : (confidence, 한 줄 설명)
-    "session_exact":           ("T1", "세션로그 대화 턴 원문 정확일치(1차 출처)"),
-    "session_norm":            ("T1", "세션로그 대화 턴 공백정규화 일치(1차 출처·원문 슬라이스 보존)"),
-    "session_speaker_mismatch": ("T2", "세션로그에서 찾았으나 노드 화자와 턴 역할 불일치 — owner 확인"),
-    "session_late":            ("T2", "세션로그 위치이나 저장 시각 이후 발화(재언급) — owner 확인"),
-    "md_exact":                ("T2", "문서(2차 요약본) 라인 일치 — 원문 대화 아님"),
-    "session_echo":            ("T3", "도구 입출력·주입 블록에서만 발견(빙구팩 자기 렌더) — 원본 아님"),
-    "self_reference":          ("T3", "컨테이너가 발췌 자신과 동일(독립 원본 아님·NEW2.10 강등)"),
-    "none":                    ("T4", "회수 불가 — evidence_locator 미기재, 사유만 기록"),
-}
-# 우선순위(작을수록 좋음) — 같은 evidence 에 여러 후보가 걸리면 이 순서로 고른다.
-_METHOD_RANK = {"session_exact": 0, "session_norm": 1, "session_speaker_mismatch": 2,
-                "session_late": 3, "md_exact": 4, "session_echo": 5}
 
 _WS = re.compile(r"\s+")
 _SYSREM = re.compile(r"<system-reminder>.*?</system-reminder>", re.S)
@@ -116,12 +110,82 @@ def _ro_conn(path):
         return con
 
 
-def is_operating_ledger(path):
+def _norm_path(p):
+    """비교용 정규화 — realpath 까지 푼다(symlink/junction 으로 같은 파일을 다른 이름으로 가리키는 우회 차단)."""
+    return os.path.normcase(os.path.realpath(os.path.abspath(str(p))))
+
+
+def operating_ledger_paths():
+    """운영 ledger 후보 경로들. 실패한 축은 조용히 버리지 않고 목록에서만 빠진다.
+
+    ① `_plat.default_ledger()` — BINGGU_HOME 을 **우선**하는 현행 축.
+    ② `_plat.default_ledger(env={})` — env 를 무시한 **실제 사용자 홈** 축.
+       ①만 보면 BINGGU_HOME 을 다른 곳으로 둔 셸에서 운영 경로를 직접 넘길 때 가드가 뚫린다(D6).
+    ③ `~/.binggupack/ledger.sqlite` — resolver 가 실패해도 남는 최후의 리터럴 축.
+    """
+    out = []
+    for fn in (lambda: _plat.default_ledger(),
+               lambda: _plat.default_ledger(env={}),
+               lambda: os.path.join(os.path.expanduser("~"), ".binggupack", "ledger.sqlite")):
+        try:
+            p = fn()
+        except Exception:                   # noqa: BLE001 — 축 하나가 실패해도 나머지로 판정한다
+            continue
+        if p and p not in out:
+            out.append(p)
+    return out
+
+
+def _ledger_identity(path):
+    """대상 ledger 의 audit_meta.ledger_id — **읽기 전용**. 부재/미발행/오류면 None.
+
+    세 가지를 일부러 좁게 잡았다.
+      · `binggu_schema.ledger_id()` 를 쓰지 않는다 — 값이 없으면 발행 후 commit 한다(=write).
+      · 파일이 없으면 연결조차 하지 않는다 — `sqlite3.connect` 는 빈 파일을 만들어 버린다.
+      · `_ro_conn` 의 read-write 폴백을 쓰지 않는다 — 이 함수는 **남의(운영) ledger** 도 열기
+        때문에, WAL DB 를 read-write 로 열면 그 홈에 -wal/-shm 이 생긴다(운영홈 불변 위반).
+        mode=ro 로 못 열면 그냥 None → 식별자 축만 비활성이고 경로 축은 그대로 산다.
+    """
     try:
-        op = _plat.default_ledger()
-    except Exception:                       # noqa: BLE001 — resolver 실패 시 보수적으로 '아님'
-        return False
-    return os.path.normcase(os.path.abspath(str(path))) == os.path.normcase(os.path.abspath(op))
+        if not os.path.isfile(path):
+            return None
+        import pathlib
+        uri = pathlib.Path(path).resolve().as_uri() + "?mode=ro"
+        con = sqlite3.connect(uri, uri=True)
+    except Exception:                       # noqa: BLE001 — 열 수 없으면 식별 불가(None)
+        return None
+    try:
+        row = con.execute("SELECT value FROM audit_meta WHERE key='ledger_id'").fetchone()
+        return row[0] if row and row[0] else None
+    except Exception:                       # noqa: BLE001 — audit_meta 부재 등
+        return None
+    finally:
+        try:
+            con.close()
+        except Exception:                   # noqa: BLE001
+            pass
+
+
+def is_operating_ledger(path):
+    """운영 ledger 판정 — **경로 축 OR 식별자 축**. §C-11(승인 대행 금지)의 유일한 코드 가드다.
+
+    경로 비교만 쓰면 env 하나로 무력화된다(D6): `default_ledger()` 가 BINGGU_HOME 을 우선하므로
+    BINGGU_HOME 을 temp 로 둔 셸에서 `--ledger <운영경로> --apply` 를 치면 가드가 False 를 냈다.
+    그래서 ① 후보 경로 전부와 대조하고, ② 그래도 안 걸리면 대상 ledger 의 `audit_meta.ledger_id`
+    가 운영 ledger 와 같은지 본다(경로 우회 무력화).
+
+    ★ 부작용 1개를 명시한다 — 운영 ledger 를 **복사한 사본**은 ledger_id 를 그대로 물려받으므로
+      이 함수가 True 를 낸다. 즉 사본에 `--apply` 할 때도 `--confirm-operating <batch-id>` 가
+      필요하다. 사람의 앵커 한 줄을 더 받는 쪽이, 운영을 사본으로 착각해 손대는 쪽보다 싸다.
+    """
+    tgt = _norm_path(path)
+    ops = operating_ledger_paths()
+    if any(tgt == _norm_path(p) for p in ops):
+        return True
+    tid = _ledger_identity(path)
+    if not tid:
+        return False                        # 식별 불가 → 경로 축 결과(아님)를 그대로 쓴다
+    return any(_ledger_identity(p) == tid for p in ops if _norm_path(p) != tgt)
 
 
 # ── 원본 회수: 대상 목록 ──────────────────────────────────────────────────────
@@ -464,7 +528,9 @@ def _stats(sheet, ev_total, existing, targets, win_lo, win_hi):
     for s in sheet:
         by_method[s["match_method"]] = by_method.get(s["match_method"], 0) + 1
         by_conf[s["confidence"]] = by_conf.get(s["confidence"], 0) + 1
-    primary = sum(by_method.get(m, 0) for m in PRIMARY_METHODS)
+    # 1차 판정은 등급 정본의 단일 판정자에 위임한다(D10) — 여기서 method 집합을 다시 적으면
+    # 앞막이(live_capture·confidence 로 갈림)와 답이 어긋난다.
+    primary = sum(1 for s in sheet if is_primary_source(s["match_method"], s["confidence"]))
     speaker = {}
     for tg in targets:
         k = tg["speaker"] or "(NULL)"
@@ -476,7 +542,7 @@ def _stats(sheet, ev_total, existing, targets, win_lo, win_hi):
         k = tg["speaker"] or "(NULL)"
         if s and s["match_method"] != "none":
             speaker[k]["any"] += 1
-            if s["match_method"] in PRIMARY_METHODS:
+            if is_primary_source(s["match_method"], s["confidence"]):
                 speaker[k]["primary"] += 1
     return {
         "evidence_total": ev_total, "planned_rows": sum(1 for s in sheet if s["match_method"] != "none"),
@@ -630,8 +696,10 @@ def _evloc_anchor(con):
 
 def _guard_operating(ledger_path, batch_id, confirm):
     if is_operating_ledger(ledger_path) and confirm != batch_id:
-        return ("운영 ledger 대상 write 는 사람의 명시 앵커가 필요하다 — "
-                "`--confirm-operating %s` (§C-11 승인 대행 금지)" % (batch_id or "<batch-id>"))
+        return ("운영 ledger(또는 같은 ledger_id 를 물려받은 사본) 대상 write 는 사람의 명시 "
+                "앵커가 필요하다 — `--confirm-operating %s` (§C-11 승인 대행 금지). "
+                "BINGGU_HOME 을 바꿔도 이 판정은 우회되지 않는다."
+                % (batch_id or "<batch-id>"))
     return None
 
 
@@ -1025,6 +1093,41 @@ def _selftest():
             res5["status"] == "BLOCK" and "plan_batch_id_mismatch" in (res5["reason"] or ""),
             res5.get("reason"))
         chk("35 불일치 BLOCK 도 백업/DDL 이전에 걸린다", "backup" not in res5)
+
+        # ── 운영 ledger 판정 D6 (경로 우회 + 사본 식별자) ─────────────────────
+        # 운영 홈은 절대 건드리지 않는다 — temp 에 **가짜 운영 홈**을 만들어 BINGGU_HOME 으로
+        # 가리킨 뒤, 그 env 상태에서도 실제 사용자 홈 경로가 여전히 운영으로 잡히는지 본다
+        # (이 검사는 경로 문자열 비교뿐이라 운영 파일을 열지 않는다).
+        ops_home = os.path.join(work, "opshome")
+        os.makedirs(ops_home)
+        ops_led = os.path.join(ops_home, "ledger.sqlite")
+        StagingDB(ops_led).close()
+        ops_copy = os.path.join(work, "ops_copy.sqlite")
+        shutil.copy2(ops_led, ops_copy)
+        real_home_led = os.path.join(os.path.expanduser("~"), ".binggupack", "ledger.sqlite")
+        _old_home = os.environ.get("BINGGU_HOME")
+        os.environ["BINGGU_HOME"] = ops_home
+        try:
+            chk("36 BINGGU_HOME 을 딴 데로 돌려도 실제 사용자 홈 ledger 는 운영 판정(D6 우회 차단)",
+                is_operating_ledger(real_home_led), real_home_led)
+            chk("37 BINGGU_HOME 이 가리키는 ledger 도 운영 판정(현행 축 유지)",
+                is_operating_ledger(ops_led))
+            chk("38 ledger_id 를 물려받은 사본은 경로가 달라도 운영 판정(식별자 축)",
+                is_operating_ledger(ops_copy))
+            chk("39 무관한 temp ledger 는 운영이 아니다(오탐 0)", not is_operating_ledger(ledger))
+            res6 = apply_plan(ops_copy, {"batch_id": "bfD6", "rows": [], "prov_rows": []}, "bfD6")
+            chk("40 사본 대상 apply 도 앵커 없이는 BLOCK(백업/DDL 이전 차단)",
+                res6["status"] == "BLOCK" and "confirm-operating" in (res6.get("reason") or "")
+                and "backup" not in res6, res6.get("reason"))
+            rb6 = rollback_batch(ops_copy, "bfD6")
+            chk("41 rollback 도 같은 앵커 가드를 통과해야 한다",
+                rb6["status"] == "BLOCK" and "confirm-operating" in (rb6.get("reason") or ""),
+                rb6.get("reason"))
+        finally:
+            if _old_home is None:
+                os.environ.pop("BINGGU_HOME", None)
+            else:
+                os.environ["BINGGU_HOME"] = _old_home
     finally:
         shutil.rmtree(work, ignore_errors=True)
 

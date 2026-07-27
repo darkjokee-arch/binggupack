@@ -166,7 +166,11 @@ def test_locator_excerpt_is_frozen_full_text(tmp_path):
         assert text == OWNER
         assert sha == hashlib.sha256(OWNER.encode("utf-8")).hexdigest() and len(sha) == 64
         assert src and loc and cont                 # 빈칸을 남기지 않는다(origin 미지정도 좌표 기록)
-        assert method == "live_capture" and conf == "T1" and by == "auto"
+        # ★ D10: 등급은 하드코딩이 아니라 공용 GRADE 표로 산출한다.
+        #   origin 미지정 = 독립 컨테이너가 없다(container_sha == excerpt_sha) → T2.
+        #   앞막이가 세션 좌표를 실어 보낸 경우에만 T1.
+        assert method == "live_capture" and by == "auto"
+        assert conf == "T2" and cont == sha        # 자기참조 컨테이너 = 2차 등급
         assert batch and batch.startswith("save:")  # 롤백 단위가 붙어 있다
     finally:
         db.close()

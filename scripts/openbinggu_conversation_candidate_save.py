@@ -17,7 +17,13 @@ import shutil
 import sys
 import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_HERE = os.path.dirname(os.path.abspath(__file__))          # <repo>/scripts
+_ROOT = os.path.dirname(_HERE)                              # <repo>
+for _p in (_ROOT, _HERE):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)                              # binggupack 패키지 + 형제 bare-name
+
+from binggupack.schema.evidence_grade import live_capture_confidence  # 등급 정본(D10)
 from openbinggu_conversation_capture_preview import capture_preview, _PREVIEW_PII_EXTRA  # 정본 재실행
 from openbinggu_staging_write_selftest import (staging_apply, OPERATING_PATHS, _hash,
                                                loc_row, excerpt_sha)
@@ -42,6 +48,9 @@ def _source_coords(origin, raw_text, sentence):
       capture buffer 가 채워 넣는 값(binggu_capture_persist 의 src_id/src_sha)이 그대로 들어온다.
     origin 이 없어도 **빈칸을 남기지 않는다** — 원본 발화 자체를 좌표계로 삼아
     (utterance:<hash>, off:<pos>:len:<n>, sha256(원문 전체)) 를 기록한다. 절단·요약 0.
+    ★ 다만 그 폴백은 '자기좌표'다(가리킬 독립 원본이 없다) — 등급 정본이 이 경우를 T1 이
+      아니라 T2 로 내린다(D10 · binggupack.schema.evidence_grade.live_capture_confidence).
+      세션 좌표를 아는 호출자는 반드시 origin 을 넘겨라.
     """
     o = origin or {}
     raw = "" if raw_text is None else str(raw_text)
@@ -181,10 +190,12 @@ def prepare_selected(db, text, indices, speaker=None, explicit=False, allow_revi
         edges.append({"id": "edge:CONV:" + _sent_hash(it["sent"]), "relation": "evidence_supports",
                       "source": eid, "target": it["nid"], "evidence_refs": [eid]})
         # 앞막이 — 증거(evidence_id)에 원본 좌표 부착(§1·MF2.6). pack 에는 넣지 않는다.
+        # confidence 는 하드코딩하지 않는다(D10) — 등급 정본이 좌표 근거를 보고 T1/T2 를 가른다.
         _sid, _loc, _cont = _source_coords(origin, text, it["sent"])
+        _conf, _ = live_capture_confidence(_sid, _cont, excerpt_sha(it["sent"]))
         loc_rows.append(loc_row(eid, it["sent"], source_id=_sid, locator=_loc,
                                 container_sha=_cont, match_method="live_capture",
-                                confidence="T1", verified_by="auto",
+                                confidence=_conf, verified_by="auto",
                                 batch_id="save:" + pack_id))
     pack = {"pack_id": pack_id, "content": pack_content,
             "nodes": nodes, "edges": edges, "evidence": evidence}
@@ -397,8 +408,10 @@ def save_paired(db, owner_text, ai_text, ctx, snap_dir,
     loc_rows = []
     for _eid, _sent, _raw, _org in loc_seed:
         _sid, _loc, _cont = _source_coords(_org, _raw, _sent)
+        # confidence 하드코딩 금지(D10) — 등급 정본이 좌표 근거로 T1/T2 를 가른다.
+        _conf, _ = live_capture_confidence(_sid, _cont, excerpt_sha(_sent))
         loc_rows.append(loc_row(_eid, _sent, source_id=_sid, locator=_loc, container_sha=_cont,
-                                match_method="live_capture", confidence="T1", verified_by="auto",
+                                match_method="live_capture", confidence=_conf, verified_by="auto",
                                 batch_id="save:" + pack["pack_id"]))
     r = staging_apply(db, pack, {"actor": ctx.get("actor", "human"),
                                  **{k: v for k, v in ctx.items() if k in ("backup_fail", "wal_abort", "checksum_mismatch")}},
@@ -586,16 +599,19 @@ def run():
     from binggu_schema import evloc_env, has_table
     from openbinggu_staging_write_selftest import evloc_mirror_path, verify_locator_tail
 
-    # 20. 테이블 부재(플래그 OFF·현 운영 기본) → 저장 정상 + 사유 반환 + mirror jsonl 유실 0
+    # 20. 테이블 부재(플래그 OFF·현 운영 기본) → 저장 정상 + 사유 반환 + **산출물 0**
+    #     기능이 꺼진 ledger 에 미러만 쌓이면 '플래그 해제로 되돌지 않는 잔존물'이 된다(D2/D13)
+    #     → 미러 게이트는 has_table 하나. 사유는 mirror_skipped 로 표면화되고 침묵하지 않는다.
     db_l0 = open_g3(os.path.join(tmp, "s_loc_off.sqlite"))
     r20 = _ss(db_l0, CONVO, [1], {"actor": "human", "confirm": "SAVE 1"}, snap_dir, speaker="owner")
     lc20 = r20.get("locator") or {}
     mir20 = evloc_mirror_path(db_l0.path)
-    rec(20, "앞막이 OFF(테이블 부재) → 저장 정상 + reason=table_absent + mirror jsonl 보관",
+    rec(20, "앞막이 OFF(테이블 부재) → 저장 정상 + reason=table_absent + 산출물 0(mirror 미생성)",
         r20["applied"] and r20["saved"] == 1
         and not has_table(db_l0.con, "evidence_locator")
-        and lc20.get("reason") == "table_absent" and lc20.get("mirrored") == 1
-        and os.path.exists(mir20)); db_l0.close()
+        and lc20.get("reason") == "table_absent" and lc20.get("mirrored") == 0
+        and lc20.get("mirror_skipped") == "table_absent"
+        and not os.path.exists(mir20)); db_l0.close()
 
     # 21. 테이블 실재 → evidence 1:1 locator 적재 + 좌표(원문 내 offset)·excerpt 동결 확인
     with evloc_env(True):
@@ -639,7 +655,20 @@ def run():
         _pr24["ok"] and set(_pr24["pack"]) == {"pack_id", "content", "nodes", "edges", "evidence"}
         and len(_pr24["loc_rows"]) == 1
         and not any("excerpt" in k or "locator" in k or "source_id" in k
-                    for k in _pr24["pack"])); db_l1.close()
+                    for k in _pr24["pack"]))
+
+    # ===== 25~27 등급 정본(D10) — confidence 는 하드코딩이 아니라 좌표 근거로 갈린다 =====
+    # 표는 binggupack.schema.evidence_grade 한 곳에만 있고, 앞막이·백필이 그 표를 함께 본다.
+    _g = dict(db_l1.con.execute("SELECT source_id, confidence FROM evidence_locator"))
+    rec(25, "등급 — origin 명시 + 독립 컨테이너 = T1", _g.get("session:S-21") == "T1")
+    rec(26, "등급 — 컨테이너가 발췌 자신이면 T1 아님(자기참조 강등·NEW2.10)",
+        _g.get("sess:OWN") == "T2" and _g.get("sess:AI") == "T2")
+    r27 = _ss(db_l1, "이 건은 다음 주에 다시 검토하는 편이 낫겠다.", [1],
+              {"actor": "human", "confirm": "SAVE 1"}, snap_dir, speaker="owner")
+    _g27 = [r[0] for r in db_l1.con.execute(
+        "SELECT confidence FROM evidence_locator WHERE source_id LIKE 'utterance:%'")]
+    rec(27, "등급 — origin 미지정(폴백 자기좌표)은 T2(1차 출처 날조 금지·D8 운영 기본값)",
+        r27["applied"] and bool(_g27) and set(_g27) == {"T2"}); db_l1.close()
 
     # 12. audit chain INTACT + 운영 store 불변
     intact = db.verify_chain()

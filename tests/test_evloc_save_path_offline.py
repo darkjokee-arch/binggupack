@@ -69,12 +69,12 @@ def test_save_succeeds_with_locator_table_absent(tmp_path):
         assert rep["inserted"] == 0 and rep["error"] is None
         # 테이블을 몰래 만들지도 않는다
         assert bs.has_table(db.con, "evidence_locator") is False
-        # excerpt 는 ledger 밖 jsonl 에 이중 보관 — 유실 0
-        rows = _mirror_rows(db)
-        assert len(rows) == 1
-        assert rows[0]["excerpt_text"] == OWNER
-        assert rows[0]["_persisted"] is False and rows[0]["_skip_reason"] == "table_absent"
-        assert rows[0]["excerpt_sha"] and len(rows[0]["excerpt_sha"]) == 64
+        # ★ D2/D13: 기능 자체가 꺼진 상태(table_absent)에서는 미러도 쓰지 않는다.
+        #   "OFF 면 기존 동작 불변" 이 상위 규약이라, 꺼둔 기능의 산출물이 운영홈에
+        #   쌓이면 안 된다(excerpt 평문·TTL/회전 없음). 이중 보관은 '테이블은 있는데
+        #   INSERT 가 실패/폐기된' 경우에만 의미가 있다.
+        assert _mirror_rows(db) == []
+        assert rep["mirrored"] == 0 and rep.get("mirror_skipped") == "table_absent"
     finally:
         db.close()
 
