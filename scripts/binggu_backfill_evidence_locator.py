@@ -964,7 +964,8 @@ def _selftest():
         n_elig = con.execute("SELECT count(*) FROM system_provenance WHERE evidence_eligible!=0").fetchone()[0]
         con.close()
         chk("20 계획 행수 == 적재 행수", n_loc == len(plan["rows"]), (n_loc, len(plan["rows"])))
-        chk("21 system_provenance 는 전건 evidence_eligible=0(증거 불인정)", n_elig == 0)
+        chk("21 system_provenance 는 전건 evidence_eligible=0(증거 불인정)", n_elig == 0,
+            "prov=%d elig=%d" % (n_prov, n_elig))
 
         # 멱등
         with evloc_env(True):
@@ -973,6 +974,8 @@ def _selftest():
         n_loc2 = con.execute("SELECT count(*) FROM evidence_locator WHERE batch_id='bfT1'").fetchone()[0]
         con.close()
         chk("22 재적재 멱등(UNIQUE 4튜플 → 행수 불변)", n_loc2 == n_loc, (n_loc, n_loc2))
+        chk("22b 재적재도 정상 종료(멱등 경로가 조용히 죽지 않음)",
+            res2.get("status") in ("APPLIED", "SKIPPED"), res2.get("status"))
 
         # 롤백
         rb = rollback_batch(ledger, "bfT1")
