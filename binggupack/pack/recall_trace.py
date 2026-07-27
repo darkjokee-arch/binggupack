@@ -288,7 +288,7 @@ def record_outcome(trace_id, node_id, verdict, ctx, ts, *, reason_code=None, hom
         # trace 존재 확인(dangling outcome 방지 — 없는 trace 판정은 분모 오염)
         if not con.execute("SELECT 1 FROM recall_traces WHERE trace_id=?", (trace_id,)).fetchone():
             return {"recorded": False, "reason": "trace_not_found"}
-        prev = con.execute("SELECT outcome_id, actor FROM recall_outcomes"
+        prev = con.execute("SELECT outcome_id, actor, verdict FROM recall_outcomes"
                            " WHERE trace_id=? AND node_id=?", (trace_id, node_id)).fetchone()
         if prev:
             # owner 덮어쓰기: AI 자기신고 도장은 사람 판정이 오면 교체(사람 > AI · 기본값 성격).
@@ -301,14 +301,16 @@ def record_outcome(trace_id, node_id, verdict, ctx, ts, *, reason_code=None, hom
                 (oid, verdict, reason_code, actor, ts, trace_id, node_id))
             con.commit()
             return {"recorded": True, "outcome_id": oid, "reason_code": reason_code,
-                    "actor": actor, "overwrote": prev[1]}
+                    "actor": actor, "overwrote": prev[1], "node_id": node_id,
+                    "prev_verdict": prev[2]}
         con.execute(
             "INSERT INTO recall_outcomes(outcome_id,trace_id,node_id,verdict,reason_code,actor,ts)"
             " VALUES(?,?,?,?,?,?,?)", (oid, trace_id, node_id, verdict, reason_code, actor, ts))
         con.commit()
     finally:
         con.close()
-    return {"recorded": True, "outcome_id": oid, "reason_code": reason_code, "actor": actor}
+    return {"recorded": True, "outcome_id": oid, "reason_code": reason_code,
+            "actor": actor, "node_id": node_id}
 
 
 # ---------------- T0 자동 관측: 그래프 편입 = 채택 (헌법 v2 · owner 신호) ----------------
