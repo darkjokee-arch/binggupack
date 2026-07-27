@@ -29,7 +29,11 @@ import uuid
 
 # user_version(PRAGMA)로 기록되는 정본 스키마 버전. 마이그레이션 게이트 키.
 # v2 (P1-A trusted approval event): approval_requests·approval_consumptions 테이블 + audit_meta['ledger_id'].
-SCHEMA_VERSION = 2
+# v3 (다리c situation): recall_traces.situation TEXT — 회상이 '어떤 의도 상황'(lookup/decision/
+#     change/ambiguous · §9 Layer1 축)에서 일어났는지. nullable ADD COLUMN 비파괴 보강.
+# v4 (session_id): recall_traces.session_id TEXT — 회상이 '어느 세션'에서 일어났는지. 세션 마무리
+#     preview §2 가 '이번 세션 실제 회상'(도움 판정 대상)을 누적 청소분과 분리(owner 2026-07-25).
+SCHEMA_VERSION = 4
 
 # ── 테이블 정본 정의 ──────────────────────────────────────────────────────────
 # 각 테이블: 컬럼 DDL 리스트(합집합). 첫 항목은 대개 PRIMARY KEY.
@@ -106,6 +110,12 @@ _TABLE_COLUMNS = {
         "kind TEXT",
         "query_sha TEXT",
         "domain TEXT",
+        # situation(v3): 회상 시점의 의도 상황 — lookup/decision/change/ambiguous(§9 Layer1 축).
+        #   domain(어느 프로젝트)과 직교하는 '무슨 상황에서 회상했나'. reason_code(왜 무시/교정)와도 직교.
+        #   PII 0 — 자유 원문 아닌 enum 라벨만(VALID_SITUATIONS). nullable → 구 store ALTER 보강.
+        "situation TEXT",
+        # session_id(v4): 회상이 일어난 세션 — 마무리 preview §2 '이번 세션 회상' 필터. nullable ADD COLUMN.
+        "session_id TEXT",
         "recalled_json TEXT",
         "top1_node_id TEXT",
         "risk_level TEXT",

@@ -27,6 +27,17 @@ SAVE_TRIGGER_RE = re.compile(
     r"\s*(?:SAVE|저장|세이브)\s*\d+(\s*[-~]\s*\d+)?(\s*,\s*\d+(\s*[-~]\s*\d+)?)*\s*",
     re.IGNORECASE)  # 트리거↔숫자 공백 선택적(저장1·저장 1 모두)
 
+# 혼합 도장 줄(owner 실측 2026-07-24): 한 줄에 '저장1,2 히트2,4 미스1,3' 처럼 SAVE+히트/미스를
+# 함께 침 — SAVE 세그먼트만 추출하되, 줄 전체가 도장 세그먼트(SAVE/히트/미스/승격)들로만 구성될
+# 때만 인정(그 외 임의 텍스트 붙으면 오도장 차단). 히트/미스가 이미 혼합 줄 지원(gate_log 7/22)한
+# 것과 대칭 — SAVE 앵커만 줄 fullmatch 요구하던 비대칭 해소.
+_STAMP_SEG = (r"(?:SAVE|저장|세이브|HIT|히트|MISS|미스|PROMOTE|승격)\s*\d+(?:\s*[-~]\s*\d+)?"
+              r"(?:\s*,\s*\d+(?:\s*[-~]\s*\d+)?)*(?:\s*(?:무관|이미앎|약함|낡음|맥락|최신|틀림))?")
+_STAMP_LINE_RE = re.compile(r"\s*(?:%s\s*)+" % _STAMP_SEG, re.IGNORECASE)   # 줄 = 도장 세그 1+
+_SAVE_SEG_RE = re.compile(
+    r"(?:SAVE|저장|세이브)\s*(\d+(?:\s*[-~]\s*\d+)?(?:\s*,\s*\d+(?:\s*[-~]\s*\d+)?)*)",
+    re.IGNORECASE)  # 혼합 줄에서 SAVE 숫자부만 캡처
+
 _RANGE_CAP = 50  # 범위 확장 상한(오타 '1-99999' 폭주 방지 — 초과 시 그 도장 무효)
 
 # fenced 코드블록 구분선(``` 또는 ~~~ 로 시작하는 줄) — 붙여넣은 로그/AI응답/문서의 '명령 아닌 영역' 표시.
@@ -86,9 +97,17 @@ def parse_save_indices(prompt):
         return _expand_indices(p)
     out, seen = [], set()
     for line in _strip_embedded_regions(p).splitlines():
-        if line.strip() and SAVE_TRIGGER_RE.fullmatch(line):
-            idx = _expand_indices(line)
-            for i in idx or []:
+        ls = line.strip()
+        if not ls:
+            continue
+        if SAVE_TRIGGER_RE.fullmatch(ls):
+            segs = [ls]                       # 순수 SAVE 줄(기존 동작)
+        elif _STAMP_LINE_RE.fullmatch(ls):
+            segs = _SAVE_SEG_RE.findall(ls)   # ④ 혼합 도장 줄 → SAVE 세그먼트만(히트/미스 동반 무시)
+        else:
+            segs = []                         # 문장 속 언급·임의 텍스트 → 오도장 차단(계약 유지)
+        for seg in segs:
+            for i in _expand_indices(seg) or []:
                 if i not in seen:
                     seen.add(i)
                     out.append(i)
