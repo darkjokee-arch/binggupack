@@ -576,12 +576,18 @@ def _ai_stamp_use_count(ledger, res, verdict, use_ai):
     owner 가 used 로 확인해준 경우는 결론이 같으므로 그대로 둔다(카운트 흔들지 않음).
     사람이 올린 몫은 use_key 가 달라 이 경로에서 절대 건드려지지 않는다.
 
-    반환 (use_count, action) — action ∈ {"record","revoke",None}. 해당 없으면 (None, None).
+    반환 (use_count, action) — action ∈ {"record","revoke","error(...)",None}.
+    ★실패를 조용히 넘기지 않는다(§13 B10) — 예외는 "error(타입)" 로 돌려 CLI 가 화면에 표시한다.
+    2026-07-27 실사용 1차에서 RANK 지연 import 누락(NameError)을 except 가 삼켜 **12건 도장이
+    전부 무증상 미반영**됐다. 그때 화면엔 아무 표시도 없었다 — 그래서 사유를 반환값에 싣는다.
     """
     node_id = res.get("node_id")
     if not node_id:
         return None, None
     try:
+        # ★ RANK 는 이 모듈의 전역이 아니다 — 다른 경로들(cmd_recall·_mark_from_recall)도
+        # 함수 안에서 지연 import 한다. 여기서도 반드시 지역 import 할 것.
+        import binggu_p1_ranking as RANK
         from binggupack.pack import recall_trace as _RT
         if use_ai and verdict == "used":
             action = "record"
@@ -599,8 +605,8 @@ def _ai_stamp_use_count(ledger, res, verdict, use_ai):
         finally:
             db.close()
         return n, action
-    except Exception:
-        return None, None
+    except Exception as e:
+        return None, "error(%s)" % type(e).__name__
 
 
 def _trace_review(RT, ledger, home):
@@ -687,10 +693,14 @@ def cmd_trace(a):
                 note = (" · note=%s" % res["reason_code"]) if res.get("reason_code") else ""
                 over = (" · %s 도장 덮어씀" % res["overwrote"]) if res.get("overwrote") else ""
                 uc, act = _ai_stamp_use_count(ledger, res, verdict, use_ai)
-                if act:
+                if act in ("record", "revoke"):
                     touched_use = True
-                rank = ("" if not act else
-                        " · use_count=%s(%s)" % (uc, "AI 반영" if act == "record" else "AI 몫 회수"))
+                    rank = " · use_count=%s(%s)" % (
+                        uc, "AI 반영" if act == "record" else "AI 몫 회수")
+                elif act:
+                    rank = " · ⚠ 랭킹 반영 실패(%s)" % act   # silent drop 금지(§13 B10)
+                else:
+                    rank = ""
                 print("판정 기록: #%d → %s%s (actor=%s)%s%s"
                       % (n, verdict, note, actor_label, over, rank))
             else:
