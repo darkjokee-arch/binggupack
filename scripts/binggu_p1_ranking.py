@@ -36,6 +36,7 @@ from binggupack.pack.p1_ranking import (  # noqa: E402,F401  (전체 명시 re-e
     compute_score,
     node_rank_score,
     record_use,
+    revoke_use,
     adoption_key,
     cfg,
 )
@@ -161,6 +162,30 @@ def _selftest():
         # adoption_key 결정성(같은 인자 같은 날 → 동일 키)
         chk("T18 adoption_key 결정적(같은 query/domain → 동일)",
             adoption_key("배포 절차 확인", domain="bid") == k)
+
+        # ── T19 revoke_use (2026-07-27) — AI 도장 랭킹 반영의 되돌림 대칭성 ──
+        AIK = "use-aistamp"
+        r1 = record_use(db, "n2", use_key=AIK)          # 2 → 3 (AI 몫 추가)
+        chk("T19 AI 몫 record_use → +1(2→3)", r1 == 3)
+        r2 = revoke_use(db, "n2", AIK)                  # 3 → 2 (AI 몫만 회수)
+        chk("T19b revoke_use → AI 몫 −1(3→2)", r2 == 2)
+        ev_ai = con.execute("SELECT count(*) FROM use_events"
+                            " WHERE node_id='n2' AND use_key=?", (AIK,)).fetchone()[0]
+        chk("T19c 회수 시 use_events 행도 삭제(재기록 가능)", ev_ai == 0)
+        # 사람 몫(k·k2)은 그대로 — 출처가 다르면 안 건드린다
+        ev_human = con.execute("SELECT count(*) FROM use_events"
+                               " WHERE node_id='n2' AND use_key IN (?,?)", (k, k2)).fetchone()[0]
+        chk("T19d 사람 몫 use_events 불변(2건 · 출처 분리)", ev_human == 2)
+        r3 = revoke_use(db, "n2", AIK)                  # 이미 회수됨 → 불변
+        chk("T19e 없는 출처 회수 → use_count 불변(2)", r3 == 2)
+        r4 = revoke_use(db, "없는노드", AIK)
+        chk("T19f 노드 부재 → None", r4 is None)
+        # 하한 클램프 — use_count 0 에서 회수해도 음수로 안 감
+        con.execute("INSERT INTO nodes(node_id,use_count) VALUES('n3',0)")
+        con.execute("INSERT INTO use_events(node_id,use_key,ts) VALUES('n3',?,'t')", (AIK,))
+        con.commit()
+        chk("T19g use_count 0 에서 회수 → 0 유지(음수 금지)",
+            revoke_use(db, "n3", AIK) == 0)
         con.close()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

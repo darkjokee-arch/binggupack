@@ -136,3 +136,34 @@ def record_use(db, node_id, use_key=None):
     db.con.execute("UPDATE nodes SET use_count=? WHERE node_id=?", (new_count, node_id))
     db.con.commit()
     return new_count
+
+
+def revoke_use(db, node_id, use_key):
+    """record_use 취소 — use_events row 삭제 + use_count--. 되돌림 대칭성(2026-07-27).
+
+    배경: owner 지시로 AI 자기신고 도장(ai_stamp)도 use_count 를 올리게 됐다. 그러면 AI 가
+    잘못 찍은 도장이 랭킹에 **영구 잔류**할 수 있으므로, owner 가 같은 항목을 다르게 판정하면
+    올렸던 몫을 되돌려야 대칭이 맞는다. use_key 를 actor 별로 나눠 기록하기 때문에
+    (`__trace_mark_ai__` vs `__trace_mark__`) **AI 가 올린 몫만** 회수되고 사람 몫은 안 건드린다.
+    같은 구조라서 owner 가 나중에 "AI 반영 취소"로 마음을 바꿔도 AI 분만 일괄 회수할 수 있다.
+
+    use_key 필수 — 무엇을 되돌리는지 특정하지 않은 감산은 금지. 그 출처로 올린 적이 없으면 불변.
+    use_events 부재 구 ledger 는 되돌릴 근거가 없으므로 no-op(임의 감산 안 함 · 안전).
+    반환 = 갱신 후 use_count(노드 부재 None).
+    """
+    cur = db.con.execute("SELECT use_count FROM nodes WHERE node_id=?", (node_id,))
+    row = cur.fetchone()
+    if row is None:
+        return None
+    try:
+        d = db.con.execute("DELETE FROM use_events WHERE node_id=? AND use_key=?",
+                           (node_id, use_key))
+    except sqlite3.OperationalError:
+        return int(row[0] or 0)   # use_events 부재 — 근거 없는 감산 금지(no-op)
+    if d.rowcount == 0:
+        db.con.commit()
+        return int(row[0] or 0)   # 그 출처로 올린 적 없음 — 불변
+    new_count = max(0, int(row[0] or 0) - 1)
+    db.con.execute("UPDATE nodes SET use_count=? WHERE node_id=?", (new_count, node_id))
+    db.con.commit()
+    return new_count
