@@ -65,6 +65,7 @@ def save_candidates_batch(db, snap_dir, buffer_items, indices, gate_log_path=Non
     from binggupack.safety.gate_log import preview_ref_for_candidates, gate_human_for_ref, gate_path
     from binggupack.storage import save_paired
     from openbinggu_conversation_capture_preview import capture_preview
+    from binggu_capture_persist import DEFAULT_PAIR_RELATION
 
     indices = [int(i) for i in (indices or [])]
     if not indices:
@@ -76,17 +77,34 @@ def save_candidates_batch(db, snap_dir, buffer_items, indices, gate_log_path=Non
     if not gate_human_for_ref(pref, indices, path=gp):
         return {"applied": False, "reason": "no_save_gate_ref", "saved": 0, "skipped": 0, "results": []}
 
-    by_idx = {it.get("idx"): it.get("text", "") for it in buffer_items}
+    by_idx = {it.get("idx"): it for it in buffer_items}
     human_base = {"actor": "human", "actor_promoted_by": "batch_save_gate_ref"}
     results = []
     total_saved = 0
     skipped = 0
     for idx in indices:
-        text = by_idx.get(idx)
+        it = by_idx.get(idx) or {}
+        text = it.get("text", "")
         if not text:
             results.append({"cand": idx, "pick": None, "applied": False,
                             "reason": "candidate_missing", "pack_id": None})
             skipped += 1
+            continue
+        ai_ctx = it.get("ai_context")
+        if ai_ctx:
+            # B(대화쌍): owner 발화 ↔ 직전 AI말 pair(노드2+엣지1) 저장. relation=신호 제안값(owner
+            #   SAVE 앵커가 승인 · §8-1 정체성 축). 대표문(owner_pick=1) 1 pair — 같은 ai 노드가
+            #   여러 pick 에 재등장하면 save_paired 가 pair_partial_exists 로 막으므로 분할 안 함.
+            relation = it.get("pair_relation") or DEFAULT_PAIR_RELATION
+            ctx = dict(human_base)
+            ctx["confirm"] = "PAIR %s owner:1 ai:1" % relation
+            r = save_paired(db, text, ai_ctx, ctx, snap_dir,
+                            relation_kind=relation, owner_pick=1, ai_pick=1)
+            if r.get("applied"):
+                total_saved += 1
+            results.append({"cand": idx, "pick": 1, "applied": bool(r.get("applied")),
+                            "reason": r.get("reason"), "pack_id": r.get("pack_id"),
+                            "paired": True, "relation": relation})
             continue
         sents = capture_preview(text, explicit=True).get("candidates", [])
         for pick in range(1, len(sents) + 1):
@@ -96,7 +114,8 @@ def save_candidates_batch(db, snap_dir, buffer_items, indices, gate_log_path=Non
             if r.get("applied"):
                 total_saved += 1
             results.append({"cand": idx, "pick": pick, "applied": bool(r.get("applied")),
-                            "reason": r.get("reason"), "pack_id": r.get("pack_id")})
+                            "reason": r.get("reason"), "pack_id": r.get("pack_id"),
+                            "paired": False, "relation": None})
     return {"applied": total_saved > 0, "reason": None, "saved": total_saved,
             "skipped": skipped, "results": results}
 

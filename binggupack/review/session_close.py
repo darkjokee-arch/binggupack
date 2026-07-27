@@ -285,36 +285,100 @@ def _build_outcome_candidates(home=None, today=None):
                 "note": "당일 후보 로드 실패(graceful 생략)"}
 
 
-# ---------------- 2c. 이번 세션 회상 히트 후보 (recall_trace · read-only · owner 도장만) ----------------
+# ---------------- 2c. 누적 미판정 회상 정리 후보 (recall_trace · 세션 무관 · read-only · owner 도장만) ----------------
 
-def _build_recall_hits(home=None, ledger_path=None):
-    """이번 세션 미판정 회상 노드 = '히트 후보'(도움된 기억에 owner 가 도장할 대상).
-    recall_trace.list_pending 재사용(trace store 부재/OFF → count 0 graceful). 번호(H N)는
-    save_review_snapshot 로 (trace_id,node_id) 고정 → owner 'binggu trace mark N used' N-shift 안전.
+def _build_recall_hits(home=None, ledger_path=None, now_ts=None, top_n=12, session_id=None):
+    """누적 미판정 회상 정리 후보(세션 무관) — AI 자동선별 소수(값 확정 0) + owner 도장.
 
-    ★축 구분(MF3): 여기 '히트'=회상 효용(recall_outcomes used, usefulness) — use_count(ledger,
-    recall --record)와 다른 축. 도장은 owner actor=human 게이트(AI 자동 0). trace store 는
-    ledger.sqlite sibling(운영 ledger 불변). claim 은 ledger read-only join 표시용(store 원문 0).
-    반환 {available, count, items:[{idx,category,rank,claim}], note}."""
+    ★v4(2026-07-25 owner 지적 해결): session_id 주어지면 '이번 세션 실제 회상'을 우선 표시(효용
+    판정 대상 — 도움=`히트`/헛다리=`미스`). 이번 세션 회상이 없으면(구세션·session_id NULL) 아래 폴백:
+    누적 미판정 중 청소 시급분(오래됨·미편입 우선). recall_traces.session_id(v4)가 이번 세션 필터를 가능케 함.
+    (구 한계 2026-07-22: session_id 컬럼 부재로 '이번 세션'을 못 걸러 누적만 표시 → v4로 해소.)
+    실데이터 전량이 preflight 자동회상이라 미판정이 수백 건 누적된다(2026-07-21 실측: pending
+    425 = 100% preflight). owner 가 전부 도장할 수 없으므로 AI 가 **미스 후보(오래됨·그래프
+    미편입 = recall_trace.list_miss_candidates)를 우선 정렬**해 top_n 만 제시한다. 선별=조회+신호
+    (자동 OK), 값 확정(recall_outcomes used/ignored)은 owner actor=human 도장만(헌법 정합 · owner
+    논증 2026-07-21: 후보 제시 ≠ 판정). 번호(N)는 save_review_snapshot 으로 선별목록에 고정 →
+    owner '히트 N'/'미스 N' N-shift 안전. now_ts 미지정 → 미스 선별 생략(최신 미판정 top_n).
+
+    ★축 구분(MF3): '히트'=회상 효용(recall_outcomes used, usefulness) — use_count(ledger)와 다른
+    축. trace store 는 ledger.sqlite sibling(운영 ledger 불변). claim 은 read-only join(원문 0).
+    반환 {available, count, total_pending, items:[{idx,category,rank,claim,flag,age_hours}], note}."""
     try:
         from binggupack.pack import recall_trace as RT
     except Exception:
-        return {"available": False, "count": 0, "items": [],
-                "note": "recall_trace 모듈 미사용(히트 후보 생략)"}
+        return {"available": False, "count": 0, "total_pending": 0, "items": [],
+                "note": "recall_trace 모듈 미사용(회상 후보 생략)"}
     try:
         lp = ledger_path or _ledger_path(home)
+        # v4(owner 2026-07-25): 이번 세션 실제 회상 우선 — 도움 판정 대상은 '이번 세션 인출 회상'이다.
+        #   session_id 주어지고 이번 세션 회상이 있으면 그것(효용 판정), 없으면(구세션·NULL) 누적 청소분 폴백.
+        # include_ai_stamped(2026-07-27): AI 자기신고 도장이 찍힌 것도 목록에 남겨 owner 가
+        # 보고 덮어쓸 수 있게 한다(사람 > AI). 사람 판정분은 확정이라 계속 제외.
+        session_pending = (RT.list_pending(home=home, ledger_path=lp, session_id=session_id,
+                                           include_ai_stamped=True)
+                           if session_id else [])
+        if session_pending:
+            sel = []
+            for p in reversed(session_pending):  # list_pending 은 ts asc → 뒤가 최신
+                sel.append({"trace_id": p["trace_id"], "node_id": p["node_id"],
+                            "category": p.get("category"), "rank": p.get("rank"),
+                            "claim": p.get("claim"), "flag": "session",
+                            "ai_verdict": p.get("ai_verdict"),
+                            "ai_reason_code": p.get("ai_reason_code")})
+                if len(sel) >= top_n:
+                    break
+            for i, s in enumerate(sel, 1):
+                s["idx"] = i
+            # scope/session_id 를 함께 고정 — 다른 목록(전체 누적)이 스냅샷을 덮은 뒤의 오도장 차단
+            RT.save_review_snapshot(sel, home=home, scope="session", session_id=session_id,
+                                    ts=now_ts)
+            items = [{"idx": s["idx"], "category": s.get("category"), "rank": s.get("rank"),
+                      "claim": s.get("claim"), "flag": s.get("flag"),
+                      "ai_verdict": s.get("ai_verdict"),
+                      "ai_reason_code": s.get("ai_reason_code")} for s in sel]
+            n_ai = sum(1 for s in sel if s.get("ai_verdict"))
+            return {"available": True, "count": len(items), "total_pending": len(session_pending),
+                    "items": items, "scope": "session", "ai_stamped": n_ai,
+                    "note": ("이번 세션 실제 회상 %d건 중 %d건 — 도움됐으면 `히트 N`·안 도움이면 `미스 N`. "
+                             "AI 자동 기입 %d건(기본값 · 다르게 찍으면 owner 것이 덮어씀)."
+                             % (len(session_pending), len(items), n_ai))}
         pending = RT.list_pending(home=home, ledger_path=lp)
+        total = len(pending)
         if not pending:
-            return {"available": True, "count": 0, "items": [],
-                    "note": "이번 세션 미판정 회상 없음(trace OFF 거나 회상 0 — binggu trace enable 로 켜짐)"}
-        RT.save_review_snapshot(pending, home=home)  # H N → (trace_id,node_id) 고정(mark N-shift 안전)
-        items = [{"idx": p["idx"], "category": p.get("category"),
-                  "rank": p.get("rank"), "claim": p.get("claim")} for p in pending]
-        return {"available": True, "count": len(items), "items": items,
-                "note": "도움된 회상에 owner '히트 N'(actor=human) — use_count 아닌 회상효용 축(MF3)·자동 0"}
+            return {"available": True, "count": 0, "total_pending": 0, "items": [],
+                    "note": "누적 미판정 회상 없음(trace OFF 거나 회상 0 — binggu trace enable 로 켜짐)"}
+        # AI 자동선별: 미스 후보(오래됨·미편입) 우선 → 나머지는 최신 회상으로 채움(top_n 컷)
+        miss = RT.list_miss_candidates(now_ts, home=home, ledger_path=lp, top_n=top_n) if now_ts else []
+        seen = {(m["trace_id"], m["node_id"]) for m in miss}
+        selected = [dict(m, flag="miss") for m in miss]
+        if len(selected) < top_n:
+            for p in reversed(pending):  # list_pending 은 ts asc → 뒤가 최신
+                k = (p["trace_id"], p["node_id"])
+                if k in seen:
+                    continue
+                seen.add(k)
+                selected.append({"trace_id": p["trace_id"], "node_id": p["node_id"],
+                                 "category": p.get("category"), "rank": p.get("rank"),
+                                 "claim": p.get("claim"), "flag": "recent"})
+                if len(selected) >= top_n:
+                    break
+        for i, s in enumerate(selected, 1):
+            s["idx"] = i
+        # 폴백 경로는 전체 누적 목록 — scope="all" 로 표시해 세션 목록과 구분(오도장 차단)
+        RT.save_review_snapshot(selected, home=home, scope="all", ts=now_ts)
+        items = [{"idx": s["idx"], "category": s.get("category"), "rank": s.get("rank"),
+                  "claim": s.get("claim"), "flag": s.get("flag"),
+                  "age_hours": s.get("age_hours")} for s in selected]
+        miss_n = sum(1 for s in selected if s.get("flag") == "miss")
+        return {"available": True, "count": len(items), "total_pending": total, "items": items,
+                "note": ("이번 세션이 아니라 전체 누적 미판정 %d건 중 청소 시급분 %d건 선별"
+                         "(⚠미스 후보 %d = 오래됨·그래프 미편입 우선). "
+                         "도움=`히트 N`·헛다리=`미스 N`(actor=human) — 선별=조회, 도장=사람(자동 0)"
+                         % (total, len(items), miss_n))}
     except Exception:
-        return {"available": False, "count": 0, "items": [],
-                "note": "히트 후보 로드 실패(graceful 생략)"}
+        return {"available": False, "count": 0, "total_pending": 0, "items": [],
+                "note": "회상 후보 로드 실패(graceful 생략)"}
 
 
 # ---------------- 2d. AI 제안 L1 명제 (hybrid_agi · 승인 대기 · 화자축 분리 · read-only) ----------------
@@ -424,21 +488,24 @@ def _build_governance(home=None, cwd=None, ledger_path=None):
         ro.close()
 
 
-def build_close_summary(home=None, cwd=None, ledger_path=None, session_id=None, today=None):
+def build_close_summary(home=None, cwd=None, ledger_path=None, session_id=None,
+                        today=None, now_ts=None):
     """세션 마무리 표시용 요약 빌드(저장 0 · read-only). preview + 거버넌스 묶음.
     session_id 지정 시 preview 를 그 세션 발화로 한정(세션 경계). today 파라미터는 하위호환
     유지(구 지적 후보 필터용 — §supersede: 지적 후보 섹션은 2026-07-16 owner 지시로 폐지,
     판정은 binggu verdict 즉시 기록으로 대체 — 세션마무리 배치 확인 의식 0).
+    now_ts(ISO · 호출자 주입 · Date.now 미사용): 회상 미스 후보 나이 판정용 — 미지정 시
+    미스 자동선별 생략(최신 미판정만 · graceful).
     반환 {preview, recall_hits, governance, save_action}."""
     _ = today  # 하위호환(구 시그니처 호출자 무해)
     return {
         "preview": _build_preview(home, session_id=session_id),
-        "recall_hits": _build_recall_hits(home, ledger_path),
+        "recall_hits": _build_recall_hits(home, ledger_path, now_ts=now_ts, session_id=session_id),
         "l1_proposals": _build_l1_proposals(home),
         "governance": _build_governance(home, cwd, ledger_path),
         "save_action": {
             "auto_save": False,
-            "how": "저장은 사람이 직접 — preview 번호를 보고 **이 세션 채팅에** `SAVE 1,2`(여러 개 한 번) 발화 시 앵커 생성→저장. 도움된 회상은 `히트 H1,H2`(여러 개 한 줄). 안 하면 넘어감(강제 0). 로컬 터미널 별도 실행 안내 금지(이 세션에서 완결)·빙구팩 자동저장 0(저장 확정=사람 · T2). 효용 도장은 사람 히트 + T0 그래프편입 자동관측(opt-in · 헌법 v2 · used only).",
+            "how": "저장은 사람이 직접 — preview 번호를 보고 **이 세션 채팅에** `SAVE 1,2`(여러 개 한 번) 발화 시 앵커 생성→저장. 도움된 회상은 `히트 1,2`·헛다리는 `미스 3`(H 접두 금지 — 게이트는 `히트/미스 \\d+` 만 인식). 안 하면 넘어감(강제 0). 로컬 터미널 별도 실행 안내 금지(이 세션에서 완결)·빙구팩 자동저장 0(저장 확정=사람 · T2). 효용 도장은 사람 히트/미스 + T0 그래프편입 자동관측(opt-in · 헌법 v2 · used only).",
         },
     }
 
@@ -457,17 +524,14 @@ def _build_paste_block(summary):
     pv = summary.get("preview", {}) or {}
     if pv.get("available") and pv.get("count"):
         block.append("SAVE %s" % ",".join(str(i) for i in range(1, pv["count"] + 1)))
-    rh = summary.get("recall_hits", {}) or {}
-    if rh.get("available") and rh.get("count"):
-        idxs = [str(it["idx"]) for it in rh.get("items", []) if it.get("idx") is not None]
-        if idxs:
-            block.append("히트 %s" % ",".join(idxs))
+    # 회상 판정(히트/미스)은 복붙 블록에 자동으로 넣지 않는다 — owner 가 도움/헛다리를
+    # 골라 직접 도장(전체 자동 '히트 <전체>' = usefulness 100% 편향의 기계적 근원). SAVE 만 자동.
     return block
 
 
 def render_close_md(summary):
     """세션 마무리 요약 → 사람이 읽는 마크다운(결정적 · LLM 0 · 저장 0).
-    저장 preview(candidate) + 이번 세션 회상 히트 후보 + 거버넌스(적중률) + 한 줄 도장 안내."""
+    저장 preview(candidate) + 누적 미판정 회상 정리 후보(세션 무관) + 거버넌스(적중률) + 한 줄 도장 안내."""
     lines = ["## 세션 마무리 — 저장 preview + 회상 히트 + 거버넌스 (저장 0 · 사람이 SAVE/도장)"]
 
     # 1) 저장 후보
@@ -477,6 +541,13 @@ def render_close_md(summary):
     if pv.get("available") and pv.get("count"):
         for it in pv.get("items", []):
             lines.append("- " + str(it.get("label", it.get("text", ""))))
+            # B-2(대화쌍): 직전 AI말 발췌를 2줄로 노출 — owner 가 SAVE 하면 save_paired 로
+            #   owner 발화 ↔ AI 말 pair(노드2+엣지1) 저장(별도 경로 신설 없음 · 재료 표시만).
+            ai_ctx = it.get("ai_context")
+            if ai_ctx:
+                s = " ".join(str(ai_ctx).split())
+                lines.append("    ↳ 직전 AI말(대화쌍 재료 · SAVE 시 pair 저장): %s"
+                             % (s if len(s) <= 80 else s[:79] + "…"))
         lines.append("> %s" % pv.get("note", "owner 승인 전 candidate"))
     else:
         lines.append("- (수집된 candidate 없음 — 표시할 preview 0)")
@@ -485,19 +556,32 @@ def render_close_md(summary):
         lines.append("- ⚠️ 긴 발화 %d건 자동 제외(붙여넣기·대화 덩어리·AI 응답문 — 화자축 오염 방지). "
                      "진짜 저장하려면 그 내용에 `이거 저장해` 명시." % bv)
 
-    # 2) 이번 세션 회상 히트 후보 (recall_trace 통합 · MF3 회상효용 축 · owner 도장)
+    # 2) 누적 미판정 회상 정리 후보 (recall_trace 통합 · 세션 무관 · MF3 회상효용 축 · owner 도장)
     rh = summary.get("recall_hits", {}) or {}
     lines.append("")
-    lines.append("### 2) 이번 세션 회상 — 도움된 기억에 히트 (회상효용 · owner 도장)")
+    # ★제목은 실제 scope 를 따른다(2026-07-25 owner 지적): v4 session 필터가 걸렸는데도 제목이
+    #   "세션 무관"이면 owner 가 "이게 이번 세션 회상 맞냐"를 알 수 없다(note 만 고치고 제목을 안 고친 결함).
+    if rh.get("scope") == "session":
+        lines.append("### 2) 이번 세션 회상 — 효용 판정 "
+                     "(이 세션에서 실제 인출된 회상 · 도움=`히트 N` / 헛다리=`미스 N`)")
+    else:
+        lines.append("### 2) 누적 미판정 회상 — 정리 "
+                     "(세션 무관 · 오래됨/미편입 우선 · 도움=`히트 N` / 헛다리=`미스 N`)")
     if rh.get("available") and rh.get("count"):
         for it in rh.get("items", []):
             cat = (" [%s]" % it["category"]) if it.get("category") else ""
             rank = (" score=%.2f" % it["rank"]) if isinstance(it.get("rank"), (int, float)) else ""
             claim = it.get("claim") or "(원문 미상)"
-            lines.append("- %d. %s%s%s" % (it["idx"], claim, cat, rank))
-        lines.append("> %s" % rh.get("note", "도움된 회상만 도장 — 자동 0"))
+            if it.get("flag") == "miss":
+                ah = it.get("age_hours")
+                age = (" · %.0fh 안 쓰임" % ah) if isinstance(ah, (int, float)) else ""
+                mark = " ⚠미스후보"
+            else:
+                age = mark = ""
+            lines.append("- %d.%s %s%s%s%s" % (it["idx"], mark, claim, cat, rank, age))
+        lines.append("> %s" % rh.get("note", "도움=히트 N·헛다리=미스 N — 양쪽 다 도장해야 정직·안 치면 pending 유지·자동 0"))
     else:
-        lines.append("- (이번 세션 미판정 회상 없음 — trace OFF 거나 회상 0)")
+        lines.append("- (누적 미판정 회상 없음 — trace OFF 거나 회상 0)")
 
     # 2-b) AI 제안 L1 명제 (hybrid_agi · 승인 대기 · owner 후보와 화자축 분리)
     lp1 = summary.get("l1_proposals", {}) or {}
@@ -535,8 +619,11 @@ def render_close_md(summary):
     lines.append("")
     lines.append("### 4) 한 줄로 도장 (안 하면 넘어감 · 강제 0)")
     lines.append("- 저장: `SAVE n` — 예 `SAVE 1,2`(여러 개 한 번) 또는 `SAVE all`")
-    lines.append("- 히트: `히트 1,2` — 도움된 회상만(여러 개 한 줄)")
-    lines.append("- 자동저장: **0** · 자동도장: **0** (헌법 — 사람 앵커·actor=human 만)")
+    lines.append("- 히트: `히트 1,2` — 도움된 회상 / 미스: `미스 3` — 헛다리·안 도움된 회상(여러 개 한 줄)")
+    lines.append("  (양쪽 다 도장해야 usefulness 정직 — 히트만 = 100% 가짜·안 치면 pending 유지)")
+    # 2026-07-27 owner 지시로 회상 도장만 자동 열외 — 저장은 그대로 사람 앵커.
+    lines.append("- 자동저장: **0** (헌법 — 사람 앵커) · 회상 도장: **AI 자동 기입**"
+                 "(actor=ai_stamp · owner 가 다르게 찍으면 덮어씀)")
     lines.append("- %s" % sa.get("how", "저장·도장은 사람이 직접."))
 
     # 5) 한 번에 복사 저장 (복붙 블록 · 게이트 줄단위 인식 · 통합 파서 불요)
@@ -548,6 +635,7 @@ def render_close_md(summary):
         lines.extend(paste)
         lines.append("```")
         lines.append("> 각 줄이 게이트에 개별 인식 — 한 번 붙여넣기로 전 종류 저장(원하는 줄만 남겨 부분 저장도 가능). "
+                     "회상 판정(히트/미스)은 자동으로 안 넣음 — §2 보고 도움=`히트 N`·헛다리=`미스 N` 직접(편향 방지). "
                      "AI 제안(P)은 저장 경로 준비 중(단계2)이라 블록에서 제외.")
     else:
         lines.append("- (저장·히트 후보 없음 — 복사할 블록 0)")
@@ -581,7 +669,9 @@ def process(signal, home=None, cwd=None, ledger_path=None):
     if not det["is_close"]:
         return {**det, "summary": None, "rendered": None}
     sid = signal.get("session_id") if isinstance(signal, dict) else None
-    summary = build_close_summary(home, cwd, ledger_path, session_id=sid)
+    import time
+    now_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())  # hook 운영 진입점 — 미스 후보 나이 판정용
+    summary = build_close_summary(home, cwd, ledger_path, session_id=sid, now_ts=now_ts)
     return {**det, "summary": summary, "rendered": render_close_md(summary)}
 
 
@@ -683,6 +773,19 @@ def _selftest():
         except Exception:
             buf_ok = False  # 버퍼 모듈 흐름 변경 시 graceful 실패 표시
         check(buf_ok, "T9 candidate 적재 후 preview 표시 · ledger 미생성(candidate-only · 저장 0)")
+
+        # T9b B-2: dialectic 발화(prev_turn) → preview 대화쌍 노출 + render 에 직전 AI말 2줄
+        pair_ok = True
+        try:
+            b.feed("아니 그게 아니라 A안이 맞다", "C:/Users/fixture-user/binggupack",
+                   prev_turn="B안을 추천합니다")
+            pv2 = _build_preview(home=home)
+            has_ctx = any(it.get("ai_context") for it in pv2.get("items", []))
+            md_pair = render_close_md({"preview": pv2, "save_action": {"auto_save": False}})
+            pair_ok = has_ctx and "대화쌍 재료" in md_pair and "B안을 추천합니다" in md_pair
+        except Exception:
+            pair_ok = False
+        check(pair_ok, "T9b dialectic → preview ai_context 노출 + render '대화쌍 재료' 직전 AI말 표시")
 
         # T10 거버넌스 요약(hit_events 있는 ledger) — signal_only 표지 + 저장 0
         gov_ok = True
@@ -805,14 +908,38 @@ def _selftest():
                   "T20b review snapshot 저장(H N → trace/node 고정 · mark N-shift 안전)")
             s_rh = build_close_summary(home=str(home_rh), ledger_path=str(led_rh))
             md_rh = render_close_md(s_rh)
-            check("이번 세션 회상" in md_rh and "- 1. " in md_rh
-                  and "히트 1,2" in md_rh and "SAVE 1,2" in md_rh
+            # 복붙 블록엔 SAVE 만(자동 '히트 <전체>' 제거 = 편향 근원 차단) · §2·§4 는 히트/미스 양자 유도
+            paste_rh = _build_paste_block(s_rh)
+            check("누적 미판정 회상" in md_rh and "- 1. " in md_rh
+                  and "미스 N" in md_rh and "미스 3" in md_rh and "SAVE 1,2" in md_rh
                   and "### 5) 한 번에 저장" in md_rh
-                  and "자동저장: **0**" in md_rh,
-                  "T21 render: 회상 히트 숫자 라벨(H버그 수정·게이트 정합) + 복붙 블록 + 도장 안내 + 자동 0")
+                  and "자동저장: **0**" in md_rh
+                  and all(not ln.startswith("히트") for ln in paste_rh),
+                  "T21 render: 회상 판정 히트/미스 양자 유도 + 복붙 SAVE only(자동 전체히트 제거) + 자동 0")
             rh0 = _build_recall_hits(home=str(tmp / ".binggupack_rh0"))
             check(rh0["count"] == 0,
                   "T21b trace 부재 home → 히트 후보 0(graceful · 운영홈 미접촉)")
+            # T21c(v4 session_id): 이번 세션 회상 우선(scope=session) vs 폴백(누적)
+            home_sc = tmp / ".binggupack_sc"
+            RT.set_trace_flag(True, home=str(home_sc))
+            RT.record_trace("이번세션회상", "preflight", [{"node_id": "node:CONV:sc1"}],
+                            "2026-07-25T01:00:00Z", session_id="SC_NOW", home=str(home_sc))
+            RT.record_trace("구세션회상", "preflight", [{"node_id": "node:CONV:sc2"}],
+                            "2026-07-24T01:00:00Z", session_id="SC_OLD", home=str(home_sc))
+            rh_now = _build_recall_hits(home=str(home_sc), session_id="SC_NOW")
+            rh_fb = _build_recall_hits(home=str(home_sc))
+            check(rh_now.get("scope") == "session" and rh_now["count"] == 1
+                  and rh_fb.get("scope") != "session" and rh_fb["total_pending"] == 2,
+                  "T21c(v4) session_id → 이번 세션 회상 우선(scope=session·1건) · 폴백=누적(2건)")
+            # T21d(2026-07-25 owner 지적 회귀방지): 제목이 실제 scope 를 따라야 한다.
+            #   note 만 '이번 세션'이고 제목이 '세션 무관'이면 owner 가 무엇을 판정하는지 알 수 없다.
+            t_now = [ln for ln in render_close_md({"recall_hits": rh_now}).splitlines()
+                     if ln.startswith("### 2)")]
+            t_fb = [ln for ln in render_close_md({"recall_hits": rh_fb}).splitlines()
+                    if ln.startswith("### 2)")]
+            check(bool(t_now) and "이번 세션 회상" in t_now[0]
+                  and bool(t_fb) and "누적 미판정" in t_fb[0],
+                  "T21d 제목이 scope 를 따름(session=이번 세션 회상 / 폴백=누적 미판정)")
         except Exception as e:
             rh_ok = False
             check(rh_ok, "T20~T21 회상 히트 통합 예외: %s" % type(e).__name__)

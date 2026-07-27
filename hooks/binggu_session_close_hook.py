@@ -85,7 +85,26 @@ def main():
             block = out["rendered"] + observe_note + (
                 "\n\n> ★세션 마무리 감지 — 위 preview 번호로 **사장님이** `SAVE n`/`PAIR ...` 직접 "
                 "선택하세요(빙구팩 자동저장 0 · AI 임의저장 금지 · G4).")
-            sys.stdout.buffer.write((block + "\n").encode("utf-8"))
+            # ★owner 표시 배선(2026-07-22 owner 실측 재발 "미스후보 12건 나한테는 안 보인다"):
+            #   PR#103 은 systemMessage 필드로 owner 표시를 시도했으나 이 Claude Code 환경은
+            #   UserPromptSubmit 의 systemMessage 를 owner 화면에 표시하지 않는다(additionalContext 는
+            #   Claude 에 정상 주입 실측). 따라서 확실한 경로 = additionalContext + Claude 렌더 —
+            #   hook 이 Claude 에게 "이 표를 owner 응답에 전문 렌더하라"고 명시 지시한다(Claude 가
+            #   놓쳐도 방어). systemMessage 는 작동하는 환경/버전 대비 병행 유지. 저장/도장은 사람만(G4 불변).
+            claude_directive = (
+                "[Claude 필수 — 세션 마무리 preview 렌더] 아래 저장/회상 후보 표(번호+원문)를 "
+                "**네 응답에 그대로 옮겨** 사장님이 보게 하라. 이 additionalContext 는 너에게만 보이고 "
+                "사장님 화면엔 안 뜬다(이 환경 systemMessage 미표시). '위 preview 참조'·'hook 에 있음'·"
+                "요약 금지 — 저장 후보·회상 후보 전문 렌더 필수. 저장/도장(SAVE/히트/미스)은 사장님만.\n\n"
+                "────────────────\n\n")
+            payload = json.dumps({
+                "systemMessage": block,
+                "hookSpecificOutput": {
+                    "hookEventName": "UserPromptSubmit",
+                    "additionalContext": claude_directive + block,
+                },
+            }, ensure_ascii=False)
+            sys.stdout.buffer.write((payload + "\n").encode("utf-8"))
             sys.stdout.buffer.flush()
     except Exception:
         pass  # 모든 예외 흡수 — 세션 방해 0

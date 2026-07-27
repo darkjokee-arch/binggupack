@@ -55,6 +55,14 @@ except Exception:  # pragma: no cover - 폴백(외부 의존 없이 동일 정�
 
     _RANGE_CAP = 50
 
+    # 혼합 도장 줄(2026-07-24) — 정본 gate_text 와 byte-identical 폴백.
+    _STAMP_SEG = (r"(?:SAVE|저장|세이브|HIT|히트|MISS|미스|PROMOTE|승격)\s*\d+(?:\s*[-~]\s*\d+)?"
+                  r"(?:\s*,\s*\d+(?:\s*[-~]\s*\d+)?)*(?:\s*(?:무관|이미앎|약함|낡음|맥락|최신|틀림))?")
+    _STAMP_LINE_RE = re.compile(r"\s*(?:%s\s*)+" % _STAMP_SEG, re.IGNORECASE)
+    _SAVE_SEG_RE = re.compile(
+        r"(?:SAVE|저장|세이브)\s*(\d+(?:\s*[-~]\s*\d+)?(?:\s*,\s*\d+(?:\s*[-~]\s*\d+)?)*)",
+        re.IGNORECASE)
+
     _FENCE_RE = re.compile(r"^\s*(?:```|~~~)")
 
     def _strip_embedded_regions(text):
@@ -93,9 +101,17 @@ except Exception:  # pragma: no cover - 폴백(외부 의존 없이 동일 정�
             return _expand_indices(p)
         out, seen = [], set()
         for line in _strip_embedded_regions(p).splitlines():
-            if line.strip() and SAVE_TRIGGER_RE.fullmatch(line):
-                idx = _expand_indices(line)
-                for i in idx or []:
+            ls = line.strip()
+            if not ls:
+                continue
+            if SAVE_TRIGGER_RE.fullmatch(ls):
+                segs = [ls]
+            elif _STAMP_LINE_RE.fullmatch(ls):
+                segs = _SAVE_SEG_RE.findall(ls)   # 혼합 도장 줄 → SAVE 세그먼트만
+            else:
+                segs = []
+            for seg in segs:
+                for i in _expand_indices(seg) or []:
                     if i not in seen:
                         seen.add(i)
                         out.append(i)
