@@ -174,9 +174,16 @@ def capture_preview(text, max_candidates=DEFAULT_MAX, explicit=False):
     raw = (text or "")
     truncated = False
     if len(raw) > INPUT_CAP:
-        cut = raw.rfind("\n", 0, INPUT_CAP)
-        raw = raw[:cut if cut > 200 else INPUT_CAP]
+        # S2-3(2단계 절단): 이 컷은 표시측이 아니라 **저장측**이다 — 20000자 이후 문장은
+        # 후보 집합에 존재 자체가 없어 저장될 길이 없다(v2 의 '표시측' 분류는 오분류였음).
+        # 플래그 ON 이면 전 구간을 스캔한다. 종전 컷은 '\n'(split 경계)에서 잘렸으므로
+        # 머리 부분의 문장 분해는 동일하고 새 후보는 뒤에만 붙는다(prefix-extension · G-2).
+        # truncated 는 계약 유지를 위해 계속 세팅한다 — ON 에서는 "잘렸다"가 아니라
+        # "장문 입력(전 구간 스캔)" 의 알림 신호로 의미가 바뀐다.
         truncated = True
+        if not longsave_enabled():
+            cut = raw.rfind("\n", 0, INPUT_CAP)
+            raw = raw[:cut if cut > 200 else INPUT_CAP]
 
     excluded = {}
 
@@ -262,7 +269,8 @@ def capture_preview(text, max_candidates=DEFAULT_MAX, explicit=False):
         lines.append("제외: " + ", ".join("%s=%d" % (_friendly_excl(k), v) for k, v in sorted(excluded.items())))
     if truncated:
         lines.append("")
-        lines.append("(입력이 %d자 캡으로 절단됨)" % INPUT_CAP)
+        lines.append("(장문 입력 — 전 구간 스캔·절단 0)" if long_on
+                     else "(입력이 %d자 캡으로 절단됨)" % INPUT_CAP)
     # L 섹션 — 항목이 있을 때만 붙인다. 플래그 OFF 또는 장문 0 이면 markdown 은 종전과 byte 동일.
     if long_items:
         lines.append("")

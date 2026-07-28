@@ -23,6 +23,13 @@ from binggu_capture_classifier import EXPLICIT_SAVE, PREVIEW_TRIGGER, _any, clas
 
 TEXT_CAP = 1000         # 자동수집 버퍼 발화 보존 상한 = capture_preview.MAX_NODE_SENTENCE 정합(owner GO 2026-06-15).
 AI_CONTEXT_CAP = 400    # B(대화쌍) pair 재료(직전 AI말) 발췌 상한 — 전문 저장 금지(§3-2 원문 write0 원리).
+
+
+def _longsave_on():
+    """S2-3 저장측 캡 해제 스위치(docs/BINGGUPACK_STAGE2_TRUNCATION_DESIGN.md).
+    **호출 시점 평가** — import 시점이면 장수 프로세스가 플래그를 켜도 옛 값을 본다.
+    OFF 가 기본이고, OFF 면 위 두 상한이 종전 그대로 걸린다(회귀 0)."""
+    return os.environ.get("BINGGU_LONGSAVE_V1") == "1"
 # dialectic 판정: owner 발화가 직전 AI 말에 대한 반응(반박·반문·수정)일 때만 그 AI말을 pair 재료로 보관.
 #   설계 §9 Phase3·§5 L6 정합 — 반문/AI교정/약한교정 = why 발화 = 대화쌍 후보.
 #   좁게 시작(명시 dialectic 신호만) — 분류기 완화=노이즈 범람(2026-07-21 traj F) 경계.
@@ -398,16 +405,23 @@ class PersistentCaptureBuffer:
         if v["state"] != "captured_candidate":
             return {"action": "ignored", "verdict": v, "stored": False}
         text = utterance.strip()
+        # S2-3(2단계 절단): 플래그 ON 이면 버퍼에 전문을 보관한다. 상한 초과분을 잘라 버리면
+        # L-lane 이 preview 에서 꺼낼 원문 자체가 이미 없어진다(잘린 뒤엔 복구 불가).
+        # OFF 는 종전 그대로 — 회귀 0. truncated 는 "잘렸다"가 아니라 "상한 초과 장문"의 신호로
+        # 계속 유효하다(소비자 계약 유지 · 아래 preview 마커가 이 값을 읽는다).
         truncated = len(text) > TEXT_CAP
-        if truncated:
-            text = text[:TEXT_CAP]  # 원문 전문 저장 금지
+        if truncated and not _longsave_on():
+            text = text[:TEXT_CAP]  # 원문 전문 저장 금지(종전 동작)
         # B(2026-07-21 owner "대화쌍 통째"): owner 발화가 직전 AI 말에 대한 반응(dialectic)이면
         #   그 AI 말 발췌를 pair 재료로 candidate 에 보관(저장 아님). owner 가 PAIR 로 확정할 때
         #   save_paired(owner_text, ai_text, relation)의 ai_text 재료가 된다. 발췌 cap(전문 금지) +
         #   dialectic 신호일 때만(무분별 AI말 저장 회피 · 분류기 완화=노이즈 traj F 경계).
+        # ★S2-3 실피해 1위: AI_CONTEXT_CAP=400 은 대화쌍의 AI 쪽 맥락을 전건 잘라 왔다
+        #   (운영 버퍼 실측 20/21 = 95.2%). 이 값은 그대로 ai 노드 sentence 가 되므로 저장측이다.
         ai_ctx = None
         if prev_turn and (DIALECTIC_SIGNALS & set(v.get("signals") or [])):
-            ai_ctx = str(prev_turn).strip()[:AI_CONTEXT_CAP]
+            _ai = str(prev_turn).strip()
+            ai_ctx = _ai if _longsave_on() else _ai[:AI_CONTEXT_CAP]
         # 앞막이 좌표 재료 — src_sha 는 **절단 전 원문 전체**의 sha256(64hex). TEXT_CAP 로 잘려도
         # '원래 무엇이었는지' 는 남는다(저장 문장 ↔ 원문 대조·회수 키).
         src_sha = hashlib.sha256(_utf8(utterance)).hexdigest()

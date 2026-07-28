@@ -82,7 +82,10 @@ def _prev_assistant_text(transcript_path, cap=1500, tail=400):
         t = "".join(x.get("text", "") for x in c
                     if isinstance(x, dict) and x.get("type") == "text").strip()
         if t:
-            last_ai = t[:cap]  # 창 안 마지막 assistant text 유지(직전 turn)
+            # S2-3: cap 은 이 사슬의 **상류 절단**이다 — 하류 AI_CONTEXT_CAP 만 떼도 여기서 이미
+            # 1500 으로 잘려 있으면 전문 보존이 안 된다. 플래그 ON 이면 자르지 않는다.
+            # tail(스캔할 줄 수)은 절단이 아니라 탐색 범위라 그대로 유지한다.
+            last_ai = t if os.environ.get("BINGGU_LONGSAVE_V1") == "1" else t[:cap]
     return last_ai
 
 
