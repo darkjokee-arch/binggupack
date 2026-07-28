@@ -7,7 +7,7 @@ OpenBinggu Step 3 — synthetic staging write 구현 + selftest.
 안전: staging = temp 파일 SQLite(운영과 물리 분리). 운영 localcrab_index.sqlite/user_graph/_graph_merge
       connect 0·write 0(mtime 전후 대조). C-2 guard 통과 후에만 insert. apply(운영) 0.
 """
-import os, sys, re, json, hashlib, sqlite3, tempfile, shutil
+import os, sys, re, json, hashlib, sqlite3, tempfile, shutil  # noqa: E401,I001
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
@@ -24,10 +24,272 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 from binggu_paths import OPERATING_PATHS  # noqa: E402,F401
-from binggu_schema import apply_schema  # noqa: E402  정본 스키마 위임(staging=True)
+
+# 정본 스키마 위임(staging=True) + evloc 축 유틸(Unit A). has_table/table_columns 는 write 경로가
+# env 플래그가 아니라 **ledger 실재 상태**로 판단하기 위한 정본(재검증 NEW2.5).
+from binggu_schema import (  # noqa: E402
+    apply_schema,
+    has_table,
+    locator_checksum,
+    safe_backup,
+    table_columns,
+)
+
 
 def _canon(s): return re.sub(r"\s+", " ", str(s)).strip().encode("utf-8", "replace")
 def _hash(s): return hashlib.sha256(_canon(s)).hexdigest()[:16]
+
+
+# ── evidence_locator (앞막이) — 저장 시점 원본 좌표 기록 ─────────────────────────
+# 스펙 §1 증거 3요소(source_id · 위치 · excerpt_sha)를 evidence_id 에 부착한다(MF2.6).
+# 불변 3개(전부 아래 함수들이 강제·selftest 로 증명):
+#   ① write 여부는 env 가 아니라 has_table(con,'evidence_locator') 로 판단한다(NEW2.5).
+#      hook·MCP·CLI·schtasks 는 env 원천이 전부 달라 env 로 갈리면 반쪽 스키마가 된다.
+#   ② locator 실패가 저장을 절대 롤백시키지 않는다 — SAVEPOINT 로 감싸고, 실패는 삼키지 않고
+#      **사유를 report 로 반환**한다(silent drop 금지 · §13 B-10).
+#   ③ excerpt 는 ledger 밖 jsonl 에 이중 보관(MF1.3) — 단 **기능이 켜진 ledger 에서만**(D2).
+#      MF1.3 의 '이중 보관'은 "테이블은 있는데 INSERT 가 실패/폐기된" 경우의 단일 실패점 회피가
+#      목적이다. 테이블 자체가 없는 ledger(=기능 OFF·현 운영 기본값)에서 미러를 쓰면 '기능은
+#      꺼져 있는데 산출물만 쌓이는' 상태가 되고(플래그 해제로 되돌지 않는 유일 잔존물 · TTL/회전/
+#      상한 0 · excerpt 평문 · ledger 무결성 축 밖), 최상위 제약 "OFF 면 기존 동작 불변"과 정면
+#      충돌한다 → 미러 게이트는 `has_table(con, evidence_locator)` **하나**로 통일한다.
+#   ④ 미러는 트랜잭션이 **확정된 뒤**에 쓴다(D4). 커밋 전에 쓰면 롤백된 저장이 `_persisted=True`
+#      로 남아 '유실 0' 증거가 오염된다(실측: applied=False 인데 mirror 는 persisted=True).
+EVLOC_TABLE = "evidence_locator"
+EVLOC_MIRROR_NAME = "evloc_mirror.jsonl"
+# 크기 상한·회전(D13) — 무한 증가 차단. 초과 시 현재 파일을 `evloc_mirror.1.jsonl` 로 1세대만
+# 밀어내고 새로 시작한다(총 상한 = (KEEP+1) × MAX). 회전은 삭제가 아니라 세대 이동이고,
+# 밀려나는 것은 **가장 오래된 1세대뿐**이라 최근 이력은 항상 남는다. 사유는 report 로 반환한다.
+EVLOC_MIRROR_MAX_BYTES = int(os.environ.get("BINGGU_EVLOC_MIRROR_MAX_BYTES") or (8 * 1024 * 1024))
+EVLOC_MIRROR_KEEP = 1
+# UNIQUE(evidence_id, source_id, locator, excerpt_sha) 참여 컬럼. sqlite 는 NULL 을 서로 distinct 로
+# 보므로 NULL 이 섞이면 중복 차단이 무력해진다 → writer 가 None 대신 '' 로 정규화한다(Unit A 주의4).
+_EVLOC_UNIQUE_COLS = ("evidence_id", "source_id", "locator", "excerpt_sha")
+
+
+def excerpt_sha(text):
+    """§1 excerpt_sha = sha256(excerpt_text.utf-8) **전체 64hex**.
+
+    _hash(공백정규화 sha256[:16])와 **다른 함수**다 — _hash 산식을 건드리면 c2_check 의
+    applied_registry 중복판정이 무효화돼 과거 pack 이 전부 재적재 가능해진다(설계 §1-1).
+    """
+    return hashlib.sha256(str(text).encode("utf-8")).hexdigest()
+
+
+def evloc_mirror_path(db_path):
+    """excerpt 이중 보관 jsonl 경로 = ledger 파일과 같은 디렉터리.
+
+    `~/.binggupack` 리터럴을 쓰지 않는다(NEW2.9) — 운영 ledger 는 <binggu_home>/ledger.sqlite 이므로
+    결과가 <binggu_home>/evloc_mirror.jsonl 로 같고, 격리홈/temp 홈/BINGGU_HOME 에서는 **그 홈 안**에
+    남아 운영홈 오염·스플릿브레인이 구조적으로 불가능하다.
+    """
+    d = os.path.dirname(os.path.abspath(str(db_path)))
+    return os.path.join(d or ".", EVLOC_MIRROR_NAME)
+
+
+def loc_id(evidence_id, source_id, locator, exc_sha):
+    """loc_id = sha256(evidence_id|source_id|locator|excerpt_sha)[:24] (설계 §1-1)."""
+    key = "|".join(str(x or "") for x in (evidence_id, source_id, locator, exc_sha))
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
+
+
+def loc_row(evidence_id, excerpt_text, source_id=None, locator=None, container_sha=None,
+            match_method="live_capture", confidence="T1", verified_by="auto",
+            batch_id=None, created_at=None):
+    """evidence_locator 1행 dict. UNIQUE 참여 4컬럼은 None → '' 정규화."""
+    exc = "" if excerpt_text is None else str(excerpt_text)
+    esha = excerpt_sha(exc)
+    row = {
+        "evidence_id": "" if evidence_id is None else str(evidence_id),
+        "source_id": "" if source_id is None else str(source_id),
+        "locator": "" if locator is None else str(locator),
+        "excerpt_sha": esha,
+        "excerpt_text": exc,
+        "container_sha": container_sha,
+        "match_method": match_method,
+        "confidence": confidence,
+        "verified_by": verified_by,
+        "batch_id": batch_id,
+        "created_at": _now_iso(created_at),
+    }
+    row["loc_id"] = loc_id(row["evidence_id"], row["source_id"], row["locator"], esha)
+    return row
+
+
+def _mirror_rotate(path, max_bytes=None, keep=None):
+    """상한 초과 시 세대 회전(D13). 반환: 회전했으면 밀어낸 경로, 아니면 None. 실패는 raise."""
+    cap = EVLOC_MIRROR_MAX_BYTES if max_bytes is None else max_bytes
+    gens = EVLOC_MIRROR_KEEP if keep is None else keep
+    if cap <= 0 or not os.path.exists(path):
+        return None
+    if os.path.getsize(path) < cap:
+        return None
+    base, ext = os.path.splitext(path)
+    if gens <= 0:                       # 보관 세대 0 = 잘라내기(운영 기본값 아님)
+        os.remove(path)
+        return None
+    for i in range(gens, 0, -1):
+        src = path if i == 1 else "%s.%d%s" % (base, i - 1, ext)
+        dst = "%s.%d%s" % (base, i, ext)
+        if os.path.exists(dst):
+            os.remove(dst)              # 가장 오래된 세대만 사라진다
+        if os.path.exists(src):
+            os.replace(src, dst)
+    return "%s.1%s" % (base, ext)
+
+
+def _mirror_append(db_path, rows, persisted, reason=None):
+    """excerpt 이중 보관(MF1.3) — append-only jsonl. 실패해도 저장 흐름을 막지 않되 사유는 반환.
+
+    ★호출 전에 게이트(`_mirror_allowed`)를 통과했다는 전제다 — 이 함수 자체는 정책을 모른다.
+    """
+    path = evloc_mirror_path(db_path)
+    rotated = None
+    try:
+        rotated = _mirror_rotate(path)
+        with open(path, "a", encoding="utf-8") as f:
+            for r in rows:
+                rec = dict(r)
+                rec["_persisted"] = bool(persisted)
+                rec["_skip_reason"] = reason
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        return {"written": len(rows), "path": path, "error": None, "rotated": rotated}
+    except Exception as ex:
+        return {"written": 0, "path": path, "rotated": rotated,
+                "error": "%s: %s" % (type(ex).__name__, ex)}
+
+
+def _mirror_allowed(con, db_path):
+    """미러를 쓸 자격 판정(D2) — **기능이 켜진 ledger 인가** 하나로만 판단한다.
+
+    env(BINGGU_EVLOC_V5)가 아니라 테이블 실재로 본다: hook·MCP·CLI 는 env 원천이 달라서
+    env 로 갈리면 같은 ledger 에 대해 프로세스마다 결론이 달라진다(NEW2.5).
+    """
+    if not db_path:
+        return False
+    return has_table(con, EVLOC_TABLE)
+
+
+def flush_locator_mirror(con, db_path, rows, persisted, reason=None, report=None):
+    """트랜잭션 **확정 후** 미러 flush(D4). report 지정 시 mirrored/mirror_path/error 를 제자리 갱신.
+
+    롤백 경로에서는 persisted=False · reason='txn_rolled_back' 로 불러 **보정 레코드**를 남긴다 —
+    그래야 나중에 이 jsonl 을 '적재 실패분 복구' 원료로 읽어도 저장된 적 없는 행을 저장된 것으로
+    오판하지 않는다.
+    """
+    rows = list(rows or [])
+    if not rows or not _mirror_allowed(con, db_path):
+        if report is not None and rows and db_path:
+            report["mirror_skipped"] = "table_absent"
+        return None
+    m = _mirror_append(db_path, rows, persisted=persisted, reason=reason)
+    if report is not None:
+        report["mirrored"] = report.get("mirrored", 0) + m["written"]
+        report["mirror_path"] = m["path"]
+        report["mirror_rotated"] = m.get("rotated")
+        if m["error"]:
+            report["error"] = ((report.get("error") + " / ") if report.get("error") else "") \
+                + "mirror:" + m["error"]
+    return m
+
+
+def insert_locators(con, rows, db_path=None, mirror=True):
+    """evidence_locator 적재(INSERT OR IGNORE). **절대 raise 하지 않는다** — 사유를 report 로 반환.
+
+    반환 {attempted, inserted, present, mirrored, skipped, reason, error, mirror_path,
+          mirror_skipped, mirror_deferred, mirror_rotated}
+      reason: None(정상) | 'no_rows' | 'table_absent' | 'insert_failed' | 'insert_dropped'
+      present: 적재 후 실제로 ledger 에 존재하는 대상 행 수(멱등 재적재분 포함).
+      mirror_skipped: 'table_absent'(기능 OFF ledger — 미러도 안 쓴다 · D2)
+      mirror_deferred: True 면 호출자가 커밋 후 `flush_locator_mirror` 를 부를 책임을 진다(D4).
+
+    mirror=False: 열린 트랜잭션 안에서 부를 때 쓴다. 미러를 커밋 전에 쓰면 롤백된 저장이
+      `_persisted=True` 로 남아 '유실 0' 증거가 오염된다(D4).
+    ★`INSERT OR IGNORE` 는 UNIQUE 뿐 아니라 NOT NULL/CHECK 위반까지 **예외 없이 버린다**.
+      그래서 '예외 0' 만 보면 조용한 유실이 성립한다 → 삽입 후 loc_id 실재를 다시 읽어
+      attempted 와 대조하고, 못 미치면 'insert_dropped' 로 표면화한다(silent drop 금지).
+    호출자가 열어둔 트랜잭션 안이면 SAVEPOINT 로 감싸 **locator 실패가 pack 저장을 롤백시키지
+    않게** 한다(NEW2.5 시나리오 B: `no such table` 이 열린 BEGIN 안에서 터지면 owner 발화 통째 소실).
+    """
+    rows = list(rows or [])
+    rep = {"attempted": len(rows), "inserted": 0, "present": None, "mirrored": 0,
+           "skipped": False, "reason": None, "error": None, "mirror_path": None,
+           "mirror_skipped": None, "mirror_deferred": False, "mirror_rotated": None}
+    if not rows:
+        rep["skipped"] = True
+        rep["reason"] = "no_rows"
+        return rep
+    if not has_table(con, EVLOC_TABLE):
+        rep["skipped"] = True
+        rep["reason"] = "table_absent"      # 플래그 OFF ledger — 정상 경로(무해 skip)
+    else:
+        live = set(table_columns(con, EVLOC_TABLE))
+        in_txn = bool(getattr(con, "in_transaction", False))
+        sp = "evloc_sp"
+        try:
+            if in_txn:
+                con.execute("SAVEPOINT %s" % sp)
+            n = 0
+            for r in rows:
+                cols = [c for c in r if c in live]
+                if not cols:
+                    continue
+                vals = [("" if r[c] is None and c in _EVLOC_UNIQUE_COLS else r[c]) for c in cols]
+                cur = con.execute(
+                    "INSERT OR IGNORE INTO %s(%s) VALUES(%s)"
+                    % (EVLOC_TABLE, ",".join(cols), ",".join("?" * len(cols))), vals)
+                n += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+            # OR IGNORE 가 조용히 버린 행 검출 — loc_id 실재를 다시 읽어 attempted 와 대조.
+            if "loc_id" in live:
+                ids = [r["loc_id"] for r in rows if r.get("loc_id")]
+                if ids:
+                    rep["present"] = con.execute(
+                        "SELECT count(*) FROM %s WHERE loc_id IN (%s)"
+                        % (EVLOC_TABLE, ",".join("?" * len(ids))), ids).fetchone()[0]
+                    if rep["present"] < len(ids):
+                        rep["reason"] = "insert_dropped"
+                        rep["error"] = ("INSERT OR IGNORE 가 %d/%d 행을 버렸다(제약 불일치 의심)"
+                                        % (len(ids) - rep["present"], len(ids)))
+            # evloc 전용 무결성 앵커(MF1.3). ★audit_log 에 넣지 않는다(NEW2.7) — locator 해시가
+            # audit tail 을 점유하면 verify_tail_state(store_checksum 대조)가 영구 False 가 된다.
+            if n and has_table(con, "audit_meta"):
+                con.execute("INSERT OR REPLACE INTO audit_meta(key,value) VALUES('evloc_head',?)",
+                            (locator_checksum(con),))
+            if in_txn:
+                con.execute("RELEASE %s" % sp)
+            else:
+                con.commit()
+            rep["inserted"] = n
+        except Exception as ex:
+            rep["reason"] = "insert_failed"
+            rep["error"] = "%s: %s" % (type(ex).__name__, ex)
+            try:
+                if in_txn:
+                    con.execute("ROLLBACK TO %s" % sp)
+                    con.execute("RELEASE %s" % sp)
+                else:
+                    con.rollback()
+            except Exception as ex2:      # 롤백 실패도 삼키지 않는다
+                rep["error"] += " / savepoint_rollback:%s" % type(ex2).__name__
+    # 미러(MF1.3) — 게이트는 '기능이 켜진 ledger 인가' 하나(D2). 기능 OFF 면 산출물 0.
+    if db_path and not _mirror_allowed(con, db_path):
+        rep["mirror_skipped"] = "table_absent"
+    elif db_path and not mirror:
+        rep["mirror_deferred"] = True          # 커밋 후 flush 책임은 호출자(D4)
+    elif db_path:
+        flush_locator_mirror(con, db_path, rows, persisted=bool(rep["inserted"]),
+                             reason=rep["reason"], report=rep)
+    return rep
+
+
+def verify_locator_tail(con):
+    """audit_meta['evloc_head'] ↔ 현재 locator_checksum 대조. 앵커 없으면 True(미사용 ledger)."""
+    if not has_table(con, "audit_meta"):
+        return True
+    row = con.execute("SELECT value FROM audit_meta WHERE key='evloc_head'").fetchone()
+    if not row:
+        return True
+    return row[0] == locator_checksum(con)
 
 
 def _now_iso(ts=None):
@@ -124,11 +386,18 @@ class StagingDB:
         self.con.commit()
 
     def snapshot(self, snap_dir, name):
-        """표준 스냅샷 — wal_checkpoint(TRUNCATE) 후 main 파일 복사 (WAL 잔존분 누락 방지)."""
-        self.con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        """표준 스냅샷 — sqlite **Online Backup API**(MF1.1). 검증 실패 시 raise.
+
+        구 경로(`PRAGMA wal_checkpoint(TRUNCATE)` + `shutil.copy2`)는 폐기했다: 다른 연결이 읽기
+        트랜잭션을 잡고 있으면 checkpoint 가 busy 로 실패하는데 반환값을 버려서 무음이고, main
+        파일만 복사돼 **조용히 잘린 백업**이 만들어진다(실증 501행 중 1행·예외 0). staging_apply 가
+        매 저장마다 이 함수를 부르므로 이 수리가 곧 상시 스냅샷 신뢰 회복이다.
+        safe_backup 은 백업 직후 사본을 열어 원본과 상대 대조(테이블집합·행수·audit_meta·
+        user_version·quick_check)까지 마친다 — 통과 못 하면 BackupVerifyError.
+        """
         self.con.commit()
         snap = os.path.join(snap_dir, name)
-        shutil.copy2(self.path, snap)
+        safe_backup(self.path, snap)
         return snap
 
     @contextmanager
@@ -266,11 +535,20 @@ def c2_check(db, pack, ctx):
     return None
 
 
-def apply_pack_in_txn(db, pack, now_iso):
+def apply_pack_in_txn(db, pack, now_iso, loc_rows=None, loc_report=None, mirror_now=True):
     """★P1-B.1: 단일 열린 트랜잭션 안에서 pack INSERT(nodes/edges/evidence/applied_registry).
     BEGIN/COMMIT/snapshot/audit 없음 — 호출자가 단일 트랜잭션 경계·audit 를 관리한다.
     staging_apply(단건)와 commit_bundle(묶음 crash-atomic)의 유일한 INSERT SQL 원천(schema drift 방지).
-    반환 content_hash."""
+    반환 content_hash.
+
+    loc_rows: evidence_locator 행 리스트(앞막이). **pack dict 에 넣지 않고 별도 인자**로 받는다
+      (MF2.7) — excerpt 전문이 pack 객체에 상주하면 유출 차단이 '타입 경계'가 아니라 '규율'이 된다.
+      기본 None 이므로 기존 3인자 호출(binggu_hosted_bundle.py 등)은 완전 무영향.
+    loc_report: 지정 시 locator 적재 결과 dict 를 **제자리 갱신**(사유 반환 — best-effort ≠ 침묵).
+    mirror_now: False 면 excerpt 미러를 여기서 쓰지 않고 `mirror_deferred=True` 로 표시만 한다 —
+      호출자가 **커밋 확정 후** `flush_locator_mirror` 를 부른다(D4: 롤백된 저장이 미러에
+      `_persisted=True` 로 남아 '유실 0' 증거를 오염시키는 것을 구조적으로 차단).
+      기본 True 라 기존 호출자(binggu_hosted_bundle 등)는 무영향."""
     ch = _hash(pack["content"])
     for n in pack["nodes"]:
         # speaker(owner/ai/None)는 pack node dict 에서 일원화해 적재(ctx 아님). 미지정=None(NULL).
@@ -283,40 +561,94 @@ def apply_pack_in_txn(db, pack, now_iso):
         db.con.execute("INSERT INTO evidence(evidence_id,sentence,source_pointer_id,source_hash,redaction_policy,pack_id,created_at) VALUES(?,?,?,?,?,?,?)",
                        (ev["id"], ev["sentence"], ev.get("source_pointer_id","sp"), ev.get("source_hash"), ev.get("redaction_policy"), pack["pack_id"], now_iso))
     db.con.execute("INSERT INTO applied_registry VALUES(?,?,?)", (pack["pack_id"], ch, now_iso))
+    # 앞막이 — 저장 시점 원본 좌표. 테이블 실재 판정 + SAVEPOINT 격리라 실패해도 pack 은 살아남는다.
+    rep = insert_locators(db.con, loc_rows, db_path=getattr(db, "path", None),
+                          mirror=mirror_now)
+    if loc_report is not None:
+        loc_report.clear()
+        loc_report.update(rep)
     return ch
 
 
-def staging_apply(db, pack, ctx, snap_dir, ts=None):
-    """C-2 통과 후 transaction insert. checksum/WAL 중단 시 rollback."""
+def staging_apply(db, pack, ctx, snap_dir, ts=None, loc_rows=None):
+    """C-2 통과 후 transaction insert. checksum/WAL 중단 시 rollback.
+
+    loc_rows: evidence_locator 앞막이 행(선택). pack 과 분리된 별도 인자(MF2.7).
+
+    ★locator 리포트는 **모든 return 에** 실린다(D4). 예전엔 롤백·BLOCK 경로가 리포트 없이
+      조기 return 해서 호출자가 '좌표가 어떻게 됐는지' 신호를 전혀 못 받았다(silent drop).
+    ★excerpt 미러는 **트랜잭션 확정 후에만** 쓴다(D4) — 롤백분은 `_persisted=False` +
+      `_skip_reason='txn_rolled_back'` 보정 레코드로 남는다."""
+    loc_rows = list(loc_rows or [])
+    loc_report = {"attempted": len(loc_rows), "inserted": 0, "present": None, "mirrored": 0,
+                  "skipped": True, "reason": "not_attempted", "error": None,
+                  "mirror_path": None, "mirror_skipped": None, "mirror_deferred": False,
+                  "mirror_rotated": None}
     before = db.store_checksum()
     reason = c2_check(db, pack, ctx)
     if reason:
         db.audit_append(ctx.get("actor","human"), "insert", pack["pack_id"], "BLOCK", reason, before, before, ts=ts)
-        return {"applied": False, "reason": reason, "button": "disabled"}
+        return {"applied": False, "reason": reason, "button": "disabled",
+                "locator": loc_report}
     with db.write_lock():
-        # backup (commit 직전) — checkpoint 포함 표준 스냅샷
-        snap = db.snapshot(snap_dir, "snap_" + _hash(before))
+        # backup (commit 직전) — Online Backup API 표준 스냅샷(MF1.1).
+        # 백업 실패는 조용히 넘기지 않는다: 기존 backup_fail 주입과 같은 BLOCK 경로로 표면화한다
+        # (구 copy2 경로는 예외가 그대로 밖으로 튀어 저장이 예외로 죽었다).
+        try:
+            snap = db.snapshot(snap_dir, "snap_" + _hash(before))
+        except Exception as ex:
+            db.audit_append(ctx.get("actor","human"), "insert", pack["pack_id"], "BLOCK",
+                            "backup_create_failed", before, before, ts=ts)
+            return {"applied": False, "reason": "backup_create_failed", "button": "disabled",
+                    "backup_error": "%s: %s" % (type(ex).__name__, ex),
+                    "locator": loc_report}
         now = _now_iso(ts)
+        ledger_path = getattr(db, "path", None)
+
+        def _rolled_back(why):
+            """롤백 확정 — 미러엔 보정 레코드(_persisted=False)만 남긴다(D4)."""
+            loc_report["rolled_back"] = why
+            loc_report["inserted"] = 0       # 롤백으로 사라졌다 — 리포트도 사실을 따른다
+            loc_report["present"] = 0
+            flush_locator_mirror(db.con, ledger_path, loc_rows, persisted=False,
+                                 reason="txn_rolled_back", report=loc_report)
+            loc_report["mirror_deferred"] = False
+
         try:
             db.con.execute("BEGIN")
-            apply_pack_in_txn(db, pack, now)  # nodes/edges/evidence/applied_registry (단일 SQL 원천)
+            # nodes/edges/evidence/applied_registry(+locator) — 단일 SQL 원천.
+            # mirror_now=False: 미러는 커밋 확정 후에(D4).
+            apply_pack_in_txn(db, pack, now, loc_rows=loc_rows, loc_report=loc_report,
+                              mirror_now=False)
             # WAL/transaction 중단 주입 (ROLLBACK 이 applied_registry 포함 전체 원복 — 최종 상태 동일)
             if ctx.get("wal_abort"):
                 db.con.execute("ROLLBACK")
+                _rolled_back("sqlite_wal_incomplete")
                 db.audit_append(ctx.get("actor","human"), "insert", pack["pack_id"], "ROLLBACK", "sqlite_wal_incomplete", before, db.store_checksum(), ts=ts)
-                return {"applied": False, "reason": "sqlite_wal_incomplete", "button": "disabled"}
+                return {"applied": False, "reason": "sqlite_wal_incomplete", "button": "disabled",
+                        "locator": loc_report}
             # checksum mismatch 주입 → 롤백
             if ctx.get("checksum_mismatch"):
                 db.con.execute("ROLLBACK")
+                _rolled_back("sqlite_checksum_mismatch")
                 db.audit_append(ctx.get("actor","human"), "insert", pack["pack_id"], "ROLLBACK", "sqlite_checksum_mismatch", before, db.store_checksum(), ts=ts)
-                return {"applied": False, "reason": "sqlite_checksum_mismatch", "button": "disabled"}
+                return {"applied": False, "reason": "sqlite_checksum_mismatch", "button": "disabled",
+                        "locator": loc_report}
             db.con.execute("COMMIT")
         except Exception as ex:
             db.con.execute("ROLLBACK")
-            return {"applied": False, "reason": "exception:"+type(ex).__name__, "button": "disabled"}
+            _rolled_back("exception:" + type(ex).__name__)
+            return {"applied": False, "reason": "exception:"+type(ex).__name__, "button": "disabled",
+                    "locator": loc_report}
+        # 커밋 확정 후에만 excerpt 미러 flush(D4) — 여기 도달 = ledger 에 실재.
+        flush_locator_mirror(db.con, ledger_path, loc_rows,
+                             persisted=bool(loc_report.get("inserted")),
+                             reason=loc_report.get("reason"), report=loc_report)
+        loc_report["mirror_deferred"] = False
         after = db.store_checksum()
         db.audit_append(ctx.get("actor","human"), "insert", pack["pack_id"], "ALLOW", None, before, after, ts=ts)
-    return {"applied": True, "reason": None, "button": "enabled", "snapshot": snap}
+    return {"applied": True, "reason": None, "button": "enabled", "snapshot": snap,
+            "locator": loc_report}
 
 
 def tombstone(db, node_id, ctx, snap_dir, ts=None):
@@ -475,6 +807,265 @@ def run():
     rec(17,"comp4 hit_events ALTER 비파괴(기존 행 보존·신규 NULL) + store_checksum 불변(audit anchor)",
         all(c in hcols17 for c in ("domain","context_hash","decision_id"))
         and old_he==("hit", None, None, None) and ck_before==ck_after); db.close()
+
+    # ===== 18~23 evidence_locator 앞막이 (플래그 OFF/ON · 실패 격리 · 백업) =====
+    from binggu_schema import evloc_env  # 테스트 전용 컨텍스트(종료 시 env 원복)
+
+    def _loc_pack(pid):
+        p = base_pack(pack_id=pid, content="c_" + pid)
+        p["nodes"][0]["id"] = "n_" + pid
+        p["edges"][0]["id"] = "e_" + pid
+        p["edges"][0]["target"] = "n_" + pid
+        p["edges"][0]["source"] = "EVC-" + pid
+        p["edges"][0]["evidence_refs"] = ["EVC-" + pid]
+        p["evidence"][0]["id"] = "EVC-" + pid
+        return p
+
+    def _rows_for(pid, raw="원본 발화 전체 — 마진 12% 확보 확인됨."):
+        return [loc_row("EVC-" + pid, "마진 12% 확보", source_id="session:S-" + pid,
+                        locator="off:11:len:9", container_sha=excerpt_sha(raw),
+                        batch_id="save:" + pid)]
+
+    # 18. 테이블 부재(플래그 OFF) ledger → 저장 정상 + skip 사유 반환 + ★부작용 0(D2)
+    #     구 기대치는 'mirror jsonl 보관'이었다. 그건 기능이 꺼진 홈에 excerpt 평문 파일을
+    #     매 저장마다 무한 append 하는 동작이라 "OFF 면 기존 동작 불변"과 정면 충돌했다.
+    db = StagingDB(os.path.join(tmp, "s18_locoff.sqlite"))
+    r18 = staging_apply(db, _loc_pack("p18"), {"actor": "human"}, snap_dir,
+                        loc_rows=_rows_for("p18"))
+    loc18 = r18.get("locator") or {}
+    mir18 = evloc_mirror_path(db.path)
+    n18 = db.con.execute("SELECT count(*) FROM nodes").fetchone()[0]
+    rec(18, "locator 테이블 부재 → 저장 정상(applied) + reason=table_absent + 미러 산출물 0(D2)",
+        r18["applied"] and n18 == 1 and loc18.get("reason") == "table_absent"
+        and loc18.get("inserted") == 0 and loc18.get("mirrored") == 0
+        and loc18.get("mirror_skipped") == "table_absent"
+        and not os.path.exists(mir18))
+    rec(19, "locator 부재 ledger 는 has_table=False(env 아닌 실재 판정·NEW2.5)",
+        not has_table(db.con, EVLOC_TABLE)); db.close()
+
+    # 20. 테이블 실재 ledger → locator 행 생성 + 저장 정상 + 전용 무결성 앵커
+    with evloc_env(True):
+        db = StagingDB(os.path.join(tmp, "s20_locon.sqlite"))
+    r20 = staging_apply(db, _loc_pack("p20"), {"actor": "human"}, snap_dir,
+                        loc_rows=_rows_for("p20"))
+    loc20 = r20.get("locator") or {}
+    row20 = db.con.execute(
+        "SELECT evidence_id, source_id, locator, excerpt_sha, excerpt_text, batch_id"
+        " FROM evidence_locator").fetchall()
+    tail20 = verify_locator_tail(db.con)
+    rec(20, "locator 테이블 실재 → 행 적재 + 저장 정상 + evloc 앵커(verify_locator_tail)",
+        r20["applied"] and loc20.get("inserted") == 1 and len(row20) == 1
+        and row20[0] == ("EVC-p20", "session:S-p20", "off:11:len:9",
+                         excerpt_sha("마진 12% 확보"), "마진 12% 확보", "save:p20")
+        and tail20)
+    # 21. 멱등 — 같은 4튜플 재적재는 UNIQUE 로 1행 유지(INSERT OR IGNORE)
+    rep21 = insert_locators(db.con, _rows_for("p20"), db_path=db.path)
+    n21 = db.con.execute("SELECT count(*) FROM evidence_locator").fetchone()[0]
+    rec(21, "locator 재적재 멱등(UNIQUE 4튜플 → 1행 유지)",
+        n21 == 1 and rep21["inserted"] == 0 and rep21["error"] is None)
+    # 22. evloc 앵커는 audit_log tail 을 점유하지 않는다(NEW2.7 — verify_tail_state 영구 False 방지)
+    rec(22, "locator 적재 후에도 audit chain·tail anchor 무손상(evloc 는 audit_meta 별도 키)",
+        db.verify_chain() and db.verify_tail_state()
+        and db.con.execute("SELECT action FROM audit_log ORDER BY seq DESC LIMIT 1"
+                           ).fetchone()[0] == "insert"); db.close()
+
+    # 23. locator INSERT 예외 주입(동명 VIEW → 'cannot modify view') → pack 저장은 살아남고 사유만 반환
+    db = StagingDB(os.path.join(tmp, "s23_locfail.sqlite"))
+    db.con.execute("CREATE VIEW evidence_locator AS SELECT node_id AS loc_id,"
+                   " node_id AS evidence_id FROM nodes")
+    db.con.commit()
+    r23 = staging_apply(db, _loc_pack("p23"), {"actor": "human"}, snap_dir,
+                        loc_rows=_rows_for("p23"))
+    loc23 = r23.get("locator") or {}
+    n23 = db.con.execute("SELECT count(*) FROM nodes").fetchone()[0]
+    e23 = db.con.execute("SELECT count(*) FROM evidence").fetchone()[0]
+    rec(23, "locator INSERT 예외 → 저장 롤백 0(nodes/evidence 적재) + reason=insert_failed 반환",
+        r23["applied"] and n23 == 1 and e23 == 1
+        and loc23.get("reason") == "insert_failed" and loc23.get("error")
+        and loc23.get("mirrored") == 1 and db.verify_chain()); db.close()
+
+    # 23b. ★INSERT OR IGNORE 는 NOT NULL 위반까지 예외 없이 버린다 → '예외 0' 을 성공으로 읽으면
+    #      조용한 유실. present 재조회로 잡아 'insert_dropped' 로 표면화하는지 확인.
+    db = StagingDB(os.path.join(tmp, "s23b_locdrop.sqlite"))
+    db.con.execute("CREATE TABLE evidence_locator(loc_id TEXT PRIMARY KEY, evidence_id TEXT,"
+                   " must_have TEXT NOT NULL)")
+    db.con.commit()
+    r23b = staging_apply(db, _loc_pack("p23b"), {"actor": "human"}, snap_dir,
+                         loc_rows=_rows_for("p23b"))
+    loc23b = r23b.get("locator") or {}
+    rec(26, "OR IGNORE 무음 폐기 검출(reason=insert_dropped) + pack 저장은 정상",
+        r23b["applied"] and loc23b.get("reason") == "insert_dropped"
+        and loc23b.get("present") == 0 and loc23b.get("inserted") == 0
+        and loc23b.get("mirrored") == 1
+        and db.con.execute("SELECT count(*) FROM nodes").fetchone()[0] == 1); db.close()
+
+    # 24. snapshot = Online Backup API — 리더가 읽기 트랜잭션을 쥔 상태에서도 사본 행수 == 원본
+    #     (구 wal_checkpoint+copy2 는 이 조건에서 예외 0·501행 중 1행만 백업했다 · MF1.1)
+    db = StagingDB(os.path.join(tmp, "s24_backup.sqlite"))
+    for k in range(5):
+        staging_apply(db, _loc_pack("p24_%d" % k), {"actor": "human"}, snap_dir)
+    src_n = db.con.execute("SELECT count(*) FROM nodes").fetchone()[0]
+    reader = sqlite3.connect(db.path)
+    reader.execute("BEGIN")
+    reader.execute("SELECT count(*) FROM nodes").fetchone()
+    try:
+        snap24 = db.snapshot(snap_dir, "snap_backup24.sqlite")
+        sc = sqlite3.connect(snap24)
+        snap_n = sc.execute("SELECT count(*) FROM nodes").fetchone()[0]
+        sc.close()
+    finally:
+        reader.close()
+    rec(24, "snapshot(Online Backup API): 리더 점유 중에도 사본 행수 == 원본 [%d]" % src_n,
+        src_n == 5 and snap_n == src_n)
+    # 25. 구 3인자 apply_pack_in_txn 호출 호환(hosted_bundle 경로) — loc_rows 기본 None
+    db.con.execute("BEGIN")
+    ch25 = apply_pack_in_txn(db, _loc_pack("p25"), _now_iso())
+    db.con.execute("COMMIT")
+    rec(25, "apply_pack_in_txn 구 3인자 호출 호환(loc_rows 기본 None)",
+        ch25 == _hash("c_p25")
+        and db.con.execute("SELECT count(*) FROM nodes WHERE node_id='n_p25'").fetchone()[0] == 1)
+    db.close()
+
+    # ===== 27~31 D2/D4/D9/D13 회귀 =====
+    _ROOT_DIR = os.path.dirname(_HERE)
+    if _ROOT_DIR not in sys.path:
+        sys.path.insert(0, _ROOT_DIR)
+    from binggupack.evidence.locator import (  # noqa: E402
+        PRIMARY_METHODS,
+        coverage_line,
+        evidence_locator_coverage,
+    )
+
+    # 27. ★D4 — 롤백된 저장이 미러에 `_persisted=True` 로 남지 않는다.
+    #     구 동작: 미러 append 가 pack 트랜잭션 **안**이라 ROLLBACK 후에도 persisted=True 가 남고
+    #     반환 dict 엔 locator 가 아예 없어 사유 신호 0(실측 s9: applied=False / mirror persisted=True).
+    # ★미러 경로는 ledger 와 같은 디렉터리라 tmp 를 공유하면 앞선 케이스의 줄이 섞인다 →
+    #   미러 줄수를 단언하는 케이스는 **전용 홈**을 판다(이름 충돌 방지: h27/h32 는 이 파일 유일).
+    home27 = os.path.join(tmp, "h27"); os.makedirs(home27, exist_ok=True)
+    with evloc_env(True):
+        db = StagingDB(os.path.join(home27, "s27_rollback.sqlite"))
+    r27 = staging_apply(db, _loc_pack("p27"), {"actor": "human", "wal_abort": True}, snap_dir,
+                        loc_rows=_rows_for("p27"))
+    loc27 = r27.get("locator") or {}
+    mir27 = evloc_mirror_path(db.path)
+    recs27 = [json.loads(ln) for ln in open(mir27, encoding="utf-8").read().splitlines() if ln.strip()] \
+        if os.path.exists(mir27) else []
+    rec(27, "롤백 저장 → ledger locator 0 + 미러는 보정 레코드(_persisted=False/txn_rolled_back)"
+            " + 모든 return 에 locator 리포트(D4)",
+        (not r27["applied"]) and r27["reason"] == "sqlite_wal_incomplete"
+        and db.con.execute("SELECT count(*) FROM evidence_locator").fetchone()[0] == 0
+        and db.con.execute("SELECT count(*) FROM nodes").fetchone()[0] == 0
+        and len(recs27) == 1 and recs27[0]["_persisted"] is False
+        and recs27[0]["_skip_reason"] == "txn_rolled_back"
+        and recs27[0]["excerpt_text"] == "마진 12% 확보"      # 유실 0 은 유지된다
+        and loc27.get("rolled_back") == "sqlite_wal_incomplete"
+        and loc27.get("inserted") == 0)
+    # 28. BLOCK 경로(트랜잭션 진입 전)도 locator 리포트를 싣는다 — 침묵 금지(§13 B-10)
+    p28block = _loc_pack("p28block"); p28block["edges"][0]["evidence_refs"] = []
+    r28b = staging_apply(db, p28block, {"actor": "human"}, snap_dir, loc_rows=_rows_for("p28block"))
+    rec(28, "BLOCK 반환에도 locator 리포트 동봉(reason=not_attempted) + 미러 추가 0",
+        (not r28b["applied"]) and r28b["reason"] == "evidence_refs_missing"
+        and (r28b.get("locator") or {}).get("reason") == "not_attempted"
+        and (r28b.get("locator") or {}).get("attempted") == 1
+        and len([ln for ln in open(mir27, encoding="utf-8").read().splitlines() if ln.strip()]) == 1)
+    db.close()
+
+    # 29. ★D9 — 출하 coverage 함수: 1차 출처(primary)와 any 를 **분리**한다.
+    #     같은 ledger 를 count(*) 로 세면 2/3=66.7% 인데 1차 출처는 1/3=33.3% 다.
+    with evloc_env(True):
+        db = StagingDB(os.path.join(tmp, "s29_cov.sqlite"))
+    staging_apply(db, _loc_pack("p29a"), {"actor": "human"}, snap_dir,
+                  loc_rows=[loc_row("EVC-p29a", "1차 발췌", source_id="session:S-29",
+                                    locator="uuid:turn-1", match_method="session_exact",
+                                    confidence="T1")])
+    staging_apply(db, _loc_pack("p29b"), {"actor": "human"}, snap_dir,
+                  loc_rows=[loc_row("EVC-p29b", "2차 발췌", source_id="doc:memo.md",
+                                    locator="line:3", match_method="md_exact",
+                                    confidence="T2")])
+    staging_apply(db, _loc_pack("p29c"), {"actor": "human"}, snap_dir)   # 좌표 없음
+    cov29 = evidence_locator_coverage(db.con)
+    # 테스트 helper(tests/test_evidence_locator_axis.py:55) 와 **같은 값**인지 같은 ledger 에서 대조
+    helper_total = db.con.execute("SELECT count(*) FROM evidence").fetchone()[0]
+    helper_any = db.con.execute(
+        "SELECT count(*) FROM evidence e WHERE EXISTS("
+        " SELECT 1 FROM evidence_locator l WHERE l.evidence_id = e.evidence_id)").fetchone()[0]
+    helper_orphan = db.con.execute(
+        "SELECT count(*) FROM nodes n WHERE NOT EXISTS("
+        " SELECT 1 FROM edges e WHERE e.target=n.node_id AND e.relation='evidence_supports')"
+    ).fetchone()[0]
+    # system_provenance 를 아무리 넣어도 분자·분모 어디에도 안 들어간다
+    db.con.executemany(
+        "INSERT INTO system_provenance(prov_id,subject_kind,subject_id,parser,file_path)"
+        " VALUES(?,?,?,?,?)",
+        [("SP1", "evidence", "EVC-p29c", "md_parser", "seed/x.md"),
+         ("SP2", "evidence", "EVC-NOT-REAL", "md_parser", "_archive/y.md")])
+    db.con.commit()
+    cov29b = evidence_locator_coverage(db.con)
+    rec(29, "evidence_locator_coverage: primary %d/%d vs any %d/%d 분리 + helper 값 일치 +"
+            " system_provenance 무영향(D9)"
+            % (cov29["with_primary"], cov29["evidence_total"],
+               cov29["with_locator"], cov29["evidence_total"]),
+        cov29["evidence_total"] == helper_total == 3
+        and cov29["with_primary"] == 1 and cov29["with_locator"] == helper_any == 2
+        and abs(cov29["primary_ratio"] - 1 / 3) < 1e-9
+        and abs(cov29["any_ratio"] - 2 / 3) < 1e-9
+        and cov29["ratio"] == cov29["any_ratio"]
+        and cov29["no_evidence_nodes"] == helper_orphan
+        and cov29b == cov29
+        and "primary 1/3" in coverage_line(cov29))
+    # 30. 등급 정본 위임 확인(D9×D10) — 앞막이 축은 method 가 아니라 **confidence** 로 갈린다.
+    #     같은 match_method='live_capture' 인데 T1 은 1차, T2 는 1차 아님이 실제로 갈리는지 본다.
+    #     동시에 백필·등급표·coverage 세 소비자가 **같은 표 하나**를 보는지 확인(두 번째 진실 금지).
+    from binggu_backfill_evidence_locator import PRIMARY_METHODS as _BF_PRIMARY  # noqa: E402
+
+    from binggupack.schema import evidence_grade as _grade  # noqa: E402
+    with evloc_env(True):
+        db30 = StagingDB(os.path.join(tmp, "s30_live.sqlite"))
+    staging_apply(db30, _loc_pack("p30a"), {"actor": "human"}, snap_dir,
+                  loc_rows=[loc_row("EVC-p30a", "발췌", source_id="session:S-30",
+                                    locator="off:0", container_sha="독립컨테이너",
+                                    match_method="live_capture", confidence="T1")])
+    staging_apply(db30, _loc_pack("p30b"), {"actor": "human"}, snap_dir,
+                  loc_rows=[loc_row("EVC-p30b", "발췌", source_id="utterance:deadbeef",
+                                    locator="off:0", match_method="live_capture",
+                                    confidence="T2")])
+    cov30 = evidence_locator_coverage(db30.con)
+    rec(30, "1차 출처 판정 = 등급 정본 위임(live_capture T1만 분자 · 표는 하나: locator↔backfill↔grade)",
+        PRIMARY_METHODS is _grade.PRIMARY_METHODS and tuple(_BF_PRIMARY) == tuple(PRIMARY_METHODS)
+        and cov30["evidence_total"] == 2 and cov30["with_locator"] == 2
+        and cov30["with_primary"] == 1
+        and cov30["rows_by_confidence"] == {"T1": 1, "T2": 1}); db30.close()
+    # 29c. 테이블 부재 ledger 에서도 raise 0 (게이트가 OFF 홈에서 죽지 않는다)
+    db_off29 = StagingDB(os.path.join(tmp, "s29_covoff.sqlite"))
+    cov_off = evidence_locator_coverage(db_off29.con)
+    rec(31, "coverage 는 테이블 부재 ledger 에서도 raise 0(locator_table=False·비율 0)",
+        cov_off["locator_table"] is False and cov_off["primary_ratio"] == 0.0
+        and cov_off["any_ratio"] == 0.0)
+    db_off29.close(); db.close()
+
+    # 32. ★D13 — 미러 크기 상한·세대 회전(무한 증가 차단). 상한을 일시적으로 낮춰 실제로 돌린다.
+    home32 = os.path.join(tmp, "h32"); os.makedirs(home32, exist_ok=True)
+    with evloc_env(True):
+        db = StagingDB(os.path.join(home32, "s32_rot.sqlite"))
+    _old_cap = EVLOC_MIRROR_MAX_BYTES
+    globals()["EVLOC_MIRROR_MAX_BYTES"] = 400
+    try:
+        mir32 = evloc_mirror_path(db.path)
+        for k in range(6):
+            insert_locators(db.con, _rows_for("p32_%d" % k), db_path=db.path)
+        rotated32 = os.path.splitext(mir32)[0] + ".1" + os.path.splitext(mir32)[1]
+        cur_size = os.path.getsize(mir32)
+        total = cur_size + (os.path.getsize(rotated32) if os.path.exists(rotated32) else 0)
+        # 세대 상한 = (KEEP+1) × MAX + 마지막 1회 append 분(회전은 쓰기 **전**에 판정)
+        n_files = len([f for f in os.listdir(os.path.dirname(mir32))
+                       if f.startswith("evloc_mirror")])
+    finally:
+        globals()["EVLOC_MIRROR_MAX_BYTES"] = _old_cap
+    rec(32, "미러 크기 상한·회전 동작(현재 %dB + 회전본 = %dB · 파일 %d개로 고정)"
+            % (cur_size, total, n_files),
+        os.path.exists(rotated32) and n_files == EVLOC_MIRROR_KEEP + 1
+        and cur_size < 400 * 2)
+    db.close()
 
     after_mtime = {p:(os.path.getmtime(p) if os.path.exists(p) else None) for p in OPERATING_PATHS}
     store_unchanged = before_mtime == after_mtime

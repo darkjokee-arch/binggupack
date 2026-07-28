@@ -23,8 +23,17 @@ for _p in (_SCRIPTS, _ROOT):
 from binggu_schema import (  # noqa: E402,F401  (정본 re-export)
     SCHEMA_VERSION,
     apply_schema,
+    evloc_enabled,
+    has_table,
+    integrity_probe,
     ledger_id,
+    locator_checksum,
+    safe_backup,
     schema_version,
 )
 
-__all__ = ["SCHEMA_VERSION", "apply_schema", "ledger_id", "schema_version"]
+# ★ 신규 심볼도 여기서 노출한다(결함 D11) — 빠져 있으면 소비자가
+#   `from binggupack.storage.schema import has_table` 에서 ImportError 를 맞고,
+#   scripts/ 를 sys.path 에 얹는 bare-name import 로 우회해 정본 경로가 갈린다.
+__all__ = ["SCHEMA_VERSION", "apply_schema", "evloc_enabled", "has_table", "integrity_probe",
+           "ledger_id", "locator_checksum", "safe_backup", "schema_version"]

@@ -96,7 +96,16 @@ def deprecate_item(db, kind, item_id, reason, ctx, snap_dir, counter_evidence_re
         return block("tombstoned_item")
 
     with db.write_lock():
-        snap = db.snapshot(snap_dir, "snap_g3_" + _hash(before))
+        # 백업 실패는 조용히 넘기지 않고 staging_apply 와 **동일한 계약**으로 표면화한다(D5) —
+        # StagingDB.snapshot 은 이제 sqlite Online Backup API + 사본 상대 대조라 검증 실패 시
+        # BackupVerifyError 를 던진다. 무방비 호출이면 그 예외가 MCP deprecate 도구 밖으로 튀어
+        # 나간다(구 shutil.copy2 경로엔 없던 실패 모드).
+        try:
+            snap = db.snapshot(snap_dir, "snap_g3_" + _hash(before))
+        except Exception as ex:      # noqa: BLE001
+            r = block("backup_create_failed")
+            r["backup_error"] = "%s: %s" % (type(ex).__name__, ex)
+            return r
         db.con.execute("BEGIN")
         db.con.execute("UPDATE %s SET state='deprecated' WHERE %s=?" % (table, col), (item_id,))
         db.con.execute("INSERT INTO deprecations(item_id,kind,reason,counter_evidence_ref,ts) VALUES(?,?,?,?,?)",

@@ -34,6 +34,45 @@ WEAK_LABELS = {"nearby_candidate", "stance_candidate"}
 # 상태 enum — 기각 도장(deprecated) 포함 (Wikidata rank 차용)
 VALID_STATUS = {"candidate", "confirmed", "deprecated"}
 
+# ---------------- 화자축 relation 정본 (SPEAKER_EDGES · 2026-07-27 신설) ----------------
+# 실측 ledger 53건이 쓰고 있던 relation 6종의 정식 등록. **소급 유효 등록만**이고
+# 기존 행 UPDATE 0 · 저장 경로 배선 0 (판정 함수 제공까지가 이번 스코프).
+#
+# ★ label_kind 매트릭스를 걸지 않는다 — 운영 ledger 실측 53건의 node_type 쌍이
+#   judgment→judgment 20 / judgment→state 4 / evidence→judgment 4 / judgment→evidence 4 /
+#   state→state 3 / judgment→doc 3 / state→evidence 3 … 로 5종×5종 전면 분산(15개 쌍)이다.
+#   화자축은 "무엇에 대한 관계"가 아니라 "누가 누구에게 반응했나"라서 의미 매트릭스가
+#   원리적으로 맞지 않는다. 검증 축은 speaker 다(src≠tgt · 둘 다 {ai,owner} · self-loop 금지).
+#
+# 방향 규약(정본: openbinggu_conversation_candidate_save.py:231-236 주석):
+#   relation prefix = source(반응 주체), 대상이 target. 먼저 말한 사람 → 반응한 사람이 아니라
+#   반응 주체가 source 다. 실측 정합: ai_* 25건 전부 (ai→owner) · owner_* 28건 전부 (owner→ai).
+SPEAKERS = {"ai", "owner"}
+
+SPEAKER_EDGES = {
+    "ai_accepts":    {"verb": "수용한다", "src_speaker": "ai",    "tgt_speaker": "owner"},
+    "ai_refutes":    {"verb": "반박한다", "src_speaker": "ai",    "tgt_speaker": "owner"},
+    "ai_revises":    {"verb": "수정한다", "src_speaker": "ai",    "tgt_speaker": "owner"},
+    "owner_accepts": {"verb": "수용한다", "src_speaker": "owner", "tgt_speaker": "ai"},
+    "owner_refutes": {"verb": "반박한다", "src_speaker": "owner", "tgt_speaker": "ai"},
+    "owner_revises": {"verb": "수정한다", "src_speaker": "owner", "tgt_speaker": "ai"},
+}
+
+# ---------------- 증빙축 relation 정본 (GROUNDING_EDGES · 2026-07-27 신설) ----------------
+# evidence_supports 는 source 가 evidence 테이블 id(`EVC-*`)라 nodes 에 부재하다.
+# 실측: 500건 전부 source ∈ evidence(500/500) · target ∈ nodes(500/500) · source ∈ nodes 는 0건.
+# → VERB_EDGES 매트릭스(nodes↔nodes 전제)에 먹이면 dangling FAIL 이 확정이므로 **별도 축**.
+EVIDENCE_ID_PREFIXES = ("EVC-",)
+
+GROUNDING_EDGES = {
+    "evidence_supports": {"verb": "증빙한다", "src_space": "evidence", "tgt_space": "node"},
+}
+
+
+def looks_like_evidence_id(item_id):
+    """evidence 테이블 조회가 불가할 때의 폴백 판정 — id prefix 규칙(`EVC-`). 순수 함수."""
+    return isinstance(item_id, str) and item_id.upper().startswith(EVIDENCE_ID_PREFIXES)
+
 
 def validate_verb_edge(edge, nodes_by_id):
     """6종 동사형 엣지 1건 검증. 반환 {"verdict": PASS|FAIL, "reason": ...}. write 0.
@@ -160,6 +199,45 @@ def _selftest():
     wk_ok = weak["verdict"] == "FAIL"
     all_ok = all_ok and wk_ok
     print("  [%s] %-28s (약한 라벨 본그래프 거부)" % ("OK" if wk_ok else "FAIL", "weak_label_rejected"))
+
+    # ---- VERB_EDGES 원형 불변 잠금 ----
+    # `rel not in VERB_EDGES` 를 '강한 의미엣지인가' 판정으로 쓰는 소비자가 있다
+    # (binggu_cloud_pack_export.py:127 · binggu_graph_confirm.py:74 · binggu_graph_preview.py:100).
+    # 화자축/증빙축을 여기에 합치면 그 판정이 조용히 샌다 → 6종 고정을 테스트로 못박는다.
+    frozen6 = {"supports_judgment", "contradicts", "depends_on", "blocks", "enables", "refines"}
+    v6_ok = set(VERB_EDGES) == frozen6
+    all_ok = all_ok and v6_ok
+    print("  [%s] %-28s (6종 고정 — 화자/증빙축 혼입 금지)" % ("OK" if v6_ok else "FAIL", "VERB_EDGES_frozen6"))
+
+    # ---- SPEAKER_EDGES 레지스트리 형태 ----
+    spk_ok = (
+        set(SPEAKER_EDGES) == {"ai_accepts", "ai_refutes", "ai_revises",
+                               "owner_accepts", "owner_refutes", "owner_revises"}
+        and all(s["src_speaker"] in SPEAKERS and s["tgt_speaker"] in SPEAKERS
+                and s["src_speaker"] != s["tgt_speaker"] for s in SPEAKER_EDGES.values())
+        # 방향 규약: relation prefix == source 화자
+        and all(rel.split("_", 1)[0] == s["src_speaker"] for rel, s in SPEAKER_EDGES.items())
+        # 화자축은 의미 매트릭스를 갖지 않는다(src/tgt label_kind 키 부재)
+        and all("src" not in s and "tgt" not in s for s in SPEAKER_EDGES.values())
+        # VERB_EDGES 와 교집합 0
+        and not (set(SPEAKER_EDGES) & set(VERB_EDGES))
+    )
+    all_ok = all_ok and spk_ok
+    print("  [%s] %-28s (6종·화자축·매트릭스 미적용)" % ("OK" if spk_ok else "FAIL", "SPEAKER_EDGES"))
+
+    # ---- GROUNDING_EDGES 레지스트리 형태 ----
+    gnd_ok = (
+        set(GROUNDING_EDGES) == {"evidence_supports"}
+        and GROUNDING_EDGES["evidence_supports"]["src_space"] == "evidence"
+        and GROUNDING_EDGES["evidence_supports"]["tgt_space"] == "node"
+        and not (set(GROUNDING_EDGES) & set(VERB_EDGES))
+        and not (set(GROUNDING_EDGES) & set(SPEAKER_EDGES))
+        and looks_like_evidence_id("EVC-CONV-f112cf41")
+        and not looks_like_evidence_id("node:CONV:f112cf41")
+        and not looks_like_evidence_id(None)
+    )
+    all_ok = all_ok and gnd_ok
+    print("  [%s] %-28s (evidence→node · id prefix 폴백)" % ("OK" if gnd_ok else "FAIL", "GROUNDING_EDGES"))
 
     print("\n  operating_store_unchanged: True (판정만, FS write 0)")
     gate = "GO" if all_ok else "NO-GO"

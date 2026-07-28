@@ -20,6 +20,28 @@ import sys
 from pathlib import Path
 
 
+def _note(stage, exc):
+    """예외 삼킴 금지 — 계약(stdout 침묵 · 항상 exit 0) 불변인 채 사유 1줄만 stderr 로 남긴다.
+
+    ★왜(2026-07-28 CodeQL py/empty-except 수리): `except: pass` 는 배선 끊김(import 누락 등)을
+    조용히 삼켜 hook 이 '동작 중'인 채 아무 일도 안 하게 만든다 — 2026-07 무증상 실사고 2건의
+    공통 원인. 예외를 밖으로 던지지 않으므로 세션은 절대 죽지 않고, 사유만 디버그 채널에 남는다.
+    본문은 예외 '타입'만 — 예외 메시지엔 경로·프롬프트 원문이 섞일 수 있어 미출력(유출 0).
+    반환: 사유 문자열(호출부·셀프테스트 대조용). stderr 사용 불가 환경에서도 예외 없음."""
+    reason = "%s: %s" % (stage, type(exc).__name__)
+    try:
+        line = "[binggu_capture_hook] %s\n" % reason
+        buf = getattr(sys.stderr, "buffer", None)
+        if buf is not None:   # cp949 콘솔에서도 UnicodeEncodeError 0(bytes 직결)
+            buf.write(line.encode("utf-8", "replace"))
+            buf.flush()
+        else:
+            sys.stderr.write(line)
+    except Exception:
+        return reason         # stderr 부재/닫힘 — 반환값으로만 사유 유지
+    return reason
+
+
 def _scripts_dir():
     """binggu_capture_persist 가 있는 scripts/ 경로.
     1) BINGGU_SCRIPTS env 우선  2) 이 파일이 <repo>/hooks 에 있을 때 ../scripts."""
@@ -92,8 +114,9 @@ def _run(data):
                 (_home() / "capture_last_preview.json").write_text(
                     json.dumps({"count": pv["count"], "bulk_vetoed": pv.get("bulk_vetoed", 0)},
                                ensure_ascii=False), encoding="utf-8")
-            except Exception:
-                pass
+            except Exception as e:
+                # 상태파일 write 실패는 수집 자체를 막지 않는다(계속) — 다만 삼키지 않고 사유를 남긴다.
+                _note("Stop preview 상태파일 write 실패", e)
         else:  # UserPromptSubmit
             # ★A(2026-07-21 owner "대화가 버려진다"): 직전 AI 응답을 prev_turn 으로 넘겨
             #   classify 의 dialectic 게이트(AI 제안 → owner 질문/반박이면 단순질문 veto 해제)를
@@ -140,10 +163,13 @@ def _selftest():
                     "BINGGU_SCRIPTS": scripts, "PYTHONUTF8": "1"}
 
         def call(payload, raw=None):
+            # encoding 명시: hook 의 사유 1줄(stderr)은 utf-8 bytes 직결이라 cp949 콘솔에서도
+            # 부모가 안전하게 디코드해야 한다(미명시 시 locale 디코드 → UnicodeDecodeError 위험).
             return subprocess.run(
                 [sys.executable, self_path],
                 input=(raw if raw is not None else json.dumps(payload)),
-                capture_output=True, text=True, env=base_env)
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                env=base_env)
 
         repo_cwd = "C:/Users/fixture-user/binggupack"
         other_cwd = "C:/Users/fixture-user/example-org/example-project"
@@ -206,10 +232,23 @@ def _selftest():
         check(size() == before2, "T10 transcript 없음 → 단순질문 veto(prev_turn 미배선 회귀 보존)")
 
         # T11 candidate 에 prev_turn(AI 원문) 미저장 확인 — text 는 owner 발화만
-        import binggu_capture_persist as _bcp
-        items = _bcp.PersistentCaptureBuffer(home=home).render_preview().get("items", [])
+        #   위에서 from-import 한 PersistentCaptureBuffer 재사용 — 같은 모듈을 import/from-import
+        #   두 형태로 이중 로드하지 않는다(CodeQL py/import-and-import-from · 2026-07-28).
+        items = PersistentCaptureBuffer(home=home).render_preview().get("items", [])
         texts = " ".join(it.get("text", "") for it in items)
         check("B안을 추천합니다" not in texts, "T11 prev_turn(AI 원문) candidate 미저장(write 0 불변)")
+
+        # T12 상태파일 write 실패 → 예외 삼킴 0(2026-07-28 CodeQL py/empty-except 수리 증명).
+        #   파일 자리에 디렉터리를 두어 write_text 를 강제 실패시킨다. 계약(exit 0 · stdout 침묵)은
+        #   그대로, 사유만 stderr 1줄. 종전 `except: pass` 였다면 완전 무증상이었을 자리.
+        lp = home / "capture_last_preview.json"
+        lp.unlink()
+        lp.mkdir()
+        r = call({"hook_event_name": "Stop"})
+        check(r.returncode == 0 and r.stdout.strip() == ""
+              and "[binggu_capture_hook]" in (r.stderr or "")
+              and "write 실패" in (r.stderr or ""),
+              "T12 상태파일 write 실패 → exit 0 · stdout 침묵 · stderr 사유 1줄(삼킴 0)")
 
         print(f"\nGATE={'GO' if ok else 'NO-GO'}")
         return 0 if ok else 1

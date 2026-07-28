@@ -6,9 +6,15 @@
 
 회귀 가드: tests/storage_characterization.py (save_selected 현재 동작 고정) + doctor.
 
-공개 API:
-  - save_selected(db, text, indices, ctx, snap_dir, due_date=None, speaker=None)
-  - save_paired(...)         화자 축 페어 저장(owner/ai)
+공개 API (시그니처는 정본 구현과 1:1 — 낡으면 소비자가 인자 존재를 모른 채 호출한다):
+  - save_selected(db, text, indices, ctx, snap_dir, due_date=None, speaker=None,
+                  explicit=False, origin=None)
+      origin: 앞막이 출처 dict(source_id|src_id|transcript_path|session_id|turn_uuid|src_sha).
+      미지정이면 원문 발화 자신을 좌표계로 삼는 폴백(`utterance:<hash>`)이 되어 등급이 T2 로
+      내려간다 — 세션 좌표가 있으면 반드시 넘길 것(정본: openbinggu_conversation_candidate_save).
+  - save_paired(db, owner_text, ai_text, ctx, snap_dir, relation_kind="ai_accepts",
+                owner_pick=1, ai_pick=1, due_date=None, owner_origin=None, ai_origin=None)
+      화자 축 페어 저장(owner/ai) — owner_origin/ai_origin 은 각 화자 발화의 앞막이 출처.
   - commit_selected(db, text, preview_id, picks, confirm, snap_dir, ...)
   - open_g3(path)            장부(ledger) 열기
   - set_review_due(...)      검증 예정일 설정
