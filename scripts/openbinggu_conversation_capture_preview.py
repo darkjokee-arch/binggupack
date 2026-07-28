@@ -29,6 +29,22 @@ HARD_MAX = 20
 # MAX_NODE_SENTENCE = 단일 문장 정당 상한. 초과 = 종결어미 없이 이어진 문단/로그 덩어리(비정상) →
 # silent 절단 아닌 후보 제외(BLOCK). 정당한 긴 교훈 문장은 전부 통과. [[feedback_binggupack_identity_personal_ontology_agi]]
 MAX_NODE_SENTENCE = 1000
+
+# ── L-lane (2단계 절단 · 설계 docs/BINGGUPACK_STAGE2_TRUNCATION_DESIGN.md) ──────────────
+# MAX_NODE_SENTENCE 초과분을 "버리는" 대신 별도 차선으로 옮긴다. 주 목록(candidates·
+# excluded_counts)은 바이트 단위로 불변 — 분기가 PII/secret/classify/dedup/정원보다 앞이라
+# 정원도 안 먹고 seen 도 안 건드리고 번호도 안 민다(설계 G-1).
+# owner 결정(2026-07-28): 4000자를 넘어도 저장은 전문. 표시만 앞뒤로 줄이고 전문 sha·열람
+# 명령을 같이 띄운다("본 것 = 저장된 것"의 취지 유지 · 6/15 사고 절단 금지 정합).
+L_FULL_SHOW = 4000   # 이 이하는 L 섹션에도 전문 표시
+L_MAX = 5            # L 정원. 초과분은 long_overflow 로 표면화하되 폐기 0(버퍼 원문 잔존)
+L_HEAD, L_TAIL = 800, 400
+
+
+def longsave_enabled():
+    """L-lane opt-in. **호출 시점 평가** — import 시점 금지(MCP 는 장수 프로세스라
+    import-time 이면 플래그를 켜도 영원히 옛 값을 본다)."""
+    return os.environ.get("BINGGU_LONGSAVE_V1") == "1"
 _SENT_SPLIT = re.compile(r"(?<=[.!?다음임함됨까요])\s+|\n+")
 _REDACT_RE = re.compile(r"\[REDACTED:\w+\]")
 
@@ -94,6 +110,59 @@ def _suggest_subtype(sent):
     return None
 
 
+def _blob_suspect(raw):
+    """L 항목이 '사람이 쓴 긴 판단'인지 '붙여넣기 덩어리'인지의 보조 라벨.
+
+    **분리 전 원본 축**에서 판정한다(문장으로 쪼갠 뒤엔 덩어리가 짧은 조각이 되어 신호가 사라진다).
+    판정 정본은 capture 의 `_is_bulk_text` 를 그대로 재사용 — 여기서 임계를 새로 만들지 않는다.
+    설계상 종결어미 부재·특수문자 비율 보조신호가 후보로 올라와 있으나 **임계 미실측**이라 넣지 않는다
+    (추측값을 박지 않는다). 어떤 경우에도 **폐기 0** — 이 값은 라벨링·정렬·자동포함 여부에만 쓴다."""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from binggu_capture_persist import _is_bulk_text   # 지연 import(순환 회피 + 정본 재사용)
+        return bool(_is_bulk_text(raw))
+    except Exception:
+        return False   # 판정 불가 = 라벨 없음. 폐기가 아니라 자동포함만 보수적으로 막힌다
+
+
+def _long_collect(sent, items, excl, blob_suspect):
+    """L-lane 수집 — 주 목록 계산에 일절 영향 주지 않는다(별도 리스트·별도 카운터).
+
+    ★ 안전 게이트는 주 목록과 동일하게 건다. 분기 지점이 PII/secret 검사보다 **앞**이라
+      그냥 담으면 PII 든 긴 문장이 검사를 건너뛰고 저장 후보가 된다(구현 중 발견 — 설계 보정).
+      제외 카운트는 `long_excluded` 로 분리해 `excluded_counts` 바이트 불변(G-1)을 지킨다."""
+    pii = scan_residual_pii(sent) + [k for k, rx in _PREVIEW_PII_EXTRA if rx.search(sent)]
+    if pii:
+        for k in pii:
+            excl("pii_" + k)
+        return
+    if any(p.search(sent) for p in v011.SECRET_PATTERNS):
+        excl("secret_pattern")
+        return
+    if len(items) >= L_MAX:
+        excl("long_overflow")   # 표면화만 — 버퍼 원문은 남아 재-preview 로 회수 가능
+        return
+    kind, _rule = lkmap.classify_label_kind(sent)
+    h = hashlib.sha256(sent.encode("utf-8")).hexdigest()[:16]
+    verdict = a0.classify_node(
+        {"id": "long:" + h, "sentence": sent, "node_type": lkmap.KO2EN[kind],
+         "evidence_refs": ["preview"]}, status="candidate")
+    items.append({"label": "L%d" % (len(items) + 1), "sentence": sent, "length": len(sent),
+                  "sha": h, "blob_suspect": blob_suspect, "label_kind": kind,
+                  "a0_verdict": verdict["verdict"], "capture_reason": "장문(주 목록 상한 초과)"})
+
+
+def _long_display(item):
+    """L 항목 표시 문자열 — L_FULL_SHOW 이하는 전문, 초과는 머리·꼬리 + 전문 길이·sha·열람 명령.
+    저장은 **어느 쪽이든 전문**이다. 축약될 때도 저장될 글자수·sha·여는 법을 표시 안에 둔다."""
+    s = item["sentence"]
+    if item["length"] <= L_FULL_SHOW:
+        return s
+    return ("%s …(중략)… %s\n\n> 전문 %d자 · sha:%s · 전문 보기: `binggu capture --show %s` "
+            "(표시만 줄었고 **저장은 전문**)"
+            % (s[:L_HEAD], s[-L_TAIL:], item["length"], item["sha"][:8], item["label"]))
+
+
 def capture_preview(text, max_candidates=DEFAULT_MAX, explicit=False):
     """대화 발췌 → 핵심문장 후보 미리보기. 순수 함수(write 0). 반환 dict.
 
@@ -116,6 +185,13 @@ def capture_preview(text, max_candidates=DEFAULT_MAX, explicit=False):
 
     candidates = []
     seen = set()
+    long_items, long_excluded = [], {}
+    long_on = longsave_enabled()          # 호출 시점 1회 평가(루프 중 값 흔들림 방지)
+    blob_suspect = _blob_suspect(raw) if long_on else False   # 분리 전 **원본 축**에서 판정
+
+    def long_excl(kind):
+        long_excluded[kind] = long_excluded.get(kind, 0) + 1
+
     for sent in (s.strip() for s in _SENT_SPLIT.split(raw)):
         if not sent:
             continue
@@ -124,7 +200,10 @@ def capture_preview(text, max_candidates=DEFAULT_MAX, explicit=False):
             continue
         if len(sent) > MAX_NODE_SENTENCE:
             # 단일 문장 정당 상한 초과 = 문단/로그 덩어리(split 실패) — 절단 아닌 제외.
+            # 주 목록에서의 제외·카운트는 **불변**(G-1). L-lane 은 여기서 갈라지는 별도 차선일 뿐.
             excl("over_max_sentence")
+            if long_on:
+                _long_collect(sent, long_items, long_excl, blob_suspect)
             continue
         # PII/secret — redact 가 아니라 후보 제외 (owner 조건). 사유 kind 만 집계.
         pii = scan_residual_pii(sent) + [k for k, rx in _PREVIEW_PII_EXTRA if rx.search(sent)]
@@ -184,12 +263,35 @@ def capture_preview(text, max_candidates=DEFAULT_MAX, explicit=False):
     if truncated:
         lines.append("")
         lines.append("(입력이 %d자 캡으로 절단됨)" % INPUT_CAP)
+    # L 섹션 — 항목이 있을 때만 붙인다. 플래그 OFF 또는 장문 0 이면 markdown 은 종전과 byte 동일.
+    if long_items:
+        lines.append("")
+        lines.append("## 긴 발화 %d건 — 주 번호(1,2,3…)와 별개 축입니다" % len(long_items))
+        lines.append("")
+        lines.append("| # | 도장 | 문장 | 길이 | 헌법판정 |")
+        lines.append("|---|---|---|---|---|")
+        for it in long_items:
+            mark = " ⚠덩어리 의심" if it["blob_suspect"] else ""
+            lines.append("| %s | %s%s | %s | %d자 | %s |"
+                         % (it["label"], it["label_kind"], mark, _long_display(it),
+                            it["length"], it["a0_verdict"]))
+        lines.append("")
+        lines.append("저장하려면 `SAVE %s` — 주 목록 번호는 그대로입니다."
+                     % ", ".join(it["label"] for it in long_items))
+    if long_excluded:
+        lines.append("")
+        lines.append("긴 발화 제외: "
+                     + ", ".join("%s=%d" % (_friendly_excl(k), v)
+                                 for k, v in sorted(long_excluded.items())))
     lines.append("")
     lines.append("입력은 모델이 전달한 대화 텍스트 기준입니다(원문 그대로 보장 없음 — "
                  "모델 요약보다 원문 대화/로그를 넣을수록 도장 분류가 정확합니다). "
                  "미리보기일 뿐 아무것도 저장되지 않았습니다(nothing_saved=true). 등재는 로컬 승인 게이트에서만.")
 
+    # long_candidates/long_excluded 는 플래그 OFF 에서도 **항상 존재**([]/{}) — 구 소비자가
+    # 키 부재로 죽지 않게(KeyError 0 · 설계 J5). 값이 비면 markdown 도 종전과 byte 동일.
     return {"candidates": candidates, "excluded_counts": excluded, "truncated": truncated,
+            "long_candidates": long_items, "long_excluded": long_excluded,
             "preview_markdown": "\n".join(lines), "nothing_saved": True}
 
 
@@ -309,6 +411,42 @@ def run_selftest():
         len(r15["candidates"]) == 1 and bool(c15.get("capture_reason")) and c15.get("gate") == "regex"
         and "단순조회" in r15["preview_markdown"]
         and any(k.startswith("not_judgment:") for k in r15["excluded_counts"]))
+
+    # ── L-lane (2단계 절단) 16~18 ─────────────────────────────────────────────
+    # huge(케이스 13, ~1200자 단일문)를 그대로 재사용해 "같은 입력, 플래그만 다름"을 대조한다.
+    _prev_flag = os.environ.pop("BINGGU_LONGSAVE_V1", None)
+    try:
+        r16 = capture_preview(huge)
+        rec(16, "플래그 OFF — long_candidates 키는 있고 비어 있음(구 소비자 KeyError 0)",
+            r16["long_candidates"] == [] and r16["long_excluded"] == {}
+            and r16["candidates"] == r13["candidates"]
+            and r16["excluded_counts"] == r13["excluded_counts"])
+
+        os.environ["BINGGU_LONGSAVE_V1"] = "1"
+        r17 = capture_preview(huge)
+        l17 = r17["long_candidates"][0] if r17["long_candidates"] else {}
+        rec(17, "플래그 ON — L1 수집(전문 byte 동일·절단 0) + 주 목록 축 불변",
+            len(r17["long_candidates"]) == 1 and l17.get("label") == "L1"
+            and l17.get("sentence") == huge.strip() and l17.get("length") == len(huge.strip())
+            # ★주 목록은 OFF 와 완전히 같아야 한다(G-1) — 정원·dedup·번호 어느 것도 안 밀린다
+            and r17["candidates"] == r13["candidates"]
+            and r17["excluded_counts"] == r13["excluded_counts"])
+
+        # 18. ★L-lane 도 PII/secret 게이트를 통과해야 한다.
+        #     분기 지점이 PII 검사보다 앞이라, 그냥 담으면 PII 든 긴 문장이 검사를 건너뛴다
+        #     (구현 중 발견한 설계 공백 — 회귀로 못박는다). 제외 카운트는 long_excluded 로 분리해
+        #     주 목록 excluded_counts 의 byte 불변을 깨지 않는다.
+        # 1000자를 확실히 넘겨야 L-lane 분기로 간다(짧으면 주 목록 PII 게이트에서 걸려 검증이 무의미).
+        pii_long = "연락처 010-9876-5432 로 연락해서 " + "이 건은 계속 보류하기로 하고 " * 70 + "이다."
+        r18 = capture_preview(pii_long)
+        rec(18, "L-lane 도 PII 차단(long_excluded 로 분리 집계·raw 미출력)",
+            len(pii_long) > MAX_NODE_SENTENCE and r18["long_candidates"] == []
+            and any(k.startswith("pii_") for k in r18["long_excluded"])
+            and "9876" not in r18["preview_markdown"])
+    finally:
+        os.environ.pop("BINGGU_LONGSAVE_V1", None)
+        if _prev_flag is not None:
+            os.environ["BINGGU_LONGSAVE_V1"] = _prev_flag
 
     # 10. write/save 0 — 감시 디렉토리 FS 전후 동일 + 본 모듈 save 함수 부재
     fs_after = _fs_snapshot(watch)
