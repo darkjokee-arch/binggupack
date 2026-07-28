@@ -1271,9 +1271,8 @@ if __name__ == "__main__":
         sys.exit(0)
     if sys.argv[1] == "--observe-dry-run":
         # 운영 홈 T0 자동관측 미리보기(도장 0 · owner 확인용) — 실시간 ts(실행 기록 목적)
-        from datetime import datetime, timezone
         _h = _plat.binggu_home()
-        _res = auto_observe_adoption(datetime.now(timezone.utc).isoformat(),
+        _res = auto_observe_adoption(datetime.datetime.now(datetime.timezone.utc).isoformat(),
                                      home=_h, ledger_path=os.path.join(_h, "ledger.sqlite"),
                                      dry_run=True)
         print(json.dumps(_res, ensure_ascii=False, indent=2))
