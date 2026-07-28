@@ -80,6 +80,10 @@ GATES = [
     ("p1b mutation closure","binggu_p1b_mutation_closure_selftest.py", ["--selftest"], "GATE=GO"),
     ("p1b1 bundle atomicity","binggu_p1b1_bundle_atomicity_selftest.py", ["--selftest"], "GATE=GO"),
     ("setup-save onboard","binggu_setup_save.py",                      ["--selftest"], "GATE: GO"),
+    # 2026-07-28 등록: 둘 다 게이트 밖이라 회귀가 조용히 살아 있었다(replace_ux 는 실제로
+    #   StopIteration 으로 죽은 채 방치). 게이트에 없는 selftest = 회귀 감지 0.
+    ("candidate list view","openbinggu_candidate_list_view.py",         ["--selftest"], "GATE: GO"),
+    ("candidate replace ux","openbinggu_candidate_replace_ux.py",       ["--selftest"], "GATE: GO"),
     ("archive backup/export", os.path.join("..", "binggupack", "workspace", "archive.py"), [], "GATE=GO"),
     ("publish workflow",  "publish_workflow_selftest.py",              ["--selftest"], "GATE: GO"),
     ("private path scan", "private_path_scan.py",                      ["--source"], "GATE: GO"),

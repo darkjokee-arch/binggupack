@@ -287,7 +287,11 @@ def main_selftest():
     db = open_g3(os.path.join(tmp, "s.sqlite"))
 
     # 0. 시나리오 — 저장 3건(판단/상태/개념)
-    r0 = save_selected(db, T1, [1, 2, 3], {"actor": "human", "confirm": "SAVE 1,2,3"}, snap_dir)
+    # ★explicit=True 필수: 명시 저장 시나리오다. 자동수집(explicit=False)은 판단/개념문을
+    #   candidate 로 뽑지 않아(1인칭 주관문만) saved 0 → 아래 next() 가 StopIteration 으로 죽는다.
+    #   형제 selftest(openbinggu_candidate_list_view)는 같은 함정을 이미 피해 뒀는데 여기만 누락됐었다.
+    r0 = save_selected(db, T1, [1, 2, 3], {"actor": "human", "confirm": "SAVE 1,2,3"}, snap_dir,
+                       explicit=True)
     ck("0_시나리오_구성(후보3건)", r0["applied"] and r0["saved"] == 3)
     rows0 = list_candidates(db)["rows"]
     j_nid = next(r["node_id"] for r in rows0 if r["kind"] == "판단")
