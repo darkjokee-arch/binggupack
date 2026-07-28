@@ -64,6 +64,38 @@ def run_selftest():
     rec(4, "MAX_NODE_SENTENCE py==ts (단일 문장 정당 상한 — 발췌 cut 폐기)",
         lambda: num_pair("py_preview", "MAX_NODE_SENTENCE", "ts_preview", "MAX_NODE_SENTENCE"))
 
+    # ---- S2-6 ③ 구조 backstop — 숫자가 같아도 분기 형태가 갈리면 잡는다(설계 §7) ----
+    def long_lane_branch():
+        """over_max_sentence 분기가 양쪽 모두 L-lane append 를 동반하는지(형태 assert).
+        숫자 parity 만으로는 '한쪽만 L 로 안 담는' 회귀를 통과시킨다."""
+        py, ts = srcs["py_preview"], srcs["ts_preview"]
+        py_ok = bool(re.search(r"over_max_sentence", py)) and bool(re.search(r"_long_collect\(", py))
+        ts_ok = bool(re.search(r'excl\("over_max_sentence"\)', ts)) and bool(re.search(r"longItems\.push\(", ts))
+        return py_ok and ts_ok, "py_long_collect=%s ts_longItems_push=%s" % (py_ok, ts_ok)
+
+    def long_lane_fields():
+        """L 행의 sha·blob_suspect 를 양쪽 모두 채우는지 — ts 에 없으면 골든 대조가 무의미해진다."""
+        py, ts = srcs["py_preview"], srcs["ts_preview"]
+        py_ok = ('"sha"' in py or "'sha'" in py) and "blob_suspect" in py
+        ts_ok = "sha:" in ts.replace(" ", "") and "blob_suspect" in ts
+        return py_ok and ts_ok, "py=%s ts=%s" % (py_ok, ts_ok)
+
+    def golden_shared():
+        """py 생성기와 ts 하네스가 **같은 골든 파일**을 참조하는지(경로 갈림 = 대조 무력화)."""
+        gp = os.path.join(BASE, "hosted", "parity", "capture_preview_golden.json")
+        harness = os.path.join(BASE, "hosted", "workers", "parity", "capture_preview_parity.ts")
+        if not os.path.exists(harness):
+            return False, "parity 하네스 없음"
+        src = open(harness, "r", encoding="utf-8").read()
+        ts_points = "capture_preview_golden.json" in src and '"parity"' in src
+        py_points = "capture_preview_golden.json" in srcs["py_preview"]
+        return (ts_points and py_points and os.path.exists(gp),
+                "golden=%s py_ref=%s ts_ref=%s" % (os.path.exists(gp), py_points, ts_points))
+
+    rec(11, "over_max_sentence 분기가 양쪽 모두 L-lane append 동반(형태)", long_lane_branch)
+    rec(12, "L 행 sha·blob_suspect 양쪽 존재(골든 대조 전제)", long_lane_fields)
+    rec(13, "py 생성기·ts 하네스가 동일 골든 파일 참조", golden_shared)
+
     def bizno_pair(name):
         a = _grab(srcs["py_preview"],
                   r'\("%s", re\.compile\(r"([^"]+)"\)\)' % name, "py." + name)

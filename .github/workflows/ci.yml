@@ -35,6 +35,11 @@ jobs:
       - name: tsc --noEmit (strict)
         working-directory: hosted/workers
         run: npx tsc --noEmit
+      # S2-6: py↔ts 골든 대조. 숫자 상수만 맞춰보는 종전 parity 는 "값이 같은 채 분기 로직만
+      # 갈린" 경우를 통과시켰다(설계 §7) → 200케이스 × 플래그 OFF/ON 형태 대조로 강제한다.
+      - name: capture_preview py↔ts 골든 parity
+        working-directory: hosted/workers
+        run: npm run test:parity
 
   selftest:
     # cross-platform 정책(scripts/binggu_platform.py) 실기기 검증 — 실제 ubuntu/macos/windows 러너에서 GATE=GO.
