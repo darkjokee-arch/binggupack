@@ -575,6 +575,40 @@ def _golden_corpus():
     return cases[:200]
 
 
+_RUN_MIN = 8   # 이보다 짧은 반복은 리터럴이 더 작다
+
+
+def _pack_input(text):
+    """골든 입력 압축 — 연속 동일 문자 런만 `[문자, 횟수]` 로, 나머지는 리터럴 그대로.
+
+    ★ 압축하는 이유는 용량이 아니라 **게이트 통과**다: tree scan 은 512KB 초과 텍스트를
+      '내용 미검사'로 보고 fail-closed BLOCK 한다(`content_size_skip`). 20000/40000자 경계
+      케이스를 원문으로 박으면 골든이 그 상한을 넘어 공개 트리 스캔이 영구 BLOCK 된다.
+    """
+    parts, buf, i, n = [], [], 0, len(text)
+    while i < n:
+        j = i
+        while j < n and text[j] == text[i]:
+            j += 1
+        run = j - i
+        if run >= _RUN_MIN:
+            if buf:
+                parts.append("".join(buf))
+                buf = []
+            parts.append([text[i], run])
+        else:
+            buf.append(text[i] * run)
+        i = j
+    if buf:
+        parts.append("".join(buf))
+    return parts
+
+
+def _unpack_input(parts):
+    """`_pack_input` 역함수. ts 하네스도 동일 규칙으로 복원한다(형태가 단순해 이중구현 위험 낮음)."""
+    return "".join(p if isinstance(p, str) else p[0] * p[1] for p in parts)
+
+
 def _project(r):
     """교집합 projection — 양쪽이 반드시 같아야 하는 필드만 남긴다."""
     return {
@@ -612,6 +646,13 @@ def build_golden():
             os.environ.pop("BINGGU_SEMANTIC_OFF", None)
         else:
             os.environ["BINGGU_SEMANTIC_OFF"] = prev_sem
+    packed = []
+    for c in corpus:
+        parts = _pack_input(c["input"])
+        if _unpack_input(parts) != c["input"]:      # 왕복 무손실 아니면 골든을 쓰지 않는다
+            raise ValueError("pack/unpack 왕복 불일치: %s" % c["case_id"])
+        packed.append({"case_id": c["case_id"], "parts": parts})
+    corpus = packed
     return {"format": "capture-preview-parity-golden-v1", "projection": GOLDEN_PROJECTION,
             "notes": GOLDEN_NOTES, "explicit": GOLDEN_EXPLICIT,
             "semantic_off": GOLDEN_SEMANTIC_OFF,

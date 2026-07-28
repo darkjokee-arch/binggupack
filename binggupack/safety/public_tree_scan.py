@@ -312,6 +312,10 @@ PUBLIC_IGNORE = ["*.sqlite", "*.db", "*_graph.yaml", "reports/", "reviews/", "ca
                  # scan 시 build 산출물이 read_error 로 잡혀 BLOCK 되던 개발 UX 버그 차단. .gitignore 정신상 제외.
                  # 최상위는 prefix 매칭(dist/), 중첩·egg-info(이름가변)는 fnmatch 글롭(*/dist/* · *.egg-info/*).
                  "dist/", "*/dist/*", "build/", "*/build/*", "*.egg-info/*", "*/*.egg-info/*",
+                 # S2-6 parity 하네스 tsc 산출물(`npm run test:parity` 생성 · gitignore 대상).
+                 # 자기 코드의 컴파일 사본이라 원본을 이미 scan 했고, `exports.hasSecret = ...` 같은
+                 # 심볼 재export 가 secret_kv 로 오탐된다(dist/ 와 동일 처분).
+                 "dist-parity/", "*/dist-parity/*",
                  # gitignore 대상 비공개·미커밋 라이브 데이터 (path_private_pack_data 자기탐지 회피)
                  "hosted/workers/data/", "data/packs.json",
                  # 서드파티 의존성(gitignore·미커밋) — CI/로컬에서 npm install 로 생성됨. 자기 코드 아님 → scan 제외.

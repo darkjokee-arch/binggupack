@@ -60,8 +60,12 @@ function main(): number {
     return 2;
   }
   const golden = JSON.parse(fs.readFileSync(GOLDEN, "utf-8"));
-  const corpus: { case_id: string; input: string }[] = golden.corpus;
-  const byId = new Map(corpus.map((c) => [c.case_id, c.input]));
+  // 입력은 반복 구간이 `[문자, 횟수]` 로 압축돼 있다(py `_pack_input`) — 골든이 tree scan 의
+  // 512KB 미검사 상한을 넘으면 공개 트리 스캔이 fail-closed BLOCK 되기 때문.
+  const unpack = (parts: any[]): string =>
+    parts.map((p) => (typeof p === "string" ? p : String(p[0]).repeat(p[1]))).join("");
+  const corpus: { case_id: string; parts: any[] }[] = golden.corpus;
+  const byId = new Map(corpus.map((c) => [c.case_id, unpack(c.parts)]));
 
   let checked = 0;
   const diffs: string[] = [];
