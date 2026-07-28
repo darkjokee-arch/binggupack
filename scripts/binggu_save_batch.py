@@ -57,6 +57,16 @@ def render_batch_preview(buffer_items):
     return "\n".join(lines)
 
 
+def _origin_of(it):
+    """buffer item → 앞막이 출처 dict. capture buffer 가 채운 좌표(src_id/src_sha)를 저장까지
+    실어 나른다. 이 배선이 없으면 hook 이 모은 세션 좌표가 마지막 홉에서 버려지고
+    locator 의 source_id 가 `utterance:<hash>` 자기해시로만 남는다(앞막이 무력화)."""
+    if not isinstance(it, dict):
+        return None
+    o = {k: it.get(k) for k in ("src_id", "src_sha") if it.get(k)}
+    return o or None
+
+
 def save_candidates_batch(db, snap_dir, buffer_items, indices, gate_log_path=None):
     """indices 의 candidate 를 각각 화자축 pair 로 배치 저장. owner SAVE 앵커로 human 승격.
 
@@ -99,7 +109,8 @@ def save_candidates_batch(db, snap_dir, buffer_items, indices, gate_log_path=Non
             ctx = dict(human_base)
             ctx["confirm"] = "PAIR %s owner:1 ai:1" % relation
             r = save_paired(db, text, ai_ctx, ctx, snap_dir,
-                            relation_kind=relation, owner_pick=1, ai_pick=1)
+                            relation_kind=relation, owner_pick=1, ai_pick=1,
+                            owner_origin=_origin_of(it))
             if r.get("applied"):
                 total_saved += 1
             results.append({"cand": idx, "pick": 1, "applied": bool(r.get("applied")),
@@ -110,7 +121,8 @@ def save_candidates_batch(db, snap_dir, buffer_items, indices, gate_log_path=Non
         for pick in range(1, len(sents) + 1):
             ctx = dict(human_base)
             ctx["confirm"] = "PAIR owner:%d" % pick   # candidate 전체 저장 승인 범위 내
-            r = save_paired(db, text, None, ctx, snap_dir, owner_pick=pick)
+            r = save_paired(db, text, None, ctx, snap_dir, owner_pick=pick,
+                            owner_origin=_origin_of(it))
             if r.get("applied"):
                 total_saved += 1
             results.append({"cand": idx, "pick": pick, "applied": bool(r.get("applied")),

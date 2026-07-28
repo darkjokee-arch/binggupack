@@ -553,7 +553,18 @@ def route_change(db, change_kind, summary, ctx, snap_dir, ts=None):
         db.con.commit()
         # 영수증 기록 후 스냅샷 → 롤백점은 '영수증 포함' 상태. 그래프 변화 0인 no-op 가 아니라
         #   "영수증 발급 직후" 시점 보존(이후 staging_apply 그래프 write 만 가역 원복).
-        snap = db.snapshot(snap_dir, "snap_safe_" + _hash(before + now))
+        # StagingDB.snapshot 은 Online Backup API + 사본 상대 대조라 검증 실패 시
+        #   BackupVerifyError 를 던진다 → staging_apply 와 동일한 backup_create_failed 계약으로
+        #   받는다(D5). 롤백점 없이 applied=True 를 주면 '되돌릴 수 있다' 는 거짓 신호가 된다.
+        try:
+            snap = db.snapshot(snap_dir, "snap_safe_" + _hash(before + now))
+        except Exception as ex:      # noqa: BLE001
+            db.audit_append(_audit_actor(ctx), "route_change", change_kind, "BLOCK",
+                            "backup_create_failed", before, db.store_checksum(), ts=ts)
+            return {"route": "auto_receipt", "risk": risk, "applied": False,
+                    "reason": "backup_create_failed", "receipt_seq": receipt_seq,
+                    "snapshot": None,
+                    "backup_error": "%s: %s" % (type(ex).__name__, ex)}
     return {"route": "auto_receipt", "risk": risk, "applied": True, "reason": None,
             "receipt_seq": receipt_seq, "snapshot": snap, "rollback_to_receipt": receipt_seq}
 
