@@ -343,8 +343,35 @@ def _ensure_scripts_path():
 
 # 회수 도장 안내(작업A2) — MCP reader 원격 표면은 도장 소비용 staging 파일에 일절 쓰지 않는다(MF7).
 #   사람 도장 경로는 로컬 세션 한정(UserPromptSubmit hook 기록) → 안내 문구 1줄만 응답에 병기.
-_STAMP_HINT = ("유용했으면 로컬 세션(Claude Code)에서 recall 후 채팅 정확형 1줄 '히트 N' — "
-               "MCP 는 도장 staging 기록 0(안내만)")
+# 2026-07-28: MCP 회상도 효용 판정 장부에는 등록한다(↓ _mcp_record_trace). staging 미접촉은 불변.
+_STAMP_HINT_ON = ("이 회상은 효용 판정 대기 목록에 등록됨 — 도장은 로컬 세션(Claude Code)의 "
+                  "세션 마무리 preview 또는 'binggu trace mark N used/ignored'. "
+                  "MCP 는 도장 staging/스냅샷 기록 0")
+_STAMP_HINT_OFF = ("효용 판정 장부 OFF — 'binggu trace enable' 후부터 등록됨. "
+                   "MCP 는 도장 staging/스냅샷 기록 0")
+
+
+def _mcp_record_trace(kind, query, nodes, *, domain=None, situation_src=None,
+                      risk_level=None, needs_question=None):
+    """MCP 회상을 효용 판정 장부(recall_trace.sqlite)에 등록 — opt-in(trace_enabled)일 때만.
+
+    왜 등록만 하고 staging 은 안 쓰나(MF7 유지): staging/스냅샷은 owner 가 화면에서 보고 있는
+      번호축이라 원격 표면이 덮으면 엉뚱한 회상에 도장이 찍힌다(2026-07-27 스냅샷 4중 write 사고와
+      동형). 등록은 장부 append 라 번호축과 무관 — 번호는 로컬 preview 가 매긴다.
+    ledger write 0(별도 store) · PII 0(query=sha16 · 노드는 메타만) · 실패 흡수(회상 응답 무방해).
+    반환 True = 실제 등록됨(= 도장 대상), False = OFF 이거나 실패(안내 문구가 갈린다)."""
+    try:
+        _ensure_scripts_path()
+        import binggu_recall_trace as RT
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        r = RT.record_trace(query, kind, nodes, ts, domain=domain,
+                            situation=RT.classify_situation(situation_src or query),
+                            risk_level=risk_level, needs_question=needs_question,
+                            home=_operating_home())
+        return bool(isinstance(r, dict) and r.get("recorded"))
+    except Exception:
+        return False
 
 
 def _u_recall(params=None):
@@ -370,7 +397,9 @@ def _u_recall(params=None):
     out = {"action": "recall", "mode": "read", "count": len(nodes),
            "nodes": nodes, "edges": edges, "summary": res.get("summary", "")}
     if nodes:
-        out["stamp_hint"] = _STAMP_HINT  # 안내 1줄만 — MCP 는 도장 staging 기록 0(MF7)
+        rec = _mcp_record_trace("mcp_recall", query, res["relevant_nodes"])
+        out["trace_recorded"] = rec  # 등록 여부 정직 노출(OFF 를 침묵으로 넘기지 않는다)
+        out["stamp_hint"] = _STAMP_HINT_ON if rec else _STAMP_HINT_OFF
     return out
 
 
@@ -406,7 +435,9 @@ def _u_why(params=None):
            "edges": edges, "summary": _redact_pii(res.get("summary", "")),
            "confidence": res.get("confidence", 0.0)}
     if nodes:
-        out["stamp_hint"] = _STAMP_HINT  # 안내 1줄만 — MCP 는 도장 staging 기록 0(MF7)
+        rec = _mcp_record_trace("mcp_why", query, res["relevant_nodes"])
+        out["trace_recorded"] = rec
+        out["stamp_hint"] = _STAMP_HINT_ON if rec else _STAMP_HINT_OFF
     return out
 
 
@@ -434,7 +465,13 @@ def _u_preflight(params=None):
            "risk_level": res["risk_level"],
            "question": res.get("question") if res.get("needs_question") else None}
     if res["remember"] or res["avoid_patterns"] or res["preferences"]:
-        out["stamp_hint"] = _STAMP_HINT  # 안내 1줄만 — MCP 는 도장 staging 기록 0(MF7)
+        # 판정 대상은 remember(회상된 기억)뿐 — avoid/preferences 는 규칙 표시라 도장 축이 아니다.
+        rec = bool(res["remember"]) and _mcp_record_trace(
+            "mcp_preflight", params.get("prompt") or "", res["remember"],
+            domain=params.get("domain"), situation_src=params.get("prompt"),
+            risk_level=res.get("risk_level"), needs_question=res.get("needs_question"))
+        out["trace_recorded"] = rec
+        out["stamp_hint"] = _STAMP_HINT_ON if rec else _STAMP_HINT_OFF
     return out
 
 

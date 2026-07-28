@@ -161,8 +161,16 @@ def replace_from_list(db, index, node_hash8, new_sentence, reason, ctx, snap_dir
 
     # ---- 묶음 전체 lock (이중 실행 감지) — 내부 모듈은 같은 pid 재진입 허용 ----
     with db.write_lock():
-        # ---- 묶음 스냅샷 1회 선확보 — StagingDB.snapshot 표준 (checkpoint 후 copy) ----
-        snap = db.snapshot(snap_dir, "snap_replace_" + _hash(before))
+        # ---- 묶음 스냅샷 1회 선확보 — StagingDB.snapshot 표준 (sqlite Online Backup API · MF1.1) ----
+        # 사본을 원본과 상대 대조(테이블집합·행수·audit_meta·user_version·quick_check)까지 하므로
+        # 검증 실패 시 BackupVerifyError 를 던진다 → staging_apply 와 동일한 backup_create_failed
+        # BLOCK 계약으로 받는다(D5). 아직 DB 변경 0 지점이라 그대로 반환해도 원복 대상이 없다.
+        try:
+            snap = db.snapshot(snap_dir, "snap_replace_" + _hash(before))
+        except Exception as ex:      # noqa: BLE001
+            r = block("backup_create_failed")
+            r["backup_error"] = "%s: %s" % (type(ex).__name__, ex)
+            return r
 
         # ---- journal 마커 (L-2) — 묶음 시작 기록. 완료/원복 끝에서 제거, crash 잔존 시 다음 실행 차단.
         # 내부 모듈(deprecate_item·staging_apply·audit_append)이 각자 commit 하므로 외곽 단일

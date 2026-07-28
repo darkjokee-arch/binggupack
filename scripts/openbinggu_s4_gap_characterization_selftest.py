@@ -370,7 +370,9 @@ def run():
         rec("D3", "write_lock 같은 pid 재진입 허용 / 타 pid RuntimeError", entered and other_raised)
         d3_db.close()
 
-        # --- D9: snapshot wal_checkpoint 후 copy → 파일 생성 + 복사본 nodes count 일치 ---
+        # --- D9: snapshot 표준 = sqlite Online Backup API(safe_backup · MF1.1) → 파일 생성 +
+        #         복사본 nodes count 일치. 구 'wal_checkpoint 후 copy' 는 폐기(busy 무음 절단).
+        #         검증 실패 시 BackupVerifyError raise — 호출부는 backup_create_failed 로 받는다. ---
         d9_db = StagingDB(os.path.join(tmp, "ch_d9.sqlite"))
         staging_apply(d9_db, base_pack(), {"actor": "human"}, snap_dir)
         snap_d9 = d9_db.snapshot(snap_dir, "snap_d9")

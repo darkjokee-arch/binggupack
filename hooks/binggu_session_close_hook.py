@@ -25,6 +25,28 @@ for _p in (REPO, os.path.join(REPO, "scripts")):
         sys.path.insert(0, _p)
 
 
+def _note(stage, exc):
+    """예외 삼킴 금지 — 계약(stdout JSON 형식 · 항상 exit 0) 불변인 채 사유 1줄만 stderr 로 남긴다.
+
+    ★왜(2026-07-28 CodeQL py/empty-except 수리): 앵커 stage 가 조용히 실패하면 owner 가 보는
+    preview 와 SAVE n 대조 기준이 갈려 오저장/미저장이 무증상으로 일어난다(2026-07-20 이원화 버그
+    계열). 예외는 밖으로 던지지 않아 세션은 절대 죽지 않고, 사유만 디버그 채널에 남는다.
+    본문은 예외 '타입'만 — 메시지엔 경로·발화 원문이 섞일 수 있어 미출력(유출 0).
+    반환: 사유 문자열. 정본 주석: binggu_capture_hook._note."""
+    reason = "%s: %s" % (stage, type(exc).__name__)
+    try:
+        line = "[binggu_session_close_hook] %s\n" % reason
+        buf = getattr(sys.stderr, "buffer", None)
+        if buf is not None:   # cp949 콘솔에서도 UnicodeEncodeError 0(bytes 직결)
+            buf.write(line.encode("utf-8", "replace"))
+            buf.flush()
+        else:
+            sys.stderr.write(line)
+    except Exception:
+        return reason         # stderr 부재/닫힘 — 반환값으로만 사유 유지
+    return reason
+
+
 def _home():
     env = os.environ.get("BINGGU_HOME")
     return env if env else os.path.join(os.path.expanduser("~"), ".binggupack")
@@ -61,8 +83,10 @@ def main():
                 if items:
                     from binggu_save_batch import stage_batch_anchor
                     stage_batch_anchor(items, session_id=sid)
-            except Exception:
-                pass
+            except Exception as e:
+                # 앵커 실패해도 preview 표시는 계속(기존 best-effort 계약 유지) — 다만 삼키지 않고
+                # 사유를 남긴다. 무증상이면 owner 의 SAVE n 이 조용히 빗나간다.
+                _note("SAVE 앵커 stage 실패(preview 표시는 계속)", e)
             # ★T0 그래프편입 자동관측(헌법 v2) — opt-in ON 일 때만. 회상 노드가 '회상 이후 새 엣지'로
             #   편입됐으면 used 자동 도장(사람 도장 불요). ledger read-only(sibling recall_trace 만
             #   append)·best-effort·예외 흡수. 기본 OFF(auto_observe_enabled) — dry-run 확인 후 owner 가
@@ -80,8 +104,9 @@ def main():
                     if _n:
                         observe_note = ("\n\n> ✅ 회상 %d건이 새 엣지로 편입돼 자동 채택(used) 관측됨 "
                                         "(T0 자율 · owner 도장 불요 · 운영 ledger 불변)." % _n)
-            except Exception:
-                pass
+            except Exception as e:
+                # 자동관측 실패해도 preview 표시는 계속(opt-in 부가 기능) — 사유만 남긴다.
+                _note("T0 그래프편입 자동관측 실패(preview 표시는 계속)", e)
             block = out["rendered"] + observe_note + (
                 "\n\n> ★세션 마무리 감지 — 위 preview 번호로 **사장님이** `SAVE n`/`PAIR ...` 직접 "
                 "선택하세요(빙구팩 자동저장 0 · AI 임의저장 금지 · G4).")
