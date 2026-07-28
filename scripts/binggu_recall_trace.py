@@ -39,6 +39,7 @@ from binggupack.pack.recall_trace import (  # noqa: E402,F401  (전체 명시 re
     _sha16,
     _scrub_node,
     _trace_id,
+    latest_session_id,
     record_trace,
     trace_from_why_search,
     trace_from_preflight,
