@@ -397,8 +397,10 @@ def save_paired(db, owner_text, ai_text, ctx, snap_dir,
     paired = bool(ai_text)
     if paired and relation_kind not in PAIR_RELATIONS:
         return block("relation_kind_invalid")
-    expected = ("PAIR %s owner:%d ai:%d" % (relation_kind, owner_pick, ai_pick)) if paired \
-        else ("PAIR owner:%d" % owner_pick)
+    # %s — owner_pick 은 정수(주 목록) 또는 'L1'(장문 차선)이라 %d 로는 L 을 못 담는다.
+    # 정수일 때 산출 문자열은 %d 와 동일해 기존 confirm 문구 계약은 그대로다(회귀 0).
+    expected = ("PAIR %s owner:%s ai:%s" % (relation_kind, owner_pick, ai_pick)) if paired \
+        else ("PAIR owner:%s" % owner_pick)
     if ctx.get("confirm") != expected:
         return block("confirm_phrase_mismatch")
 
