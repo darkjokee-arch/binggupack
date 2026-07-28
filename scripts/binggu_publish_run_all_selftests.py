@@ -21,11 +21,24 @@ owner 지시(2026-06-14 GO-P8): 회귀 묶음 명령 추가만.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
+from concurrent.futures import ThreadPoolExecutor
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPTS = os.path.join(REPO, "scripts")
+
+# 게이트별 격리 실행 — 2026-07-29.
+#   ① 속도: 게이트 56개를 순차 subprocess 로 띄우면 windows 러너에서 222초(ubuntu 24초 · 9배)다.
+#      python 인터프리터 기동 비용이 windows 에서 훨씬 크기 때문이고, 게이트 자체는 서로 독립이다.
+#   ② 안정성: 종전엔 전 게이트가 **같은 BINGGU_HOME/temp 를 공유**해 파일쓰기 레이스로 1회성
+#      transient FAIL 이 났다(본 파일 상단 FLAKY 절차의 원인). 게이트마다 홈을 갈라 원인을 없앤다.
+# 순서 보존: 결과는 GATES 순서대로 출력한다(로그 diff 안정).
+# BGP_REGRESS_WORKERS=1 로 순차 실행(원인 규명·baseline 측정용).
+_MAX_WORKERS = max(1, int(os.environ.get("BGP_REGRESS_WORKERS")
+                          or min(8, (os.cpu_count() or 2))))
 
 # (라벨, 스크립트, 추가인자, 성공판정문구)
 GATES = [
@@ -91,13 +104,24 @@ GATES = [
 ]
 
 
-def run_one(label, script, extra, ok_marker):
+def run_one(label, script, extra, ok_marker, home=None):
     path = os.path.join(SCRIPTS, script)
     if not os.path.exists(path):
         return {"label": label, "ok": False, "detail": "script_missing", "rc": None}
+    env = os.environ.copy()
+    if home:
+        # 게이트 전용 홈·temp. 운영 홈(~/.binggupack)은 어느 게이트도 건드리지 않는다.
+        # ★ temp 는 홈 **밖**의 형제 디렉터리여야 한다 — 같은 경로로 묶으면 temp 로 내보내는
+        #   export 가 "거버넌스 홈에 쓰기"로 오인돼 차단된다(binggu_hit_export._assert_export_target).
+        h = os.path.join(home, "home")
+        t = os.path.join(home, "tmp")
+        os.makedirs(h, exist_ok=True)
+        os.makedirs(t, exist_ok=True)
+        env["BINGGU_HOME"] = h
+        env["TMPDIR"] = env["TEMP"] = env["TMP"] = t
     try:
         p = subprocess.run([sys.executable, path] + extra, cwd=REPO,
-                           capture_output=True, text=True, timeout=600)
+                           capture_output=True, text=True, timeout=600, env=env)
     except Exception as e:  # noqa
         return {"label": label, "ok": False, "detail": "run_error:%s" % str(e)[:60], "rc": None}
     out = (p.stdout or "") + (p.stderr or "")
@@ -119,7 +143,16 @@ def main():
     print("=" * 56)
     print("BingguPack 회귀 묶음 (summary-fail) — P1~P7 + cloud_pack + tree scan")
     print("=" * 56)
-    results = [run_one(*g) for g in GATES]
+    root = tempfile.mkdtemp(prefix="bgp_regress_")
+    try:
+        with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as ex:
+            # 게이트마다 격리 홈(h0, h1, ...) — 공유 상태 0 이라 순서 무관·병렬 안전.
+            futures = [ex.submit(run_one, *g, home=os.path.join(root, "h%d" % i))
+                       for i, g in enumerate(GATES)]
+            results = [f.result() for f in futures]   # 제출 순서 = GATES 순서
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    print("(격리 홈 · 병렬 %d)" % _MAX_WORKERS)
     print()
     for r in results:
         mark = "PASS" if r["ok"] else "FAIL"
