@@ -48,13 +48,39 @@ def render_batch_preview(buffer_items):
     lines = ["# 세션 마무리 배치 저장 preview (candidate · 저장 0 · 사람이 SAVE)",
              "| # | owner 발화(원문) |", "|---|---|"]
     for it in (buffer_items or []):
-        txt = (it.get("text", "") or "").replace("\n", " ")
+        raw = it.get("text", "") or ""
+        txt = raw.replace("\n", " ")
         if len(txt) > 90:
-            txt = txt[:90] + "…"
+            # 표시만 줄인다(저장은 전문) — 실제 길이를 같이 적어 표시↔저장 괴리를 없앤다.
+            txt = txt[:90] + "… (전문 %d자)" % len(raw)
         lines.append("| %s | %s |" % (it.get("idx"), txt))
     lines.append("")
+    # SAVE 시 실제로 몇 문장이 저장되는지 사전 고지 — 장문 차선이 붙으면 건수가 늘 수 있다.
+    n_main, n_long = _batch_sentence_counts(buffer_items)
+    if n_long:
+        lines.append("SAVE 하면 문장 **%d건(주 %d · 긴 %d)** 이 저장됩니다."
+                     % (n_main + n_long, n_main, n_long))
     lines.append('저장: 이 채팅에 `SAVE 6,11,13`(원하는 번호) 한 번 → 지정 candidate 전체를 저장.')
     return "\n".join(lines)
+
+
+def _batch_sentence_counts(buffer_items):
+    """preview 표의 각 candidate 가 SAVE 시 만들 문장 수 (주 목록 / 장문 차선).
+    표시 전용 집계라 실패는 조용히 0 (preview 가 죽으면 owner 가 아무것도 못 본다)."""
+    n_main = n_long = 0
+    try:
+        from openbinggu_conversation_capture_preview import capture_preview
+        for it in (buffer_items or []):
+            txt = it.get("text", "") or ""
+            if not txt or it.get("ai_context"):
+                continue          # 대화쌍 경로는 대표문 1 pair 고정 — 이 집계 대상 아님
+            pv = capture_preview(txt, explicit=True)
+            n_main += len(pv.get("candidates", []))
+            n_long += sum(1 for x in pv.get("long_candidates", [])
+                          if not x.get("blob_suspect"))
+    except Exception:
+        return n_main, n_long
+    return n_main, n_long
 
 
 def _origin_of(it):
@@ -117,7 +143,8 @@ def save_candidates_batch(db, snap_dir, buffer_items, indices, gate_log_path=Non
                             "reason": r.get("reason"), "pack_id": r.get("pack_id"),
                             "paired": True, "relation": relation})
             continue
-        sents = capture_preview(text, explicit=True).get("candidates", [])
+        pv = capture_preview(text, explicit=True)
+        sents = pv.get("candidates", [])
         for pick in range(1, len(sents) + 1):
             ctx = dict(human_base)
             ctx["confirm"] = "PAIR owner:%d" % pick   # candidate 전체 저장 승인 범위 내
@@ -128,6 +155,26 @@ def save_candidates_batch(db, snap_dir, buffer_items, indices, gate_log_path=Non
             results.append({"cand": idx, "pick": pick, "applied": bool(r.get("applied")),
                             "reason": r.get("reason"), "pack_id": r.get("pack_id"),
                             "paired": False, "relation": None})
+        # L-lane(2단계 절단): 주 목록 순회 뒤 장문 차선. 이 candidate 는 owner 가 이미 SAVE 로
+        #   승인한 범위이므로 그 안의 장문도 같은 승인에 포함된다.
+        #   단 **덩어리 의심(blob_suspect)은 자동 포함하지 않는다** — 로그·붙여넣기가 온톨로지에
+        #   섞이는 통로가 되면 안 되므로 명시 `SAVE L1` 경로로만 들어온다(설계 J1).
+        for lit in pv.get("long_candidates", []):
+            if lit.get("blob_suspect"):
+                results.append({"cand": idx, "pick": lit.get("label"), "applied": False,
+                                "reason": "blob_suspect_needs_explicit", "pack_id": None,
+                                "paired": False, "relation": None})
+                skipped += 1
+                continue
+            ctx = dict(human_base)
+            ctx["confirm"] = "PAIR owner:%s" % lit.get("label")
+            r = save_paired(db, text, None, ctx, snap_dir, owner_pick=lit.get("label"),
+                            owner_origin=_origin_of(it))
+            if r.get("applied"):
+                total_saved += 1
+            results.append({"cand": idx, "pick": lit.get("label"),
+                            "applied": bool(r.get("applied")), "reason": r.get("reason"),
+                            "pack_id": r.get("pack_id"), "paired": False, "relation": None})
     return {"applied": total_saved > 0, "reason": None, "saved": total_saved,
             "skipped": skipped, "results": results}
 

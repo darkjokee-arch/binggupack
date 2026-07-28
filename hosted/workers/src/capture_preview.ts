@@ -122,10 +122,22 @@ function classify(sentence: string): [string, string] {
   return ["판단", "fallback_judgment"];
 }
 
-export function capturePreview(text: string, maxCandidates?: number): Record<string, any> {
+// L-lane 정원·표시 임계 — Python 정본(openbinggu_conversation_capture_preview.py)과 같은 값.
+const L_MAX = 5;
+const L_FULL_SHOW = 4000;
+
+/** L-lane opt-in.
+ *  Python 은 env(BINGGU_LONGSAVE_V1) 로 켜지만 Workers 런타임에는 process.env 가 없다 →
+ *  여기서는 **명시 인자**로 받는다(기본 false = 현행 동작 완전 불변). 형태만 다르고 의미는 같다.
+ *  py↔ts 골든 대조(S2-6)는 양쪽을 ON 으로 맞춘 상태에서 수행한다. */
+export interface CapturePreviewOpts { longSave?: boolean }
+
+export function capturePreview(text: string, maxCandidates?: number,
+                               opts?: CapturePreviewOpts): Record<string, any> {
   let maxC = Math.trunc(Number(maxCandidates ?? DEFAULT_MAX));
   if (Number.isNaN(maxC)) maxC = DEFAULT_MAX;
   maxC = Math.max(1, Math.min(maxC, HARD_MAX));
+  const longOn = opts?.longSave === true;
   let raw = text || "";
   let truncated = false;
   if (raw.length > INPUT_CAP) {
@@ -138,12 +150,32 @@ export function capturePreview(text: string, maxCandidates?: number): Record<str
   const excl = (k: string) => { excluded[k] = (excluded[k] || 0) + 1; };
   const candidates: any[] = [];
   const seen = new Set<string>();
+  // L-lane — 주 목록(candidates·excluded_counts)은 바이트 불변, 별도 리스트·별도 카운터.
+  const longItems: any[] = [];
+  const longExcluded: Record<string, number> = {};
+  const longExcl = (k: string) => { longExcluded[k] = (longExcluded[k] || 0) + 1; };
 
   for (const piece of raw.split(SENT_SPLIT)) {
     const sent = (piece || "").trim();
     if (!sent) continue;
     if (!meaningful(sent)) { excl("short_or_fragment"); continue; }
-    if (sent.length > MAX_NODE_SENTENCE) { excl("over_max_sentence"); continue; }
+    if (sent.length > MAX_NODE_SENTENCE) {
+      excl("over_max_sentence");
+      // 주 목록 제외·카운트는 불변. 여기서 갈라지는 별도 차선일 뿐(Python 정본 1:1).
+      // ★ 안전 게이트는 주 목록과 동일하게 건다 — 이 분기가 PII/secret 검사보다 앞이라
+      //   그냥 담으면 PII 든 긴 문장이 검사를 건너뛴다.
+      if (longOn) {
+        const lpii = scanPii(sent);
+        if (lpii.length) { for (const k of lpii) longExcl("pii_" + k); continue; }
+        if (SECRET_RES.some((re) => re.test(sent))) { longExcl("secret_pattern"); continue; }
+        if (longItems.length >= L_MAX) { longExcl("long_overflow"); continue; }
+        const [lkind] = classify(sent);
+        longItems.push({ label: "L" + (longItems.length + 1), sentence: sent,
+                         length: sent.length, label_kind: lkind,
+                         a0_verdict: a0Verdict(sent) });
+      }
+      continue;
+    }
     const pii = scanPii(sent);
     if (pii.length) { for (const k of pii) excl("pii_" + k); continue; }
     if (SECRET_RES.some((re) => re.test(sent))) { excl("secret_pattern"); continue; }
@@ -172,11 +204,32 @@ export function capturePreview(text: string, maxCandidates?: number): Record<str
     lines.push("");
     lines.push("(입력이 " + INPUT_CAP + "자 캡으로 절단됨)");
   }
+  // L 섹션 — 항목이 있을 때만. 없으면 markdown 은 종전과 완전 동일.
+  if (longItems.length) {
+    lines.push("");
+    lines.push("## 긴 발화 " + longItems.length + "건 — 주 번호(1,2,3…)와 별개 축입니다");
+    lines.push("");
+    lines.push("| # | 도장 | 문장 | 길이 | 헌법판정 |");
+    lines.push("|---|---|---|---|---|");
+    for (const it of longItems) {
+      const shown = it.length <= L_FULL_SHOW ? it.sentence
+        : it.sentence.slice(0, 800) + " …(중략)… " + it.sentence.slice(-400);
+      lines.push("| " + it.label + " | " + it.label_kind + " | " + shown + " | " +
+                 it.length + "자 | " + it.a0_verdict + " |");
+    }
+  }
+  const lexKeys = Object.keys(longExcluded).sort();
+  if (lexKeys.length) {
+    lines.push("");
+    lines.push("긴 발화 제외: " + lexKeys.map((k) => k + "=" + longExcluded[k]).join(", "));
+  }
   lines.push("");
   lines.push("입력은 모델이 전달한 대화 텍스트 기준입니다(원문 그대로 보장 없음 — " +
              "모델 요약보다 원문 대화/로그를 넣을수록 도장 분류가 정확합니다). " +
              "미리보기일 뿐 아무것도 저장되지 않았습니다(nothing_saved=true). 등재는 로컬 승인 게이트에서만.");
 
+  // long_candidates/long_excluded 는 OFF 에서도 항상 존재([]/{}) — 구 소비자 KeyError 0.
   return { candidates, excluded_counts: excluded, truncated,
+           long_candidates: longItems, long_excluded: longExcluded,
            preview_markdown: lines.join("\n"), nothing_saved: true };
 }
