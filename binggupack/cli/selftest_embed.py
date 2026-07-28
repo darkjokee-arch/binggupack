@@ -660,13 +660,34 @@ def _selftest_body():
         _m_sig0 = _il_sig(_m_led)
         _mr = SH.handle_tool("recall", {"query": "마진 보류"}, tmp)
         _mtr = _mr.get("tool_result") or {}
-        ck("M1_MCP_recall→결과+stamp_hint안내만",
+        ck("M1_MCP_recall→결과+stamp_hint안내(trace OFF)",
            _mr.get("executed") is True and _mtr.get("count", 0) >= 1
-           and "도장 staging 기록 0" in (_mtr.get("stamp_hint") or ""))
+           and "도장 staging/스냅샷 기록 0" in (_mtr.get("stamp_hint") or "")
+           and _mtr.get("trace_recorded") is False)  # opt-in OFF 면 등록 0 · 문구도 OFF 판
         ck("M2_MCP_recall후_staging미생성+ledger불변",
            not os.path.exists(os.path.join(_m_home, "last_recall_candidates.json"))
            and not os.path.exists(os.path.join(_m_home, "last_promote_candidates.json"))
            and _il_sig(_m_led) == _m_sig0)
+        # M2b(2026-07-28): opt-in ON 이면 MCP 회상도 판정 대기 장부에 등록된다 —
+        #   내가 판단에 쓰는 경로(MCP recall)가 도장 대상 밖이던 결함의 회귀 방지.
+        #   staging/스냅샷 미접촉은 ON 에서도 불변(번호축은 로컬 preview 소유).
+        import binggu_recall_trace as _MRT
+        _MRT.set_trace_flag(True, home=_m_home)
+        try:
+            _mr2 = SH.handle_tool("recall", {"query": "마진 보류"}, tmp)
+            _mtr2 = _mr2.get("tool_result") or {}
+            _mcon = _sq3.connect(os.path.join(_m_home, "recall_trace.sqlite"))
+            _mkinds = [r[0] for r in _mcon.execute("SELECT kind FROM recall_traces").fetchall()]
+            _mcon.close()
+            ck("M2b_trace_ON→MCP회상이_판정대기_장부에_등록(kind=mcp_recall)",
+               _mtr2.get("trace_recorded") is True and _mkinds == ["mcp_recall"]
+               and "판정 대기 목록에 등록됨" in (_mtr2.get("stamp_hint") or ""))
+            ck("M2c_등록해도_staging스냅샷_미생성+ledger불변(MF7·번호축 보존)",
+               not os.path.exists(os.path.join(_m_home, "last_recall_candidates.json"))
+               and not os.path.exists(os.path.join(_m_home, "recall_trace_review.json"))
+               and _il_sig(_m_led) == _m_sig0)
+        finally:
+            _MRT.set_trace_flag(False, home=_m_home)
         _mf = [SH.handle_tool(t, {}, tmp)
                for t in ("record_use", "record_resolution", "opencrab_pack_update")]
         ck("M3_FORBIDDEN불변(기록계열·클라우드write_미노출)",
