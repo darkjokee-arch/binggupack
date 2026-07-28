@@ -477,9 +477,210 @@ def run_selftest():
     sys.exit(0 if gate == "GO" else 1)
 
 
+# ---------------- S2-6 py↔ts 골든 (py = SSOT) ----------------
+
+# 교집합 projection — py 전용 필드(preview_markdown·rule_id·long_excluded 등)는 대조 대상이 아니다.
+# 숫자 상수만 맞춰보는 종전 parity 는 "값이 같은 채 분기 로직만 갈린" 경우를 통과시켰다(설계 §7).
+GOLDEN_PROJECTION = ["candidates[sentence,label_kind,a0_verdict]", "excluded_counts",
+                     "long_candidates[label,length,sha,blob_suspect]", "truncated"]
+
+# 골든 JSON 은 저장소에 커밋된다 → PII/secret 입력은 **일부러 넣지 않는다**(스캔 패턴을 파일로
+# 박으면 tree scan 게이트와 충돌). 두 축의 parity 는 소스 구조 backstop 에서 regex 로 강제한다.
+#
+# ★ explicit=True 로 생성한다 — ts 에는 SSOT 판단-veto(capclf.classify)가 **미구현**이라
+#   veto 를 켠 채로는 400건 중 351건이 "ts 가 더 느슨하다"는 같은 사유로 갈려 다른 축을 전부 가린다.
+#   veto 면제 축을 고정해 길이·개행·중복·정원·L-lane·truncated 분기를 대조하고,
+#   판단-veto 축 자체는 별도 트랙으로 남긴다(아래 KNOWN_DIVERGENCE).
+GOLDEN_EXPLICIT = True
+# semantic 도장 층은 **Ollama 설치 여부로 자동 ON** 된다(binggu_canonical_semantic.enabled).
+# 골든이 생성 환경에 따라 달라지면 골든 자격이 없으므로 생성 시 강제 OFF 로 고정한다(결정성).
+GOLDEN_SEMANTIC_OFF = True
+KNOWN_DIVERGENCE = [
+    "ts 에 SSOT 판단-veto(capclf.classify → not_judgment:*) 미구현 — hosted 경로가 로컬보다 느슨하다. "
+    "분류기 전체 포팅이 필요해 본 골든의 대조 범위 밖(골든은 explicit=True 로 이 축을 고정).",
+    "ts 에 semantic 도장 층(binggu_canonical_semantic.suggest_label_kind) 미구현 — py 는 종결어 규칙 위에 "
+    "의미 기반 label_kind 를 덮어쓴다. 골든은 BINGGU_SEMANTIC_OFF=1 로 규칙 층만 대조한다.",
+]
+GOLDEN_NOTES = ("합성 전용 · 운영 원문 0 · PII/secret 입력 제외(구조 backstop 담당) · "
+                "py 가 SSOT — ts 는 이 파일을 읽어 대조만 한다 · explicit=True 고정")
+
+
+def _golden_corpus():
+    """결정적 합성 코퍼스(난수 0). 경계값 + 파라미터 스윕으로 200건."""
+    cases = []
+
+    def add(cid, text):
+        cases.append({"case_id": cid, "input": text})
+
+    S = "이 입찰은 보류하기로 결정했다."
+    T = "로그에 오타가 세 번 찍혔다."
+
+    # --- 기본/빈값 ---
+    add("empty", "")
+    add("space_only", "   \n  \t ")
+    add("single", S)
+    add("two_sent", S + " " + T)
+    add("fragment_only", "음. 어. 그.")
+    add("dup_x3", " ".join([S] * 3))
+    add("over_capacity", " ".join("케이스 %d 는 검토 후 보류한다." % i for i in range(14)))
+
+    # --- MAX_NODE_SENTENCE(1000) 경계 ---
+    for n in (999, 1000, 1001, 1110):
+        add("len_%d_nl0" % n, "가" * (n - 1) + "다")
+    add("len_1110_nl0_real", "그래서 " + "가나다라마바사 " * 137 + "결정했다")
+
+    # --- 개행 밀도(blob_suspect 축: >300자 & 개행>=3, 또는 >2000자) ---
+    add("log_blob_nl19", "\n".join("스텝 %d 처리 완료 로그 라인." % i for i in range(20)))
+    add("blob_soft_301_nl3", ("가" * 100 + "\n") * 3 + "가" * 5)
+    add("blob_soft_299_nl3", ("가" * 33 + "\n") * 3 + "가" * 5)
+    add("blob_hard_2001_nl0", "가" * 2000 + "다")
+    add("blob_1999_nl0", "가" * 1998 + "다")
+
+    # --- INPUT_CAP(20000) 경계 · 개행 위치 有/無 ---
+    add("cap_19999_nl0", "가" * 19998 + "다")
+    add("cap_20000_nl0", "가" * 19999 + "다")
+    add("cap_20001_nl0", "가" * 20000 + "다")
+    add("cap_nl_at_19999", "가" * 19999 + "\n" + "뒤 문장은 캡 뒤에 있다.")
+    add("cap_nl_at_20000", "가" * 20000 + "\n" + "뒤 문장은 캡 뒤에 있다.")
+    add("cap_nl_at_20001", "가" * 20001 + "\n" + "뒤 문장은 캡 뒤에 있다.")
+    add("cap_nl_early_150", "가" * 150 + "\n" + "가" * 20000 + "다")
+    add("cap_40000", "\n".join("케이스 %d 는 검토 후 보류한다." % i for i in range(1600)))
+
+    # --- L 정원(L_MAX=5) 초과 ---
+    add("long_x7", "\n".join(("장문 %d " % i) + "가" * 1100 + "다" for i in range(7)))
+    add("long_x5", "\n".join(("장문 %d " % i) + "가" * 1100 + "다" for i in range(5)))
+
+    # --- 파라미터 스윕(결정적) — 길이 × 개행수 ---
+    for ln in (40, 120, 260, 340, 700, 1200, 2400):
+        for nl in (0, 1, 3, 6):
+            body = ("가" * max(1, ln // max(1, nl + 1)) + ("\n" if nl else "")) * (nl + 1)
+            add("sweep_l%d_n%d" % (ln, nl), body.rstrip("\n") + "다")
+
+    # --- 문장 수 스윕 ---
+    for k in (1, 2, 5, 9, 10, 11, 13):
+        add("sent_x%d" % k, " ".join("항목 %d 는 검토 후 보류한다." % i for i in range(k)))
+
+    # --- 혼합: 짧은 판단 + 장문 1개 ---
+    for k in (1, 3, 6):
+        add("mix_short%d_long1" % k,
+            " ".join([S] * k) + "\n" + "장문 " + "가" * 1100 + "다")
+
+    # 200건 채우기 — 결정적 반복 변주(내용만 다르고 분기 축은 위 케이스 조합)
+    i = 0
+    while len(cases) < 200:
+        add("fill_%03d" % i,
+            "판단 %d 은 검토 후 보류한다. 근거는 로그에 남아 있다." % i
+            + ("\n" + "가" * (200 + i * 7) + "다" if i % 3 == 0 else ""))
+        i += 1
+    return cases[:200]
+
+
+_RUN_MIN = 8   # 이보다 짧은 반복은 리터럴이 더 작다
+
+
+def _pack_input(text):
+    """골든 입력 압축 — 연속 동일 문자 런만 `[문자, 횟수]` 로, 나머지는 리터럴 그대로.
+
+    ★ 압축하는 이유는 용량이 아니라 **게이트 통과**다: tree scan 은 512KB 초과 텍스트를
+      '내용 미검사'로 보고 fail-closed BLOCK 한다(`content_size_skip`). 20000/40000자 경계
+      케이스를 원문으로 박으면 골든이 그 상한을 넘어 공개 트리 스캔이 영구 BLOCK 된다.
+    """
+    parts, buf, i, n = [], [], 0, len(text)
+    while i < n:
+        j = i
+        while j < n and text[j] == text[i]:
+            j += 1
+        run = j - i
+        if run >= _RUN_MIN:
+            if buf:
+                parts.append("".join(buf))
+                buf = []
+            parts.append([text[i], run])
+        else:
+            buf.append(text[i] * run)
+        i = j
+    if buf:
+        parts.append("".join(buf))
+    return parts
+
+
+def _unpack_input(parts):
+    """`_pack_input` 역함수. ts 하네스도 동일 규칙으로 복원한다(형태가 단순해 이중구현 위험 낮음)."""
+    return "".join(p if isinstance(p, str) else p[0] * p[1] for p in parts)
+
+
+def _project(r):
+    """교집합 projection — 양쪽이 반드시 같아야 하는 필드만 남긴다."""
+    return {
+        "candidates": [{"sentence": c["sentence"], "label_kind": c["label_kind"],
+                        "a0_verdict": c["a0_verdict"]} for c in r["candidates"]],
+        "excluded_counts": r["excluded_counts"],
+        "long_candidates": [{"label": x["label"], "length": x["length"], "sha": x["sha"],
+                             "blob_suspect": x["blob_suspect"]} for x in r["long_candidates"]],
+        "truncated": r["truncated"],
+    }
+
+
+def build_golden():
+    """플래그 OFF/ON 두 벌 산출 — ON 만 보면 기본 동작 회귀를 놓친다."""
+    corpus = _golden_corpus()
+    runs = []
+    prev = os.environ.get("BINGGU_LONGSAVE_V1")
+    prev_sem = os.environ.get("BINGGU_SEMANTIC_OFF")
+    if GOLDEN_SEMANTIC_OFF:
+        os.environ["BINGGU_SEMANTIC_OFF"] = "1"
+    try:
+        for flag in (False, True):
+            os.environ["BINGGU_LONGSAVE_V1"] = "1" if flag else "0"
+            runs.append({"longsave": flag,
+                         "results": [dict(case_id=c["case_id"],
+                                          **_project(capture_preview(c["input"],
+                                                                     explicit=GOLDEN_EXPLICIT)))
+                                     for c in corpus]})
+    finally:
+        if prev is None:
+            os.environ.pop("BINGGU_LONGSAVE_V1", None)
+        else:
+            os.environ["BINGGU_LONGSAVE_V1"] = prev
+        if prev_sem is None:
+            os.environ.pop("BINGGU_SEMANTIC_OFF", None)
+        else:
+            os.environ["BINGGU_SEMANTIC_OFF"] = prev_sem
+    packed = []
+    for c in corpus:
+        parts = _pack_input(c["input"])
+        if _unpack_input(parts) != c["input"]:      # 왕복 무손실 아니면 골든을 쓰지 않는다
+            raise ValueError("pack/unpack 왕복 불일치: %s" % c["case_id"])
+        packed.append({"case_id": c["case_id"], "parts": parts})
+    corpus = packed
+    return {"format": "capture-preview-parity-golden-v1", "projection": GOLDEN_PROJECTION,
+            "notes": GOLDEN_NOTES, "explicit": GOLDEN_EXPLICIT,
+            "semantic_off": GOLDEN_SEMANTIC_OFF,
+            "known_divergence": KNOWN_DIVERGENCE,
+            "constants": {"INPUT_CAP": INPUT_CAP,
+                                                 "MAX_NODE_SENTENCE": MAX_NODE_SENTENCE,
+                                                 "L_MAX": L_MAX, "DEFAULT_MAX": DEFAULT_MAX},
+            "corpus": corpus, "runs": runs}
+
+
+GOLDEN_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           "hosted", "parity", "capture_preview_golden.json")
+
+
 if __name__ == "__main__":
     if not sys.argv[1:] or sys.argv[1] == "--selftest":
         run_selftest()
+    elif sys.argv[1] == "--write-golden":
+        import json as _json
+        out = sys.argv[2] if len(sys.argv) > 2 else GOLDEN_PATH
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        payload = build_golden()
+        with open(out, "w", encoding="utf-8") as f:
+            # 기계 대조용 — 들여쓰기 없이(저장소 부담 · 20000/40000자 경계 케이스가 크다)
+            _json.dump(payload, f, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            f.write("\n")
+        print("golden written: %s (cases=%d runs=%d)"
+              % (out, len(payload["corpus"]), len(payload["runs"])))
     else:
-        print("usage: openbinggu_conversation_capture_preview.py [--selftest]")
+        print("usage: openbinggu_conversation_capture_preview.py [--selftest | --write-golden [path]]")
         sys.exit(2)
