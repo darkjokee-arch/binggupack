@@ -84,10 +84,24 @@ def _gate_ref_ok(text, indices, mode):
     승격 없이 판정만(fail-closed·게이트 부재/오류 False)."""
     try:
         import binggu_save_gate as sgate
-        cands = capture_preview(text, explicit=mode)["candidates"]
+        pv = capture_preview(text, explicit=mode)
+        cands = pv["candidates"]
         pref = sgate.preview_ref_for_candidates(cands)
         idxs = [i for i in indices
                 if isinstance(i, int) and 1 <= i <= len(cands)]
+        # L-lane: 라벨은 별도 축(lref)으로 판정한다. 정수 축 판정에 섞으면 주 목록 게이트가 오염된다.
+        labels = [str(x) for x in indices if not isinstance(x, int)]
+        if labels:
+            from binggupack.safety.gate_log import (   # 지연 import(L 을 쓸 때만 의존)
+                _long_rows, long_ref_for_rows, gate_human_for_long_ref)
+            lrows = _long_rows(pv.get("long_candidates"))
+            have = {r.get("label") for r in lrows}
+            if not all(lb in have for lb in labels):
+                return False   # 화면에 없던 라벨 = fail-closed
+            if not gate_human_for_long_ref(long_ref_for_rows(lrows), labels):
+                return False
+            if not idxs:
+                return True    # L 만 찍은 경우 — 주 축 판정 없이 통과
         return bool(idxs) and bool(sgate.gate_human_for_ref(pref, idxs))
     except Exception:
         return False
@@ -131,10 +145,19 @@ def prepare_selected(db, text, indices, speaker=None, explicit=False, allow_revi
         rejected[code] = rejected.get(code, 0) + 1
 
     for i in indices:
-        if not isinstance(i, int) or i < 1 or i > len(cands):
+        # L-lane(2단계 절단): 'L1' 라벨은 주 목록이 아니라 long_candidates 에서 꺼낸다.
+        # 정수축(1,2,3…)과 문자열축(L1,L2…)이라 번호 충돌 불가 · 주 목록 인덱싱 경로는 무변경.
+        if isinstance(i, str) and i[:1] in ("L", "l"):
+            c = next((x for x in pv.get("long_candidates", [])
+                      if x.get("label") == "L" + i[1:]), None)
+            if c is None:
+                rej("index_out_of_range")
+                continue
+        elif not isinstance(i, int) or i < 1 or i > len(cands):
             rej("index_out_of_range")
             continue
-        c = cands[i - 1]
+        else:
+            c = cands[i - 1]
         sent = c["sentence"]  # 사용자가 고른 문장 전체 = 저장될 문자열 (발췌 cut 폐기 — 개인 온톨로지 정체성)
         kind = c["label_kind"]
         # 저장될 문자열(=문장 전체) 그대로 A0 재판정
@@ -295,12 +318,23 @@ def _pick_one_node(text, pick, speaker, explicit=None):
         explicit = _last_preview_mode(True)
     pv = capture_preview(text, explicit=explicit)
     cands = pv["candidates"]
-    if not isinstance(pick, int) or pick < 1 or pick > len(cands):
+    # L-lane(2단계 절단): pick 이 'L1' 같은 문자열이면 주 목록이 아니라 long_candidates 에서 꺼낸다.
+    # 정수축과 문자열축이라 번호 충돌이 구조적으로 불가능하고, 주 목록 인덱싱 경로는 무변경이다.
+    if isinstance(pick, str) and pick[:1] in ("L", "l"):
+        label = "L" + pick[1:]
+        c = next((x for x in pv.get("long_candidates", []) if x.get("label") == label), None)
+        if c is None:
+            if any(k.startswith("pii_") or k == "secret_pattern"
+                   for k in pv.get("long_excluded", {})):
+                return "pii_or_secret"
+            return "index_out_of_range"
+    elif not isinstance(pick, int) or pick < 1 or pick > len(cands):
         # 명시 입력인데 후보가 없으면 안전 게이트(PII/secret)로 제외됐을 수 있다 → 사유 명확화.
         if any(k.startswith("pii_") or k == "secret_pattern" for k in pv["excluded_counts"]):
             return "pii_or_secret"
         return "index_out_of_range"
-    c = cands[pick - 1]
+    else:
+        c = cands[pick - 1]
     sent, kind = c["sentence"], c["label_kind"]
     verdict = a0.classify_node({"id": "pre:" + _sent_hash(sent), "sentence": sent,
                                 "node_type": lkmap.KO2EN[kind], "evidence_refs": ["pre"]}, status="candidate")

@@ -82,14 +82,45 @@ except Exception:  # pragma: no cover - 폴백(외부 의존 없이 동일 정�
                     out.append(i)
         return out or None
 
-    def parse_save_indices(prompt):
+    # L-lane 토큰(2단계 절단) — 정본 gate_text 와 동일 정의. 기존 축은 불변, allow_long 시에만 사용.
+    _L_TOKEN = r"(?:\d+(?:\s*[-~]\s*\d+)?|[Ll]\d+)"
+    SAVE_TRIGGER_L_RE = re.compile(
+        r"\s*(?:SAVE|저장|세이브)\s*" + _L_TOKEN + r"(\s*,\s*" + _L_TOKEN + r")*\s*",
+        re.IGNORECASE)
+
+    def _expand_indices_long(text):
+        out, seen = [], set()
+        for part in re.findall(r"\d+(?:\s*[-~]\s*\d+)?|[Ll]\d+", str(text)):
+            if part[:1] in ("L", "l"):
+                key = "L" + part[1:]
+                if key not in seen:
+                    seen.add(key)
+                    out.append(key)
+                continue
+            nums = [int(x) for x in re.findall(r"\d+", part)]
+            if len(nums) == 2:
+                lo, hi = min(nums), max(nums)
+                if hi - lo + 1 > _RANGE_CAP:
+                    return None
+                span = range(lo, hi + 1)
+            else:
+                span = nums
+            for i in span:
+                if i not in seen:
+                    seen.add(i)
+                    out.append(i)
+        return out or None
+
+    def parse_save_indices(prompt, allow_long=False):
         p = str(prompt or "")
-        if SAVE_TRIGGER_RE.fullmatch(p):
-            return _expand_indices(p)
+        trigger = SAVE_TRIGGER_L_RE if allow_long else SAVE_TRIGGER_RE
+        expand = _expand_indices_long if allow_long else _expand_indices
+        if trigger.fullmatch(p):
+            return expand(p)
         out, seen = [], set()
         for line in _strip_embedded_regions(p).splitlines():
-            if line.strip() and SAVE_TRIGGER_RE.fullmatch(line):
-                idx = _expand_indices(line)
+            if line.strip() and trigger.fullmatch(line):
+                idx = expand(line)
                 for i in idx or []:
                     if i not in seen:
                         seen.add(i)
@@ -214,7 +245,23 @@ def preview_ref_for_candidates(candidates):
     return preview_ref_for_rows(_preview_rows(candidates))
 
 
-def write_last_preview(candidates, path=None, explicit=False, session_id=None):
+def _long_rows(long_candidates):
+    """L 후보 → [{"label","sh"}] rows. 주 목록의 _preview_rows 와 **별도 축**(정수 idx vs 'L1' 라벨).
+    sh 는 주 목록과 같은 sent_hash 를 써서 저장측 대조 방식이 갈리지 않게 한다."""
+    return [{"label": it.get("label"), "sh": sent_hash(it.get("sentence", ""))}
+            for it in (long_candidates or [])
+            if it.get("label") and _norm(it.get("sentence", ""))]
+
+
+def long_ref_for_rows(rows):
+    """L rows → 결정론적 lref(16자). pref 와 **입력이 다른 별도 해시** — 주 목록이 안 변했는데
+    L 때문에 pref 해석이 흔들리는 일이 구조적으로 없다(설계 G-1/G-3)."""
+    joined = "\n".join("%s:%s" % (r.get("label"), r.get("sh")) for r in (rows or []))
+    return hashlib.sha256(("long|" + joined).encode("utf-8")).hexdigest()[:16]
+
+
+def write_last_preview(candidates, path=None, explicit=False, session_id=None,
+                       long_candidates=None):
     """capture_preview 후보 → idx+sentence_hash 영속(원문 미저장, hash만). SAVE hook 이 대조용으로 읽음.
     매 preview 마다 덮어씀(직전 1건만 유효). pref=save-n 참조 바인딩용 preview_ref,
     explicit=후보 재도출 모드 — save/pair/core 재승격이 기록된 모드로 동일 재계산(pref 패리티).
@@ -228,6 +275,11 @@ def write_last_preview(candidates, path=None, explicit=False, session_id=None):
                "explicit": bool(explicit), "items": rows}
     if session_id is not None:
         payload["session_id"] = session_id
+    # L-lane: 항목이 있을 때만 키를 넣는다 → L 이 없으면 앵커 파일이 구버전과 **byte 동일**(G-3).
+    lrows = _long_rows(long_candidates)
+    if lrows:
+        payload["long_items"] = lrows
+        payload["lref"] = long_ref_for_rows(lrows)
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False)
@@ -250,8 +302,10 @@ def gate_record_ref(pref, idxs, ts=None, source="user_prompt", path=None):
     return 1
 
 
-def _load_refs(path=None, now=None):
-    """기록장 → {(pref, idx): 최신ts}. ref 레코드({"pref","idxs"})만 적재 — 레거시 sh 행은 _load 몫."""
+def _load_refs(path=None, now=None, ref_key="pref", idx_key="idxs"):
+    """기록장 → {(ref, idx): 최신ts}. ref 레코드({"pref","idxs"})만 적재 — 레거시 sh 행은 _load 몫.
+    ref_key/idx_key 를 바꾸면 L-lane 레코드({"lref","lidxs"})를 같은 로직으로 읽는다
+    (키가 다르므로 두 축이 서로의 레코드를 절대 집어가지 않는다)."""
     path = path or gate_path()
     out = {}
     if not os.path.exists(path):
@@ -265,10 +319,10 @@ def _load_refs(path=None, now=None):
                 d = json.loads(line)
             except Exception:
                 continue
-            pref, ts = d.get("pref"), d.get("ts", 0)
+            pref, ts = d.get(ref_key), d.get("ts", 0)
             if not pref:
                 continue
-            for i in (d.get("idxs") or []):
+            for i in (d.get(idx_key) or []):
                 k = (pref, i)
                 if k not in out or ts > out[k]:
                     out[k] = ts
@@ -296,12 +350,33 @@ def gate_human_for_ref(pref, idxs, path=None, now=None):
     return True
 
 
-def gate_record_from_prompt(prompt, preview_path=None, gate_path=None, ts=None):
+def gate_human_for_long_ref(lref, labels, path=None, now=None):
+    """L-lane 판독 — (lref, 'L1'…) 전부가 사람 SAVE 발화로 기록됐고 신선도 창 이내면 True.
+    gate_human_for_ref 와 같은 fail-closed 규율(미기록·stale·미래ts 전부 False). 축만 분리."""
+    now = now if now is not None else time.time()
+    labels = [str(x) for x in (labels or [])]
+    if not lref or not labels:
+        return False
+    rec = _load_refs(path, now, ref_key="lref", idx_key="lidxs")
+    for lb in labels:
+        ts = rec.get((lref, lb))
+        if ts is None:
+            return False
+        age = now - ts
+        if age < 0:
+            return False
+        if GATE_WINDOW_SEC and age > GATE_WINDOW_SEC:
+            return False
+    return True
+
+
+def gate_record_from_prompt(prompt, preview_path=None, gate_path=None, ts=None,
+                            allow_long=False):
     """SAVE hook 진입점 — 발화가 'SAVE n' 정확형이면 직전 preview 의 해당 idx 를 게이트에 기록.
     신형 preview(pref 有)는 ref 레코드 1행 + 레거시 sh 행 병기 append(구 소비자 무수정 호환),
     구형(pref 無)은 레거시 sh 행만(현행 동일 동작). 반환 레거시 기록 건수(0=SAVE 발화 아님/
     후보 없음/매칭 0). 원문 미접근(hash 만)."""
-    idxs = parse_save_indices(prompt)
+    idxs = parse_save_indices(prompt, allow_long=allow_long)
     if not idxs:
         return 0
     pp = preview_path or last_preview_path()
@@ -312,18 +387,26 @@ def gate_record_from_prompt(prompt, preview_path=None, gate_path=None, ts=None):
             pv = json.load(f)
     except Exception:
         return 0
+    # ★ 조회원은 items **와** long_items 양쪽이다. long_items 를 안 보면 'SAVE L1' 이
+    #   matched=[] → return 0 으로 조용히 죽어 L-lane 전체가 무력해진다(적대검토 지적① 확증 지점).
     by_idx = {r.get("idx"): r.get("sh") for r in pv.get("items", [])}
-    matched = [i for i in idxs if by_idx.get(i)]
-    hashes = [by_idx[i] for i in matched]
+    by_label = {r.get("label"): r.get("sh") for r in pv.get("long_items", [])}
+    matched = [i for i in idxs if isinstance(i, int) and by_idx.get(i)]
+    matched_l = [x for x in idxs if not isinstance(x, int) and by_label.get(x)]
+    hashes = [by_idx[i] for i in matched] + [by_label[x] for x in matched_l]
     if not hashes:
         return 0
     gp = gate_path or _gate_path()
     ts = ts if ts is not None else time.time()
     os.makedirs(os.path.dirname(gp), exist_ok=True)
-    pref = pv.get("pref")
+    pref, lref = pv.get("pref"), pv.get("lref")
     with open(gp, "a", encoding="utf-8") as f:
-        if pref:
+        if pref and matched:
             f.write(json.dumps({"pref": pref, "idxs": matched, "ts": ts,
+                                "source": "user_prompt"}, ensure_ascii=False) + "\n")
+        # L 은 **별도 레코드**(lref/lidxs) — pref 레코드에 섞으면 주 목록 축이 오염된다.
+        if lref and matched_l:
+            f.write(json.dumps({"lref": lref, "lidxs": matched_l, "ts": ts,
                                 "source": "user_prompt"}, ensure_ascii=False) + "\n")
         for h in hashes:
             f.write(json.dumps({"sh": h, "ts": ts, "source": "user_prompt"}, ensure_ascii=False) + "\n")

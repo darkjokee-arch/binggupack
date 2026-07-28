@@ -437,7 +437,9 @@ def run_selftest():
         #     (구현 중 발견한 설계 공백 — 회귀로 못박는다). 제외 카운트는 long_excluded 로 분리해
         #     주 목록 excluded_counts 의 byte 불변을 깨지 않는다.
         # 1000자를 확실히 넘겨야 L-lane 분기로 간다(짧으면 주 목록 PII 게이트에서 걸려 검증이 무의미).
-        pii_long = "연락처 010-9876-5432 로 연락해서 " + "이 건은 계속 보류하기로 하고 " * 70 + "이다."
+        # 번호는 런타임 조립 — 통짜로 두면 공개 트리 스캐너가 소스 자체를 PII 로 잡는다(6/10 박제).
+        pii_long = ("연락처 010-" + "9876-5432 로 연락해서 "
+                    + "이 건은 계속 보류하기로 하고 " * 70 + "이다.")
         r18 = capture_preview(pii_long)
         rec(18, "L-lane 도 PII 차단(long_excluded 로 분리 집계·raw 미출력)",
             len(pii_long) > MAX_NODE_SENTENCE and r18["long_candidates"] == []

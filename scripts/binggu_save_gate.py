@@ -95,23 +95,54 @@ except Exception:  # pragma: no cover - 폴백(외부 의존 없이 동일 정�
                     out.append(i)
         return out or None
 
-    def parse_save_indices(prompt):
+    # L-lane 토큰(2단계 절단) — 정본 gate_text 와 동일 정의. 기존 축 불변, allow_long 시에만 사용.
+    _L_TOKEN = r"(?:\d+(?:\s*[-~]\s*\d+)?|[Ll]\d+)"
+    SAVE_TRIGGER_L_RE = re.compile(
+        r"\s*(?:SAVE|저장|세이브)\s*" + _L_TOKEN + r"(\s*,\s*" + _L_TOKEN + r")*\s*",
+        re.IGNORECASE)
+
+    def _expand_indices_long(text):
+        out, seen = [], set()
+        for part in re.findall(r"\d+(?:\s*[-~]\s*\d+)?|[Ll]\d+", str(text)):
+            if part[:1] in ("L", "l"):
+                key = "L" + part[1:]
+                if key not in seen:
+                    seen.add(key)
+                    out.append(key)
+                continue
+            nums = [int(x) for x in re.findall(r"\d+", part)]
+            if len(nums) == 2:
+                lo, hi = min(nums), max(nums)
+                if hi - lo + 1 > _RANGE_CAP:
+                    return None
+                span = range(lo, hi + 1)
+            else:
+                span = nums
+            for i in span:
+                if i not in seen:
+                    seen.add(i)
+                    out.append(i)
+        return out or None
+
+    def parse_save_indices(prompt, allow_long=False):
         p = str(prompt or "")
-        if SAVE_TRIGGER_RE.fullmatch(p):
-            return _expand_indices(p)
+        trigger = SAVE_TRIGGER_L_RE if allow_long else SAVE_TRIGGER_RE
+        expand = _expand_indices_long if allow_long else _expand_indices
+        if trigger.fullmatch(p):
+            return expand(p)
         out, seen = [], set()
         for line in _strip_embedded_regions(p).splitlines():
             ls = line.strip()
             if not ls:
                 continue
-            if SAVE_TRIGGER_RE.fullmatch(ls):
+            if trigger.fullmatch(ls):
                 segs = [ls]
             elif _STAMP_LINE_RE.fullmatch(ls):
                 segs = _SAVE_SEG_RE.findall(ls)   # 혼합 도장 줄 → SAVE 세그먼트만
             else:
                 segs = []
             for seg in segs:
-                for i in _expand_indices(seg) or []:
+                for i in expand(seg) or []:
                     if i not in seen:
                         seen.add(i)
                         out.append(i)

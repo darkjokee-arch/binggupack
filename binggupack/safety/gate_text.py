@@ -81,8 +81,49 @@ def _expand_indices(text):
     return out or None
 
 
-def parse_save_indices(prompt):
+# ── L-lane 토큰 (2단계 절단 · docs/BINGGUPACK_STAGE2_TRUNCATION_DESIGN.md) ────────────
+# 기존 SAVE_TRIGGER_RE/_expand_indices 는 **손대지 않는다** — allow_long=False(기본)면
+# 파싱 경로가 종전과 완전히 동일해 회귀 0. L 은 전용 정규식·전용 확장 함수로만 처리한다.
+# 범위 'L1-L3' 는 미지원(범위 오지정 위험 · 설계 S2-2). 혼합 도장 줄('히트 1 SAVE L1')도
+# 미지원 — 순수 'SAVE L1' / 'SAVE 1,L2' 형태만 인정한다(계약 최소 확장).
+_L_TOKEN = r"(?:\d+(?:\s*[-~]\s*\d+)?|[Ll]\d+)"
+SAVE_TRIGGER_L_RE = re.compile(
+    r"\s*(?:SAVE|저장|세이브)\s*" + _L_TOKEN + r"(\s*,\s*" + _L_TOKEN + r")*\s*",
+    re.IGNORECASE)
+
+
+def _expand_indices_long(text):
+    """숫자 → int, L 토큰 → 'L<n>' 문자열(대문자 정규화). 정수축과 문자열축이라 충돌 불가.
+    범위 폭주(_RANGE_CAP 초과) → None 은 기존과 동일."""
+    out, seen = [], set()
+    for part in re.findall(r"\d+(?:\s*[-~]\s*\d+)?|[Ll]\d+", str(text)):
+        if part[:1] in ("L", "l"):
+            key = "L" + part[1:]
+            if key not in seen:
+                seen.add(key)
+                out.append(key)
+            continue
+        nums = [int(x) for x in re.findall(r"\d+", part)]
+        if len(nums) == 2:
+            lo, hi = min(nums), max(nums)
+            if hi - lo + 1 > _RANGE_CAP:
+                return None
+            span = range(lo, hi + 1)
+        else:
+            span = nums
+        for i in span:
+            if i not in seen:
+                seen.add(i)
+                out.append(i)
+    return out or None
+
+
+def parse_save_indices(prompt, allow_long=False):
     """도장 인식 — 인덱스 리스트 또는 None.
+
+    allow_long: L 토큰('SAVE L1') 인정 여부. **기본 False = 종전 동작 그대로**(회귀 0).
+      True 는 L-lane 을 아는 호출자만 명시로 켠다. 반환 리스트에 int 와 'L1' 문자열이 섞일 수
+      있으므로, 켜는 쪽은 두 축을 구분해 소비할 책임이 있다.
 
     ① 발화 전체가 정확형('<트리거> n' 등) → 인정(기존 동작).
     ② ★줄 단위 정확형(2026-07-13 owner GO): 여러 지시를 한 메시지에 묶는 사용자 스타일 대응 —
@@ -93,21 +134,23 @@ def parse_save_indices(prompt):
        (_strip_embedded_regions 로 줄 스캔 전 제거). 평문 라인모드(②)는 그대로 보존.
     트리거 = SAVE/저장/세이브(대소문자 무시). 범위 '1-5' 지원(_RANGE_CAP 상한)."""
     p = str(prompt or "")
-    if SAVE_TRIGGER_RE.fullmatch(p):
-        return _expand_indices(p)
+    trigger = SAVE_TRIGGER_L_RE if allow_long else SAVE_TRIGGER_RE
+    expand = _expand_indices_long if allow_long else _expand_indices
+    if trigger.fullmatch(p):
+        return expand(p)
     out, seen = [], set()
     for line in _strip_embedded_regions(p).splitlines():
         ls = line.strip()
         if not ls:
             continue
-        if SAVE_TRIGGER_RE.fullmatch(ls):
+        if trigger.fullmatch(ls):
             segs = [ls]                       # 순수 SAVE 줄(기존 동작)
         elif _STAMP_LINE_RE.fullmatch(ls):
             segs = _SAVE_SEG_RE.findall(ls)   # ④ 혼합 도장 줄 → SAVE 세그먼트만(히트/미스 동반 무시)
         else:
             segs = []                         # 문장 속 언급·임의 텍스트 → 오도장 차단(계약 유지)
         for seg in segs:
-            for i in _expand_indices(seg) or []:
+            for i in expand(seg) or []:
                 if i not in seen:
                     seen.add(i)
                     out.append(i)
