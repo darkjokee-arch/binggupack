@@ -365,10 +365,18 @@ def _mcp_record_trace(kind, query, nodes, *, domain=None, situation_src=None,
         import binggu_recall_trace as RT
         from datetime import datetime, timezone
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        # 세션 근사 귀속(2026-07-28 owner 지적) — MCP 는 session_id 를 못 받아 NULL 로 쌓였고,
+        # 그 결과 owner 가 판단에 실제로 쓴 회상이 마무리 preview 의 '이번 세션 회상'에서
+        # 구조적으로 빠졌다. 직전 preflight(=같은 발화 처리 중 hook 이 남긴 것)의 session_id 를
+        # 승계한다. 30분 넘게 떨어져 있으면 None → 현행(미귀속)으로 안전 폴백.
+        try:
+            sid = RT.latest_session_id(home=_operating_home(), before_ts=ts)
+        except Exception:
+            sid = None
         r = RT.record_trace(query, kind, nodes, ts, domain=domain,
                             situation=RT.classify_situation(situation_src or query),
                             risk_level=risk_level, needs_question=needs_question,
-                            home=_operating_home())
+                            session_id=sid, home=_operating_home())
         return bool(isinstance(r, dict) and r.get("recorded"))
     except Exception:
         return False

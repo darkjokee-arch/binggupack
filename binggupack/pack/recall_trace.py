@@ -24,6 +24,7 @@ Phase 1(binggu_recall.py + recall_consistency_harness.py)은 합성 corpus 의 �
 """
 from __future__ import annotations
 
+import datetime
 import hashlib
 import json
 import os
@@ -194,6 +195,54 @@ def _scrub_node(n):
 def _trace_id(kind, query_sha, node_ids, ts):
     raw = "%s|%s|%s|%s" % (kind, query_sha, ",".join(node_ids), ts)
     return "rtr-" + hashlib.sha256(raw.encode("utf-8", "replace")).hexdigest()[:16]
+
+
+# ---------------- 세션 근사 귀속 (MCP 회상용) ----------------
+
+def latest_session_id(home=None, before_ts=None, within_minutes=30):
+    """직전 회상의 session_id — MCP 회상이 세션을 모를 때 쓰는 근사 귀속. read-only.
+
+    ★왜 필요한가(2026-07-28 owner 지적): MCP 서버는 Claude Code 와 별도 프로세스라
+    session_id 를 직접 못 받는다(hook 만 `data['session_id']` 로 받음). 그 결과 owner 가
+    판단에 실제로 인출한 `mcp_recall` 이 session_id NULL 로 쌓여, 세션 마무리 preview 의
+    '이번 세션 회상'(list_pending(session_id=...)) 에서 **구조적으로 제외**됐다 —
+    즉 "내가 쓴 회상은 도장을 못 받고, hook 이 자동 주입한 것만 판정 대상"이 된다.
+
+    근사 근거(실측): 같은 발화를 처리하는 동안 preflight hook 이 먼저 돌고 그 직후 MCP
+    회상이 일어난다. 2026-07-28 실측 mcp_recall 5건 전부 직전 preflight 와 **2~5분** 간격이고
+    세션이 정확히 일치했다. within_minutes 를 넘으면 세션이 바뀌었을 수 있으므로 None 을
+    돌려 **현행 동작(미귀속)으로 안전하게 떨어진다** — 틀린 세션에 붙이느니 안 붙인다.
+    (완전한 해법은 MCP 프로토콜이 세션을 실어주는 것이나 그건 클라이언트 소관.)
+    """
+    try:
+        con = _open_store(home)
+    except Exception:
+        return None
+    try:
+        if before_ts:
+            row = con.execute(
+                "SELECT session_id, ts FROM recall_traces WHERE session_id IS NOT NULL"
+                " AND ts <= ? ORDER BY ts DESC LIMIT 1", (before_ts,)).fetchone()
+        else:
+            row = con.execute(
+                "SELECT session_id, ts FROM recall_traces WHERE session_id IS NOT NULL"
+                " ORDER BY ts DESC LIMIT 1").fetchone()
+    except Exception:
+        return None
+    finally:
+        con.close()
+    if not row or not row[0]:
+        return None
+    if before_ts and within_minutes:
+        try:
+            fmt = "%Y-%m-%dT%H:%M:%SZ"
+            prev = datetime.datetime.strptime(row[1], fmt)
+            cur = datetime.datetime.strptime(before_ts, fmt)
+            if (cur - prev) > datetime.timedelta(minutes=within_minutes):
+                return None
+        except Exception:
+            return None   # 파싱 실패 시 귀속하지 않음(오귀속 < 미귀속)
+    return row[0]
 
 
 # ---------------- 기록: recall/preflight 결과 → trace (opt-in) ----------------
@@ -891,6 +940,27 @@ def _selftest():
         pend_all = list_pending(home=home_sid)
         ck(len(pend_a) == 2 and len(pend_all) == 3,
            "session_id(v4) → list_pending 이번 세션 필터(SID_A 2 / 전체 누적 3)")
+
+        # ── latest_session_id(2026-07-28): MCP 회상 세션 근사 귀속 ──
+        # owner 지적 "이번 세션 회상이 이번 세션에 사용한 게 아닌데?" — MCP 는 session_id 를
+        # 못 받아 NULL 로 쌓였고, 실제로 판단에 쓴 회상이 마무리 preview 에서 구조적으로 빠졌다.
+        ck(latest_session_id(home=home_sid, before_ts="2026-07-25T03:05:00Z") == "SID_B",
+           "latest_session_id → 직전(5분 전) 회상의 세션 승계(SID_B)")
+        ck(latest_session_id(home=home_sid, before_ts="2026-07-25T02:10:00Z") == "SID_A",
+           "latest_session_id → before_ts 이전 것만 본다(SID_A · 미래 SID_B 무시)")
+        ck(latest_session_id(home=home_sid, before_ts="2026-07-25T05:00:00Z") is None,
+           "latest_session_id → 시간 창(30분) 초과 시 None(오귀속 < 미귀속)")
+        ck(latest_session_id(home=home_sid, before_ts="2026-07-25T05:00:00Z",
+                             within_minutes=180) == "SID_B",
+           "latest_session_id → within_minutes 확대하면 승계(창 파라미터 실동작)")
+        ck(latest_session_id(home=home_sid) == "SID_B",
+           "latest_session_id → before_ts 없으면 최신 세션")
+        ck(latest_session_id(home=os.path.join(tmp, ".binggupack_no_store")) is None,
+           "latest_session_id → store 없으면 None(예외 0)")
+        _sid_mt0 = os.path.getmtime(trace_store_path(home_sid))
+        latest_session_id(home=home_sid, before_ts="2026-07-25T03:05:00Z")
+        ck(os.path.getmtime(trace_store_path(home_sid)) == _sid_mt0,
+           "latest_session_id → read-only(store mtime 불변)")
         r_bad_sit = trace_from_preflight("다른 질의 xyz", res_pf, "2026-06-27T09:00:00Z",
                                          situation="INVALID_SIT", home=home_sit)
         con = _open_store(home_sit)
