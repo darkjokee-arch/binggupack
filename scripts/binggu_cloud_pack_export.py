@@ -40,9 +40,45 @@ ZIP_ALLOWED_EXT = {".json", ".jsonl", ".md", ".txt"}
 ZIP_MAX_ENTRIES = 500
 ZIP_MAX_FILE_BYTES = 5 * 1024 * 1024
 
+# S2-5 (§5 무손실 정합): 그래프 노드 label 은 80자 캡을 유지하되(소비자 호환) 전문은 chunk 로 회수 가능해야 한다.
+# Evidence 는 전문이 이미 chunk 에 있었으나 Claim 은 어디에도 없어 80자 뒤가 팩에서 영구 소실됐다.
+SHORT_LABEL_LEN = 80
+CLAIM_DOC_ID = "DOC-CLAIM-1"
+VIEW_PAYLOAD_CAP = 20000      # 팩당 view 캡(budget.md)
+VIEW_PAYLOAD_HEADROOM = 0.30  # 캡 대비 요구 여유
+
 
 def _sha(s):
     return hashlib.sha256((s or "").encode("utf-8")).hexdigest()[:12]
+
+
+def _short_label(text):
+    """(short_label, truncated) — 표시용 80자 캡. 전문은 full_ref chunk 로 회수한다(절단 = 소실 아님)."""
+    t = text or ""
+    return t[:SHORT_LABEL_LEN], len(t) > SHORT_LABEL_LEN
+
+
+def assert_no_lossy_labels(graph_nodes, chunks, origin_sha):
+    """label_truncated 노드의 full_ref 가 실제 chunk 로 해소되고 sha 가 원문과 일치하는지 검사.
+
+    불일치 = 80자 뒤가 팩에서 영구 소실된다는 뜻이므로 **빌드 실패**시킨다(§5 가 명령한 유일한 실패 경로).
+    """
+    by_cid = {c.get("chunk_id"): c for c in chunks}
+    problems = []
+    for gn in graph_nodes:
+        if not gn.get("label_truncated"):
+            continue
+        ref = gn.get("full_ref")
+        c = by_cid.get(ref)
+        if c is None:
+            problems.append({"node": gn.get("id"), "reason": "full_ref_unresolved", "full_ref": ref})
+            continue
+        want = origin_sha.get(gn.get("id"))
+        if want is not None and _sha(c.get("text")) != want:
+            problems.append({"node": gn.get("id"), "reason": "chunk_sha_mismatch", "full_ref": ref})
+    if problems:
+        raise ValueError("LOSSY_LABEL: 전문 회수 불가 %d건 — %s" % (len(problems), problems[:3]))
+    return True
 
 
 def _leak_count(text):
@@ -89,7 +125,8 @@ def build_cloud_pack(out_dir, nodes, evidence, graph_preview, graph_confirm,
     documents = [{"doc_id": "DOC-synthetic-1", "title": "[SYNTHETIC] BingguPack fixture document",
                   "source": "synthetic", "readable": True, "candidate": True, "unverified": True,
                   "text": "synthetic fixture aggregating evidence chunks"}]
-    chunks, ev_index, graph_nodes, graph_edges = [], [], [], []
+    ev_chunks, claim_chunks, ev_index, graph_nodes, graph_edges = [], [], [], [], []
+    origin_sha = {}   # 노드 id → 원문 전문 sha (무손실 게이트 기준값)
     leak_count = 0
 
     # evidence → chunk + evidence/index + Evidence node + document/chunk edge
@@ -97,13 +134,17 @@ def build_cloud_pack(out_dir, nodes, evidence, graph_preview, graph_confirm,
         txt = e["text"]
         leak_count += _leak_count(txt)
         cid = "CHUNK-" + e["id"]
-        chunks.append({"chunk_id": cid, "doc_id": "DOC-synthetic-1", "evidence_id": e["id"],
-                       "text": txt, "candidate": True})
+        ev_chunks.append({"chunk_id": cid, "doc_id": "DOC-synthetic-1", "evidence_id": e["id"],
+                          "text": txt, "candidate": True})
         ev_index.append({"evidence_id": e["id"], "chunk_id": cid, "doc_id": "DOC-synthetic-1",
                          "source": e.get("source", "synthetic"), "text_sha": _sha(txt)})
-        # Evidence node
+        # Evidence node — 전문은 이미 chunk 에 있으므로 full_ref 로 가리키기만 하면 무손실
+        ev_short, ev_trunc = _short_label(txt)
+        origin_sha[e["id"]] = _sha(txt)
         graph_nodes.append({"id": e["id"], "node_type": "Evidence", "label_kind": "증거",
-                            "text": txt[:80], "evidence_refs": [e["id"]], "candidate": True, "unverified": True})
+                            "text": ev_short, "short_label": ev_short, "label_truncated": ev_trunc,
+                            "full_ref": cid,
+                            "evidence_refs": [e["id"]], "candidate": True, "unverified": True})
         # document/chunk edge (Evidence node -> document)  *grounding, not a verb-edge*
         graph_edges.append({"from": e["id"], "to": "DOC-synthetic-1", "relation": "evidence_of_document",
                             "edge_kind": "grounding", "evidence_refs": [e["id"]], "candidate": True})
@@ -111,11 +152,31 @@ def build_cloud_pack(out_dir, nodes, evidence, graph_preview, graph_confirm,
     # canonical content nodes
     for n in nodes:
         p = n["properties"]
+        sent = p.get("sentence", "")
+        c_short, c_trunc = _short_label(sent)
+        # Claim 전문 chunk — ev_index 에는 넣지 않는다(§1: Claim 은 증거가 아니다).
+        # 빈 문장은 chunk 를 만들지 않는다(nonempty 게이트 보호) — 절단분도 없으므로 무손실 불변.
+        cc_id = None
+        if sent.strip():
+            cc_id = "CHUNK-CLAIM-" + n["id"]
+            claim_chunks.append({"chunk_id": cc_id, "doc_id": CLAIM_DOC_ID, "claim_id": n["id"],
+                                 "text": sent, "candidate": True})
+            origin_sha[n["id"]] = _sha(sent)
         graph_nodes.append({"id": n["id"], "node_type": "Claim", "label_kind": p.get("label_kind"),
-                            "text": p.get("sentence", "")[:80],
+                            "text": c_short, "short_label": c_short, "label_truncated": c_trunc,
+                            "full_ref": cc_id,
                             "semantic_subtype": p.get("semantic_subtype"),   # 보조 메타(canonical 승격 0)
                             "evidence_refs": n.get("evidence_refs") or [], "candidate": True, "unverified": True})
-        leak_count += _leak_count(p.get("sentence", ""))
+        leak_count += _leak_count(sent)
+
+    # Claim 전문 보관 문서 + 통합 chunk 뷰. retrieval eval 은 Evidence chunk 축만 본다(지표 정의 불변).
+    if claim_chunks:
+        documents.append({"doc_id": CLAIM_DOC_ID, "title": "[SYNTHETIC] Claim 전문 보관 문서",
+                          "source": "claim_full_text", "readable": True, "candidate": True,
+                          "unverified": True,
+                          "text": "Claim 노드 label 80자 캡의 전문 회수처(§5 무손실 정합)"})
+    chunks = ev_chunks + claim_chunks
+    assert_no_lossy_labels(graph_nodes, chunks, origin_sha)
 
     # ---- approved supports_judgment edges 만 (validate_verb_edge 통과) ----
     nbi = {n["id"]: {"id": n["id"], "properties": {"label_kind": n["properties"].get("label_kind"),
@@ -154,7 +215,9 @@ def build_cloud_pack(out_dir, nodes, evidence, graph_preview, graph_confirm,
     nonempty = all((c.get("text") or "").strip() for c in chunks)
 
     # retrieval eval (fixture · 실제 term coverage 계산 · 억지 true 금지)
-    bench_q, bench_r, reval = _retrieval_eval(chunks)
+    # ★ Evidence chunk 축만 대상 — Claim 전문 chunk 는 검색 대상이 아니라 label 회수처다.
+    #   섞으면 같은 대화에서 나온 Claim/Evidence 가 서로의 self-match 를 뺏어 지표가 흔들린다(정의 변경 금지).
+    bench_q, bench_r, reval = _retrieval_eval(ev_chunks)
 
     required_failures = []
     if leak_count != 0:
@@ -194,7 +257,21 @@ def build_cloud_pack(out_dir, nodes, evidence, graph_preview, graph_confirm,
               "note": "텍스트 전용 fixture — 시각 자산 0 · OCR/CLIP 의존성 설치 0"}
 
     counts = {"documents": len(documents), "chunks": len(chunks), "evidence": len(ev_index),
+              "evidence_chunks": len(ev_chunks), "claim_chunks": len(claim_chunks),
               "nodes": len(graph_nodes), "edges": len(graph_edges), "edges_skipped": len(edge_skipped)}
+
+    # payload budget — label 축약 후 view 캡 대비 여유(§6-4)
+    truncated_nodes = [n for n in graph_nodes if n.get("label_truncated")]
+    view_payload = len(json.dumps(graph_nodes, ensure_ascii=False).encode("utf-8")) + \
+        len(json.dumps(graph_edges, ensure_ascii=False).encode("utf-8"))
+    budget_headroom = 1.0 - (view_payload / VIEW_PAYLOAD_CAP) if VIEW_PAYLOAD_CAP else 0.0
+    budget_ok = budget_headroom >= VIEW_PAYLOAD_HEADROOM
+    avg_label = round(sum(len(n.get("text") or "") for n in graph_nodes) / max(1, len(graph_nodes)), 1)
+    payload_budget = {"nodes": len(graph_nodes), "edges": len(graph_edges),
+                      "average_label_len": avg_label, "truncated_labels": len(truncated_nodes),
+                      "view_payload_bytes": view_payload, "view_cap": VIEW_PAYLOAD_CAP,
+                      "headroom": round(budget_headroom, 3),
+                      "required_headroom": VIEW_PAYLOAD_HEADROOM, "budget_ok": budget_ok}
 
     manifest = {"format_version": PACK_FORMAT, "pack_title": PACK_TITLE, "purpose": PACK_PURPOSE,
                 "pack_type": "candidate", "data_class": data_class, "unverified": True,
@@ -206,11 +283,16 @@ def build_cloud_pack(out_dir, nodes, evidence, graph_preview, graph_confirm,
                           "reports/release_gate.json", "reports/evidence_index.json", "reports/graphrag.json",
                           "reports/retrieval_eval.json", "benchmark/queries.jsonl", "benchmark/results.jsonl",
                           "ingest/plan.json", "ingest/batches.jsonl", "neo4j/opencrab_ingest.jsonl",
-                          "neo4j/export_status.json", "reports/visual_processing.json"]}
+                          "neo4j/export_status.json", "reports/visual_processing.json",
+                          "reports/pack_payload_budget.md"]}
 
+    if not budget_ok:
+        degraded_reasons.append("view_payload_headroom %.3f < %.2f (payload %d / cap %d)"
+                                % (budget_headroom, VIEW_PAYLOAD_HEADROOM, view_payload, VIEW_PAYLOAD_CAP))
     quality = {"leak_count": leak_count, "nodes_with_id": nodes_with_id,
                "edges_have_endpoints": edges_have_endpoints, "readable_documents": readable_docs,
                "nonempty_chunks": nonempty, "edges_skipped": edge_skipped,
+               "payload_budget": payload_budget, "lossy_labels": 0,
                "required_failures": required_failures, "release_ready": release_ready,
                "release_status": release_status, "degraded_reasons": degraded_reasons}
     release_gate = {"thresholds": {"hit_rate": 0.8, "relevant_hit_rate": 0.6,
@@ -263,6 +345,20 @@ def build_cloud_pack(out_dir, nodes, evidence, graph_preview, graph_confirm,
     wjsonl("neo4j/opencrab_ingest.jsonl", neo4j_ingest)
     wjson("neo4j/export_status.json", neo4j_status)
     wjson("reports/visual_processing.json", visual)
+
+    with open(os.path.join(out_dir, "reports/pack_payload_budget.md"), "w", encoding="utf-8") as f:
+        f.write("# Pack payload budget\n\n"
+                "| 항목 | 값 |\n|---|---|\n"
+                "| 노드 | %d |\n| 엣지 | %d |\n| 평균 label 길이 | %s |\n"
+                "| 80자 캡 적용 label | %d |\n| Claim 전문 chunk | %d |\n"
+                "| view payload | %d B |\n| view 캡 | %d B |\n"
+                "| 여유 | %.1f%% (요구 %.0f%%) |\n| 판정 | %s |\n\n"
+                "label 은 %d자 캡이지만 전문은 `full_ref` chunk 로 회수된다(§5 무손실). "
+                "회수 불가 시 `assert_no_lossy_labels` 가 빌드를 실패시킨다.\n"
+                % (payload_budget["nodes"], payload_budget["edges"], avg_label,
+                   payload_budget["truncated_labels"], len(claim_chunks),
+                   view_payload, VIEW_PAYLOAD_CAP, budget_headroom * 100,
+                   VIEW_PAYLOAD_HEADROOM * 100, "OK" if budget_ok else "OVER", SHORT_LABEL_LEN))
 
     return {"manifest": manifest, "quality": quality, "release_gate": release_gate, "counts": counts,
             "visual": visual, "edge_skipped": edge_skipped}
@@ -409,6 +505,58 @@ def _selftest():
            "manifest cloud_upload=false · db_insert=false")
         ns = json.load(open(os.path.join(out, "neo4j/export_status.json"), encoding="utf-8"))
         ck(ns["ingested"] is False and ns["cloud_upload"] is False, "neo4j export_status: ingest/upload 0")
+
+        # ---- S2-5 (§5 무손실): Claim label 80자 캡 뒤가 팩에서 회수 가능한가 ----
+        chunks_j = [json.loads(l) for l in open(os.path.join(out, "cloud/chunks.jsonl"), encoding="utf-8")]
+        by_cid = {c["chunk_id"]: c for c in chunks_j}
+        src_by_id = {n["id"]: n["properties"].get("sentence", "") for n in nodes}
+        claim_nodes = [n for n in nodes_j if n.get("node_type") == "Claim"]
+        ck(len(claim_nodes) >= 1 and all(
+            n.get("full_ref") and by_cid.get(n["full_ref"], {}).get("text") == src_by_id[n["id"]]
+            for n in claim_nodes),
+           "Claim 전문이 chunk 로 회수 가능(원문 byte 동일) — %d개" % len(claim_nodes))
+
+        # Claim chunk 는 증거가 아니다 → ev_index 미등장
+        ck(not any(str(r.get("chunk_id", "")).startswith("CHUNK-CLAIM-") for r in idx),
+           "ev_index 에 Claim chunk 미등장(Claim 은 증거가 아니다)")
+
+        # 회수 불가/sha 불일치 주입 → 빌드 실패(§5 가 명령한 유일한 실패 경로)
+        def _blocked(gn, chs, osha):
+            try:
+                assert_no_lossy_labels(gn, chs, osha)
+                return False
+            except ValueError:
+                return True
+        unresolved = _blocked([{"id": "node:x", "node_type": "Claim", "label_truncated": True,
+                                "full_ref": "CHUNK-CLAIM-missing"}], [], {"node:x": _sha("원문")})
+        mismatch = _blocked([{"id": "node:y", "node_type": "Claim", "label_truncated": True,
+                              "full_ref": "CHUNK-CLAIM-y"}],
+                            [{"chunk_id": "CHUNK-CLAIM-y", "text": "다른 문장"}], {"node:y": _sha("원문")})
+        ck(unresolved and mismatch, "회수 불가·sha 불일치 주입 → 빌드 실패(ValueError)")
+
+        # 80자 초과 실케이스 — 캡이 실제로 걸린 상태에서도 전문 왕복
+        long_sent = "[SYNTHETIC] " + ("가나다라마바사아자차카타파하 " * 12)
+        ck(len(long_sent) > SHORT_LABEL_LEN, "긴 문장 fixture 가 80자 초과(%d자)" % len(long_sent))
+        nodes2 = [dict(n, properties=dict(n["properties"])) for n in nodes]
+        nodes2[2]["properties"]["sentence"] = long_sent
+        g2 = build_graph_preview(nodes2, evidence_items=evidence)
+        conf2 = build_graph_confirm(g2, approve=list(range(1, len(g2["edges"]) + 1)))
+        out2 = os.path.join(tmp, "pack_long")
+        build_cloud_pack(out2, nodes2, evidence, g2, conf2)
+        n2 = [json.loads(l) for l in open(os.path.join(out2, "graph/nodes.jsonl"), encoding="utf-8")]
+        c2 = {c["chunk_id"]: c for c in
+              (json.loads(l) for l in open(os.path.join(out2, "cloud/chunks.jsonl"), encoding="utf-8"))}
+        tgt = next(n for n in n2 if n["id"] == nodes2[2]["id"])
+        ck(tgt["label_truncated"] is True and len(tgt["text"]) == SHORT_LABEL_LEN
+           and c2[tgt["full_ref"]]["text"] == long_sent,
+           "80자 초과 Claim: label 절단 표시 + 전문 chunk 왕복 byte 동일")
+
+        # payload budget 리포트
+        pb = rep["quality"]["payload_budget"]
+        ck(os.path.exists(os.path.join(out, "reports/pack_payload_budget.md"))
+           and pb["view_cap"] == VIEW_PAYLOAD_CAP and isinstance(pb["budget_ok"], bool),
+           "payload budget 산출(여유 %.1f%% · 요구 %.0f%%)" % (pb["headroom"] * 100,
+                                                              pb["required_headroom"] * 100))
 
         # ZIP 생성 + 규칙
         zp = os.path.join(tmp, "pack.zip")
