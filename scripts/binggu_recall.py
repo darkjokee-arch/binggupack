@@ -219,6 +219,23 @@ def _selftest():
         ck(any(p["node_id"] == "node:CONV:ee05" for p in pf_pref["preferences"]),
            "preflight → 사용자 선호(subtype=선호) 회수")
 
+        # ── 주입 하한 preflight_rel_min(기본 0.25) — 저관련 주입 차단·위험축 불변 ──
+        # query 5토큰 중 aa01 은 '배포' 1개만 매칭(rel 0.2 < 0.25). scorer 어휘 전용 고정.
+        _lex = lambda q, s: None  # noqa: E731
+        pf_floor = preflight_context(ledger, prompt="설정 파일 정리 작업 배포", scorer=_lex)
+        ck(all(n["relevance"] >= 0.25 for n in pf_floor["remember"])
+           and not any(n["node_id"] == "node:CONV:aa01" for n in pf_floor["remember"]),
+           "주입 하한: rel 0.2(5토큰 중 1) 노드는 remember 주입 제외")
+        ck(any(m["node_id"] == "node:CONV:aa01" for m in pf_floor["avoid_patterns"]),
+           "주입 하한은 위험축(avoid/반문) 미적용 — 버그패턴 매칭 유지(안전 불변)")
+        home_f0 = os.path.join(tmp, ".binggupack_floor0")
+        os.makedirs(home_f0, exist_ok=True)
+        CFG.save_user_config({"recall_config": {"preflight_rel_min": 0.0}}, home=home_f0)
+        pf_f0 = preflight_context(ledger, prompt="설정 파일 정리 작업 배포",
+                                  home=home_f0, scorer=_lex)
+        ck(any(n["node_id"] == "node:CONV:aa01" for n in pf_f0["remember"]),
+           "하한 0 override → 구 동작 복원(rel>0 전부 주입 · 사용자 조정 반영)")
+
         # ── P2 의미(semantic) 회상: 어휘 미매칭 query 가 의미로 회상되는가 ──
         # 별도 temp ledger — 어휘가 전혀 겹치지 않는 동의 개념 쌍을 심는다.
         sem_ledger = os.path.join(tmp, "sem_ledger.sqlite")

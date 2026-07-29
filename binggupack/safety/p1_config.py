@@ -149,6 +149,11 @@ DEFAULT_CONFIG = {
         "risk_high_score": 0.55,
         "preflight_max": 5,
         "recall_limit": 5,
+        #   preflight_rel_min: preflight 주입(기억할 것·선호) 관련성 하한 — 이 미만은 주입 안 함.
+        #     2026-07-29 도장 실측: used/ignored 변별력이 전부 저관련 구간에 있어 0.25 가
+        #     잡음 37% 차단 최적점(0.5 까지 올려도 +3 뿐). 위험반문(risk)은 하한 미적용(안전 축).
+        #     0 으로 두면 구 동작(rel>0 전부 주입).
+        "preflight_rel_min": 0.25,
         "semantic_recall_enabled": False,
         "trace_enabled": False,
     },
@@ -163,7 +168,7 @@ DEFAULT_CONFIG = {
 }
 
 _RECALL_KEYS = ("risk_mid_score", "risk_high_score", "preflight_max", "recall_limit",
-                "semantic_recall_enabled", "trace_enabled")
+                "preflight_rel_min", "semantic_recall_enabled", "trace_enabled")
 
 _RANKING_KEYS = ("freshness", "relevance", "utility")
 
@@ -273,7 +278,7 @@ def _coerce_recall(raw):
     """
     base = dict(DEFAULT_CONFIG["recall_config"])
     if isinstance(raw, dict):
-        for k in ("risk_mid_score", "risk_high_score"):
+        for k in ("risk_mid_score", "risk_high_score", "preflight_rel_min"):
             try:
                 v = float(raw.get(k, base[k]))
             except (TypeError, ValueError):

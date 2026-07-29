@@ -97,7 +97,10 @@ async function call(name, args) {
   const r = await call("preflight_context", { prompt:"검증 없이 바로 배포하려고 한다 endpoint selftest", cwd:"/w/example-project" });
   ck("preflight 위험→중간↑+avoid(버그패턴)", (r.risk_level==="중간"||r.risk_level==="높음") && r.avoid_patterns.length>=1);
   ck("preflight 높음→needs_question+question", r.needs_question===true && r.question && r.question.includes("배포"));
-  ck("preflight 선호 회수", r.preferences.some(p=>p.node_id==="node:t:n5"));
+  ck("preflight 주입하한: '한다'만 스친 선호(rel 0.125<0.25) 제외",
+     !r.preferences.some(p=>p.node_id==="node:t:n5"));
+  const pref = await call("preflight_context", { prompt:"배포 작업 백업 먼저", cwd:"/w/example-project" });
+  ck("preflight 선호 회수(하한 이상 rel 0.8)", pref.preferences.some(p=>p.node_id==="node:t:n5"));
   const safe = await call("preflight_context", { prompt:"토마토 수프 레시피 정리", cwd:"/w/cooking" });
   ck("preflight 무관→반문0+avoid0", safe.needs_question===false && safe.avoid_patterns.length===0);
   const hi = await call("preflight_context", { prompt:"배포 무관단어 점검", cwd:"/x", risk_high_score: 0.9 });
