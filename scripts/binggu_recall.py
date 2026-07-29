@@ -139,6 +139,34 @@ def _selftest():
         ck(rs == sorted(rs, reverse=True) or len(rs) <= 1,
            "why_search 동점 시 rank_score 내림차순 정렬")
 
+        # ── IDF 2차 키(relq): 같은 rel 동점에서 희소 토큰 매칭이 rank 를 이긴다 ──
+        tie_ledger = os.path.join(tmp, "tie_ledger.sqlite")
+        tcon = sqlite3.connect(tie_ledger)
+        apply_schema(tcon)
+
+        def add_tie(nid, sent, used):
+            tcon.execute(
+                "INSERT INTO nodes(node_id,node_type,sentence,candidate,state,content_hash,"
+                "created_at,semantic_subtype,use_count) VALUES(?,?,?,?,?,?,?,?,?)",
+                (nid, "judgment", sent, 0, "active", "h", now, "교훈", used))
+
+        # query "정렬 selftest" → 회수 노드 전원 rel=0.5(2토큰 중 1) 동점.
+        # 'selftest'=흔한 토큰(3노드 포함·df3) vs '정렬'=희소 토큰(1노드·df1).
+        add_tie("node:CONV:tj01", "배포 후 selftest 로그를 정리한다", 9)   # 흔한 토큰·rank 최상
+        add_tie("node:CONV:tj02", "커밋 전 selftest 를 실행한다", 7)
+        add_tie("node:CONV:tj03", "회상 목록은 정렬 기준이 중요하다", 0)   # 희소 토큰·rank 최하
+        add_tie("node:CONV:tj04", "빌드 파이프라인 selftest 는 병렬로 돈다", 4)
+        tcon.commit()
+        tcon.close()
+        # scorer 주입 = 항상 None(어휘 전용) — Ollama 유무로 결과가 흔들리면 검증이 아니다
+        # (2026-07-29 실측: 라이브 Ollama 가 무관쌍 cos 0.58 을 줘 동점 자체가 깨짐).
+        ws_tie = why_search(tie_ledger, "정렬 selftest", scorer=lambda q, s: None)
+        tie_rel = [n["relevance"] for n in ws_tie["relevant_nodes"]]
+        ck(len(ws_tie["relevant_nodes"]) == 4 and len(set(tie_rel)) == 1,
+           "IDF 동점 fixture: 회수 4노드 전원 같은 rel(순수 동점 상황 확인)")
+        ck(ws_tie["relevant_nodes"][0]["node_id"] == "node:CONV:tj03",
+           "IDF 2차 키: 희소 토큰('정렬') 매칭이 흔한 토큰+높은 rank 를 이긴다(동점 분해)")
+
         # ── judgment_trace: edge 따라 사슬 ──
         jt = judgment_trace(ledger, "node:CONV:aa01")
         ck(jt["found"] and len(jt["chain"]) >= 1

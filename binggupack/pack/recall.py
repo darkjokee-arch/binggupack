@@ -32,6 +32,7 @@ judgment_trace/match_risk_patterns/preflight_context·embed 캐시 helper)이 �
 from __future__ import annotations
 
 import hashlib
+import math
 import os
 import sqlite3
 import struct
@@ -433,8 +434,19 @@ def _why_search_on_graph(g, query, limit, home, scorer):
         if _pf is not None:
             _pf([n["sentence"] for n in g["nodes"]])
 
+    # IDF(그래프 내 df) — 같은 rel 동점 안에서만 쓰는 2차 키(relq). 쿼리 토큰이 5개면 rel 은
+    # 0.2 단위로 양자화돼 동점이 홍수를 이루고, 그 안에서는 rank_score 가 전권을 쥐어
+    # 흔한 부분문자열 토큰(예: 'rel'⊂'release')만 스친 무관 노드가 상위로 온다(2026-07-29 실측).
+    # 희소 토큰 매칭을 앞세워 동점을 가른다 — rel 값·게이트·위험매칭·기록 스키마는 불변.
+    uniq = sorted(set(qtok))  # set 순회 비결정 방지 — 정렬 고정(합산 순서 결정적)
+    lower_sents = [(n, (n["sentence"] or "").lower()) for n in g["nodes"]]
+    total_n = len(lower_sents) or 1
+    idf = {t: math.log(1.0 + total_n / float(sum(1 for _, s in lower_sents if t in s) or 1))
+           for t in uniq}
+    idf_sum = sum(idf[t] for t in uniq) or 1.0
+
     scored = []
-    for n in g["nodes"]:
+    for n, low in lower_sents:
         rel = _relevance(qtok, n["sentence"])
         if scorer is not None and qtok:
             cs = scorer(query, n["sentence"])
@@ -442,9 +454,10 @@ def _why_search_on_graph(g, query, limit, home, scorer):
                 rel = max(rel, cs)  # cos 보강(의미 매칭, floor 이상만 — 무관 cos 잡음 차단)
         if rel <= 0.0:
             continue
-        scored.append((rel, n))
-    # 관련성 1차, rank_score(신선도+유용성) 2차, id 사전순 3차 — 결정적.
-    scored.sort(key=lambda x: (-x[0], -x[1]["rank_score"], x[1]["id"]))
+        relq = round(sum(idf[t] for t in uniq if t in low) / idf_sum, 6)
+        scored.append((rel, relq, n))
+    # 관련성 1차, IDF 가중 관련성(relq — 동점 분해) 2차, rank_score 3차, id 사전순 4차 — 결정적.
+    scored.sort(key=lambda x: (-x[0], -x[1], -x[2]["rank_score"], x[2]["id"]))
     top = scored[:limit]
 
     rel_nodes = [{
@@ -452,16 +465,16 @@ def _why_search_on_graph(g, query, limit, home, scorer):
         "node_type": n["node_type"], "semantic_subtype": n["semantic_subtype"],
         "rank_score": n["rank_score"], "relevance": round(rel, 4),
         "candidate": True, "trust": "candidate_unverified",
-    } for rel, n in top]
+    } for rel, _relq, n in top]
 
-    top_ids = {n["id"] for _, n in top}
+    top_ids = {n["id"] for _, _, n in top}
     rel_edges = [{
         "edge_id": e["id"], "relation": e["relation"],
         "source": e["source"], "target": e["target"], "candidate": True,
     } for e in g["edges"] if e["source"] in top_ids or e["target"] in top_ids]
 
     evidence = [{"node_id": n["id"], "evidence_excerpt": n["sentence"][:120]}
-                for _, n in top]
+                for _, _, n in top]
     confidence = round(top[0][0], 4) if top else 0.0
     summary = ("관련 기억 %d건(랭킹순). candidate — 사람 확정 전 참고용." % len(top)
                if top else "query 와 관련된 판단/근거 노드를 찾지 못했습니다.")
