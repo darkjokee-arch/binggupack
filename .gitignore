@@ -6,6 +6,10 @@
 dist/
 **/dist/
 
+# S2-6 parity 하네스 컴파일 산출물 (npm run test:parity 가 매번 재생성)
+dist-parity/
+**/dist-parity/
+
 # node 의존성
 node_modules/
 **/node_modules/

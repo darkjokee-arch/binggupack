@@ -1,0 +1,15 @@
+{
+  "//": "S2-6 py↔ts 골든 대조 전용. Workers 런타임이 아니라 node 로 돌리므로 워커 타입을 끌어오지 않는다.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "lib": ["ES2022", "DOM"],
+    "types": [],
+    "strict": false,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "outDir": "dist-parity",
+    "rootDir": "."
+  },
+  "include": ["src/capture_preview.ts", "parity/capture_preview_parity.ts"]
+}
