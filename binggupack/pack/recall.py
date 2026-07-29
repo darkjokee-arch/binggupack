@@ -650,31 +650,37 @@ def preflight_context(ledger_path, prompt=None, cwd=None, domain=None,
                 "summary": "그래프가 비어 있습니다(신규 사용자 — 회상할 기억 없음)."}
 
     # remember = 관련 판단/근거 상위 preflight_max개(why_search 본체 재사용 — g 재로드 0).
+    # 주입 하한 preflight_rel_min(2026-07-29): 도장 실측(사람 도장 히트율 9.3%·잡음 유입이 근본)
+    # 으로 하한 미만은 주입하지 않는다 — "무관 작업 → 출력 0(소음 0)" 설계 의도 복원.
+    # 위험반문(risk)은 하한 미적용(안전 축 불변) — 직접 인출(why_search/MCP recall)도 미적용.
+    rel_min = rc.get("preflight_rel_min", 0.25)
     ws = _why_search_on_graph(g, work_text, rc["preflight_max"], home, scorer)
-    remember = ws["relevant_nodes"]
+    remember = [n for n in ws["relevant_nodes"] if n["relevance"] >= rel_min]
 
     # 반문 = 위험패턴 매칭(Phase6).
     risk = match_risk_patterns(g, work_text, qtok, home=home, scorer=scorer)
 
     # 하면 안 되는 과거 패턴 = 버그패턴 subtype 중 관련된 것.
     avoid = [m for m in risk["matches"] if m["semantic_subtype"] == "버그패턴"]
-    # 사용자 선호 = subtype=선호 노드 중 관련된 것(위험 아님 — 참고).
+    # 사용자 선호 = subtype=선호 노드 중 관련된 것(위험 아님 — 참고). 주입 하한 동일 적용.
     preferences = []
     for n in g["nodes"]:
         if n["semantic_subtype"] != "선호":
             continue
         rel = _relevance(qtok, n["sentence"])
-        if rel > 0.0:
+        if rel >= rel_min and rel > 0.0:
             preferences.append({"node_id": n["id"], "claim": n["sentence"][:100],
                                 "relevance": round(rel, 4)})
     preferences.sort(key=lambda p: -p["relevance"])
 
     ask = [risk["question"]] if risk["question"] else []
     _release()
+    # confidence = 하한 통과분 기준(빈 remember 에 confidence>0 모순 방지 · ts 미러 동일 계약).
+    confidence = remember[0]["relevance"] if remember else 0.0
     return {"remember": remember, "ask": ask, "avoid_patterns": avoid,
             "preferences": preferences[:rc["preflight_max"]],
             "risk_level": risk["risk_level"], "needs_question": risk["needs_question"],
-            "question": risk["question"], "confidence": ws["confidence"],
+            "question": risk["question"], "confidence": confidence,
             "summary": ("관련 기억 %d · 위험패턴 %d · 위험도 %s%s"
                         % (len(remember), len(risk["matches"]), risk["risk_level"],
                            " (반문 필요)" if risk["needs_question"] else ""))}

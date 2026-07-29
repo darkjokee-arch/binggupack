@@ -581,6 +581,8 @@ function toolPreflightContext(store: PackStore, args: Record<string, any>): any 
   const riskMid = typeof args.risk_mid_score === "number" ? args.risk_mid_score : RISK_MID_DEFAULT;
   const riskHigh = typeof args.risk_high_score === "number" ? args.risk_high_score : RISK_HIGH_DEFAULT;
   const maxN = Math.max(1, Math.min(toInt(args.max_nodes ?? 5), 7));
+  // 주입 하한(py preflight_rel_min 미러 · 2026-07-29 도장 실측 0.25) — remember/선호만, risk 미적용.
+  const relMin = typeof args.rel_min === "number" ? Math.min(1, Math.max(0, args.rel_min)) : 0.25;
 
   const packIds = args.pack_id ? [String(args.pack_id)] : store.ids();
   const allNodes: any[] = [];
@@ -597,7 +599,7 @@ function toolPreflightContext(store: PackStore, args: Record<string, any>): any 
   const scored = allNodes.map(({ pid, n }) => ({ pid, n, rel: relScore(terms, n.claim ?? ""),
     relq: Math.round(relqScore(pfTbl, (n.claim ?? "").toLowerCase())
       * (typeof n.rank_score === "number" ? n.rank_score : 0) * 1e6) / 1e6 }))
-    .filter((x) => x.rel > 0);
+    .filter((x) => x.rel >= relMin && x.rel > 0);
   scored.sort((a, b) => b.rel - a.rel || b.relq - a.relq ||
     (a.n.id < b.n.id ? -1 : a.n.id > b.n.id ? 1 : 0));
   const remember = scored.slice(0, maxN).map(({ pid, n, rel }) => ({
@@ -617,8 +619,10 @@ function toolPreflightContext(store: PackStore, args: Record<string, any>): any 
     const rel = relScore(terms, n.claim ?? "");
     if (rel <= 0) continue;
     if (sub === "선호") {
-      preferences.push({ node_id: n.id, claim: (n.claim ?? "").slice(0, 100),
-        relevance: Math.round(rel * 10000) / 10000 });
+      if (rel >= relMin) {
+        preferences.push({ node_id: n.id, claim: (n.claim ?? "").slice(0, 100),
+          relevance: Math.round(rel * 10000) / 10000 });
+      }
       continue;
     }
     const w = RISK_SUBTYPE_WEIGHT[sub as string];
