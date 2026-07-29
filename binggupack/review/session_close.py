@@ -319,11 +319,23 @@ def _build_recall_hits(home=None, ledger_path=None, now_ts=None, top_n=12, sessi
                                            include_ai_stamped=True)
                            if session_id else [])
         if session_pending:
+            # ★owner 2회 지적(7/28 "이번세션 회상이 이번세션에 사용한게 아닌데?" · 7/29 "12건 모두
+            #   판단에 실제로 쓴 게 아닌데?") — 도장 대상은 **판단에 실제 인출한 회상**이다.
+            #   preflight 는 hook 이 매 발화 자동 주입한 것이라 내가 읽고 썼다는 보장이 없고,
+            #   건수가 압도적이라 최신순으로 자르면 목록이 전부 자동주입분으로 채워진다.
+            #   (7/29 실측: 이번 세션 preflight 13 · mcp_recall 1 → 표시 12건 **전부 preflight**,
+            #    내가 실제 인출한 1건은 오래된 축이라 컷에서 밀려남.)
+            #   7/28 수리(#122)는 "목록에 들어오게"까지였고, 이 정렬이 남은 절반이다.
+            _DIRECT = ("mcp_recall", "why_search")   # 내가 질의해서 꺼낸 것
+            direct = [p for p in reversed(session_pending) if p.get("kind") in _DIRECT]
+            auto = [p for p in reversed(session_pending) if p.get("kind") not in _DIRECT]
             sel = []
-            for p in reversed(session_pending):  # list_pending 은 ts asc → 뒤가 최신
+            for p in direct + auto:   # 직접 인출 먼저, 남는 자리만 자동 주입
                 sel.append({"trace_id": p["trace_id"], "node_id": p["node_id"],
                             "category": p.get("category"), "rank": p.get("rank"),
                             "claim": p.get("claim"), "flag": "session",
+                            "kind": p.get("kind"),
+                            "source": ("직접인출" if p.get("kind") in _DIRECT else "자동주입"),
                             "ai_verdict": p.get("ai_verdict"),
                             "ai_reason_code": p.get("ai_reason_code")})
                 if len(sel) >= top_n:
@@ -335,14 +347,19 @@ def _build_recall_hits(home=None, ledger_path=None, now_ts=None, top_n=12, sessi
                                     ts=now_ts)
             items = [{"idx": s["idx"], "category": s.get("category"), "rank": s.get("rank"),
                       "claim": s.get("claim"), "flag": s.get("flag"),
+                      "kind": s.get("kind"), "source": s.get("source"),
                       "ai_verdict": s.get("ai_verdict"),
                       "ai_reason_code": s.get("ai_reason_code")} for s in sel]
             n_ai = sum(1 for s in sel if s.get("ai_verdict"))
+            n_direct = sum(1 for s in sel if s.get("source") == "직접인출")
             return {"available": True, "count": len(items), "total_pending": len(session_pending),
                     "items": items, "scope": "session", "ai_stamped": n_ai,
+                    "direct_count": n_direct,
                     "note": ("이번 세션 실제 회상 %d건 중 %d건 — 도움됐으면 `히트 N`·안 도움이면 `미스 N`. "
-                             "AI 자동 기입 %d건(기본값 · 다르게 찍으면 owner 것이 덮어씀)."
-                             % (len(session_pending), len(items), n_ai))}
+                             "**직접인출 %d건**(내가 질의해 꺼낸 것 · 판정 우선) + 자동주입 %d건"
+                             "(hook 이 넣은 것 — 읽었다는 보장 없음). AI 자동 기입 %d건."
+                             % (len(session_pending), len(items), n_direct,
+                                len(items) - n_direct, n_ai))}
         pending = RT.list_pending(home=home, ledger_path=lp)
         total = len(pending)
         if not pending:
@@ -578,7 +595,11 @@ def render_close_md(summary):
                 mark = " ⚠미스후보"
             else:
                 age = mark = ""
-            lines.append("- %d.%s %s%s%s%s" % (it["idx"], mark, claim, cat, rank, age))
+            # 출처 표시(owner 2회 지적): '내가 질의해 꺼낸 것'과 'hook 이 자동 주입한 것'을
+            # 화면에서 구분해야 도장이 정직해진다. 자동주입은 읽었다는 보장이 없다.
+            src = it.get("source")
+            src_tag = (" `%s`" % src) if src else ""
+            lines.append("- %d.%s%s %s%s%s%s" % (it["idx"], mark, src_tag, claim, cat, rank, age))
         lines.append("> %s" % rh.get("note", "도움=히트 N·헛다리=미스 N — 양쪽 다 도장해야 정직·안 치면 pending 유지·자동 0"))
     else:
         lines.append("- (누적 미판정 회상 없음 — trace OFF 거나 회상 0)")
