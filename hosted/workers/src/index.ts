@@ -440,6 +440,31 @@ function relScore(terms: string[], text: string): number {
   return hit / uniq.size;
 }
 
+// IDF(대상 노드 집합 내 df) — 같은 rel 동점 안에서만 쓰는 2차 키(relq).
+// py _why_search_on_graph 미러: rel 양자화 동점 홍수에서 rank 가 전권을 쥐어
+// 흔한 부분문자열 토큰만 스친 무관 노드가 상위로 오는 것을 희소 토큰 가중으로 분해.
+// rel 값·게이트·위험매칭은 불변. uniq 정렬 고정(합산 순서 결정적).
+function idfTable(terms: string[], texts: string[]): { idf: Map<string, number>; sum: number; uniq: string[] } {
+  const uniq = Array.from(new Set(terms)).sort();
+  const totalN = texts.length || 1;
+  const idf = new Map<string, number>();
+  let sum = 0;
+  for (const t of uniq) {
+    let df = 0;
+    for (const s of texts) if (s.includes(t)) df++;
+    const w = Math.log(1 + totalN / (df || 1));
+    idf.set(t, w);
+    sum += w;
+  }
+  return { idf, sum: sum || 1, uniq };
+}
+
+function relqScore(tbl: { idf: Map<string, number>; sum: number; uniq: string[] }, text: string): number {
+  let rq = 0;
+  for (const t of tbl.uniq) if (text.includes(t)) rq += tbl.idf.get(t) ?? 0;
+  return Math.round((rq / tbl.sum) * 1e6) / 1e6;
+}
+
 function toolWhySearch(store: PackStore, args: Record<string, any>): any {
   const query = reqStr(args, "query");
   if (!(query.length >= 2 && query.length <= 200)) {
@@ -448,17 +473,20 @@ function toolWhySearch(store: PackStore, args: Record<string, any>): any {
   const limit = Math.max(1, Math.min(toInt(args.limit ?? 5), 20));
   const packIds = args.pack_id ? [String(args.pack_id)] : store.ids();
   const terms = query.toLowerCase().split(/\s+/).filter((t) => t.length >= 2);
-  const scored: any[] = [];
+  const all: any[] = [];
   for (const pid of packIds) {
     const v = store.get(pid);
-    for (const n of v.nodes) {
-      const rel = relScore(terms, n.claim ?? "");
-      if (rel <= 0) continue;
-      scored.push({ pid, n, rel });
-    }
+    for (const n of v.nodes) all.push({ pid, n, low: (n.claim ?? "").toLowerCase() });
   }
-  // 관련성 1차, rank_score(신선도+유용성) 2차, node_id 사전순 3차 — 결정적(P1-② 활용).
-  scored.sort((a, b) => b.rel - a.rel || b.n.rank_score - a.n.rank_score ||
+  const tbl = idfTable(terms, all.map((x) => x.low));
+  const scored: any[] = [];
+  for (const { pid, n, low } of all) {
+    const rel = relScore(terms, n.claim ?? "");
+    if (rel <= 0) continue;
+    scored.push({ pid, n, rel, relq: relqScore(tbl, low) });
+  }
+  // 관련성 1차, IDF 가중 관련성(relq — 동점 분해) 2차, rank_score 3차, node_id 사전순 4차 — 결정적.
+  scored.sort((a, b) => b.rel - a.rel || b.relq - a.relq || b.n.rank_score - a.n.rank_score ||
     (a.n.id < b.n.id ? -1 : a.n.id > b.n.id ? 1 : 0));
   const top = scored.slice(0, limit);
   const relevant_nodes = top.map(({ pid, n, rel }) => ({
@@ -562,10 +590,12 @@ function toolPreflightContext(store: PackStore, args: Record<string, any>): any 
              candidate_note: "all items candidate (not confirmed)" };
   }
 
-  // remember = 관련 노드 상위 maxN(why_search 정렬과 동일).
-  const scored = allNodes.map(({ pid, n }) => ({ pid, n, rel: relScore(terms, n.claim ?? "") }))
+  // remember = 관련 노드 상위 maxN(why_search 정렬과 동일 — relq 동점 분해 포함).
+  const pfTbl = idfTable(terms, allNodes.map(({ n }) => (n.claim ?? "").toLowerCase()));
+  const scored = allNodes.map(({ pid, n }) => ({ pid, n, rel: relScore(terms, n.claim ?? ""),
+    relq: relqScore(pfTbl, (n.claim ?? "").toLowerCase()) }))
     .filter((x) => x.rel > 0);
-  scored.sort((a, b) => b.rel - a.rel || b.n.rank_score - a.n.rank_score ||
+  scored.sort((a, b) => b.rel - a.rel || b.relq - a.relq || b.n.rank_score - a.n.rank_score ||
     (a.n.id < b.n.id ? -1 : a.n.id > b.n.id ? 1 : 0));
   const remember = scored.slice(0, maxN).map(({ pid, n, rel }) => ({
     pack_id: pid, node_id: n.id, claim: (n.claim ?? "").slice(0, 100),
