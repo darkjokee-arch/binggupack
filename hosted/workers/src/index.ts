@@ -483,10 +483,12 @@ function toolWhySearch(store: PackStore, args: Record<string, any>): any {
   for (const { pid, n, low } of all) {
     const rel = relScore(terms, n.claim ?? "");
     if (rel <= 0) continue;
-    scored.push({ pid, n, rel, relq: relqScore(tbl, low) });
+    const rank = typeof n.rank_score === "number" ? n.rank_score : 0;
+    // 동점 2차 키 = relq × rank_score 곱 블렌드(py _why_search_on_graph 미러 — 백테스트 3-arm).
+    scored.push({ pid, n, rel, relq: Math.round(relqScore(tbl, low) * rank * 1e6) / 1e6 });
   }
-  // 관련성 1차, IDF 가중 관련성(relq — 동점 분해) 2차, rank_score 3차, node_id 사전순 4차 — 결정적.
-  scored.sort((a, b) => b.rel - a.rel || b.relq - a.relq || b.n.rank_score - a.n.rank_score ||
+  // 관련성 1차, relq×rank(동점 분해 — 희소토큰×검증된유용성) 2차, node_id 사전순 3차 — 결정적.
+  scored.sort((a, b) => b.rel - a.rel || b.relq - a.relq ||
     (a.n.id < b.n.id ? -1 : a.n.id > b.n.id ? 1 : 0));
   const top = scored.slice(0, limit);
   const relevant_nodes = top.map(({ pid, n, rel }) => ({
@@ -590,12 +592,13 @@ function toolPreflightContext(store: PackStore, args: Record<string, any>): any 
              candidate_note: "all items candidate (not confirmed)" };
   }
 
-  // remember = 관련 노드 상위 maxN(why_search 정렬과 동일 — relq 동점 분해 포함).
+  // remember = 관련 노드 상위 maxN(why_search 정렬과 동일 — relq×rank 동점 분해 포함).
   const pfTbl = idfTable(terms, allNodes.map(({ n }) => (n.claim ?? "").toLowerCase()));
   const scored = allNodes.map(({ pid, n }) => ({ pid, n, rel: relScore(terms, n.claim ?? ""),
-    relq: relqScore(pfTbl, (n.claim ?? "").toLowerCase()) }))
+    relq: Math.round(relqScore(pfTbl, (n.claim ?? "").toLowerCase())
+      * (typeof n.rank_score === "number" ? n.rank_score : 0) * 1e6) / 1e6 }))
     .filter((x) => x.rel > 0);
-  scored.sort((a, b) => b.rel - a.rel || b.relq - a.relq || b.n.rank_score - a.n.rank_score ||
+  scored.sort((a, b) => b.rel - a.rel || b.relq - a.relq ||
     (a.n.id < b.n.id ? -1 : a.n.id > b.n.id ? 1 : 0));
   const remember = scored.slice(0, maxN).map(({ pid, n, rel }) => ({
     pack_id: pid, node_id: n.id, claim: (n.claim ?? "").slice(0, 100),
