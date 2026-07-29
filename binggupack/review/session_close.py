@@ -326,40 +326,67 @@ def _build_recall_hits(home=None, ledger_path=None, now_ts=None, top_n=12, sessi
             #   (7/29 실측: 이번 세션 preflight 13 · mcp_recall 1 → 표시 12건 **전부 preflight**,
             #    내가 실제 인출한 1건은 오래된 축이라 컷에서 밀려남.)
             #   7/28 수리(#122)는 "목록에 들어오게"까지였고, 이 정렬이 남은 절반이다.
+            # ★v5(2026-07-29 owner 지적 3건 — 해강 세션 preview 실측 재현 후 수리):
+            #   ① 같은 노드가 쿼리마다 다른 trace 로 잡혀 중복 노출(#2=#8) → node_id dedup.
+            #     쌍둥이 trace 참조는 dup_refs 로 스냅샷에 실어 도장 시 함께 판정(mark_by_index)
+            #     — 대표만 찍으면 나머지 (trace,node)가 누적 미판정에 유령으로 재등장한다.
+            #   ② 직접인출이 top_n 을 넘으면 오래된 쿼리 꼬리부터 잘려 실사용 회상이 증발
+            #     (실측: 직접 15건 − 12컷 = 3건 누락) → 직접인출은 컷 없이 전부(판정 완전성),
+            #     자동주입만 남는 자리를 채운다.
+            #   ③ 검색 잡음은 하드 필터 대신 rel 표시 — rel 0.125 배치에도 실사용분이 있어(실측)
+            #     기계 컷은 오컷. 주입 하한(preflight_rel_min) 미만은 ⚠저관련 마커로만 표시.
             _DIRECT = ("mcp_recall", "why_search")   # 내가 질의해서 꺼낸 것
             direct = [p for p in reversed(session_pending) if p.get("kind") in _DIRECT]
             auto = [p for p in reversed(session_pending) if p.get("kind") not in _DIRECT]
-            sel = []
-            for p in direct + auto:   # 직접 인출 먼저, 남는 자리만 자동 주입
-                sel.append({"trace_id": p["trace_id"], "node_id": p["node_id"],
-                            "category": p.get("category"), "rank": p.get("rank"),
-                            "claim": p.get("claim"), "flag": "session",
-                            "kind": p.get("kind"),
-                            "source": ("직접인출" if p.get("kind") in _DIRECT else "자동주입"),
-                            "ai_verdict": p.get("ai_verdict"),
-                            "ai_reason_code": p.get("ai_reason_code")})
-                if len(sel) >= top_n:
-                    break
+            try:
+                from binggupack.safety import p1_config as _CFG
+                rel_min = _CFG.recall_config(home).get("preflight_rel_min", 0.25)
+            except Exception:
+                rel_min = 0.25  # 정본: p1_config recall_config.preflight_rel_min
+            sel, by_node = [], {}
+            for p in direct + auto:   # 직접 인출 먼저(전부) → 자동 주입(남는 자리)
+                nid = p["node_id"]
+                if nid in by_node:                       # ① 중복 → 대표(dedup)에 흡수
+                    by_node[nid].setdefault("dup_refs", []).append([p["trace_id"], nid])
+                    continue
+                if p.get("kind") not in _DIRECT and len(sel) >= top_n:
+                    break                                # ② 자동주입만 top_n 컷
+                rel = p.get("relevance")
+                entry = {"trace_id": p["trace_id"], "node_id": nid,
+                         "category": p.get("category"), "rank": p.get("rank"),
+                         "relevance": rel,
+                         "low_rel": bool(isinstance(rel, (int, float)) and rel < rel_min),
+                         "claim": p.get("claim"), "flag": "session",
+                         "kind": p.get("kind"),
+                         "source": ("직접인출" if p.get("kind") in _DIRECT else "자동주입"),
+                         "ai_verdict": p.get("ai_verdict"),
+                         "ai_reason_code": p.get("ai_reason_code")}
+                by_node[nid] = entry
+                sel.append(entry)
             for i, s in enumerate(sel, 1):
                 s["idx"] = i
             # scope/session_id 를 함께 고정 — 다른 목록(전체 누적)이 스냅샷을 덮은 뒤의 오도장 차단
             RT.save_review_snapshot(sel, home=home, scope="session", session_id=session_id,
                                     ts=now_ts)
             items = [{"idx": s["idx"], "category": s.get("category"), "rank": s.get("rank"),
+                      "relevance": s.get("relevance"), "low_rel": s.get("low_rel"),
                       "claim": s.get("claim"), "flag": s.get("flag"),
                       "kind": s.get("kind"), "source": s.get("source"),
                       "ai_verdict": s.get("ai_verdict"),
                       "ai_reason_code": s.get("ai_reason_code")} for s in sel]
             n_ai = sum(1 for s in sel if s.get("ai_verdict"))
             n_direct = sum(1 for s in sel if s.get("source") == "직접인출")
+            n_dup = sum(len(s.get("dup_refs") or []) for s in sel)
+            dup_txt = (" 같은 노드 중복 %d건은 합침(도장 시 함께 판정)." % n_dup) if n_dup else ""
             return {"available": True, "count": len(items), "total_pending": len(session_pending),
                     "items": items, "scope": "session", "ai_stamped": n_ai,
-                    "direct_count": n_direct,
+                    "direct_count": n_direct, "dup_merged": n_dup,
                     "note": ("이번 세션 실제 회상 %d건 중 %d건 — 도움됐으면 `히트 N`·안 도움이면 `미스 N`. "
-                             "**직접인출 %d건**(내가 질의해 꺼낸 것 · 판정 우선) + 자동주입 %d건"
-                             "(hook 이 넣은 것 — 읽었다는 보장 없음). AI 자동 기입 %d건."
+                             "**직접인출 %d건 전부**(내가 질의해 꺼낸 것 · 판정 우선) + 자동주입 %d건"
+                             "(hook 이 넣은 것 — 읽었다는 보장 없음). AI 자동 기입 %d건.%s"
+                             " ⚠저관련(rel<%.2f)은 검색 잡음일 수 있음 — 아니면 `미스 N`."
                              % (len(session_pending), len(items), n_direct,
-                                len(items) - n_direct, n_ai))}
+                                len(items) - n_direct, n_ai, dup_txt, rel_min))}
         pending = RT.list_pending(home=home, ledger_path=lp)
         total = len(pending)
         if not pending:
@@ -599,7 +626,13 @@ def render_close_md(summary):
             # 화면에서 구분해야 도장이 정직해진다. 자동주입은 읽었다는 보장이 없다.
             src = it.get("source")
             src_tag = (" `%s`" % src) if src else ""
-            lines.append("- %d.%s%s %s%s%s%s" % (it["idx"], mark, src_tag, claim, cat, rank, age))
+            # rel 표시(v5 owner 지적③): 잡음은 하드 컷 대신 저관련 마커 — 판정은 사람.
+            rel = ""
+            if isinstance(it.get("relevance"), (int, float)):
+                rel = " rel=%.2f" % it["relevance"]
+                if it.get("low_rel"):
+                    rel += "⚠저관련"
+            lines.append("- %d.%s%s %s%s%s%s%s" % (it["idx"], mark, src_tag, claim, cat, rank, rel, age))
         lines.append("> %s" % rh.get("note", "도움=히트 N·헛다리=미스 N — 양쪽 다 도장해야 정직·안 치면 pending 유지·자동 0"))
     else:
         lines.append("- (누적 미판정 회상 없음 — trace OFF 거나 회상 0)")
@@ -961,6 +994,42 @@ def _selftest():
             check(bool(t_now) and "이번 세션 회상" in t_now[0]
                   and bool(t_fb) and "누적 미판정" in t_fb[0],
                   "T21d 제목이 scope 를 따름(session=이번 세션 회상 / 폴백=누적 미판정)")
+            # T21e(v5 2026-07-29 owner 지적 3건): dedup·직접인출 무컷·rel 마커
+            home_v5 = tmp / ".binggupack_v5"
+            RT.set_trace_flag(True, home=str(home_v5))
+            RT.record_trace("q_old", "mcp_recall",
+                            [{"node_id": "node:CONV:v5a", "relevance": 0.125},
+                             {"node_id": "node:CONV:v5b", "relevance": 0.125}],
+                            "2026-07-29T01:00:00Z", session_id="V5", home=str(home_v5))
+            RT.record_trace("q_new", "mcp_recall",
+                            [{"node_id": "node:CONV:v5c", "relevance": 0.59},
+                             {"node_id": "node:CONV:v5a", "relevance": 0.3}],
+                            "2026-07-29T02:00:00Z", session_id="V5", home=str(home_v5))
+            RT.record_trace("pf", "preflight", [{"node_id": "node:CONV:v5d", "relevance": 0.4}],
+                            "2026-07-29T03:00:00Z", session_id="V5", home=str(home_v5))
+            rh5 = _build_recall_hits(home=str(home_v5), session_id="V5", top_n=3)
+            # 직접 4참조 → dedup 3(v5c·v5a·v5b) 전부 유지(top_n=3 이라 구코드면 v5b 증발+중복)
+            #   · 자동주입(v5d)은 자리 없어 컷 · 중복 1건 합침
+            check(rh5["count"] == 3 and rh5["direct_count"] == 3
+                  and rh5.get("dup_merged") == 1
+                  and all(it["source"] == "직접인출" for it in rh5["items"]),
+                  "T21e(v5) 직접인출 무컷 + node dedup(중복 1 합침) + 자동주입만 top_n 컷")
+            lows = {it["relevance"]: it.get("low_rel") for it in rh5["items"]}
+            check(lows.get(0.125) is True and lows.get(0.59) is False
+                  and lows.get(0.3) is False,
+                  "T21e low_rel 마커 — 하한(0.25) 미만만 저관련(하드 컷 0)")
+            md5 = render_close_md({"recall_hits": rh5})
+            check("⚠저관련" in md5 and "rel=0.59" in md5,
+                  "T21e render — rel 표시 + ⚠저관련 마커")
+            snap5 = RT._load_review_snapshot(home=str(home_v5))
+            rep5 = next(s for s in snap5["items"] if s.get("dup_refs"))
+            check(rep5["node_id"] == "node:CONV:v5a" and len(rep5["dup_refs"]) == 1,
+                  "T21e snapshot 에 dup_refs 보존(대표=v5a·쌍둥이 1)")
+            st5 = RT.mark_by_index(rep5["idx"], "used", {"actor": "human"},
+                                   "2026-07-29T04:00:00Z", home=str(home_v5))
+            check(st5["recorded"] and st5.get("dup_stamped") == 1
+                  and len(RT.list_pending(home=str(home_v5), session_id="V5")) == 3,
+                  "T21e 도장 → 쌍둥이 trace 동시 판정(5참조−2판정=미판정 3 · 유령 0)")
         except Exception as e:
             rh_ok = False
             check(rh_ok, "T20~T21 회상 히트 통합 예외: %s" % type(e).__name__)

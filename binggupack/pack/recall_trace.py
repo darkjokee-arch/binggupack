@@ -554,7 +554,7 @@ def list_pending(home=None, ledger_path=None, session_id=None, include_ai_stampe
     include_ai_stamped(2026-07-27): True 면 **AI 자기신고 도장(ai_stamp)이 찍힌 것도 목록에 남긴다**
       — owner 가 마무리 preview 에서 보고 다르게 찍어 덮어쓸 수 있어야 하므로(사람 > AI).
       사람 판정(human)·T0 관측은 그대로 제외(확정분).
-    반환 [{idx, trace_id, node_id, category, rank, kind, claim, ai_verdict}] (idx=1부터)."""
+    반환 [{idx, trace_id, node_id, category, rank, relevance, kind, claim, ai_verdict}] (idx=1부터)."""
     if not os.path.exists(trace_store_path(home)):
         return []
     con = _open_store(home)
@@ -599,6 +599,7 @@ def list_pending(home=None, ledger_path=None, session_id=None, include_ai_stampe
             claim = (node["sentence"][:100] if node else None)
             pending.append({"trace_id": trace_id, "node_id": nid,
                             "category": n.get("category"), "rank": n.get("rank"),
+                            "relevance": n.get("relevance"),
                             "kind": kind, "claim": claim,
                             "ai_verdict": (prev["verdict"] if prev else None),
                             "ai_reason_code": (prev["reason_code"] if prev else None)})
@@ -623,9 +624,12 @@ def save_review_snapshot(pending, home=None, *, scope=None, session_id=None, ts=
     박제 정합: "저장이 도장의 단일 원천이고 표시와 빌더는 저장값만 읽어야 발산이 없다".
 
     구형(리스트) 파일도 계속 읽힌다(_load_review_snapshot 하위호환)."""
+    # dup_refs(2026-07-29 v5): 마무리 preview 가 node_id dedup 한 경우 대표 밖의 쌍둥이
+    # (trace_id,node_id) 참조 — mark_by_index 가 도장 시 함께 판정한다(없으면 키 자체 생략).
     snap = {"schema": SNAPSHOT_SCHEMA, "scope": scope, "session_id": session_id, "ts": ts,
             "items": [{"idx": p["idx"], "trace_id": p["trace_id"], "node_id": p["node_id"],
-                       "ai_verdict": p.get("ai_verdict")}
+                       "ai_verdict": p.get("ai_verdict"),
+                       **({"dup_refs": p["dup_refs"]} if p.get("dup_refs") else {})}
                       for p in pending]}
     p = review_snapshot_path(home)
     d = os.path.dirname(p)
@@ -658,7 +662,8 @@ def mark_by_index(n, verdict, ctx, ts, *, reason_code=None, home=None,
 
     스냅샷 부재 → need_review(먼저 binggu trace review). N 범위 밖 → bad_index.
     expect_scope/expect_session 지정 시 스냅샷 출처와 대조 — 불일치면 **stale_snapshot**
-    (다른 목록이 덮어쓴 뒤의 오도장 차단). 구형 v1 스냅샷은 메타가 없어 대조를 건너뛴다."""
+    (다른 목록이 덮어쓴 뒤의 오도장 차단). 구형 v1 스냅샷은 메타가 없어 대조를 건너뛴다.
+    항목에 dup_refs(v5·dedup 쌍둥이 trace 참조)가 있으면 전부 같은 판정 — 반환에 dup_stamped=k."""
     snap = _load_review_snapshot(home)
     if not snap:
         return {"recorded": False, "reason": "need_review"}
@@ -671,8 +676,22 @@ def mark_by_index(n, verdict, ctx, ts, *, reason_code=None, home=None,
     hit = next((s for s in snap["items"] if s.get("idx") == n), None)
     if not hit:
         return {"recorded": False, "reason": "bad_index"}
-    return record_outcome(hit["trace_id"], hit["node_id"], verdict, ctx, ts,
-                          reason_code=reason_code, home=home)
+    res = record_outcome(hit["trace_id"], hit["node_id"], verdict, ctx, ts,
+                         reason_code=reason_code, home=home)
+    # dedup 대표 밖의 쌍둥이 trace 참조(dup_refs)도 같은 판정 — 대표만 찍으면 나머지
+    # (trace,node)가 누적 미판정 목록에 유령으로 재등장한다(2026-07-29 owner 지적①의 파이프 끝).
+    dup_ok = 0
+    for ref in (hit.get("dup_refs") or []):
+        try:
+            r2 = record_outcome(ref[0], ref[1], verdict, ctx, ts,
+                                reason_code=reason_code, home=home)
+            if r2.get("recorded"):
+                dup_ok += 1
+        except Exception:
+            pass  # 쌍둥이 도장 실패는 대표 판정을 되돌리지 않음(best-effort)
+    if dup_ok and isinstance(res, dict):
+        res["dup_stamped"] = dup_ok
+    return res
 
 
 # ---------------- 집계 (signal_only — golden set 자동수정 0) ----------------
@@ -1091,6 +1110,26 @@ def _selftest():
         v1 = _load_review_snapshot(home=home_ai)
         ck(v1["schema"].endswith("v1") and len(v1["items"]) == 1 and v1["scope"] is None,
            "구형 리스트 스냅샷 → v1 로 감싸 읽힘(하위호환 · 대조 skip)")
+
+        # dup_refs(v5): dedup 대표에 도장하면 쌍둥이 (trace,node)도 같은 판정
+        home_dd = os.path.join(tmp, ".binggupack_dd")
+        set_trace_flag(True, home=home_dd)
+        record_trace("q1", "mcp_recall", [{"node_id": "node:CONV:dd1", "relevance": 0.5}],
+                     TS, session_id="SESS_D", home=home_dd)
+        record_trace("q2", "mcp_recall", [{"node_id": "node:CONV:dd1", "relevance": 0.3}],
+                     TS, session_id="SESS_D", home=home_dd)
+        p_dd = list_pending(home=home_dd, session_id="SESS_D")
+        ck(len(p_dd) == 2 and {p["relevance"] for p in p_dd} == {0.5, 0.3},
+           "list_pending 이 relevance 를 노출(v5 · 표시용)")
+        rep = dict(p_dd[0])  # 동시각 trace 는 trace_id 사전순 — 어느 쪽이든 대표로 무방
+        rep["idx"] = 1
+        rep["dup_refs"] = [[p_dd[1]["trace_id"], p_dd[1]["node_id"]]]
+        save_review_snapshot([rep], home=home_dd, scope="session", session_id="SESS_D", ts=TS)
+        dd = mark_by_index(1, "used", {"actor": "human"}, TS, home=home_dd)
+        ck(dd["recorded"] and dd.get("dup_stamped") == 1,
+           "dup_refs 도장 — 대표 + 쌍둥이 trace 동시 판정(dup_stamped=1)")
+        ck(len(list_pending(home=home_dd, session_id="SESS_D")) == 0,
+           "쌍둥이까지 판정돼 미판정 유령 0(dedup 파이프 끝단)")
 
         # 집계 actor 분리 — AI 도장과 사람 도장이 한 칸에 섞이지 않는다
         agg_ai = aggregate(home=home_ai)
