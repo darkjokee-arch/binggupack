@@ -166,6 +166,10 @@ def _selftest():
            "IDF 동점 fixture: 회수 4노드 전원 같은 rel(순수 동점 상황 확인)")
         ck(ws_tie["relevant_nodes"][0]["node_id"] == "node:CONV:tj03",
            "IDF 2차 키: 희소 토큰('정렬') 매칭이 흔한 토큰+높은 rank 를 이긴다(동점 분해)")
+        tie_order = [n["node_id"] for n in ws_tie["relevant_nodes"]]
+        ck(tie_order.index("node:CONV:tj01") < tie_order.index("node:CONV:tj02")
+           < tie_order.index("node:CONV:tj04"),
+           "곱 블렌드: 같은 토큰 매칭끼리는 검증된 유용성(rank) 순 유지(used 강등 방지)")
 
         # ── judgment_trace: edge 따라 사슬 ──
         jt = judgment_trace(ledger, "node:CONV:aa01")

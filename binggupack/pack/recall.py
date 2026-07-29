@@ -455,9 +455,12 @@ def _why_search_on_graph(g, query, limit, home, scorer):
         if rel <= 0.0:
             continue
         relq = round(sum(idf[t] for t in uniq if t in low) / idf_sum, 6)
-        scored.append((rel, relq, n))
-    # 관련성 1차, IDF 가중 관련성(relq — 동점 분해) 2차, rank_score 3차, id 사전순 4차 — 결정적.
-    scored.sort(key=lambda x: (-x[0], -x[1], -x[2]["rank_score"], x[2]["id"]))
+        # 동점 2차 키 = relq × rank_score 곱 블렌드 (2026-07-29 백테스트 3-arm).
+        # relq 단독은 owner 히트도장(used) 노드 top5 노출을 30→19 로 강등시켰다(희소토큰
+        # 일회성 노드가 검증된 교훈을 밀어냄). 곱 블렌드는 used 27 회복 + 잡음 최소(10).
+        scored.append((rel, round(relq * n["rank_score"], 6), n))
+    # 관련성 1차, relq×rank(동점 분해 — 희소토큰×검증된유용성) 2차, id 사전순 3차 — 결정적.
+    scored.sort(key=lambda x: (-x[0], -x[1], x[2]["id"]))
     top = scored[:limit]
 
     rel_nodes = [{
