@@ -28,6 +28,7 @@ import sqlite3
 import subprocess
 import tempfile
 import shutil
+from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 
 # __file__ = <repo>/binggupack/pack/doctor.py → 3단계 상위가 repo 루트.
 # _HERE(scripts)·_ROOT(repo) 는 하위 selftest subprocess 경로·_OP_STORE·_real_tree_scan
@@ -371,9 +372,14 @@ def run_doctor(tree_root=None, ledger_path=None):
     results = []
     all_ok = True
 
-    # 1~6 기존 selftest 호출
-    for name, script in _CHECKS:
-        r = _run_selftest(script)
+    # 1~6 기존 selftest 호출 — 병렬(2026-07-29).
+    # 각 호출이 이미 자기 격리 홈(_run_selftest 의 iso_home)에서 돌아 공유 상태가 없다.
+    # 순차로 두면 windows CI 에서 56초(ubuntu 3초 · 19배)로, python 기동 비용이 그대로 누적된다.
+    # 출력·판정 순서는 _CHECKS 순서 그대로 유지한다(로그 diff 안정).
+    with _ThreadPoolExecutor(max_workers=min(8, (os.cpu_count() or 2))) as _ex:
+        _rs = [_ex.submit(_run_selftest, script) for _name, script in _CHECKS]
+        _done = [f.result() for f in _rs]
+    for (name, _script), r in zip(_CHECKS, _done):
         ok = (r["gate"] == "GO" and r["exit"] == 0)
         all_ok = all_ok and ok
         results.append((name, ok, r))
