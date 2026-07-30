@@ -41,7 +41,14 @@ import openbinggu_a0_node_dryrun as a0  # noqa: E402
 import openbinggu_incoming_to_staging as v011  # noqa: E402  (SECRET_PATTERNS)
 
 
-MAX_SENTENCE = 80  # 형제 모듈(목록 뷰·preview·save) 발췌 규율과 동일 — 초과는 silent 절단 아닌 BLOCK
+# 정본 위임: 저장 단위 상한 = capture_preview.MAX_NODE_SENTENCE(1000). 2026-06-15 owner 결정
+# "저장 단위 = 문장 전체(80자 발췌 cut 폐기)"가 save/preview 에 반영될 때 replace 경로만 80 에
+# 남아 있었다(2026-07-30 실측 — 오절단 원문 복원 replace 가 sentence_too_long_max80 로 차단됨).
+# 초과는 silent 절단 아닌 BLOCK(불변). import 실패 시에도 정본과 같은 값으로 폴백(drift 방지 명시).
+try:
+    from openbinggu_conversation_capture_preview import MAX_NODE_SENTENCE as MAX_SENTENCE
+except Exception:
+    MAX_SENTENCE = 1000  # 정본: openbinggu_conversation_capture_preview.MAX_NODE_SENTENCE
 
 
 def _canonical_hash(s):
@@ -356,13 +363,13 @@ def main_selftest():
        (not r4["applied"]) and r4["reason"] == "duplicate_active_content"
        and (not r4z["applied"]) and r4z["reason"] == "duplicate_active_content")
 
-    # 4b. 80자 초과 BLOCK — silent 절단 없이 명시 거부 + DB 무변 (결함 2 회귀)
-    NEW4L = ("이 판단은 매우 길게 서술되어 있으며 여러 부가 조건과 배경 설명을 모두 포함하고 "
-             "있어 발췌 규율을 넘기 때문에 그대로 저장해서는 안 되는 문장이라고 판단한다.")
+    # 4b. 상한(MAX_SENTENCE=정본 1000) 초과 BLOCK — silent 절단 없이 명시 거부 + DB 무변 (결함 2 회귀)
+    #     2026-07-30: 80 은 6/15 "문장 전체 저장" 개정에서 빠진 잔재 — 정본(MAX_NODE_SENTENCE) 위임.
+    NEW4L = "이 판단은 " + "매우 " * 330 + "길어서 문단 덩어리로 판정되어 그대로 저장해서는 안 된다."
     cs4a = db.store_checksum()
     r4l = replace_from_list(db, i3, h3, NEW4L, "사유", _ctx(i3, h3, NEW4L), snap_dir)
     cs4b = db.store_checksum()
-    ck("4b_80자초과_BLOCK(silent절단_없음)", len(NEW4L) > 80
+    ck("4b_상한초과_BLOCK(silent절단_없음)", len(NEW4L) > MAX_SENTENCE
        and (not r4l["applied"]) and r4l["reason"] == "sentence_too_long_max80" and cs4a == cs4b)
 
     # 5. confirm 불일치 BLOCK (문장은 같은데 인덱스 갈림)
@@ -438,6 +445,17 @@ def main_selftest():
        and (not rblock["applied"]) and rblock["reason"] == "pending_replace_journal"
        and rec["recovered"] and cs9d == cs9c and s_rec == "active" and rec_aud == 1
        and pending_replace_journals(snap_dir) == [])
+
+    # 9d. 80~1000자 정당 문장 통과 — 오절단 원문 복원(2026-07-30 실측 차단 사례)이 이 밴드.
+    #     6/15 "문장 전체 저장" 정체성 정합(80 잔재 제거 회귀 못박기). 마지막 mutation 케이스라
+    #     i3/h3 픽스처 소모 무방(10~13 은 i3/h3 미사용).
+    NEW9D = ("이 판단은 여러 부가 조건과 배경 설명을 모두 포함해 80자를 넘지만 정당한 한 "
+             "문장이므로 전체 저장 정체성에 따라 교체가 허용되어야 한다고 판단한다.")
+    r9d = replace_from_list(db, i3, h3, NEW9D, "사유", _ctx(i3, h3, NEW9D), snap_dir)
+    s9d = db.con.execute("SELECT count(*) FROM nodes WHERE node_id=? AND state='active'",
+                         ("node:CONV:" + _sent_hash(NEW9D),)).fetchone()[0]
+    ck("9d_80자초과_1000이하_정당문장_통과(전체저장_정체성)",
+       80 < len(NEW9D) <= MAX_SENTENCE and r9d["applied"] and s9d == 1)
 
     # 10. raw 원문(긴 원본 텍스트 전문) 미저장
     blob = "\n".join(str(row) for t in ("nodes", "edges", "evidence", "deprecations", "audit_log")
