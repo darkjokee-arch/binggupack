@@ -161,19 +161,32 @@ def _dot(a, b):
     return sum(x * y for x, y in zip(a, b))
 
 
+# 프로세스 메모 — 객체 생성마다 /api/tags 왕복하던 것 제거(실측 15k회/44h).
+# 모델 교체는 재시작 후 반영(recall._MODEL_DIGEST_MEMO 와 동일한 수용된 트레이드오프).
+_DIGEST_MEMO: dict[str, str] = {}
+
+
 def model_digest():
     """#6·#8 모델 식별 — digest 변경 시 centroid 캐시 무효(drift regression 트리거)."""
+    memo = _DIGEST_MEMO.get("v")
+    if memo is not None:
+        return memo
+    dig = None
     try:
         with urllib.request.urlopen(OLLAMA + "/api/tags", timeout=10) as r:
             d = json.loads(r.read())
         for m in d.get("models", []):
             if m.get("name", "").startswith(MODEL):
-                dig = (m.get("digest") or "")[:16]
-                if dig:
-                    return dig
+                cand = (m.get("digest") or "")[:16]
+                if cand:
+                    dig = cand
+                    break
     except Exception:
         pass
-    return hashlib.sha256(MODEL.encode()).hexdigest()[:16]
+    if dig is None:
+        dig = hashlib.sha256(MODEL.encode()).hexdigest()[:16]
+    _DIGEST_MEMO["v"] = dig
+    return dig
 
 
 # ---------------- centroid 분류기 (결정적·#6) ----------------

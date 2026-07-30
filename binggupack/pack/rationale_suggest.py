@@ -97,6 +97,16 @@ def suggest_rationale(candidates, semantic=None):
     } for _, c in items]
 
     tgts = [(nid, c) for nid, c in items if c.get("label_kind") == "판단"]
+    # 콜드 캐시 배치 선채움 — 아래 src×판단 쌍 루프가 텍스트마다 단건 HTTP embed 를 왕복하던 것
+    # 제거(_why_search_on_graph 와 동일 관례 · 실측 2026-07-30). prefill 없는 커스텀 scorer 는
+    # getattr 미스로 통과, 실패해도 단건 경로가 그대로 이어받는다(graceful).
+    if _scorer is not None and tgts:
+        _pf = getattr(_scorer, "prefill", None)
+        if _pf is not None:
+            try:
+                _pf([c.get("text", "") for _, c in items if c.get("text")])
+            except Exception:
+                pass
     edges, dup_edges, seen = [], [], set()
     for nid, c in items:
         if c.get("label_kind") not in SUPPORTS_SRC:   # 증거/상태/개념만 src

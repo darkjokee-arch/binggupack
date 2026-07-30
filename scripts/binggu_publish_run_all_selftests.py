@@ -109,6 +109,10 @@ def run_one(label, script, extra, ok_marker, home=None):
     if not os.path.exists(path):
         return {"label": label, "ok": False, "detail": "script_missing", "rc": None}
     env = os.environ.copy()
+    # 게이트는 격리 홈(BINGGU_HOME=temp)에서 도는데 임베딩 영속 캐시도 그 홈에 있어 매번 콜드 →
+    # 게이트 1회당 실 Ollama /api/embed 758회(실측 2026-07-30). semantic 자체를 검증하는 게이트는
+    # probe/embed_fn 주입(mock)을 쓰므로 이 OFF 에 영향받지 않는다 — 곁다리 실서버 호출만 제거.
+    env.setdefault("BINGGU_SEMANTIC_OFF", "1")
     if home:
         # 게이트 전용 홈·temp. 운영 홈(~/.binggupack)은 어느 게이트도 건드리지 않는다.
         # ★ temp 는 홈 **밖**의 형제 디렉터리여야 한다 — 같은 경로로 묶으면 temp 로 내보내는
