@@ -13,7 +13,8 @@ facade 는 같은 객체를 노출할 뿐 게이트를 우회/완화하지 않�
   - TOOLS        노출 도구 레지스트리(read/dry-run + write-gated)
   - handle_tool(tool_name, params, allow_root)  게이트 경유 도구 실행
   - _FORBIDDEN   노출 금지 도구 집합(가시성 유지 — 서버가 노출 0 강제에 사용)
+  - reason_code_hint()  도장 verdict/reason_code 유효값(정본 recall_trace 생성 · tools/list 주입용)
 """
-from .server_handlers import handle_tool, TOOLS, _FORBIDDEN
+from .server_handlers import handle_tool, TOOLS, _FORBIDDEN, reason_code_hint
 
-__all__ = ["handle_tool", "TOOLS", "_FORBIDDEN"]
+__all__ = ["handle_tool", "TOOLS", "_FORBIDDEN", "reason_code_hint"]
