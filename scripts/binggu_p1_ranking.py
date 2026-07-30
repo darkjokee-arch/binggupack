@@ -38,6 +38,8 @@ from binggupack.pack.p1_ranking import (  # noqa: E402,F401  (전체 명시 re-e
     record_use,
     revoke_use,
     adoption_key,
+    AI_STAMP_USE_KEY,
+    ai_stamp_use_count,
     cfg,
 )
 

@@ -344,11 +344,16 @@ def _ensure_scripts_path():
 # 회수 도장 안내(작업A2) — MCP reader 원격 표면은 도장 소비용 staging 파일에 일절 쓰지 않는다(MF7).
 #   사람 도장 경로는 로컬 세션 한정(UserPromptSubmit hook 기록) → 안내 문구 1줄만 응답에 병기.
 # 2026-07-28: MCP 회상도 효용 판정 장부에는 등록한다(↓ _mcp_record_trace). staging 미접촉은 불변.
-_STAMP_HINT_ON = ("이 회상은 효용 판정 대기 목록에 등록됨 — 도장은 로컬 세션(Claude Code)의 "
-                  "세션 마무리 preview 또는 'binggu trace mark N used/ignored'. "
-                  "MCP 는 도장 staging/스냅샷 기록 0")
+_STAMP_HINT_ON = ("이 회상은 효용 판정 대기 목록에 등록됨 — **사용 시점 AI 도장**: 판단에 쓴 뒤 "
+                  "trace_stamp(trace_id + i + used/ignored/corrected)로 그 자리서 기입"
+                  "(actor=ai_stamp · owner 판정이 오면 덮어씀). 사람 도장은 로컬 세션 마무리 "
+                  "preview 또는 'binggu trace mark'. MCP 는 도장 staging/스냅샷 기록 0")
 _STAMP_HINT_OFF = ("효용 판정 장부 OFF — 'binggu trace enable' 후부터 등록됨. "
                    "MCP 는 도장 staging/스냅샷 기록 0")
+# preflight 는 자동주입(노출 로그) 축 — 판정 대상이 아니라 trace_stamp 안내를 하지 않는다.
+_STAMP_HINT_AUTO = ("자동주입 노출 로그로 등록됨(판정 대상 아님 — 도장은 직접인출 recall/why 만). "
+                    "MCP 는 도장 staging/스냅샷 기록 0")
+_REC_OFF = {"recorded": False, "trace_id": None, "n_nodes": 0}
 
 
 def _mcp_record_trace(kind, query, nodes, *, domain=None, situation_src=None,
@@ -359,7 +364,8 @@ def _mcp_record_trace(kind, query, nodes, *, domain=None, situation_src=None,
       번호축이라 원격 표면이 덮으면 엉뚱한 회상에 도장이 찍힌다(2026-07-27 스냅샷 4중 write 사고와
       동형). 등록은 장부 append 라 번호축과 무관 — 번호는 로컬 preview 가 매긴다.
     ledger write 0(별도 store) · PII 0(query=sha16 · 노드는 메타만) · 실패 흡수(회상 응답 무방해).
-    반환 True = 실제 등록됨(= 도장 대상), False = OFF 이거나 실패(안내 문구가 갈린다)."""
+    반환 {recorded, trace_id, n_nodes} — 2026-07-30 use-time AI 도장(trace_stamp)이 trace_id 를
+      필요로 해 bool → dict 로 확장(종전 bool 은 trace_id 를 버려 도장 배선이 불가능했다)."""
     try:
         _ensure_scripts_path()
         import binggu_recall_trace as RT
@@ -377,9 +383,12 @@ def _mcp_record_trace(kind, query, nodes, *, domain=None, situation_src=None,
                             situation=RT.classify_situation(situation_src or query),
                             risk_level=risk_level, needs_question=needs_question,
                             session_id=sid, home=_operating_home())
-        return bool(isinstance(r, dict) and r.get("recorded"))
+        if isinstance(r, dict) and r.get("recorded"):
+            return {"recorded": True, "trace_id": r.get("trace_id"),
+                    "n_nodes": r.get("n_nodes", 0)}
+        return dict(_REC_OFF)
     except Exception:
-        return False
+        return dict(_REC_OFF)
 
 
 def _u_recall(params=None):
@@ -406,8 +415,10 @@ def _u_recall(params=None):
            "nodes": nodes, "edges": edges, "summary": res.get("summary", "")}
     if nodes:
         rec = _mcp_record_trace("mcp_recall", query, res["relevant_nodes"])
-        out["trace_recorded"] = rec  # 등록 여부 정직 노출(OFF 를 침묵으로 넘기지 않는다)
-        out["stamp_hint"] = _STAMP_HINT_ON if rec else _STAMP_HINT_OFF
+        out["trace_recorded"] = rec["recorded"]  # 등록 여부 정직 노출(OFF 를 침묵으로 넘기지 않는다)
+        if rec["recorded"]:
+            out["trace_id"] = rec["trace_id"]  # use-time AI 도장(trace_stamp) 재료
+        out["stamp_hint"] = _STAMP_HINT_ON if rec["recorded"] else _STAMP_HINT_OFF
     return out
 
 
@@ -444,8 +455,12 @@ def _u_why(params=None):
            "confidence": res.get("confidence", 0.0)}
     if nodes:
         rec = _mcp_record_trace("mcp_why", query, res["relevant_nodes"])
-        out["trace_recorded"] = rec
-        out["stamp_hint"] = _STAMP_HINT_ON if rec else _STAMP_HINT_OFF
+        out["trace_recorded"] = rec["recorded"]
+        if rec["recorded"]:
+            # trace_id 는 도장 재료로 노출하되 node_id 는 계속 미노출(D-1) —
+            # trace_stamp 가 i → node_id 를 서버측 recalled_json 에서 해석한다.
+            out["trace_id"] = rec["trace_id"]
+        out["stamp_hint"] = _STAMP_HINT_ON if rec["recorded"] else _STAMP_HINT_OFF
     return out
 
 
@@ -474,13 +489,102 @@ def _u_preflight(params=None):
            "question": res.get("question") if res.get("needs_question") else None}
     if res["remember"] or res["avoid_patterns"] or res["preferences"]:
         # 판정 대상은 remember(회상된 기억)뿐 — avoid/preferences 는 규칙 표시라 도장 축이 아니다.
-        rec = bool(res["remember"]) and _mcp_record_trace(
+        rec = (_mcp_record_trace(
             "mcp_preflight", params.get("prompt") or "", res["remember"],
             domain=params.get("domain"), situation_src=params.get("prompt"),
             risk_level=res.get("risk_level"), needs_question=res.get("needs_question"))
-        out["trace_recorded"] = rec
-        out["stamp_hint"] = _STAMP_HINT_ON if rec else _STAMP_HINT_OFF
+            if res["remember"] else dict(_REC_OFF))
+        out["trace_recorded"] = rec["recorded"]
+        # trace_id 미노출 — preflight 는 자동주입(노출 로그) 축이라 use-time 도장 대상이 아니다
+        # (owner 2026-07-29: 자동주입은 판정 대상으로 표시하지 않음 — 읽었다는 보장이 없다).
+        out["stamp_hint"] = _STAMP_HINT_AUTO if rec["recorded"] else _STAMP_HINT_OFF
     return out
+
+
+def _u_trace_stamp(params=None):
+    """use-time AI 회상 도장 — 인출 직후 그 자리서 used/ignored/corrected 기입(actor=ai_stamp 하드).
+
+    owner 설계 지시(2026-07-29): "실제 세션에서 도움되었다를 네가 직접 판단하고 주입" —
+    도장은 회상을 실제로 쓴 시점의 AI 가 기입하고, owner 판정이 오면 덮어쓴다(사람>AI ·
+    record_outcome dup 분기). §13 C-11-1 자동 열외(도장 한정) 정합.
+
+    설계 경계:
+      · actor 는 서버 하드 고정(ai_stamp) — 이 도구로 human 도장 불가(사람 도장 위조 0).
+      · node_id 입력 불신(D-1) — trace_id + 1-based i 만 받고, i→node_id 는 서버가
+        recall_traces.recalled_json 에서 해석한다. 결과에도 node_id 미노출(why 의 D-1 유지).
+      · 스냅샷/staging 미접촉(MF7) — record_outcome 직접 호출. 번호축 오염 0.
+      · kind 게이트 — 직접인출(mcp_recall/mcp_why)만. 자동주입(preflight)은 판정 대상이 아니다
+        (owner 2026-07-29 — 읽었다는 보장이 없는 것에 도장 금지).
+      · used 도장은 use_count 랭킹에 즉시 반영 + owner 뒤집기 시 AI 몫만 회수
+        (p1_ranking.ai_stamp_use_count · 2026-07-27 owner "AI 도장도 바로 반영")."""
+    params = params or {}
+    trace_id = (params.get("trace_id") or "").strip()
+    items = params.get("items")
+    if not trace_id or not isinstance(items, list) or not items:
+        return {"action": "trace_stamp", "error": "trace_id_and_items_required",
+                "usage": "items: [{i: 1-based index, verdict: used|ignored|corrected, reason_code?}]"}
+    _ensure_scripts_path()
+    import binggu_recall_trace as RT
+    import json as _json
+    from datetime import datetime, timezone
+    home = _operating_home()
+    store = os.path.join(home, "recall_trace.sqlite")
+    if not os.path.exists(store):
+        return {"action": "trace_stamp", "stamped": 0, "results": [],
+                "note": "trace store 없음(회상 등록 전) — graceful no-op"}
+    import sqlite3 as _sq
+    con = _sq.connect(store)
+    try:
+        row = con.execute("SELECT kind, recalled_json FROM recall_traces WHERE trace_id=?",
+                          (trace_id,)).fetchone()
+    finally:
+        con.close()
+    if not row:
+        return {"action": "trace_stamp", "error": "trace_not_found", "stamped": 0, "results": []}
+    kind = row[0]
+    if kind not in ("mcp_recall", "mcp_why"):
+        return {"action": "trace_stamp", "error": "kind_not_stampable", "kind": kind, "stamped": 0,
+                "results": [], "note": "직접인출(mcp_recall/mcp_why)만 use-time 도장 대상"}
+    try:
+        node_ids = [n.get("node_id") for n in _json.loads(row[1] or "[]")]
+    except Exception:
+        node_ids = []
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    results, stamped = [], 0
+    for it in items[:50]:   # 폭주 방지(범위 상한 — 도장 파서 _STAMP_RANGE_CAP 와 동수)
+        if not isinstance(it, dict):
+            continue
+        i, verdict = it.get("i"), (it.get("verdict") or "").strip().lower()
+        reason_code = it.get("reason_code") or None
+        entry = {"i": i, "verdict": verdict}
+        if not isinstance(i, int) or isinstance(i, bool) or not (1 <= i <= len(node_ids)):
+            entry.update({"recorded": False, "reason": "bad_index"})
+            results.append(entry)
+            continue
+        node_id = node_ids[i - 1]
+        res = RT.record_outcome(trace_id, node_id, verdict,
+                                {"actor": RT.AI_STAMP_ACTOR}, ts,
+                                reason_code=reason_code, home=home)
+        entry["recorded"] = bool(res.get("recorded"))
+        if not entry["recorded"]:
+            entry["reason"] = res.get("reason")
+        else:
+            stamped += 1
+            # used → 랭킹 즉시 반영(실패는 사유 노출 — silent drop 금지 §13 B10)
+            try:
+                from binggupack.pack.p1_ranking import ai_stamp_use_count
+                n, action = ai_stamp_use_count(_operating_ledger(), res, verdict, True)
+                if action:
+                    entry["rank_action"] = action
+                    if n is not None:
+                        entry["use_count"] = n
+            except Exception as e:
+                entry["rank_action"] = "error(%s)" % type(e).__name__
+        results.append(entry)
+    return {"action": "trace_stamp", "trace_id": trace_id, "stamped": stamped,
+            "results": results,
+            "note": ("actor=ai_stamp(자기신고 · owner 판정이 덮어씀) · 스냅샷 미접촉(MF7) · "
+                     "재판정 불가(dup_outcome — AI 자기수정 금지, 사람만 교체)")}
 
 
 def _u_trace_review(params=None):
@@ -1312,6 +1416,20 @@ TOOLS = {
                                       "required": []}},
     "trace_review": {"path_params": [], "underlying": _u_trace_review, "mode": "read",
                      "input_schema": {"properties": {}, "required": []}},
+    # use-time AI 도장 — write-gated(trace store write). confirm 앵커 없음이 **의도**:
+    #   ai_stamp 는 AI 자기신고 축이라 사람 승인 위조 개념이 없고(§13 C-11-1 자동 열외 · owner
+    #   2026-07-29 설계 지시), actor 서버 하드 고정이라 human 도장 위조도 불가. 저장(SAVE)·승격·
+    #   파괴 작업의 confirm 게이트와 무관 — 그쪽은 사람 전용 그대로. ledger write 는 use_count
+    #   반영(p1_ranking 승격 함수)뿐이며 owner 덮어쓰기 시 AI 몫만 회수되는 대칭이 있다.
+    "trace_stamp":  {"path_params": [], "underlying": _u_trace_stamp, "mode": "write-gated",
+                     "input_schema": {"properties": {
+                         "trace_id": {"type": "string"},
+                         "items": {"type": "array", "items": {"type": "object", "properties": {
+                             "i": {"type": "integer"},
+                             "verdict": {"type": "string"},
+                             "reason_code": {"type": "string"}},
+                             "required": ["i", "verdict"]}}},
+                      "required": ["trace_id", "items"]}},
     "trace_show":   {"path_params": [], "underlying": _u_trace_show, "mode": "read",
                      "input_schema": {"properties": {"node_id": {"type": "string"}},
                                       "required": ["node_id"]}},
@@ -1544,6 +1662,12 @@ def _selftest():
         # 작업A(3차): hit/miss mark — dry-run 기본. BINGGU_HOME=temp(없음)라 ledger_not_found graceful(executed=True·write 0).
         ("mark_hit_read_ok",     "mark_hit",    {"recall_query": "배포 절차", "index": 1}, True, "write-gated no-ledger"),
         ("mark_miss_read_ok",    "mark_miss",   {"recall_query": "배포 절차", "index": 1}, True, "write-gated no-ledger"),
+        # use-time AI 도장(trace_stamp) — temp 홈(store 없음) graceful no-op(executed=True·write 0).
+        ("trace_stamp_no_store", "trace_stamp", {"trace_id": "rt-none",
+                                                 "items": [{"i": 1, "verdict": "used"}]}, True,
+         "write-gated no-store graceful"),
+        ("trace_stamp_bad_args", "trace_stamp", {"trace_id": ""},                          True,
+         "인자 결손 → error 필드(도구 실행 자체는 됨)"),
     ]
 
     import json as _json

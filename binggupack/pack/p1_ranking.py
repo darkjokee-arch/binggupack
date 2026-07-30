@@ -167,3 +167,58 @@ def revoke_use(db, node_id, use_key):
     db.con.execute("UPDATE nodes SET use_count=? WHERE node_id=?", (new_count, node_id))
     db.con.commit()
     return new_count
+
+
+# ---- AI 자기신고 도장 → use_count 반영 (정본 · 2026-07-30 binggu.py 에서 승격) ----
+# 승격 이유: MCP use-time 도장(trace_stamp)도 같은 반영/회수 대칭이 필요한데, 종전 위치
+# (binggu.py 최상위)는 패키지에서 import 불가라 CLI 경로만 랭킹으로 이어졌다.
+
+# AI 자기신고 도장이 올린 use_count 를 되돌릴 수 있어야 하므로 **고정 키**(day-bucket 금지).
+# adoption_key 는 날짜가 섞여 있어, AI 가 어제 찍고 owner 가 오늘 뒤집으면 어제 몫을 못 찾는다.
+# 고정 키라 (node_id, use_key) UNIQUE 로 노드당 1회만 계상된다 = 자기강화 루프도 함께 억제.
+AI_STAMP_USE_KEY = "use-aistamp"
+
+
+class _ConAdapter(object):
+    """record_use/revoke_use 는 db.con 인터페이스만 쓴다 — sqlite3 커넥션 최소 어댑터."""
+
+    def __init__(self, con):
+        self.con = con
+
+
+def ai_stamp_use_count(ledger_path, res, verdict, use_ai=True):
+    """AI 자기신고 도장의 랭킹(use_count) 반영 + owner 덮어쓰기 시 회수. best-effort.
+
+    2026-07-27 owner 결정 "AI 도장도 바로 반영":
+      · AI 가 used 로 찍음                          → record_use(+1 · 고정 키라 노드당 1회)
+      · owner 가 그 항목을 used 아닌 것으로 덮어씀 → revoke_use(AI 몫만 −1)
+    owner 가 used 로 확인해준 경우는 결론이 같으므로 카운트를 흔들지 않는다.
+    사람 몫은 use_key 가 달라(adoption_key 계열) 이 경로에서 절대 건드려지지 않는다.
+
+    반환 (use_count, action) — action ∈ {"record","revoke","error(...)",None}.
+    실패를 조용히 넘기지 않는다(§13 B10) — 예외는 "error(타입)" 로 반환해 호출자가 표시한다."""
+    node_id = (res or {}).get("node_id")
+    if not node_id:
+        return None, None
+    try:
+        # AI_STAMP_ACTOR 정본은 recall_trace — 지연 import(모듈 층위 순환 회피).
+        from binggupack.pack.recall_trace import AI_STAMP_ACTOR
+        if use_ai and verdict == "used":
+            action = "record"
+        elif (res.get("overwrote") == AI_STAMP_ACTOR
+                and res.get("prev_verdict") == "used" and verdict != "used"):
+            action = "revoke"
+        else:
+            return None, None
+        con = sqlite3.connect(ledger_path)
+        try:
+            db = _ConAdapter(con)
+            if action == "record":
+                n = record_use(db, node_id, use_key=AI_STAMP_USE_KEY)
+            else:
+                n = revoke_use(db, node_id, AI_STAMP_USE_KEY)
+        finally:
+            con.close()
+        return n, action
+    except Exception as e:
+        return None, "error(%s)" % type(e).__name__

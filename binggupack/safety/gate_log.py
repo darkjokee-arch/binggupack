@@ -459,17 +459,20 @@ _REASON_ALT = "|".join(re.escape(k) for k in sorted(_REASON_LABELS, key=len, rev
 #   자연스럽게 한 줄로 섞어 발화하면 종전 단일-세그먼트 fullmatch 가 None 반환해 도장 전부 증발
 #   (owner 실측 재발). 줄 = 세그먼트(히트/미스+인덱스) 1+ 로 인정하고 parse 에서 세그먼트별 판별.
 # ★2026-07-22(reason): 미스 세그먼트 끝 옵션 라벨('미스 3 무관')로 reason_code+verdict 세분(다리c 짝).
+# ★2026-07-30(붙여쓰기·혼합 쉼표): owner 실발화 "미스3 틀림"은 통과했지만 "미스3무관"(사유
+#   붙여쓰기 · reason 앞 \s+ 필수)과 "히트1,미스3"(세그 사이 쉼표)은 fullmatch 실패로 도장
+#   전량 증발했다(2026-07-29 human corrected 수동 집행 실측). reason 앞 \s* + 세그 연결 [\s,]*.
 _HIT_SEG_PAT = (r"(?:HIT|히트|MISS|미스)\s*\d+(?:\s*[-~]\s*\d+)?"
                 r"(?:\s*,\s*\d+(?:\s*[-~]\s*\d+)?)*"
-                r"(?:\s+(?:%s))?" % _REASON_ALT)
+                r"(?:\s*(?:%s))?" % _REASON_ALT)
 _HIT_SEG_RE = re.compile(_HIT_SEG_PAT, re.IGNORECASE)
-HIT_TRIGGER_RE = re.compile(r"\s*(?:%s\s*)+" % _HIT_SEG_PAT, re.IGNORECASE)  # 줄 = 세그먼트 1+ (혼합 OK)
+HIT_TRIGGER_RE = re.compile(r"\s*(?:%s[\s,]*)+" % _HIT_SEG_PAT, re.IGNORECASE)  # 줄 = 세그먼트 1+ (혼합·쉼표 OK)
 
 # ★2026-07-24: owner 가 저장+히트+미스를 한 줄로 침('저장1,2 히트2,4 미스1,3') — SAVE 세그 동반
 #   허용(줄 판정만). 추출은 _HIT_SEG_RE(HIT/MISS 전용)라 SAVE 세그는 chunk 인정에만 쓰이고 verdict
 #   에 안 섞인다. gate_text 의 혼합 줄 SAVE 지원과 대칭(양 파서가 서로의 세그 이물질 취급하던 해소).
 _SAVE_SEG_PAT = (r"(?:SAVE|저장|세이브)\s*\d+(?:\s*[-~]\s*\d+)?(?:\s*,\s*\d+(?:\s*[-~]\s*\d+)?)*")
-_MIXED_STAMP_RE = re.compile(r"\s*(?:(?:%s|%s)\s*)+" % (_HIT_SEG_PAT, _SAVE_SEG_PAT), re.IGNORECASE)
+_MIXED_STAMP_RE = re.compile(r"\s*(?:(?:%s|%s)[\s,]*)+" % (_HIT_SEG_PAT, _SAVE_SEG_PAT), re.IGNORECASE)
 
 # 승격 스탬프: 'PROMOTE 1' / '승격 1,3-5'. 계약 동일(fullmatch·줄단위).
 PROMOTE_TRIGGER_RE = re.compile(

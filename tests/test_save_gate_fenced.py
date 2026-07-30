@@ -100,6 +100,24 @@ def test_miss_reason_labels_parsed():
     assert r5["reason"][1] == ("ignored", "already_known") and r5["reason"][2] == ("ignored", "already_known")
 
 
+# ---------------- 붙여쓰기·혼합 쉼표(2026-07-30) — owner 실발화 증발 재현 회귀 ----------------
+def test_stamp_glued_reason_and_comma_mixed():
+    from binggupack.safety.gate_log import parse_hit_stamps
+    # ① 사유 붙여쓰기 "미스3무관" — 종전 reason 앞 \s+ 필수라 줄 fullmatch 실패 → 전량 증발
+    r = parse_hit_stamps("미스3무관")
+    assert r["miss"] == [3] and r["reason"][3] == ("ignored", "not_relevant")
+    # ② 세그 사이 쉼표 "히트1,미스3" — 종전 세그 연결 \s* 만 허용이라 전량 증발
+    r2 = parse_hit_stamps("히트1,미스3")
+    assert r2["hit"] == [1] and r2["miss"] == [3]
+    # ③ 조합: 쉼표 연결 + 붙여쓰기 사유
+    r3 = parse_hit_stamps("히트1,미스3틀림")
+    assert r3["hit"] == [1] and r3["miss"] == [3]
+    assert r3["reason"][3] == ("corrected", "false_match")
+    # ④ 기존 계약 불변 — 공백 형태·문장 속 언급 무시(오도장 차단)
+    assert parse_hit_stamps("미스 3 무관")["miss"] == [3]
+    assert parse_hit_stamps("그거 히트 3 어쩌고") is None
+
+
 # ---------------- end-to-end: 격리 home 에서 fenced 입력은 승인 기록 0 ----------------
 def test_fenced_input_does_not_record_human_approval(monkeypatch):
     from binggupack.safety import gate_log as gl

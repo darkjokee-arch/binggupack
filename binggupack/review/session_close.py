@@ -335,22 +335,37 @@ def _build_recall_hits(home=None, ledger_path=None, now_ts=None, top_n=12, sessi
             #     자동주입만 남는 자리를 채운다.
             #   ③ 검색 잡음은 하드 필터 대신 rel 표시 — rel 0.125 배치에도 실사용분이 있어(실측)
             #     기계 컷은 오컷. 주입 하한(preflight_rel_min) 미만은 ⚠저관련 마커로만 표시.
-            _DIRECT = ("mcp_recall", "why_search")   # 내가 질의해서 꺼낸 것
+            # ★v6(2026-07-30 owner 설계 지시 원문: "내가 원했던건 실제 세션에서 도움되었다를
+            #   네가 직접 판단하고 주입하는건데 자꾸 예전 세션 또는 과거의 판단을 자동주입하는게
+            #   문제") — 판정 목록 = **직접인출만**. 자동주입(preflight)은 hook 노출 로그라
+            #   내가 읽었다는 보장이 없다 → 판정 대상으로 표시하지 않는다(건수만 note).
+            #   도장 주경로도 이동: 인출 직후 use-time AI 도장(MCP trace_stamp · actor=ai_stamp)
+            #   → 이 화면은 "AI 판정 요약 + owner 덮어쓰기"가 된다.
+            # ★mcp_why 동반 수리: MCP why 도구는 kind='mcp_why' 로 기록되는데 종전 _DIRECT 에
+            #   없어 직접인출인데도 자동주입으로 오분류됐다(정찰 실측 발견 — 기존 버그).
+            _DIRECT = ("mcp_recall", "mcp_why", "why_search")   # 내가 질의해서 꺼낸 것
             direct = [p for p in reversed(session_pending) if p.get("kind") in _DIRECT]
-            auto = [p for p in reversed(session_pending) if p.get("kind") not in _DIRECT]
+            auto_n = len(session_pending) - len(direct)
+            if not direct:
+                # 직접인출 0 = 판정할 것 없음. 자동주입만으로 목록을 채우지 않는다(과거 판단
+                # 들이밀기 금지 — owner 2026-07-29). 폴백(누적 청소)으로도 안 넘어간다.
+                return {"available": True, "count": 0, "total_pending": len(session_pending),
+                        "items": [], "scope": "session", "ai_stamped": 0, "ai_used": 0,
+                        "unstamped": 0, "direct_count": 0, "auto_excluded": auto_n,
+                        "dup_merged": 0,
+                        "note": ("이번 세션 직접인출 회상 0건 — 판정 대상 없음. "
+                                 "자동주입 %d건은 노출 로그(판정 대상 아님)." % auto_n)}
             try:
                 from binggupack.safety import p1_config as _CFG
                 rel_min = _CFG.recall_config(home).get("preflight_rel_min", 0.25)
             except Exception:
                 rel_min = 0.25  # 정본: p1_config recall_config.preflight_rel_min
             sel, by_node = [], {}
-            for p in direct + auto:   # 직접 인출 먼저(전부) → 자동 주입(남는 자리)
+            for p in direct:   # 직접인출 전부(무컷 · v5 판정 완전성) — 자동주입은 목록 밖
                 nid = p["node_id"]
                 if nid in by_node:                       # ① 중복 → 대표(dedup)에 흡수
                     by_node[nid].setdefault("dup_refs", []).append([p["trace_id"], nid])
                     continue
-                if p.get("kind") not in _DIRECT and len(sel) >= top_n:
-                    break                                # ② 자동주입만 top_n 컷
                 rel = p.get("relevance")
                 entry = {"trace_id": p["trace_id"], "node_id": nid,
                          "category": p.get("category"), "rank": p.get("rank"),
@@ -374,26 +389,42 @@ def _build_recall_hits(home=None, ledger_path=None, now_ts=None, top_n=12, sessi
                       "kind": s.get("kind"), "source": s.get("source"),
                       "ai_verdict": s.get("ai_verdict"),
                       "ai_reason_code": s.get("ai_reason_code")} for s in sel]
+            n_used = sum(1 for s in sel if s.get("ai_verdict") == "used")
             n_ai = sum(1 for s in sel if s.get("ai_verdict"))
-            n_direct = sum(1 for s in sel if s.get("source") == "직접인출")
+            n_unstamped = len(sel) - n_ai
             n_dup = sum(len(s.get("dup_refs") or []) for s in sel)
             dup_txt = (" 같은 노드 중복 %d건은 합침(도장 시 함께 판정)." % n_dup) if n_dup else ""
+            un_txt = ((" 미판정 %d건은 use-time 도장 누락분 — AI 가 인출 직후 trace_stamp 로 "
+                       "찍는 게 주경로." % n_unstamped) if n_unstamped else "")
             return {"available": True, "count": len(items), "total_pending": len(session_pending),
                     "items": items, "scope": "session", "ai_stamped": n_ai,
-                    "direct_count": n_direct, "dup_merged": n_dup,
-                    "note": ("이번 세션 실제 회상 %d건 중 %d건 — 도움됐으면 `히트 N`·안 도움이면 `미스 N`. "
-                             "**직접인출 %d건 전부**(내가 질의해 꺼낸 것 · 판정 우선) + 자동주입 %d건"
-                             "(hook 이 넣은 것 — 읽었다는 보장 없음). AI 자동 기입 %d건.%s"
-                             " ⚠저관련(rel<%.2f)은 검색 잡음일 수 있음 — 아니면 `미스 N`."
-                             % (len(session_pending), len(items), n_direct,
-                                len(items) - n_direct, n_ai, dup_txt, rel_min))}
-        pending = RT.list_pending(home=home, ledger_path=lp)
+                    "ai_used": n_used, "unstamped": n_unstamped,
+                    "direct_count": len(items), "auto_excluded": auto_n, "dup_merged": n_dup,
+                    "note": ("**AI 판정 요약 + owner 덮어쓰기** — 직접인출 %d건 전부(무컷): "
+                             "AI 도장 used %d·ignored/corrected %d·미판정 %d.%s%s"
+                             " 다르게 보면 `히트 N`/`미스 N` 으로 덮어쓰기(사람>AI). "
+                             "자동주입 %d건은 노출 로그라 판정 목록에서 제외(읽었다는 보장 없음). "
+                             "⚠저관련(rel<%.2f)은 검색 잡음일 수 있음 — 아니면 `미스 N`."
+                             % (len(items), n_used, n_ai - n_used, n_unstamped, dup_txt, un_txt,
+                                auto_n, rel_min))}
+        # 폴백(세션 회상 0)도 v6 동일 원칙 — 직접인출만 판정 목록. 자동주입 누적(preflight)은
+        # 노출 로그라 owner 에게 들이밀지 않는다(건수만 note — 2026-07-29 owner 설계 지시).
+        _DIRECT_FB = ("mcp_recall", "mcp_why", "why_search")
+        all_pending = RT.list_pending(home=home, ledger_path=lp)
+        pending = [p for p in all_pending if p.get("kind") in _DIRECT_FB]
+        auto_total = len(all_pending) - len(pending)
         total = len(pending)
         if not pending:
             return {"available": True, "count": 0, "total_pending": 0, "items": [],
-                    "note": "누적 미판정 회상 없음(trace OFF 거나 회상 0 — binggu trace enable 로 켜짐)"}
-        # AI 자동선별: 미스 후보(오래됨·미편입) 우선 → 나머지는 최신 회상으로 채움(top_n 컷)
-        miss = RT.list_miss_candidates(now_ts, home=home, ledger_path=lp, top_n=top_n) if now_ts else []
+                    "note": ("누적 미판정 직접인출 회상 없음"
+                             + (" (자동주입 %d건은 노출 로그 — 판정 대상 아님)" % auto_total
+                                if auto_total else
+                                "(trace OFF 거나 회상 0 — binggu trace enable 로 켜짐)"))}
+        # AI 자동선별: 미스 후보(오래됨·미편입) 우선 — 직접인출 교집합만(kind 필드 유무 무관 안전).
+        direct_keys = {(p["trace_id"], p["node_id"]) for p in pending}
+        miss = [m for m in (RT.list_miss_candidates(now_ts, home=home, ledger_path=lp, top_n=top_n)
+                            if now_ts else [])
+                if (m["trace_id"], m["node_id"]) in direct_keys]
         seen = {(m["trace_id"], m["node_id"]) for m in miss}
         selected = [dict(m, flag="miss") for m in miss]
         if len(selected) < top_n:
@@ -415,11 +446,13 @@ def _build_recall_hits(home=None, ledger_path=None, now_ts=None, top_n=12, sessi
                   "claim": s.get("claim"), "flag": s.get("flag"),
                   "age_hours": s.get("age_hours")} for s in selected]
         miss_n = sum(1 for s in selected if s.get("flag") == "miss")
+        auto_txt = (" 자동주입 %d건은 노출 로그(판정 대상 아님·목록 제외)." % auto_total
+                    if auto_total else "")
         return {"available": True, "count": len(items), "total_pending": total, "items": items,
-                "note": ("이번 세션이 아니라 전체 누적 미판정 %d건 중 청소 시급분 %d건 선별"
-                         "(⚠미스 후보 %d = 오래됨·그래프 미편입 우선). "
+                "note": ("이번 세션이 아니라 전체 누적 미판정 **직접인출** %d건 중 청소 시급분 "
+                         "%d건 선별(⚠미스 후보 %d = 오래됨·그래프 미편입 우선).%s "
                          "도움=`히트 N`·헛다리=`미스 N`(actor=human) — 선별=조회, 도장=사람(자동 0)"
-                         % (total, len(items), miss_n))}
+                         % (total, len(items), miss_n, auto_txt))}
     except Exception:
         return {"available": False, "count": 0, "total_pending": 0, "items": [],
                 "note": "회상 후보 로드 실패(graceful 생략)"}
@@ -626,6 +659,12 @@ def render_close_md(summary):
             # 화면에서 구분해야 도장이 정직해진다. 자동주입은 읽었다는 보장이 없다.
             src = it.get("source")
             src_tag = (" `%s`" % src) if src else ""
+            # v6: AI use-time 판정을 항목에 표시 — owner 는 이걸 보고 다르게만 덮어쓴다(사람>AI).
+            # 세션 목록만(폴백 items 엔 ai_verdict 축 없음 — 미판정 오표기 방지).
+            if rh.get("scope") == "session":
+                av = it.get("ai_verdict")
+                rc = it.get("ai_reason_code")
+                src_tag += (" `AI:%s%s`" % (av, ("/" + rc) if rc else "")) if av else " `미판정`"
             # rel 표시(v5 owner 지적③): 잡음은 하드 컷 대신 저관련 마커 — 판정은 사람.
             rel = ""
             if isinstance(it.get("relevance"), (int, float)):
@@ -976,9 +1015,10 @@ def _selftest():
             # T21c(v4 session_id): 이번 세션 회상 우선(scope=session) vs 폴백(누적)
             home_sc = tmp / ".binggupack_sc"
             RT.set_trace_flag(True, home=str(home_sc))
-            RT.record_trace("이번세션회상", "preflight", [{"node_id": "node:CONV:sc1"}],
+            # v6: 판정 목록은 직접인출만 — T21c 취지(session_id 필터)는 직접인출 kind 로 검증.
+            RT.record_trace("이번세션회상", "mcp_recall", [{"node_id": "node:CONV:sc1"}],
                             "2026-07-25T01:00:00Z", session_id="SC_NOW", home=str(home_sc))
-            RT.record_trace("구세션회상", "preflight", [{"node_id": "node:CONV:sc2"}],
+            RT.record_trace("구세션회상", "mcp_recall", [{"node_id": "node:CONV:sc2"}],
                             "2026-07-24T01:00:00Z", session_id="SC_OLD", home=str(home_sc))
             rh_now = _build_recall_hits(home=str(home_sc), session_id="SC_NOW")
             rh_fb = _build_recall_hits(home=str(home_sc))
@@ -1009,11 +1049,11 @@ def _selftest():
                             "2026-07-29T03:00:00Z", session_id="V5", home=str(home_v5))
             rh5 = _build_recall_hits(home=str(home_v5), session_id="V5", top_n=3)
             # 직접 4참조 → dedup 3(v5c·v5a·v5b) 전부 유지(top_n=3 이라 구코드면 v5b 증발+중복)
-            #   · 자동주입(v5d)은 자리 없어 컷 · 중복 1건 합침
+            #   · 자동주입(v5d)은 v6 에서 목록 자체 제외(컷이 아니라 판정 대상 아님) · 중복 1건 합침
             check(rh5["count"] == 3 and rh5["direct_count"] == 3
-                  and rh5.get("dup_merged") == 1
+                  and rh5.get("dup_merged") == 1 and rh5.get("auto_excluded") == 1
                   and all(it["source"] == "직접인출" for it in rh5["items"]),
-                  "T21e(v5) 직접인출 무컷 + node dedup(중복 1 합침) + 자동주입만 top_n 컷")
+                  "T21e(v5/v6) 직접인출 무컷 + node dedup(중복 1 합침) + 자동주입 목록 제외")
             lows = {it["relevance"]: it.get("low_rel") for it in rh5["items"]}
             check(lows.get(0.125) is True and lows.get(0.59) is False
                   and lows.get(0.3) is False,
@@ -1030,6 +1070,38 @@ def _selftest():
             check(st5["recorded"] and st5.get("dup_stamped") == 1
                   and len(RT.list_pending(home=str(home_v5), session_id="V5")) == 3,
                   "T21e 도장 → 쌍둥이 trace 동시 판정(5참조−2판정=미판정 3 · 유령 0)")
+            # ── T21f(v6 2026-07-30 owner 설계 지시): 판정 목록 = 직접인출만 + AI 판정 표시 ──
+            home_v6 = tmp / ".binggupack_v6"
+            RT.set_trace_flag(True, home=str(home_v6))
+            # ① mcp_why 도 직접인출(종전 _DIRECT 누락 = 자동주입 오분류 버그 회귀 못박기)
+            r6a = RT.record_trace("q_why", "mcp_why", [{"node_id": "node:CONV:v6a"}],
+                                  "2026-07-30T01:00:00Z", session_id="V6", home=str(home_v6))
+            RT.record_trace("pf6", "preflight", [{"node_id": "node:CONV:v6b"}],
+                            "2026-07-30T02:00:00Z", session_id="V6", home=str(home_v6))
+            # ② use-time AI 도장(actor=ai_stamp)이 목록에 AI 판정으로 실림
+            RT.record_outcome(r6a["trace_id"], "node:CONV:v6a", "used",
+                              {"actor": RT.AI_STAMP_ACTOR}, "2026-07-30T01:30:00Z",
+                              home=str(home_v6))
+            rh6 = _build_recall_hits(home=str(home_v6), session_id="V6")
+            check(rh6["count"] == 1 and rh6["items"][0]["kind"] == "mcp_why"
+                  and rh6["items"][0]["source"] == "직접인출"
+                  and rh6.get("auto_excluded") == 1
+                  and rh6["items"][0].get("ai_verdict") == "used"
+                  and rh6.get("ai_used") == 1 and rh6.get("unstamped") == 0,
+                  "T21f(v6) mcp_why=직접인출 + 자동주입 목록 제외 + AI 판정(used) 요약")
+            md6 = render_close_md({"recall_hits": rh6})
+            check("`AI:used`" in md6 and "덮어쓰기" in rh6["note"],
+                  "T21f render — AI 판정 태그 + owner 덮어쓰기 안내")
+            # ③ 직접인출 0(자동주입만) → 판정 대상 없음(과거 목록 안 들이밈 · 폴백 미진입)
+            home_v6b = tmp / ".binggupack_v6b"
+            RT.set_trace_flag(True, home=str(home_v6b))
+            RT.record_trace("pf7", "preflight", [{"node_id": "node:CONV:v6c"}],
+                            "2026-07-30T03:00:00Z", session_id="V6B", home=str(home_v6b))
+            rh6b = _build_recall_hits(home=str(home_v6b), session_id="V6B")
+            check(rh6b.get("scope") == "session" and rh6b["count"] == 0
+                  and rh6b.get("auto_excluded") == 1
+                  and "판정 대상 없음" in rh6b.get("note", ""),
+                  "T21f 직접인출 0 → count 0(자동주입으로 목록 채우지 않음)")
         except Exception as e:
             rh_ok = False
             check(rh_ok, "T20~T21 회상 히트 통합 예외: %s" % type(e).__name__)

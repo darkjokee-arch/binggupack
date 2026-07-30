@@ -34,6 +34,9 @@ CORE_TOOLS = frozenset({
     "status", "recall", "why", "trace_show", "preflight", "list", "reminders", "capture_preview",
     # Consent-gated mutation (write-gated · dry-run 기본 · 확정은 사람 save-n 앵커/owner 로컬 CLI)
     "save_candidate", "pair", "deprecate", "replace",
+    # use-time AI 도장(actor=ai_stamp 하드 · §13 C-11-1 자동 열외) — recall/why 가 core 라
+    # 도장도 core 여야 사용 시점 판정 루프가 닫힌다(2026-07-30 owner 설계 지시 배선).
+    "trace_stamp",
 })
 _PROFILES = ("core", "advanced")
 _EXPOSED_MODES = ("read", "dry-run", "write-gated")
@@ -75,6 +78,9 @@ _TOOL_DESC = {
     "recall": "query 관련 기억 회상(read·랭킹순·저장 0)",
     "preflight": "작업 전 회상 — 기억할 것+위험패턴+선호(read)",
     "trace_review": "미판정 회상 목록(효용 판정 대기·read)",
+    "trace_stamp": ("use-time AI 회상 도장 — recall/why 인출을 판단에 쓴 직후 그 자리서 "
+                    "used/ignored/corrected 기입(trace_id+i · actor=ai_stamp 하드 · owner 판정이 "
+                    "덮어씀 · 자동주입 preflight 는 대상 아님)"),
     "trace_show": "판단 노드 근거 사슬 다홉(read·node_id 필요)",
     "status": "장부 요약 — active/deprecated/검증예정/수용/audit chain(read)",
     "list": "저장 후보 목록(status/kind 필터·read)",
