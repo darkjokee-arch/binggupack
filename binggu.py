@@ -589,7 +589,7 @@ def _trace_review(RT, ledger, home):
         claim = p["claim"] or ("(원문 미상 · node_id %s)" % p["node_id"])
         print("  %d. %s%s%s" % (p["idx"], claim, cat, rank))
         print("     판정: binggu trace mark %d used|ignored|corrected [--note <code>]" % p["idx"])
-    print("\nreason_code(--note): ignored→%s · corrected→%s"
+    print("\nreason_code(--note 또는 --reason): ignored→%s · corrected→%s"
           % (_reason_hint("ignored"), _reason_hint("corrected")))
     return 0
 
@@ -598,7 +598,7 @@ def cmd_trace(a):
     """trace — 회상 효용 trace(review/mark/enable/disable) + 근거 사슬(show/<node_id>).
 
     binggu trace [review]          : 미판정 회상 목록(효용 판정 대기)
-    binggu trace mark N <verdict>  : N 번 회상 판정 used|ignored|corrected (--note <reason_code>)
+    binggu trace mark N <verdict>  : N 번 회상 판정 used|ignored|corrected (--note|--reason <reason_code>)
     binggu trace enable | disable  : 효용 trace 기록 opt-in 파일플래그(preflight 패턴 통일)
     binggu trace show <node_id>    : (기존) 판단 노드 근거 사슬
     binggu trace <node:CONV:...>   : (하위호환) show 와 동일
@@ -631,7 +631,8 @@ def cmd_trace(a):
         except (TypeError, ValueError):
             ns = []
         if not ns:
-            print("사용법: binggu trace mark <N[,N...]> <used|ignored|corrected> [--note <reason_code>]")
+            print("사용법: binggu trace mark <N[,N...]> <used|ignored|corrected> "
+                  "[--note|--reason <reason_code>]")
             return 2
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         # --ai: AI 자기신고 도장(owner 지시 · 히트/미스 한정). 그 외는 기존 fail-closed 경로.
@@ -2238,6 +2239,10 @@ def main():
     tp.add_argument("a2", nargs="?", default=None)   # mark:N | show:node_id
     tp.add_argument("a3", nargs="?", default=None)   # mark:verdict
     tp.add_argument("--note", default=None)          # reason_code(화이트리스트)
+    # ★2026-07-30: MCP trace_stamp 는 인자명이 `reason_code` 인데 CLI 는 `--note` 뿐이어서
+    #   같은 도장을 두 이름으로 쳐야 했다(실사용 시 --reason 로 치고 무시됨 → 사유 유실).
+    #   같은 dest 별칭으로 흡수 — 기존 --note 계약 불변(둘 다 주면 뒤에 온 값).
+    tp.add_argument("--reason", dest="note", default=None)
     # AI 자기신고 도장(2026-07-27 owner 지시 — 히트/미스만 열외). actor=ai_stamp 로 원문 보존,
     # human 을 참칭하지 않는다. owner 가 나중에 같은 항목을 찍으면 사람 판정이 덮어쓴다.
     tp.add_argument("--ai", action="store_true")

@@ -23,8 +23,12 @@ def sent_hash(s):
 # 사람-발화 저장 트리거: 영문 'SAVE' 외 한글 '저장'/'세이브' 동등. '<트리거> n' / '<트리거> 1,3' /
 # '<트리거> 1-5'(범위 · 2026-07-13 owner GO) 형태. 발화 전체 또는 **한 줄 전체**가 정확형일 때만
 # (부분문자열·인용문·부정문 무시 — fullmatch. 줄 단위 인정은 아래 parse_save_indices).
+# ★2026-07-30(후행 구두점): "저장 1." 처럼 문장 끝 종결부호가 붙으면 fullmatch 실패로 앵커가
+#   증발했다(gate_log 히트/미스와 동기). 줄 **끝**에서만 흡수 — 세그·숫자 사이는 불허('저장 1.5'
+#   오확장 차단), 물음표 제외("저장 1?" 은 질문일 수 있어 앵커로 인정하지 않는다).
+_TRAIL_PUNCT = r"(?:[.!。…·]\s*)*"
 SAVE_TRIGGER_RE = re.compile(
-    r"\s*(?:SAVE|저장|세이브)\s*\d+(\s*[-~]\s*\d+)?(\s*,\s*\d+(\s*[-~]\s*\d+)?)*\s*",
+    r"\s*(?:SAVE|저장|세이브)\s*\d+(\s*[-~]\s*\d+)?(\s*,\s*\d+(\s*[-~]\s*\d+)?)*\s*%s" % _TRAIL_PUNCT,
     re.IGNORECASE)  # 트리거↔숫자 공백 선택적(저장1·저장 1 모두)
 
 # 혼합 도장 줄(owner 실측 2026-07-24): 한 줄에 '저장1,2 히트2,4 미스1,3' 처럼 SAVE+히트/미스를
@@ -34,7 +38,8 @@ SAVE_TRIGGER_RE = re.compile(
 _STAMP_SEG = (r"(?:SAVE|저장|세이브|HIT|히트|MISS|미스|PROMOTE|승격)\s*\d+(?:\s*[-~]\s*\d+)?"
               r"(?:\s*,\s*\d+(?:\s*[-~]\s*\d+)?)*(?:\s*(?:무관|이미앎|약함|낡음|맥락|최신|틀림))?")
 # 세그 연결에 쉼표 허용(2026-07-30 gate_log 와 동기) — owner "저장1,히트2" 류 한 줄 혼합.
-_STAMP_LINE_RE = re.compile(r"\s*(?:%s[\s,]*)+" % _STAMP_SEG, re.IGNORECASE)   # 줄 = 도장 세그 1+
+_STAMP_LINE_RE = re.compile(r"\s*(?:%s[\s,]*)+%s" % (_STAMP_SEG, _TRAIL_PUNCT),
+                            re.IGNORECASE)   # 줄 = 도장 세그 1+ (후행 구두점 흡수)
 _SAVE_SEG_RE = re.compile(
     r"(?:SAVE|저장|세이브)\s*(\d+(?:\s*[-~]\s*\d+)?(?:\s*,\s*\d+(?:\s*[-~]\s*\d+)?)*)",
     re.IGNORECASE)  # 혼합 줄에서 SAVE 숫자부만 캡처
