@@ -144,6 +144,27 @@ def test_core_profile_exact_allowlist():
     assert "trace_stamp" in srv.TOOLS and srv.TOOLS["trace_stamp"]["mode"] == "write-gated"
 
 
+def test_trace_stamp_surface_carries_reason_codes():
+    """도장 유효값이 tools/list 표면(설명+enum)에 정본 그대로 실린다.
+
+    2026-07-30 결함: AI 가 찍는 도구인데 유효값이 표면 어디에도 없어 첫 실사용 도장 6건이
+    전량 invalid_reason_code 거부. 하드카피가 아니라 recall_trace 정본 위임임을 함께 잠근다.
+    """
+    from binggupack.pack.recall_trace import REASON_CODES, VALID_VERDICTS
+    t = [x for x in srv._list_tools("core") if x["name"] == "trace_stamp"][0]
+    for verdict, codes in REASON_CODES.items():
+        assert verdict in t["description"]
+        for c in codes:
+            assert c in t["description"], (verdict, c)
+    ip = t["inputSchema"]["properties"]["items"]["items"]["properties"]
+    assert ip["verdict"]["enum"] == list(REASON_CODES)
+    assert set(ip["verdict"]["enum"]) == set(VALID_VERDICTS)
+    assert ip["reason_code"]["enum"] == [c for codes in REASON_CODES.values() for c in codes]
+    # registry 원본은 훼손 0 — 주입은 tools/list 사본에만(다른 소비자 계약 불변).
+    reg = srv.TOOLS["trace_stamp"]["input_schema"]["properties"]["items"]["items"]["properties"]
+    assert "enum" not in reg["verdict"] and "enum" not in reg["reason_code"]
+
+
 def test_advanced_profile_matches_previous_exposure():
     # advanced = 현행 필터(read/dry-run/write-gated)와 동일 소스 · 하드코딩 개수 0
     expected = {n for n, s in srv.TOOLS.items() if s["mode"] in srv._EXPOSED_MODES}

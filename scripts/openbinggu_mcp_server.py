@@ -19,11 +19,12 @@ CLI: python openbinggu_mcp_server.py --selftest      # 프로토콜 synthetic �
 import sys
 import os
 import json
+import copy
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # ROOT — binggupack facade
 # 트랙 C(C4): 핸들러 정본은 binggupack.mcp facade 경유. scripts 직접 import 도 호환(facade 재노출).
-from binggupack.mcp import handle_tool, TOOLS, _FORBIDDEN  # noqa: E402
+from binggupack.mcp import handle_tool, TOOLS, _FORBIDDEN, reason_code_hint  # noqa: E402
 
 # ── MCP exposure profiles (v1.20-B MCP Front Door) ─────────────────────────────────
 # core = 신규 사용자 기본(작고 명확한 표면). advanced = 기존 전체 노출(현행 동작 불변).
@@ -111,6 +112,37 @@ def _err(rid, code, message):
     return {"jsonrpc": "2.0", "id": rid, "error": {"code": code, "message": message}}
 
 
+def _stamp_hint_apply(name, desc, props):
+    """trace_stamp 표면에 verdict/reason_code 유효값을 주입(설명 + inputSchema enum).
+
+    2026-07-30: AI 가 찍는 도구인데 유효값이 도구 표면 어디에도 없어 첫 실사용 도장 6건이
+    전량 invalid_reason_code 로 거부됐다(한글 라벨 시도 — 알 방법이 없었다). 값은 하드카피하지
+    않고 reason_code_hint()로 recall_trace 정본에서 읽는다(§12-3 위임 — 개정 자동 반영).
+    정본 로드 실패 시 원본 그대로 반환(tools/list 는 절대 죽지 않는다).
+    """
+    if name != "trace_stamp":
+        return desc, props
+    hint = reason_code_hint()
+    if not hint:
+        return desc, props
+    parts = ["%s=%s" % (v, "/".join(c) if c else "(사유 금지)") for v, c in hint.items()]
+    desc = desc + " · reason_code 유효값(영문 enum 만): " + " · ".join(parts)
+    props = dict(props)
+    arr = copy.deepcopy(props.get("items"))
+    inner = arr.get("items") if isinstance(arr, dict) else None
+    if isinstance(inner, dict) and isinstance(inner.get("properties"), dict):
+        ip = inner["properties"]
+        if "verdict" in ip:
+            ip["verdict"] = dict(ip["verdict"], enum=list(hint),
+                                 description="used(판단에 씀) / ignored(안 씀) / corrected(틀려서 교정)")
+        if "reason_code" in ip:
+            ip["reason_code"] = dict(ip["reason_code"],
+                                     enum=[c for codes in hint.values() for c in codes],
+                                     description="verdict 별 허용값만 — " + " · ".join(parts))
+        props["items"] = arr
+    return desc, props
+
+
 def _list_tools(profile="advanced"):
     # read/dry-run/write-gated 도구 중 profile 노출 집합만. 위험 도구는 TOOLS 부재로 자연 제외.
     # profile 은 schema/description 을 바꾸지 않고 '노출 여부'만 결정 — 동일 tool 은 두 profile 에서 byte-equal.
@@ -134,8 +166,9 @@ def _list_tools(profile="advanced"):
         # MCP 표준 tool 필드만(name/description/inputSchema). mode/path_params 는 서버 내부용이라
         # 최상위 노출 금지 — Codex/Rust(rmcp) 등 엄격 클라이언트가 unknown field 로 파싱 실패(도구 캐시
         # 생성 0·연결 무력화). mode 는 위 필터(라인 69)에서만, path_params 는 inputSchema 에 이미 반영됨.
+        desc, props = _stamp_hint_apply(name, _TOOL_DESC.get(name, name), props)
         out.append({"name": name,
-                    "description": _TOOL_DESC.get(name, name),
+                    "description": desc,
                     "inputSchema": {"type": "object",
                                     "properties": props,
                                     "required": req}})

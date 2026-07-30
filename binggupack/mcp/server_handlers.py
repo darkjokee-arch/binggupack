@@ -501,6 +501,24 @@ def _u_preflight(params=None):
     return out
 
 
+def reason_code_hint():
+    """도장 verdict·reason_code 유효값 — 정본 recall_trace.REASON_CODES 에서 생성(하드카피 0).
+
+    2026-07-30: AI 가 찍는 도구인데 유효값이 도구 설명·스키마 어디에도 없어 첫 실사용 도장
+    6건이 전량 invalid_reason_code 로 거부됐다(한글 라벨 시도). tools/list 와 거부 응답이
+    이 함수로 유효값을 실어 사전·사후 양쪽에서 알 수 있게 한다. §12-3 정본 위임 —
+    값을 복사하지 않고 매번 정본에서 읽으므로 REASON_CODES 개정이 자동 반영된다.
+
+    반환 {verdict: (reason_code, ...)} · 정본 로드 실패 시 None(호출부는 graceful skip).
+    """
+    try:
+        _ensure_scripts_path()
+        import binggu_recall_trace as RT
+        return {v: tuple(c) for v, c in RT.REASON_CODES.items()}
+    except Exception:
+        return None
+
+
 def _u_trace_stamp(params=None):
     """use-time AI 회상 도장 — 인출 직후 그 자리서 used/ignored/corrected 기입(actor=ai_stamp 하드).
 
@@ -568,6 +586,12 @@ def _u_trace_stamp(params=None):
         entry["recorded"] = bool(res.get("recorded"))
         if not entry["recorded"]:
             entry["reason"] = res.get("reason")
+            # 거부 사유만 주면 재시도도 같은 값으로 또 틀린다(2026-07-30 첫 실사용 6건 전량
+            # invalid_reason_code) — 정본 유효값을 응답에 실어 그 자리서 자가교정하게 한다.
+            if entry["reason"] == "invalid_reason_code":
+                entry["valid_reason_codes"] = list(RT.REASON_CODES.get(verdict, ()))
+            elif entry["reason"] == "invalid_verdict":
+                entry["valid_verdicts"] = list(RT.VALID_VERDICTS)
         else:
             stamped += 1
             # used → 랭킹 즉시 반영(실패는 사유 노출 — silent drop 금지 §13 B10)
