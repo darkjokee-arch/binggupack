@@ -140,7 +140,12 @@ def replace_from_list(db, index, node_hash8, new_sentence, reason, ctx, snap_dir
         return block("node_hash_mismatch")
     old_nid = row["node_id"]
     # 5) 대상 active 한정 (deprecated wins — 이미 기각된 노드 재교체 금지)
-    old_db = db.con.execute("SELECT state, sentence FROM nodes WHERE node_id=?", (old_nid,)).fetchone()
+    #    speaker/semantic_subtype 도 함께 조회 — 교체본에 승계(2026-07-30 실측: fae84ebe 가
+    #    speaker NULL 로 생성돼 화자축 소실. staging_apply 는 pack node dict 의 speaker 를
+    #    이미 지원하는데 이 pack 이 안 실어 줬던 결함).
+    old_db = db.con.execute(
+        "SELECT state, sentence, speaker, semantic_subtype FROM nodes WHERE node_id=?",
+        (old_nid,)).fetchone()
     if not old_db or old_db[0] != "active":
         return block("target_not_active")
     # 6) 신규 문장 게이트 — 저장(save_selected 3a/3b)과 동일, 우회 금지
@@ -218,7 +223,9 @@ def replace_from_list(db, index, node_hash8, new_sentence, reason, ctx, snap_dir
         eid = "EVC-CONV-" + _sent_hash(new_sentence)
         th = _hash(new_sentence)  # capture 시점 동결 (자기증빙 동어반복 — conv-self prefix 명시)
         pack = {"pack_id": "convr_" + _hash(new_sentence)[:8], "content": new_sentence,
-                "nodes": [{"id": new_nid, "type": ntype, "sentence": new_sentence}],
+                # 화자축·subtype 승계 — 교체는 같은 발화의 정정이라 화자가 바뀌지 않는다.
+                "nodes": [{"id": new_nid, "type": ntype, "sentence": new_sentence,
+                           "speaker": old_db[2], "semantic_subtype": old_db[3]}],
                 "edges": [{"id": "edge:CONV:" + _sent_hash(new_sentence),
                            "relation": "evidence_supports", "source": eid, "target": new_nid,
                            "evidence_refs": [eid]}],
@@ -451,11 +458,19 @@ def main_selftest():
     #     i3/h3 픽스처 소모 무방(10~13 은 i3/h3 미사용).
     NEW9D = ("이 판단은 여러 부가 조건과 배경 설명을 모두 포함해 80자를 넘지만 정당한 한 "
              "문장이므로 전체 저장 정체성에 따라 교체가 허용되어야 한다고 판단한다.")
+    # 화자축 승계 픽스처 — 구 노드에 speaker/subtype 부여 후 교체(2026-07-30 fae84ebe NULL 실측 회귀)
+    db.con.execute("UPDATE nodes SET speaker='owner', semantic_subtype='교훈' WHERE node_id=?",
+                   (s_nid,))
+    db.con.commit()
     r9d = replace_from_list(db, i3, h3, NEW9D, "사유", _ctx(i3, h3, NEW9D), snap_dir)
-    s9d = db.con.execute("SELECT count(*) FROM nodes WHERE node_id=? AND state='active'",
-                         ("node:CONV:" + _sent_hash(NEW9D),)).fetchone()[0]
+    row9d = db.con.execute(
+        "SELECT state, speaker, semantic_subtype FROM nodes WHERE node_id=?",
+        ("node:CONV:" + _sent_hash(NEW9D),)).fetchone()
     ck("9d_80자초과_1000이하_정당문장_통과(전체저장_정체성)",
-       80 < len(NEW9D) <= MAX_SENTENCE and r9d["applied"] and s9d == 1)
+       80 < len(NEW9D) <= MAX_SENTENCE and r9d["applied"]
+       and row9d is not None and row9d[0] == "active")
+    ck("9e_교체본_화자축·subtype_승계(speaker=owner·NULL_소실_0)",
+       row9d is not None and row9d[1] == "owner" and row9d[2] == "교훈")
 
     # 10. raw 원문(긴 원본 텍스트 전문) 미저장
     blob = "\n".join(str(row) for t in ("nodes", "edges", "evidence", "deprecations", "audit_log")
