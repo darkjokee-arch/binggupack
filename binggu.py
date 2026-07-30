@@ -558,53 +558,16 @@ def _judgment_trace_show(ledger, node_id):
     return 0
 
 
-# AI 자기신고 도장이 올린 use_count 를 되돌릴 수 있어야 하므로 **고정 키**(day-bucket 금지).
-# adoption_key 는 날짜가 섞여 있어, AI 가 어제 찍고 owner 가 오늘 뒤집으면 어제 몫을 못 찾는다.
-# 고정 키라 (node_id, use_key) UNIQUE 로 노드당 1회만 계상된다 = 자기강화 루프도 함께 억제.
-_AI_STAMP_USE_KEY = "use-aistamp"
-
-
 def _ai_stamp_use_count(ledger, res, verdict, use_ai):
-    """AI 자기신고 도장의 랭킹(use_count) 반영 + owner 덮어쓰기 시 회수. best-effort(실패 침묵).
+    """AI 자기신고 도장의 랭킹(use_count) 반영 + owner 덮어쓰기 시 회수.
 
-    2026-07-27 owner 결정 "AI 도장도 바로 반영" — 종전엔 사람 도장만 use_count 로 이어졌고
-    (`hooks/binggu_save_gate_hook.py::_stamp_use_count`) AI 도장은 효용 장부에만 남았다.
-    use_count 0/468 병목을 푸는 대신 **AI 자기신고가 랭킹을 직접 움직이는** 되먹임이 생기므로,
-    되돌림을 같이 둔다:
-      · AI 가 used 로 찍음            → record_use(+1 · 고정 키라 노드당 1회)
-      · owner 가 그 항목을 used 아닌 것으로 덮어씀 → revoke_use(AI 몫만 −1)
-    owner 가 used 로 확인해준 경우는 결론이 같으므로 그대로 둔다(카운트 흔들지 않음).
-    사람이 올린 몫은 use_key 가 달라 이 경로에서 절대 건드려지지 않는다.
-
-    반환 (use_count, action) — action ∈ {"record","revoke","error(...)",None}.
-    ★실패를 조용히 넘기지 않는다(§13 B10) — 예외는 "error(타입)" 로 돌려 CLI 가 화면에 표시한다.
-    2026-07-27 실사용 1차에서 RANK 지연 import 누락(NameError)을 except 가 삼켜 **12건 도장이
-    전부 무증상 미반영**됐다. 그때 화면엔 아무 표시도 없었다 — 그래서 사유를 반환값에 싣는다.
-    """
-    node_id = res.get("node_id")
-    if not node_id:
-        return None, None
+    정본은 binggupack.pack.p1_ranking.ai_stamp_use_count 로 승격(2026-07-30) —
+    MCP use-time 도장(trace_stamp)과 CLI 가 같은 반영/회수 대칭을 공유한다.
+    반환 계약 불변: (use_count, action) — action ∈ {"record","revoke","error(...)",None}."""
     try:
-        # ★ RANK 는 이 모듈의 전역이 아니다 — 다른 경로들(cmd_recall·_mark_from_recall)도
-        # 함수 안에서 지연 import 한다. 여기서도 반드시 지역 import 할 것.
+        # ★ RANK 는 이 모듈의 전역이 아니다 — 반드시 지역 import(2026-07-27 NameError 12건 사고).
         import binggu_p1_ranking as RANK
-        from binggupack.pack import recall_trace as _RT
-        if use_ai and verdict == "used":
-            action = "record"
-        elif (res.get("overwrote") == _RT.AI_STAMP_ACTOR
-                and res.get("prev_verdict") == "used" and verdict != "used"):
-            action = "revoke"
-        else:
-            return None, None
-        db, _ = _open(ledger)
-        try:
-            if action == "record":
-                n = RANK.record_use(db, node_id, use_key=_AI_STAMP_USE_KEY)
-            else:
-                n = RANK.revoke_use(db, node_id, _AI_STAMP_USE_KEY)
-        finally:
-            db.close()
-        return n, action
+        return RANK.ai_stamp_use_count(ledger, res, verdict, use_ai)
     except Exception as e:
         return None, "error(%s)" % type(e).__name__
 

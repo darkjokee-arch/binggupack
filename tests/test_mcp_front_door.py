@@ -134,11 +134,14 @@ def test_invalid_profile_exits_two():
 def test_core_profile_exact_allowlist():
     assert srv.core_profile_invalid() == frozenset(), srv.core_profile_invalid()
     expected = {"status", "recall", "why", "trace_show", "preflight", "list", "reminders",
-                "capture_preview", "save_candidate", "pair", "deprecate", "replace"}
+                "capture_preview", "save_candidate", "pair", "deprecate", "replace",
+                # 2026-07-30 use-time AI 도장 — recall/why 가 core 라 도장도 core(루프 폐합).
+                "trace_stamp"}
     assert srv.exposed_tools("core") == expected
-    assert len(expected) == 12
+    assert len(expected) == 13
     # trace_show 가 실제 정식 tool 인지 코드로 확인
     assert "trace_show" in srv.TOOLS and srv.TOOLS["trace_show"]["mode"] == "read"
+    assert "trace_stamp" in srv.TOOLS and srv.TOOLS["trace_stamp"]["mode"] == "write-gated"
 
 
 def test_advanced_profile_matches_previous_exposure():

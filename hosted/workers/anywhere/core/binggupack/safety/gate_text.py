@@ -33,7 +33,8 @@ SAVE_TRIGGER_RE = re.compile(
 # 것과 대칭 — SAVE 앵커만 줄 fullmatch 요구하던 비대칭 해소.
 _STAMP_SEG = (r"(?:SAVE|저장|세이브|HIT|히트|MISS|미스|PROMOTE|승격)\s*\d+(?:\s*[-~]\s*\d+)?"
               r"(?:\s*,\s*\d+(?:\s*[-~]\s*\d+)?)*(?:\s*(?:무관|이미앎|약함|낡음|맥락|최신|틀림))?")
-_STAMP_LINE_RE = re.compile(r"\s*(?:%s\s*)+" % _STAMP_SEG, re.IGNORECASE)   # 줄 = 도장 세그 1+
+# 세그 연결에 쉼표 허용(2026-07-30 gate_log 와 동기) — owner "저장1,히트2" 류 한 줄 혼합.
+_STAMP_LINE_RE = re.compile(r"\s*(?:%s[\s,]*)+" % _STAMP_SEG, re.IGNORECASE)   # 줄 = 도장 세그 1+
 _SAVE_SEG_RE = re.compile(
     r"(?:SAVE|저장|세이브)\s*(\d+(?:\s*[-~]\s*\d+)?(?:\s*,\s*\d+(?:\s*[-~]\s*\d+)?)*)",
     re.IGNORECASE)  # 혼합 줄에서 SAVE 숫자부만 캡처
