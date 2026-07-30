@@ -45,7 +45,29 @@ def longsave_enabled():
     """L-lane opt-in. **호출 시점 평가** — import 시점 금지(MCP 는 장수 프로세스라
     import-time 이면 플래그를 켜도 영원히 옛 값을 본다)."""
     return os.environ.get("BINGGU_LONGSAVE_V1") == "1"
-_SENT_SPLIT = re.compile(r"(?<=[.!?다음임함됨까요])\s+|\n+")
+# 종결형 뒤 공백/개행 분리 — 단 인용 연결("~다 라고/라는/라며")·병렬 대안("~다 아니다")이
+# 이어지면 한 문장이다. 2026-07-29 오염 실측(node ed01334b): owner 원문 "…도움이되었다
+# 아니다 판단하는…"이 "되었다"에서 절단돼 뒤 절이 소실, 제안문이 단정문으로 변질(원문 보존
+# 원칙 위반). 과병합(뜻 불변)보다 과절단(뜻 변질)이 위험한 비대칭 — 보수적으로 병합한다.
+# "판단"은 병렬 대안 뒤 무조사 인용("~다 아니다 판단하는")의 연결 — 없으면 2차 절단된다.
+_SENT_SPLIT = re.compile(r"(?:(?<=[.!?다음임함됨까요])\s+|\n+)(?!라고|라는|라며|아니다|판단)")
+
+
+def _split_sentences(raw):
+    """_SENT_SPLIT 분리 + 콜론 종료 세그먼트는 다음 세그먼트와 병합.
+
+    2026-07-29 오염 실측(node ed8d0b7e): "쪽지로 비유하면:" 이 개행에서 잘려 15자 리드인
+    조각이 단독 문장으로 저장됐다. 콜론으로 끝나는 세그먼트는 도입부라 문장이 아니다 —
+    다음 세그먼트와 공백 1개로 이어붙인다(문장 내 개행 0 불변식 유지)."""
+    merged = []
+    for part in (s.strip() for s in _SENT_SPLIT.split(raw)):
+        if not part:
+            continue
+        if merged and merged[-1].endswith((":", "：")):
+            merged[-1] = merged[-1] + " " + part
+        else:
+            merged.append(part)
+    return merged
 _REDACT_RE = re.compile(r"\[REDACTED:\w+\]")
 
 # preview 전용 추가 PII (owner 6/11 결정 (a)): 사업자등록번호 형식/bare 10자리.
@@ -199,9 +221,7 @@ def capture_preview(text, max_candidates=DEFAULT_MAX, explicit=False):
     def long_excl(kind):
         long_excluded[kind] = long_excluded.get(kind, 0) + 1
 
-    for sent in (s.strip() for s in _SENT_SPLIT.split(raw)):
-        if not sent:
-            continue
+    for sent in _split_sentences(raw):
         if not _meaningful(sent):
             excl("short_or_fragment")
             continue
@@ -458,6 +478,30 @@ def run_selftest():
         if _prev_flag is not None:
             os.environ["BINGGU_LONGSAVE_V1"] = _prev_flag
 
+    # 19. ★인용 연결("~다 라고") 절단 금지 — 2026-07-29 오염 실측(ed01334b) 회귀 못박기.
+    #     explicit=True 로 판단-veto 를 면제해 분리기 축만 검증한다.
+    quot = "실제로 네가 자동으로 도움이되었다 라고 판단한 것만 도장찍는걸로 재시작하기로 했다."
+    r19 = capture_preview(quot, explicit=True)
+    rec(19, "인용 연결(종결형+공백+라고) 한 문장 유지(절단 0)",
+        len(r19["candidates"]) == 1 and r19["candidates"][0]["sentence"] == quot)
+
+    # 21. ★병렬 대안("~다 아니다") 절단 금지 — ed01334b 의 **실제 원문**(capture_buffer
+    #     id=172 실측) 재현. traj 스펙은 "라고"였으나 실오염은 "아니다" 병렬 구조였다 —
+    #     기록이 아니라 원문 실측이 설계를 정한다.
+    para = ("그렇게 하고 지금 현재 쌓여있는 회상(히트미스)관련하여 모두 삭제하고 "
+            "실제로 네가 자동으로 도움이되었다 아니다 판단하는 단계부터 처음부터 "
+            "다시 시작하는게 좋은거 아닐까?")
+    r21 = capture_preview(para, explicit=True)
+    rec(21, "병렬 대안(종결형+공백+아니다) 한 문장 유지(실오염 원문 재현)",
+        len(r21["candidates"]) == 1 and r21["candidates"][0]["sentence"] == para)
+
+    # 20. ★콜론 리드인 병합 — 2026-07-29 오염 실측(ed8d0b7e) 회귀 못박기.
+    colon_in = "쪽지로 비유하면:\n회상 도장은 사용 시점에 찍는 것이 정확하다."
+    colon_want = "쪽지로 비유하면: 회상 도장은 사용 시점에 찍는 것이 정확하다."
+    r20 = capture_preview(colon_in, explicit=True)
+    rec(20, "콜론 종료 리드인은 다음 세그먼트와 병합(단독 조각 0)",
+        len(r20["candidates"]) == 1 and r20["candidates"][0]["sentence"] == colon_want)
+
     # 10. write/save 0 — 감시 디렉토리 FS 전후 동일 + 본 모듈 save 함수 부재
     fs_after = _fs_snapshot(watch)
     rec(10, "write/save 0 (FS 전후 동일 + save 함수 부재)", fs_before == fs_after
@@ -545,6 +589,15 @@ def _golden_corpus():
     add("cap_nl_at_20001", "가" * 20001 + "\n" + "뒤 문장은 캡 뒤에 있다.")
     add("cap_nl_early_150", "가" * 150 + "\n" + "가" * 20000 + "다")
     add("cap_40000", "\n".join("케이스 %d 는 검토 후 보류한다." % i for i in range(1600)))
+
+    # --- 인용 연결/콜론 리드인 (2026-07-30 오절단 수리 축) ---
+    add("quot_dah_rago", "이 방안이 낫다 라고 판단해서 보류하기로 결정했다. 다음 건은 진행한다.")
+    add("quot_dah_ranun", "검증이 끝났다 라는 보고를 받고 배포를 진행하기로 했다.")
+    add("quot_dah_ramyeo", "다시 하겠다 라며 물러섰지만 이번 건은 보류하기로 결정했다.")
+    add("colon_leadin_nl", "쪽지로 비유하면:\n중요한 건 순서라고 판단했다.")
+    add("colon_leadin_chain", "예를 들면:\n첫째 기준은:\n검증을 먼저 하기로 결정했다.")
+    add("colon_tail_only", "정리하면 다음과 같다:")
+    add("quot_dah_anida", "이 방식이 도움이되었다 아니다 판단하는 단계부터 다시 시작하기로 결정했다.")
 
     # --- L 정원(L_MAX=5) 초과 ---
     add("long_x7", "\n".join(("장문 %d " % i) + "가" * 1100 + "다" for i in range(7)))

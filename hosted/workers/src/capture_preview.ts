@@ -10,7 +10,24 @@ const HARD_MAX = 20;
 // MAX_NODE_SENTENCE = 단일 문장 정당 상한. 초과 = 종결어미 없는 문단/로그 덩어리 → 후보 제외.
 // Python 정본(MAX_NODE_SENTENCE) 1:1 — parity selftest 로 강제.
 const MAX_NODE_SENTENCE = 1000;
-const SENT_SPLIT = /(?<=[.!?다음임함됨까요])\s+|\n+/;
+// 종결형 뒤 공백/개행 분리 — 단 인용 연결("~다 라고/라는/라며")·병렬 대안("~다 아니다")이
+// 이어지면 한 문장이다. Python 정본(_SENT_SPLIT) 1:1 — 2026-07-29 오절단 실측(ed01334b) 수리 미러.
+const SENT_SPLIT = /(?:(?<=[.!?다음임함됨까요])\s+|\n+)(?!라고|라는|라며|아니다|판단)/;
+
+/** _split_sentences 1:1 — 콜론 종료 리드인 세그먼트는 다음 세그먼트와 병합(ed8d0b7e 수리). */
+function splitSentences(raw: string): string[] {
+  const merged: string[] = [];
+  for (const piece of raw.split(SENT_SPLIT)) {
+    const part = (piece || "").trim();
+    if (!part) continue;
+    if (merged.length && /[:：]$/.test(merged[merged.length - 1])) {
+      merged[merged.length - 1] = merged[merged.length - 1] + " " + part;
+    } else {
+      merged.push(part);
+    }
+  }
+  return merged;
+}
 // 콜론을 문자 클래스로 — 소스/번들 텍스트에 영문자+콜론+백슬래시 시퀀스가 생기지 않게 (스캐너 자기검출 회피)
 const REDACT_RE = /\[REDACTED[:]\w+\]/g;
 
@@ -228,9 +245,7 @@ export function capturePreview(text: string, maxCandidates?: number,
   const longExcluded: Record<string, number> = {};
   const longExcl = (k: string) => { longExcluded[k] = (longExcluded[k] || 0) + 1; };
 
-  for (const piece of raw.split(SENT_SPLIT)) {
-    const sent = (piece || "").trim();
-    if (!sent) continue;
+  for (const sent of splitSentences(raw)) {
     if (!meaningful(sent)) { excl("short_or_fragment"); continue; }
     if (sent.length > MAX_NODE_SENTENCE) {
       excl("over_max_sentence");
