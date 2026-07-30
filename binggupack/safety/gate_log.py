@@ -466,17 +466,23 @@ _HIT_SEG_PAT = (r"(?:HIT|히트|MISS|미스)\s*\d+(?:\s*[-~]\s*\d+)?"
                 r"(?:\s*,\s*\d+(?:\s*[-~]\s*\d+)?)*"
                 r"(?:\s*(?:%s))?" % _REASON_ALT)
 _HIT_SEG_RE = re.compile(_HIT_SEG_PAT, re.IGNORECASE)
-HIT_TRIGGER_RE = re.compile(r"\s*(?:%s[\s,]*)+" % _HIT_SEG_PAT, re.IGNORECASE)  # 줄 = 세그먼트 1+ (혼합·쉼표 OK)
+# ★2026-07-30(후행 구두점): owner 실발화 "미스3." 처럼 문장 끝 종결부호가 붙으면 fullmatch 가
+#   실패해 그 줄 도장이 전량 증발했다. 줄 **끝**에서만 옵션 흡수한다 — 세그 사이·숫자 사이는
+#   불허(허용하면 '히트 1.5' 가 1·5 두 건으로 오확장). 물음표는 제외(질문 발화 오도장 차단).
+_TRAIL_PUNCT = r"(?:[.!。…·]\s*)*"
+HIT_TRIGGER_RE = re.compile(r"\s*(?:%s[\s,]*)+%s" % (_HIT_SEG_PAT, _TRAIL_PUNCT),
+                            re.IGNORECASE)  # 줄 = 세그먼트 1+ (혼합·쉼표·후행 구두점 OK)
 
 # ★2026-07-24: owner 가 저장+히트+미스를 한 줄로 침('저장1,2 히트2,4 미스1,3') — SAVE 세그 동반
 #   허용(줄 판정만). 추출은 _HIT_SEG_RE(HIT/MISS 전용)라 SAVE 세그는 chunk 인정에만 쓰이고 verdict
 #   에 안 섞인다. gate_text 의 혼합 줄 SAVE 지원과 대칭(양 파서가 서로의 세그 이물질 취급하던 해소).
 _SAVE_SEG_PAT = (r"(?:SAVE|저장|세이브)\s*\d+(?:\s*[-~]\s*\d+)?(?:\s*,\s*\d+(?:\s*[-~]\s*\d+)?)*")
-_MIXED_STAMP_RE = re.compile(r"\s*(?:(?:%s|%s)[\s,]*)+" % (_HIT_SEG_PAT, _SAVE_SEG_PAT), re.IGNORECASE)
+_MIXED_STAMP_RE = re.compile(r"\s*(?:(?:%s|%s)[\s,]*)+%s"
+                             % (_HIT_SEG_PAT, _SAVE_SEG_PAT, _TRAIL_PUNCT), re.IGNORECASE)
 
-# 승격 스탬프: 'PROMOTE 1' / '승격 1,3-5'. 계약 동일(fullmatch·줄단위).
+# 승격 스탬프: 'PROMOTE 1' / '승격 1,3-5'. 계약 동일(fullmatch·줄단위·후행 구두점 흡수).
 PROMOTE_TRIGGER_RE = re.compile(
-    r"\s*(?:PROMOTE|승격)\s*\d+(\s*[-~]\s*\d+)?(\s*,\s*\d+(\s*[-~]\s*\d+)?)*\s*",
+    r"\s*(?:PROMOTE|승격)\s*\d+(\s*[-~]\s*\d+)?(\s*,\s*\d+(\s*[-~]\s*\d+)?)*\s*%s" % _TRAIL_PUNCT,
     re.IGNORECASE)
 
 # fullmatch 통과 줄의 verdict 판별 — 선두 트리거가 HIT/히트면 hit, 아니면(MISS/미스) miss.

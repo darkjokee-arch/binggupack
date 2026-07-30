@@ -118,6 +118,30 @@ def test_stamp_glued_reason_and_comma_mixed():
     assert parse_hit_stamps("그거 히트 3 어쩌고") is None
 
 
+# ---------------- 후행 구두점(2026-07-30) — "미스3." 문장 끝 종결부호 흡수 ----------------
+def test_stamp_trailing_punctuation():
+    from binggupack.safety.gate_log import parse_hit_stamps, parse_promote_indices
+    from binggupack.safety.gate_text import parse_save_indices
+    # ① 히트/미스 — 종전 줄 끝 마침표 때문에 fullmatch 실패 → 도장 전량 증발
+    assert parse_hit_stamps("미스3.")["miss"] == [3]
+    assert parse_hit_stamps("히트 1.")["hit"] == [1]
+    r = parse_hit_stamps("히트1,미스3무관.")
+    assert r["hit"] == [1] and r["miss"] == [3]
+    assert r["reason"][3] == ("ignored", "not_relevant")
+    # ② 승격·SAVE 앵커도 동일 계약(양 파서 동기)
+    assert parse_promote_indices("승격 2.") == [2]
+    assert parse_save_indices("저장 1.") == [1]
+    assert parse_save_indices("세이브 1,3!") == [1, 3]
+    # ③ 숫자 사이 구두점은 불허 — '히트 1.5' 를 1·5 두 건으로 오확장하면 안 됨
+    assert parse_hit_stamps("히트 1.5") is None
+    # ④ 물음표는 도장 아님(질문 발화 오도장 차단)
+    assert parse_hit_stamps("히트 1?") is None
+    assert parse_save_indices("저장 1?") is None
+    # ⑤ 기존 오도장 차단 불변 — 구두점이 붙어도 문장 속 언급은 무시
+    assert parse_hit_stamps("그거 히트 3 어쩌고.") is None
+    assert parse_save_indices("도장은 세이브1 왜 실패.") is None
+
+
 # ---------------- end-to-end: 격리 home 에서 fenced 입력은 승인 기록 0 ----------------
 def test_fenced_input_does_not_record_human_approval(monkeypatch):
     from binggupack.safety import gate_log as gl
