@@ -694,7 +694,21 @@ def render_close_md(summary):
             lines.append("- %d.%s%s %s%s%s%s%s" % (it["idx"], mark, src_tag, claim, cat, rank, rel, age))
         lines.append("> %s" % rh.get("note", "도움=히트 N·헛다리=미스 N — 양쪽 다 도장해야 정직·안 치면 pending 유지·자동 0"))
     else:
-        lines.append("- (누적 미판정 회상 없음 — trace OFF 거나 회상 0)")
+        # ★2026-08-01 owner 지적: 코드는 "왜 0인지"를 note 로 내려보내는데(이번 세션 0건 /
+        #   자동주입이 관련도 기준에 못 미쳐 전부 제외 등) 렌더가 그걸 버리고 "회상 0" 한 줄만
+        #   찍어 owner 를 오도했다. 실제로는 회상이 17건 있는데 화면은 0으로 보이던 자리다.
+        #   화면은 코드가 아는 것을 그대로 말해야 한다.
+        if not rh.get("available"):
+            lines.append("- (회상 장부를 읽지 못했다 — trace OFF 이거나 장부 없음)")
+        elif rh.get("note"):
+            lines.append("- (%s)" % rh["note"])
+        else:
+            lines.append("- (표시할 회상 없음)")
+        held = (rh.get("total_pending") or 0)
+        excluded = (rh.get("auto_excluded") or 0)
+        if held or excluded:
+            lines.append("> 이번 세션 회상 %d건 기록됨 · 그중 %d건은 자리·관련도 기준 밖이라 "
+                         "판정 목록에 안 올렸다(장부에는 미판정으로 남는다)." % (held, excluded))
 
     # 2-b) AI 제안 L1 명제 (hybrid_agi · 승인 대기 · owner 후보와 화자축 분리)
     lp1 = summary.get("l1_proposals", {}) or {}
