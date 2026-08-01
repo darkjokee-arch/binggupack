@@ -449,6 +449,16 @@ _REASON_LABELS = {
     "최신": ("corrected", "superseded"),
     "틀림": ("corrected", "false_match"),
     "틀렸": ("corrected", "false_match"),
+    # ★2026-08-01 owner("네가 안 지켰다는건가 원래는 히트였다는거?") — 회상은 정확했는데
+    #   AI 가 읽고도 이행하지 않은 경우. 위 라벨들은 전부 '회상이 부실했다'는 뜻이라
+    #   여기에 찍으면 가장 필요한 경고의 유용성이 깎여 다음에 덜 뜬다(자기 발등).
+    #   이 코드만 usefulness 분모에서 빠진다(recall_trace.NOT_APPLIED_CODE).
+    "이행안함": ("ignored", "not_applied"),
+    "안지킴": ("ignored", "not_applied"),
+    "안지켰": ("ignored", "not_applied"),
+    "안지켰다": ("ignored", "not_applied"),
+    "무시함": ("ignored", "not_applied"),
+    "무시했": ("ignored", "not_applied"),
 }
 # alternation 은 긴 라벨 먼저(regex 최장매칭 · '이미알아' > '알아' 부분겹침 방지).
 _REASON_ALT = "|".join(re.escape(k) for k in sorted(_REASON_LABELS, key=len, reverse=True))
