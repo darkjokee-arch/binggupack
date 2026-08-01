@@ -1065,7 +1065,10 @@ def _selftest():
                             [{"node_id": "node:CONV:v5c", "relevance": 0.59},
                              {"node_id": "node:CONV:v5a", "relevance": 0.3}],
                             "2026-07-29T02:00:00Z", session_id="V5", home=str(home_v5))
-            RT.record_trace("pf", "preflight", [{"node_id": "node:CONV:v5d", "relevance": 0.4}],
+            # 2026-08-01: 자동주입은 판정 대상 컷(상위 N + 관련도 하한)을 통과해야 목록에 온다.
+            # 이 시험이 보려는 것은 "자리 초과 생략" 이지 컷이 아니므로, 픽스처를 컷 위로 올려
+            # 자동주입이 판정 대상이 된 상태에서 자리 경쟁을 검증한다.
+            RT.record_trace("pf", "preflight", [{"node_id": "node:CONV:v5d", "relevance": 0.65}],
                             "2026-07-29T03:00:00Z", session_id="V5", home=str(home_v5))
             rh5 = _build_recall_hits(home=str(home_v5), session_id="V5", top_n=3)
             # 직접 4참조 → dedup 3(v5c·v5a·v5b) 전부 유지(top_n=3 이라 구코드면 v5b 증발+중복)

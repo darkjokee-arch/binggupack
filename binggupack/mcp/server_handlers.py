@@ -531,8 +531,13 @@ def _u_trace_stamp(params=None):
       · node_id 입력 불신(D-1) — trace_id + 1-based i 만 받고, i→node_id 는 서버가
         recall_traces.recalled_json 에서 해석한다. 결과에도 node_id 미노출(why 의 D-1 유지).
       · 스냅샷/staging 미접촉(MF7) — record_outcome 직접 호출. 번호축 오염 0.
-      · kind 게이트 — 직접인출(mcp_recall/mcp_why)만. 자동주입(preflight)은 판정 대상이 아니다
-        (owner 2026-07-29 — 읽었다는 보장이 없는 것에 도장 금지).
+      · kind 게이트 — 직접인출(mcp_recall/mcp_why)은 무컷. 자동주입(preflight)은 **판정 대상으로
+        추려진 것만** 찍을 수 있다(2026-08-01 owner B안).
+        연혁: 07-29 owner "읽었다는 보장이 없는 것에 도장 금지" → 08-01 owner "실제로 썼냐 안
+        썼냐가 히트/미스 아니야?" 로 자동주입도 판정 대상이 됐고, 하루 140건 유입이 문제가 되어
+        B안(상위 N + 관련도 하한)으로 좁혔다. 그 기준을 통과한 것은 도장도 가능해야 일관된다
+        — 목록에는 뜨는데 찍을 수 없으면 판정이 영영 안 남는다.
+        기준 정본은 recall_trace.list_pending(= _autoinject_judgeable).
       · used 도장은 use_count 랭킹에 즉시 반영 + owner 뒤집기 시 AI 몫만 회수
         (p1_ranking.ai_stamp_use_count · 2026-07-27 owner "AI 도장도 바로 반영")."""
     params = params or {}
@@ -560,13 +565,18 @@ def _u_trace_stamp(params=None):
     if not row:
         return {"action": "trace_stamp", "error": "trace_not_found", "stamped": 0, "results": []}
     kind = row[0]
-    if kind not in ("mcp_recall", "mcp_why"):
+    if kind not in ("mcp_recall", "mcp_why") and kind not in RT.AUTOINJECT_KINDS:
         return {"action": "trace_stamp", "error": "kind_not_stampable", "kind": kind, "stamped": 0,
-                "results": [], "note": "직접인출(mcp_recall/mcp_why)만 use-time 도장 대상"}
+                "results": [], "note": "직접인출(mcp_recall/mcp_why)과 자동주입만 use-time 도장 대상"}
     try:
-        node_ids = [n.get("node_id") for n in _json.loads(row[1] or "[]")]
+        recalled = _json.loads(row[1] or "[]")
     except Exception:
-        node_ids = []
+        recalled = []
+    node_ids = [n.get("node_id") for n in recalled]
+    # 자동주입은 판정 대상으로 추려진 노드만 찍는다(owner B안 · 기준 정본은 recall_trace).
+    # i 는 recalled_json 전체 기준 그대로 둔다 — 번호축을 바꾸면 owner 가 보던 목록과 어긋난다(MF7).
+    judgeable = (None if kind not in RT.AUTOINJECT_KINDS
+                 else {n.get("node_id") for n in RT._autoinject_judgeable(recalled)})
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     results, stamped = [], 0
     for it in items[:50]:   # 폭주 방지(범위 상한 — 도장 파서 _STAMP_RANGE_CAP 와 동수)
@@ -580,6 +590,12 @@ def _u_trace_stamp(params=None):
             results.append(entry)
             continue
         node_id = node_ids[i - 1]
+        if judgeable is not None and node_id not in judgeable:
+            entry.update({"recorded": False, "reason": "not_judgeable",
+                          "note": "자동주입 중 판정 대상(상위 %d · 관련도 %.2f 이상)만 도장한다"
+                                  % (RT.AUTOINJECT_JUDGE_TOP_N, RT.AUTOINJECT_JUDGE_REL_MIN)})
+            results.append(entry)
+            continue
         # 2026-08-01: 랭킹 반영은 record_outcome 안에서 한다(도장 경로 단일화).
         res = RT.record_outcome(trace_id, node_id, verdict,
                                 {"actor": RT.AI_STAMP_ACTOR}, ts,
