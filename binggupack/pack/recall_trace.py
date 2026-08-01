@@ -52,15 +52,27 @@ AI_STAMP_ACTOR = "ai_stamp"
 
 # reason_code 화이트리스트 — note 는 자유 원문 금지(PII 차단), verdict 별 enum 만 허용.
 # golden_drift 분석에 그대로 쓰이는 구조화 신호(왜 무시/교정됐나 → fixture 보정 방향).
-#   ignored : not_relevant(무관) · already_known(이미 앎) · low_signal(약한 신호)
+#   ignored : not_relevant(무관) · already_known(이미 앎) · low_signal(약한 신호) ·
+#             not_applied(★맞는 말인데 이행 안 함 — 회상 탓 아님 · 2026-08-01 owner 지시)
 #   corrected: stale(낡음/경로 바뀜) · wrong_context(맥락 어긋남) · superseded(더 최신 판단) ·
 #              false_match(무관한데 회상됨 — golden 에서 제외 후보)
 #   used     : note 불필요(빈 값만). 명시하면 거부(used 사유는 효용 측정에 불요).
+#
+# ★not_applied 를 왜 넣었나(owner 2026-08-01 "네가 안 지켰다는건가 원래는 히트였다는거?"):
+#   기존 세 사유는 전부 **회상 쪽이 부실했다**는 뜻이다(무관·이미 앎·약함). 그런데 실제로는
+#   "회상은 정확했는데 AI 가 읽고도 안 지킨" 경우가 있다(실측: handoff 0번 후보를 항목마다
+#   실측하라는 회상이 떴는데 그대로 어겨 owner 가 이틀 연속 지적). 이걸 미스로 찍으면
+#   **가장 필요한 경고의 유용성 점수가 깎여 다음에 덜 뜬다** — 자기 발등을 찍는다.
+#   그래서 사유를 갈라 둔다: 회상이 나빴으면 고칠 곳은 저장·검색, 이행을 안 했으면 고칠 곳은 AI.
+#   집계에서도 not_applied 는 usefulness 분모에서 빠진다(NOT_APPLIED_CODE 참조).
 REASON_CODES = {
     "used": (),
-    "ignored": ("not_relevant", "already_known", "low_signal"),
+    "ignored": ("not_relevant", "already_known", "low_signal", "not_applied"),
     "corrected": ("stale", "wrong_context", "superseded", "false_match"),
 }
+
+# 회상 품질과 무관한 사유 — usefulness 계산·drift 판정에서 제외한다(회상은 정확했다).
+NOT_APPLIED_CODE = "not_applied"
 
 # ── situation(v3, 다리c) — 회상 시점의 '의도 상황' 축(§9 Layer1) ──────────────────
 # domain(cwd 프로젝트)과 직교하는 "무슨 상황에서 회상했나". reason_code(왜 무시/교정)와도 직교.
@@ -719,6 +731,9 @@ def aggregate(home=None):
 
     per = {}
     tot = {"used": 0, "ignored": 0, "corrected": 0}
+    # not_applied(회상은 맞았는데 AI 가 이행 안 함)는 회상 품질 지표에서 빼고 따로 센다.
+    # 섞으면 "가장 필요한 경고"가 낮은 유용성으로 집계돼 랭킹에서 밀린다(owner 2026-08-01).
+    tot_not_applied = 0
     # ★actor 분리(2026-07-27): AI 자기신고 도장(ai_stamp)과 사람 도장을 한 칸에 섞지 않는다.
     # 섞으면 "AI 가 스스로 유용했다고 한 것"과 "owner 가 인정한 것"을 구분 못 하고, 그 순간
     # 기존 사람 도장의 신뢰도까지 같이 흐려진다. 나눠두면 둘의 일치율(AI 도장이 owner 판정과
@@ -732,20 +747,27 @@ def aggregate(home=None):
         a[verdict] += 1
         a["total"] += 1
         tot[verdict] += 1
-        d = per.setdefault(node_id, {"used": 0, "ignored": 0, "corrected": 0, "reasons": {}})
+        d = per.setdefault(node_id, {"used": 0, "ignored": 0, "corrected": 0,
+                                     "not_applied": 0, "reasons": {}})
         d[verdict] += 1
         if reason:
             d["reasons"][reason] = d["reasons"].get(reason, 0) + 1
+        if reason == NOT_APPLIED_CODE:
+            d["not_applied"] += 1
+            tot_not_applied += 1
 
     per_node = {}
     drift = []
     for node_id, d in per.items():
-        total = d["used"] + d["ignored"] + d["corrected"]
+        # 이행 실패분은 회상 품질 지표에서 뺀다 — 회상이 나쁜 게 아니라 AI 가 안 쓴 것이다.
+        na = d["not_applied"]
+        total = d["used"] + d["ignored"] + d["corrected"] - na
         rate = round(d["used"] / total, 4) if total else None
         per_node[node_id] = {"used": d["used"], "ignored": d["ignored"],
-                             "corrected": d["corrected"], "reasons": d["reasons"],
+                             "corrected": d["corrected"], "not_applied": na,
+                             "reasons": d["reasons"],
                              "total": total, "usefulness_rate": rate}
-        bad = d["ignored"] + d["corrected"]
+        bad = d["ignored"] + d["corrected"] - na
         if total >= _DRIFT_N_MIN and total and (bad / total) >= _DRIFT_RATIO:
             drift.append({"node_id": node_id, "total": total,
                           "ignored": d["ignored"], "corrected": d["corrected"],
@@ -753,11 +775,15 @@ def aggregate(home=None):
                           "bad_ratio": round(bad / total, 4)})
     drift.sort(key=lambda x: (-x["bad_ratio"], -x["total"], x["node_id"]))
 
+    # 전체 유용성도 이행 실패분을 뺀 모수로 낸다. outcomes 는 도장 총수 그대로 두어
+    # "몇 번 판정했나"와 "회상이 얼마나 쓸모 있었나"를 구분한다.
     n_out = tot["used"] + tot["ignored"] + tot["corrected"]
+    n_quality = n_out - tot_not_applied
     for a in by_actor.values():
         a["usefulness_rate"] = round(a["used"] / a["total"], 4) if a["total"] else None
     overall = {"traces": n_traces, "outcomes": n_out, **tot,
-               "usefulness_rate": round(tot["used"] / n_out, 4) if n_out else None}
+               "not_applied": tot_not_applied,
+               "usefulness_rate": round(tot["used"] / n_quality, 4) if n_quality else None}
     return {"overall": overall, "per_node": per_node, "by_actor": by_actor,
             "golden_drift_candidates": drift, "signal_only": True, "note": _SIGNAL_NOTE}
 
@@ -875,6 +901,26 @@ def _selftest():
            and agg["per_node"]["node:CONV:bb02"]["usefulness_rate"] == 0.0,
            "per_node usefulness(aa01=1.0 · bb02=0.0)")
         ck(agg["signal_only"] is True, "집계 signal_only=True(golden 자동수정 0)")
+
+        # ── ★not_applied(2026-08-01 owner): 회상은 맞았는데 AI 가 이행 안 함 →
+        #    회상 품질(usefulness)에서 빠진다. 여기 섞이면 "가장 필요한 경고"가 낮은 점수로
+        #    집계돼 랭킹에서 밀린다(owner "네가 안 지켰다는건가 원래는 히트였다는거?").
+        rna = record_trace("이행 안 한 회상", "why_search",
+                           [{"node_id": "node:CONV:na01", "semantic_subtype": "교훈",
+                             "rank_score": 0.9, "relevance": 0.9}], TS, home=home)
+        record_outcome(rna["trace_id"], "node:CONV:na01", "ignored", {"actor": "human"}, TS,
+                       reason_code=NOT_APPLIED_CODE, home=home)
+        agg_na = aggregate(home=home)
+        na = agg_na["per_node"]["node:CONV:na01"]
+        ck(na["not_applied"] == 1 and na["total"] == 0 and na["usefulness_rate"] is None,
+           "not_applied: 회상 품질 모수에서 제외(usefulness 안 깎임)")
+        # 무관 미스는 그대로 깎여야 한다 — 둘이 구분되지 않으면 축을 나눈 의미가 없다.
+        ck(agg_na["per_node"]["node:CONV:bb02"]["usefulness_rate"] == 0.0
+           and agg_na["overall"]["not_applied"] == 1
+           and agg_na["overall"]["outcomes"] == 3,
+           "not_applied 와 무관 미스 구분(bb02=0.0 깎임 · outcomes 는 도장 총수 유지)")
+        ck(NOT_APPLIED_CODE in REASON_CODES["ignored"],
+           "not_applied 가 ignored 화이트리스트에 등록(도장 거부 안 됨)")
 
         # ── golden_drift 후보: bb02 를 ignored/corrected 3회 채워 후보화 ──
         #   (서로 다른 trace 가 필요 — 같은 trace 는 node UNIQUE). 추가 trace 2건 생성.
