@@ -648,15 +648,19 @@ def cmd_trace(a):
                  "G4_no_auto": "actor=human 만 판정 가능(헌법 · AI 는 --ai 로 ai_stamp 기록)."}
         ok_cnt = 0
         for n in ns:
+            # 2026-08-01: 랭킹 반영은 record_outcome 안으로 내렸다(도장 경로 단일화).
+            # 여기서는 결과만 읽어 표시한다 — 새 호출 경로가 생겨도 배선을 또 복사할 일이 없다.
             res = RT.mark_by_index(n, verdict, ctx, ts,
                                    reason_code=getattr(a, "note", None), home=home,
                                    expect_scope=getattr(a, "expect_scope", None),
-                                   expect_session=getattr(a, "expect_session", None))
+                                   expect_session=getattr(a, "expect_session", None),
+                                   # human 도장이어도 넘긴다 — AI 도장을 덮어쓰면 그 몫을 회수해야 한다.
+                                   ledger_path=ledger)
             if res["recorded"]:
                 ok_cnt += 1
                 note = (" · note=%s" % res["reason_code"]) if res.get("reason_code") else ""
                 over = (" · %s 도장 덮어씀" % res["overwrote"]) if res.get("overwrote") else ""
-                uc, act = _ai_stamp_use_count(ledger, res, verdict, use_ai)
+                uc, act = res.get("use_count"), res.get("rank_action")
                 if act in ("record", "revoke"):
                     touched_use = True
                     rank = " · use_count=%s(%s)" % (

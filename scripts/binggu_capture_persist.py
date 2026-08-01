@@ -418,10 +418,17 @@ class PersistentCaptureBuffer:
         #   dialectic 신호일 때만(무분별 AI말 저장 회피 · 분류기 완화=노이즈 traj F 경계).
         # ★S2-3 실피해 1위: AI_CONTEXT_CAP=400 은 대화쌍의 AI 쪽 맥락을 전건 잘라 왔다
         #   (운영 버퍼 실측 20/21 = 95.2%). 이 값은 그대로 ai 노드 sentence 가 되므로 저장측이다.
+        # ★2026-08-01 실측으로 이 조건을 넓혔다. dialectic 신호일 때만 AI 말을 남기다 보니
+        #   운영 버퍼의 56%(28/50)가 맥락 없이 굳었고, 장부에는 owner 단독 노드가 103건 쌓였다.
+        #   그 결과 "매칭이 안되는거 아니야?" 같은 발화가 무엇에 대한 말인지 알 수 없어 회상해도
+        #   히트/미스를 찍을 수 없었다("선긋기금지" 처럼 dialectic 이 아닌 신호로 분류되면 탈락).
+        #   맥락은 신호 종류와 무관하게 판정에 쓰인다 — prev_turn 이 있으면 남긴다.
+        #   (저장이 늘어나는 게 아니다. 이건 candidate 재료일 뿐이고, 저장은 owner 의 SAVE 다.
+        #    오히려 §8-1⑥ "owner 는 pair 로만" 에 더 맞는다 — 짝이 없어 단독으로 굳던 걸 막는다.)
         ai_ctx = None
-        if prev_turn and (DIALECTIC_SIGNALS & set(v.get("signals") or [])):
+        if prev_turn:
             _ai = str(prev_turn).strip()
-            ai_ctx = _ai if _longsave_on() else _ai[:AI_CONTEXT_CAP]
+            ai_ctx = (_ai if _longsave_on() else _ai[:AI_CONTEXT_CAP]) or None
         # 앞막이 좌표 재료 — src_sha 는 **절단 전 원문 전체**의 sha256(64hex). TEXT_CAP 로 잘려도
         # '원래 무엇이었는지' 는 남는다(저장 문장 ↔ 원문 대조·회수 키).
         src_sha = hashlib.sha256(_utf8(utterance)).hexdigest()
@@ -1066,27 +1073,31 @@ def _selftest():
         check(r["action"] == "bulk_veto",
               "T34 2000자+ 줄바꿈0 → HARD veto(단일행 초장문)")
 
-        # T35 B(대화쌍): dialectic 발화(AI교정/약한교정 signal + prev_turn) → 직전 AI말 발췌를
-        #     ai_context 로 보관(pair 재료) · 독립판단(prev_turn 있어도)·무맥락(prev_turn 없음)은 NULL
+        # T35 B(대화쌍): prev_turn 이 있으면 직전 AI말 발췌를 ai_context 로 보관(pair 재료).
+        #     무맥락(prev_turn 없음)만 NULL.
+        # ★2026-08-01 계약 변경: 종전에는 dialectic 신호일 때만 남겨 운영 버퍼의 56%(28/50)가
+        #   맥락 없이 굳었고 장부에 owner 단독 노드 103건이 쌓였다. "매칭이 안되는거 아니야?" 가
+        #   dialectic 이 아닌 신호("선긋기금지")로 분류되면 짝이 통째로 사라져 판정 자체가 불가능해진다.
+        #   맥락은 신호 종류와 무관하게 판정에 쓰인다 — 있으면 남긴다(저장이 아니라 candidate 재료).
         import sqlite3 as _sq
         buf6 = PersistentCaptureBuffer(home=home)
         buf6.feed("아니 그게 아니라 A가 맞다", repo_cwd, prev_turn="B안 추천")      # dialectic(AI교정)
         buf6.feed("여긴 왜 이렇게 진행하지", repo_cwd, prev_turn="C안 설명")        # dialectic(반문·설계 §9 Phase3)
-        buf6.feed("C로 결정한다", repo_cwd, prev_turn="B안 추천")                # 독립판단(방향결정)
-        buf6.feed("이게 더 맞다", repo_cwd)                                     # prev_turn 없음
+        buf6.feed("C로 결정한다", repo_cwd, prev_turn="D안 추천")                # 독립판단도 맥락 보관(신계약)
+        buf6.feed("이게 더 맞다", repo_cwd)                                     # prev_turn 없음 → NULL
         _con = _sq.connect(str(buf6.db_path))
         _rows = _con.execute(
             "SELECT ai_context FROM capture_candidates WHERE ai_context IS NOT NULL ORDER BY id").fetchall()
         _con.close()
-        check([r[0] for r in _rows] == ["B안 추천", "C안 설명"],
-              "T35 dialectic(AI교정·반문 §9 Phase3) 만 ai_context 저장 · 독립판단/무맥락 NULL")
+        check([r[0] for r in _rows] == ["B안 추천", "C안 설명", "D안 추천"],
+              "T35 prev_turn 있으면 ai_context 보관(독립판단 포함) · 무맥락만 NULL")
 
         # T36 B-2: render_preview 가 대화쌍 후보(ai_context 보유)를 노출 + '대화쌍' 태그.
         #     save_paired ai_text 재료를 세션 마무리 preview 가 owner 에게 보여준다(저장 0·표시만).
         _pvB = buf6.render_preview()
         _pair = [it for it in _pvB["items"] if it.get("ai_context")]
-        check(len(_pair) == 2 and all("대화쌍" in it["label"] for it in _pair)
-              and sorted(it["ai_context"] for it in _pair) == ["B안 추천", "C안 설명"],
+        check(len(_pair) == 3 and all("대화쌍" in it["label"] for it in _pair)
+              and sorted(it["ai_context"] for it in _pair) == ["B안 추천", "C안 설명", "D안 추천"],
               "T36 render_preview 대화쌍 후보 노출(ai_context 필드 + '대화쌍' 태그)")
 
         # T37 B-3: 신호→관계 매핑(제안값) + render_preview pair_relation 노출

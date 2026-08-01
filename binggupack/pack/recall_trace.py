@@ -309,7 +309,8 @@ def trace_from_preflight(query, result, ts, *, domain=None, situation=None, sess
 
 # ---------------- 기록: 사후 효용 판정 (actor=human 게이트) ----------------
 
-def record_outcome(trace_id, node_id, verdict, ctx, ts, *, reason_code=None, home=None):
+def record_outcome(trace_id, node_id, verdict, ctx, ts, *, reason_code=None, home=None,
+                   ledger_path=None):
     """회상 노드 1개에 대한 사후 효용 판정. verdict∈used/ignored/corrected.
 
     actor 게이트(헌법 v2 자율성 티어 · 2026-07-20 owner GO):
@@ -361,17 +362,61 @@ def record_outcome(trace_id, node_id, verdict, ctx, ts, *, reason_code=None, hom
                 " WHERE trace_id=? AND node_id=?",
                 (oid, verdict, reason_code, actor, ts, trace_id, node_id))
             con.commit()
-            return {"recorded": True, "outcome_id": oid, "reason_code": reason_code,
-                    "actor": actor, "overwrote": prev[1], "node_id": node_id,
-                    "prev_verdict": prev[2]}
+            res = {"recorded": True, "outcome_id": oid, "reason_code": reason_code,
+                   "actor": actor, "overwrote": prev[1], "node_id": node_id,
+                   "prev_verdict": prev[2]}
+            # owner 가 AI 도장을 덮어쓴 경우의 회수(revoke)도 같은 자리에서 처리한다.
+            # ai_stamp_use_count 가 actor 조합을 보고 record/revoke 를 스스로 가른다.
+            _apply_ai_stamp_rank(res, verdict, ledger_path)
+            return res
         con.execute(
             "INSERT INTO recall_outcomes(outcome_id,trace_id,node_id,verdict,reason_code,actor,ts)"
             " VALUES(?,?,?,?,?,?,?)", (oid, trace_id, node_id, verdict, reason_code, actor, ts))
         con.commit()
     finally:
         con.close()
-    return {"recorded": True, "outcome_id": oid, "reason_code": reason_code,
-            "actor": actor, "node_id": node_id}
+    res = {"recorded": True, "outcome_id": oid, "reason_code": reason_code,
+           "actor": actor, "node_id": node_id}
+    _apply_ai_stamp_rank(res, verdict, ledger_path)
+    return res
+
+
+def _apply_ai_stamp_rank(res, verdict, ledger_path=None):
+    """AI 자기신고 도장의 랭킹(use_count) 반영을 **판정 기록과 같은 자리에서** 처리한다.
+
+    2026-08-01 신설. 종전에는 이 배선이 호출자마다 복사돼 있었다(binggu.py CLI · MCP trace_stamp).
+    그래서 세 번째 경로로 찍으면 판정만 남고 랭킹이 안 따라왔다 — 07-27 에 한 번 겪고
+    08-01 에 또 겪었다(도장 4건 중 3건 use_count=0). 호출자가 늘어도 새지 않게 여기로 내린다.
+
+    ledger_path 를 안 주면 운영 홈의 ledger.sqlite 를 쓴다(없으면 조용히 건너뛴다 — trace store 는
+    ledger 없이도 동작해야 하고, 임시 홈 시험이 여기서 죽으면 안 된다).
+    실패는 삼키지 않고 res["rank_action"] 에 사유를 남긴다(§13 B10 silent drop 금지).
+    """
+    if not (res or {}).get("recorded"):
+        return res
+    # ① AI 가 방금 찍은 도장(record 후보)  ② owner 가 AI 도장을 덮어쓴 자리(revoke 후보).
+    # 어느 쪽인지는 ai_stamp_use_count 가 res 내용으로 가른다 — 여기서는 관계 없는 건만 거른다.
+    if res.get("actor") != AI_STAMP_ACTOR and res.get("overwrote") != AI_STAMP_ACTOR:
+        return res
+    path = ledger_path
+    if not path:
+        try:
+            path = os.path.join(_plat.binggu_home(), "ledger.sqlite")
+        except Exception:
+            return res
+    if not os.path.exists(path):
+        res["rank_action"] = "skipped(no_ledger)"
+        return res
+    try:
+        from binggupack.pack.p1_ranking import ai_stamp_use_count
+        n, action = ai_stamp_use_count(path, res, verdict, True)
+        if action:
+            res["rank_action"] = action
+            if n is not None:
+                res["use_count"] = n
+    except Exception as e:
+        res["rank_action"] = "error(%s)" % type(e).__name__
+    return res
 
 
 # ---------------- T0 자동 관측: 그래프 편입 = 채택 (헌법 v2 · owner 신호) ----------------
@@ -556,6 +601,36 @@ def set_auto_observe_flag(enable, home=None):
 
 # ---------------- review / mark (수동 outcome 명령 — binggu trace) ----------------
 
+# ---------------- 자동주입 판정 대상 컷 (2026-08-01 owner B안) ----------------
+#
+# v7(08-01)이 자동주입(preflight)도 판정 대상으로 열자 미판정이 하루 ~140건씩 쌓였다.
+# 세션에서 실제로 찍히는 양(12건)의 10배라 목록이 영구 적체된다.
+#
+# owner 결정(B안): 자동주입은 **trace 당 상위 N개 + 관련도 하한**만 판정 대상으로 둔다.
+# 직접 인출(mcp_recall/mcp_why)은 owner 가 직접 물어본 것이므로 **무컷 전량** 유지(v7 원칙).
+#
+# 값의 근거(운영 장부 실측 · preflight 60 trace · 노드 217개):
+#   relevance 분포 0.25~0.70(중앙값 0.58) — 하한만으로는 0.6 아래서 잘 안 줄어든다(94%가 통과).
+#   trace 당 top1 이 0.6 이상인 비율 61% → N=2·0.6 이면 하루 약 35건(세션당 ~10건).
+# owner 가 조절할 수 있게 환경변수로 뺀다(0 = 컷 없음 = v7 그대로).
+AUTOINJECT_JUDGE_TOP_N = int(os.environ.get("BINGGU_AUTOINJECT_JUDGE_TOP_N", "2"))
+AUTOINJECT_JUDGE_REL_MIN = float(os.environ.get("BINGGU_AUTOINJECT_JUDGE_REL_MIN", "0.6"))
+AUTOINJECT_KINDS = ("preflight",)
+
+
+def _autoinject_judgeable(nodes):
+    """자동주입 회상 중 판정 대상만 골라 낸다(관련도 상위 N + 하한). 컷이 0이면 전량."""
+    if not AUTOINJECT_JUDGE_TOP_N:
+        return list(nodes)
+    scored = [n for n in nodes if n.get("relevance") is not None]
+    if not scored:
+        # 관련도가 안 적힌 구형 기록은 걸러낼 근거가 없다 — 종전대로 전량 대상(안전).
+        return list(nodes)
+    scored.sort(key=lambda n: n.get("relevance") or 0, reverse=True)
+    return [n for n in scored[:AUTOINJECT_JUDGE_TOP_N]
+            if (n.get("relevance") or 0) >= AUTOINJECT_JUDGE_REL_MIN]
+
+
 def list_pending(home=None, ledger_path=None, session_id=None, include_ai_stamped=False):
     """미판정 (trace,node) 펼침 목록 + ledger claim join(표시용 · store 원문 0 유지).
 
@@ -600,6 +675,9 @@ def list_pending(home=None, ledger_path=None, session_id=None, include_ai_stampe
             nodes = json.loads(rj)
         except Exception:
             nodes = []
+        # 자동주입은 상위 N + 관련도 하한만 판정 대상(owner B안). 직접 인출은 무컷.
+        if kind in AUTOINJECT_KINDS:
+            nodes = _autoinject_judgeable(nodes)
         for n in nodes:
             nid = n.get("node_id")
             if not nid:
@@ -669,7 +747,7 @@ def _load_review_snapshot(home=None):
 
 
 def mark_by_index(n, verdict, ctx, ts, *, reason_code=None, home=None,
-                  expect_scope=None, expect_session=None):
+                  expect_scope=None, expect_session=None, ledger_path=None):
     """review 스냅샷의 N 번 항목을 판정(binggu trace mark N verdict). N shift 방지.
 
     스냅샷 부재 → need_review(먼저 binggu trace review). N 범위 밖 → bad_index.
@@ -689,7 +767,7 @@ def mark_by_index(n, verdict, ctx, ts, *, reason_code=None, home=None,
     if not hit:
         return {"recorded": False, "reason": "bad_index"}
     res = record_outcome(hit["trace_id"], hit["node_id"], verdict, ctx, ts,
-                         reason_code=reason_code, home=home)
+                         reason_code=reason_code, home=home, ledger_path=ledger_path)
     # dedup 대표 밖의 쌍둥이 trace 참조(dup_refs)도 같은 판정 — 대표만 찍으면 나머지
     # (trace,node)가 누적 미판정 목록에 유령으로 재등장한다(2026-07-29 owner 지적①의 파이프 끝).
     dup_ok = 0
@@ -1332,6 +1410,46 @@ def _selftest():
         ck(len(list_miss_candidates(NOW8, home=home8, ledger_path=led8,
                                     min_age_hours=24, top_n=1)) == 1,
            "top_n 컷(AI 선별 소수만 owner 에 제시 · 425 통짜 방지)")
+
+        # ── 자동주입 판정 대상 컷 (2026-08-01 owner B안) ──
+        # v7 이 자동주입도 판정 대상으로 열자 하루 ~140건이 쌓여 목록이 영구 적체됐다.
+        # 자동주입만 상위 N + 관련도 하한으로 좁히고, 직접 인출은 무컷을 유지해야 한다.
+        home9 = os.path.join(tmp, "cut9", ".binggupack")
+        os.makedirs(home9, exist_ok=True)
+        nodes9 = [{"node_id": "node:CONV:c%d" % k, "relevance": r, "rank": r}
+                  for k, r in enumerate([0.69, 0.63, 0.58, 0.31], 1)]
+        _record_trace_for_test = record_trace if "record_trace" in dir() else None
+        con9 = _open_store(home9)
+        for tid, kind9 in (("rtr-cut-auto", "preflight"), ("rtr-cut-direct", "mcp_recall")):
+            con9.execute(
+                "INSERT INTO recall_traces(trace_id,kind,query_sha,domain,situation,session_id,"
+                "recalled_json,top1_node_id,risk_level,needs_question,ts)"
+                " VALUES(?,?,'sha','d','lookup','s9',?,?,'low',0,?)",
+                (tid, kind9, json.dumps(nodes9), nodes9[0]["node_id"], TS))
+        con9.commit()
+        con9.close()
+        pend9 = list_pending(home=home9)
+        auto9 = [p for p in pend9 if p["kind"] == "preflight"]
+        direct9 = [p for p in pend9 if p["kind"] == "mcp_recall"]
+        ck(len(direct9) == 4, "직접 인출은 무컷 전량(owner 가 직접 물어본 것)")
+        ck([p["node_id"] for p in auto9] == ["node:CONV:c1", "node:CONV:c2"],
+           "자동주입은 관련도 상위 2 + 0.6 이상만 판정 대상(0.58·0.31 은 빠진다)")
+        _saved_n = AUTOINJECT_JUDGE_TOP_N
+        globals()["AUTOINJECT_JUDGE_TOP_N"] = 0
+        ck(len([p for p in list_pending(home=home9) if p["kind"] == "preflight"]) == 4,
+           "컷 0 = 종전 v7 동작(전량) 으로 되돌아간다")
+        globals()["AUTOINJECT_JUDGE_TOP_N"] = _saved_n
+        # 관련도가 안 적힌 구형 기록은 걸러낼 근거가 없으므로 전량 대상(안전측).
+        con9b = _open_store(home9)
+        con9b.execute(
+            "INSERT INTO recall_traces(trace_id,kind,query_sha,domain,situation,session_id,"
+            "recalled_json,top1_node_id,risk_level,needs_question,ts)"
+            " VALUES('rtr-cut-old','preflight','sha','d','lookup','s9',?,'node:CONV:o1','low',0,?)",
+            (json.dumps([{"node_id": "node:CONV:o1"}, {"node_id": "node:CONV:o2"}]), TS))
+        con9b.commit()
+        con9b.close()
+        ck(len([p for p in list_pending(home=home9) if p["trace_id"] == "rtr-cut-old"]) == 2,
+           "관련도 미기록 구형 회상은 종전대로 전량 대상(임의 탈락 0)")
 
         # ── 운영 ledger sentinel 미접촉 ──
         ck(os.path.exists(ledger) and os.path.getmtime(ledger) == ledger_mt0,
