@@ -580,9 +580,11 @@ def _u_trace_stamp(params=None):
             results.append(entry)
             continue
         node_id = node_ids[i - 1]
+        # 2026-08-01: 랭킹 반영은 record_outcome 안에서 한다(도장 경로 단일화).
         res = RT.record_outcome(trace_id, node_id, verdict,
                                 {"actor": RT.AI_STAMP_ACTOR}, ts,
-                                reason_code=reason_code, home=home)
+                                reason_code=reason_code, home=home,
+                                ledger_path=_operating_ledger())
         entry["recorded"] = bool(res.get("recorded"))
         if not entry["recorded"]:
             entry["reason"] = res.get("reason")
@@ -594,16 +596,11 @@ def _u_trace_stamp(params=None):
                 entry["valid_verdicts"] = list(RT.VALID_VERDICTS)
         else:
             stamped += 1
-            # used → 랭킹 즉시 반영(실패는 사유 노출 — silent drop 금지 §13 B10)
-            try:
-                from binggupack.pack.p1_ranking import ai_stamp_use_count
-                n, action = ai_stamp_use_count(_operating_ledger(), res, verdict, True)
-                if action:
-                    entry["rank_action"] = action
-                    if n is not None:
-                        entry["use_count"] = n
-            except Exception as e:
-                entry["rank_action"] = "error(%s)" % type(e).__name__
+            # used → 랭킹 즉시 반영. 결과는 record_outcome 이 실어 준다(실패 사유 포함 · §13 B10).
+            if res.get("rank_action"):
+                entry["rank_action"] = res["rank_action"]
+            if res.get("use_count") is not None:
+                entry["use_count"] = res["use_count"]
         results.append(entry)
     return {"action": "trace_stamp", "trace_id": trace_id, "stamped": stamped,
             "results": results,

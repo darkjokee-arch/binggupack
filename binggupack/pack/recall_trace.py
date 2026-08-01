@@ -309,7 +309,8 @@ def trace_from_preflight(query, result, ts, *, domain=None, situation=None, sess
 
 # ---------------- 기록: 사후 효용 판정 (actor=human 게이트) ----------------
 
-def record_outcome(trace_id, node_id, verdict, ctx, ts, *, reason_code=None, home=None):
+def record_outcome(trace_id, node_id, verdict, ctx, ts, *, reason_code=None, home=None,
+                   ledger_path=None):
     """회상 노드 1개에 대한 사후 효용 판정. verdict∈used/ignored/corrected.
 
     actor 게이트(헌법 v2 자율성 티어 · 2026-07-20 owner GO):
@@ -361,17 +362,61 @@ def record_outcome(trace_id, node_id, verdict, ctx, ts, *, reason_code=None, hom
                 " WHERE trace_id=? AND node_id=?",
                 (oid, verdict, reason_code, actor, ts, trace_id, node_id))
             con.commit()
-            return {"recorded": True, "outcome_id": oid, "reason_code": reason_code,
-                    "actor": actor, "overwrote": prev[1], "node_id": node_id,
-                    "prev_verdict": prev[2]}
+            res = {"recorded": True, "outcome_id": oid, "reason_code": reason_code,
+                   "actor": actor, "overwrote": prev[1], "node_id": node_id,
+                   "prev_verdict": prev[2]}
+            # owner 가 AI 도장을 덮어쓴 경우의 회수(revoke)도 같은 자리에서 처리한다.
+            # ai_stamp_use_count 가 actor 조합을 보고 record/revoke 를 스스로 가른다.
+            _apply_ai_stamp_rank(res, verdict, ledger_path)
+            return res
         con.execute(
             "INSERT INTO recall_outcomes(outcome_id,trace_id,node_id,verdict,reason_code,actor,ts)"
             " VALUES(?,?,?,?,?,?,?)", (oid, trace_id, node_id, verdict, reason_code, actor, ts))
         con.commit()
     finally:
         con.close()
-    return {"recorded": True, "outcome_id": oid, "reason_code": reason_code,
-            "actor": actor, "node_id": node_id}
+    res = {"recorded": True, "outcome_id": oid, "reason_code": reason_code,
+           "actor": actor, "node_id": node_id}
+    _apply_ai_stamp_rank(res, verdict, ledger_path)
+    return res
+
+
+def _apply_ai_stamp_rank(res, verdict, ledger_path=None):
+    """AI 자기신고 도장의 랭킹(use_count) 반영을 **판정 기록과 같은 자리에서** 처리한다.
+
+    2026-08-01 신설. 종전에는 이 배선이 호출자마다 복사돼 있었다(binggu.py CLI · MCP trace_stamp).
+    그래서 세 번째 경로로 찍으면 판정만 남고 랭킹이 안 따라왔다 — 07-27 에 한 번 겪고
+    08-01 에 또 겪었다(도장 4건 중 3건 use_count=0). 호출자가 늘어도 새지 않게 여기로 내린다.
+
+    ledger_path 를 안 주면 운영 홈의 ledger.sqlite 를 쓴다(없으면 조용히 건너뛴다 — trace store 는
+    ledger 없이도 동작해야 하고, 임시 홈 시험이 여기서 죽으면 안 된다).
+    실패는 삼키지 않고 res["rank_action"] 에 사유를 남긴다(§13 B10 silent drop 금지).
+    """
+    if not (res or {}).get("recorded"):
+        return res
+    # ① AI 가 방금 찍은 도장(record 후보)  ② owner 가 AI 도장을 덮어쓴 자리(revoke 후보).
+    # 어느 쪽인지는 ai_stamp_use_count 가 res 내용으로 가른다 — 여기서는 관계 없는 건만 거른다.
+    if res.get("actor") != AI_STAMP_ACTOR and res.get("overwrote") != AI_STAMP_ACTOR:
+        return res
+    path = ledger_path
+    if not path:
+        try:
+            path = os.path.join(_plat.binggu_home(), "ledger.sqlite")
+        except Exception:
+            return res
+    if not os.path.exists(path):
+        res["rank_action"] = "skipped(no_ledger)"
+        return res
+    try:
+        from binggupack.pack.p1_ranking import ai_stamp_use_count
+        n, action = ai_stamp_use_count(path, res, verdict, True)
+        if action:
+            res["rank_action"] = action
+            if n is not None:
+                res["use_count"] = n
+    except Exception as e:
+        res["rank_action"] = "error(%s)" % type(e).__name__
+    return res
 
 
 # ---------------- T0 자동 관측: 그래프 편입 = 채택 (헌법 v2 · owner 신호) ----------------
@@ -669,7 +714,7 @@ def _load_review_snapshot(home=None):
 
 
 def mark_by_index(n, verdict, ctx, ts, *, reason_code=None, home=None,
-                  expect_scope=None, expect_session=None):
+                  expect_scope=None, expect_session=None, ledger_path=None):
     """review 스냅샷의 N 번 항목을 판정(binggu trace mark N verdict). N shift 방지.
 
     스냅샷 부재 → need_review(먼저 binggu trace review). N 범위 밖 → bad_index.
@@ -689,7 +734,7 @@ def mark_by_index(n, verdict, ctx, ts, *, reason_code=None, home=None,
     if not hit:
         return {"recorded": False, "reason": "bad_index"}
     res = record_outcome(hit["trace_id"], hit["node_id"], verdict, ctx, ts,
-                         reason_code=reason_code, home=home)
+                         reason_code=reason_code, home=home, ledger_path=ledger_path)
     # dedup 대표 밖의 쌍둥이 trace 참조(dup_refs)도 같은 판정 — 대표만 찍으면 나머지
     # (trace,node)가 누적 미판정 목록에 유령으로 재등장한다(2026-07-29 owner 지적①의 파이프 끝).
     dup_ok = 0
