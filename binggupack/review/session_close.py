@@ -396,11 +396,16 @@ def _build_recall_hits(home=None, ledger_path=None, now_ts=None, top_n=12, sessi
             # scope/session_id 를 함께 고정 — 다른 목록(전체 누적)이 스냅샷을 덮은 뒤의 오도장 차단
             RT.save_review_snapshot(sel, home=home, scope="session", session_id=session_id,
                                     ts=now_ts)
+            # owner 발화가 대화쌍 없이 저장된 노드는 "매칭이 안되는거 아니야?" 처럼 무엇에 대한
+            # 말인지 알 수 없어 판정 자체가 불가능하다. 원본 세션에서 찾아 둔 직전 AI 발화가
+            # 있으면 함께 보여준다 — 추정이라 단정하지 않고 표시로만 돕는다(2026-08-01).
+            ctx = _pair_context(ledger_path, [s["node_id"] for s in sel])
             items = [{"idx": s["idx"], "category": s.get("category"), "rank": s.get("rank"),
                       "relevance": s.get("relevance"), "low_rel": s.get("low_rel"),
                       "claim": s.get("claim"), "flag": s.get("flag"),
                       "kind": s.get("kind"), "source": s.get("source"),
                       "ai_verdict": s.get("ai_verdict"),
+                      "pair_context": ctx.get(s["node_id"]),
                       "ai_reason_code": s.get("ai_reason_code")} for s in sel]
             n_used = sum(1 for s in sel if s.get("ai_verdict") == "used")
             n_ai = sum(1 for s in sel if s.get("ai_verdict"))
@@ -539,6 +544,35 @@ class _RoLedger:
 
 def _ledger_path(home=None):
     return str(_home(home) / "ledger.sqlite")
+
+
+def _pair_context(ledger_path, node_ids):
+    """짝 없이 저장된 노드의 '직전 AI 발화'(추정 맥락)를 node_id → 발췌로 돌려준다.
+
+    2026-08-01: owner 발화가 대화쌍 없이 단독 저장된 것이 103건이었다. 원문만 보면
+    "매칭이 안되는거 아니야?" 처럼 무엇에 대한 말인지 알 수 없어 회상해도 판정할 수 없다.
+    evidence_locator 에 세션 원본 위치가 남아 있어 직전 AI 발화를 찾아 넣어 두었다
+    (match_method='pair_context_backfill'). 화제가 바뀐 직후면 실제 맥락이 아닐 수 있어
+    **추정**으로만 쓰고, 없으면 조용히 비운다(읽기 전용 · 실패해도 마무리를 막지 않는다).
+    """
+    if not node_ids:
+        return {}
+    ro = _RoLedger(ledger_path)
+    if not ro.con:
+        return {}
+    try:
+        keys = {("EVC-CONV-" + n.split(":")[-1]): n for n in node_ids}
+        marks = ",".join("?" * len(keys))
+        rows = ro.con.execute(
+            "SELECT evidence_id, excerpt_text FROM evidence_locator "
+            "WHERE match_method='pair_context_backfill' AND evidence_id IN (%s)" % marks,
+            list(keys),
+        ).fetchall()
+        return {keys[e]: t for e, t in rows if t and e in keys}
+    except Exception:
+        return {}
+    finally:
+        ro.close()
 
 
 def _build_governance(home=None, cwd=None, ledger_path=None):
@@ -692,6 +726,12 @@ def render_close_md(summary):
                 if it.get("low_rel"):
                     rel += "⚠저관련"
             lines.append("- %d.%s%s %s%s%s%s%s" % (it["idx"], mark, src_tag, claim, cat, rank, rel, age))
+            # 짝 없이 저장된 owner 발화는 원문만으로 판정이 안 된다 — 그때 무슨 얘기 중이었는지
+            # 를 함께 보여 준다. 화제 전환 직후면 어긋날 수 있어 '추정' 이라고 못 박는다.
+            pc = it.get("pair_context")
+            if pc:
+                s = " ".join(str(pc).split())
+                lines.append("    ↳ 그때 직전 AI말(추정 맥락): %s" % (s if len(s) <= 90 else s[:89] + "…"))
         lines.append("> %s" % rh.get("note", "도움=히트 N·헛다리=미스 N — 양쪽 다 도장해야 정직·안 치면 pending 유지·자동 0"))
     else:
         # ★2026-08-01 owner 지적: 코드는 "왜 0인지"를 note 로 내려보내는데(이번 세션 0건 /

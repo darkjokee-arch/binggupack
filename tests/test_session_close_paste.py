@@ -65,6 +65,24 @@ def test_empty_recall_shows_why_not_bare_zero():
     assert "읽지 못했다" in off
 
 
+def test_pair_context_shown_as_estimate_not_fact():
+    """짝 없이 저장된 발화는 '그때 무슨 얘기 중이었는지'를 함께 보여야 판정할 수 있다.
+
+    2026-08-01 실측: owner 발화 103건이 대화쌍 없이 단독 저장돼 있었다. 원문만 보면
+    "매칭이 안되는거 아니야?" 가 무엇에 대한 말인지 알 수 없어 히트/미스를 찍을 수가 없다.
+    다만 직전 AI 발화가 진짜 맥락이 아닐 수도 있어(화제 전환 직후) **추정**으로 표시한다.
+    """
+    md = SC.render_close_md({"recall_hits": {"available": True, "count": 1, "scope": "session",
+        "items": [{"idx": 1, "claim": "매칭이 안되는거 아니야?",
+                   "pair_context": "면허로는 못 걸러지니 명백한 타공종만 빼는 게 답입니다."}]}})
+    assert "그때 직전 AI말(추정 맥락)" in md, "맥락 줄이 있어야 판정이 가능하다"
+    assert "면허로는 못 걸러지니" in md
+    # 맥락이 없는 항목은 줄을 만들지 않는다(빈 줄로 화면을 늘리지 않는다).
+    plain = SC.render_close_md({"recall_hits": {"available": True, "count": 1, "scope": "session",
+        "items": [{"idx": 1, "claim": "그 자체로 뜻이 통하는 문장"}]}})
+    assert "추정 맥락" not in plain
+
+
 def test_l1_excluded_from_paste_block():
     """L1 제안(P)은 destination(단계2) 미배선이라 복붙 블록에서 제외(죽은 명령 방지)."""
     block = SC._build_paste_block(_summary())
