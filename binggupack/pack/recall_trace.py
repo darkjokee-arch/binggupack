@@ -699,6 +699,21 @@ def list_pending(home=None, ledger_path=None, session_id=None, include_ai_stampe
     return pending
 
 
+def count_pending(home=None, session_id=None, include_ai_stamped=False):
+    """판정 대기 **수만** 반환(2026-08-01 신설). 목록·claim 없이 세기만.
+
+    왜: 마무리 화면과 status 는 "얼마나 밀렸나" 만 알면 되는데, 지금은 그 수를 알려고
+    list_pending 을 불러 **수백 건 전문을 통째로 받는다**(실측 305건). AI 소비자에겐 그게
+    그대로 토큰이고, 사람에겐 볼 필요 없는 덤프다.
+
+    선별 로직은 복제하지 않고 list_pending 에 위임한다(정본 1곳 — 판정 기준이 바뀌어도
+    여기가 따라 틀어질 일이 없다). `ledger_path` 를 주지 않으므로 표시용 claim 을 붙이는
+    **ledger 그래프 로드를 건너뛴다** — 그게 이 경로의 실제 절약분이다.
+    """
+    return len(list_pending(home=home, ledger_path=None,
+                            session_id=session_id, include_ai_stamped=include_ai_stamped))
+
+
 SNAPSHOT_SCHEMA = "recall_review_snapshot_v2"
 
 

@@ -625,13 +625,25 @@ def _u_trace_stamp(params=None):
 
 
 def _u_trace_review(params=None):
-    """미판정 회상 목록(효용 판정 대기). read-only(스냅샷 write 안 함 — mark 는 미노출)."""
+    """미판정 회상 목록(효용 판정 대기). read-only(스냅샷 write 안 함 — mark 는 미노출).
+
+    count_only(2026-08-01): 수만 필요할 때 목록을 빼고 돌려준다. 마무리 화면·상태 점검은
+    "얼마나 밀렸나" 만 알면 되는데 종전엔 수백 건 전문이 그대로 딸려왔다(실측 305건 = 순수 토큰
+    낭비). 목록이 필요하면 종전대로 인자 없이 부르면 된다(기본값 불변).
+    """
+    params = params or {}
+    count_only = bool(params.get("count_only"))
     ledger = _operating_ledger()
     home = _operating_home()
     if not os.path.exists(ledger):
-        return {"action": "trace_review", "mode": "read", "empty": True, "count": 0, "pending": []}
+        return {"action": "trace_review", "mode": "read", "empty": True, "count": 0,
+                **({} if count_only else {"pending": []})}
     _ensure_scripts_path()
     import binggu_recall_trace as RT
+    if count_only:
+        # ledger join(표시용 claim) 자체를 건너뛰는 경로 — 세는 데 그래프 로드가 필요 없다
+        return {"action": "trace_review", "mode": "read", "count_only": True,
+                "count": RT.count_pending(home=home)}
     pend = RT.list_pending(home=home, ledger_path=ledger)
     return {"action": "trace_review", "mode": "read", "count": len(pend),
             "pending": [{"idx": p["idx"], "claim": p.get("claim"), "category": p.get("category"),
@@ -679,9 +691,29 @@ def _u_status(params=None):
         chain = db.verify_chain()
     finally:
         db.close()
+    # 마무리 화면용 3종(2026-08-01) — 여기 없어서 세션마다 인라인 파이썬으로 캐내고 있었다.
+    #   recall_pending : 판정 대기 수. trace_review 를 부르면 수백 건 전문이 딸려와(실측 305건)
+    #                    "얼마나 밀렸나" 만 알고 싶을 때 값이 너무 비쌌다.
+    #   nodes_total    : 저장 전후 대조 기준값(앵커≠저장 silent drop 방지 — §C-11 DoD).
+    #   ledger_mtime   : 같은 목적. 저장 뒤 이 값이 안 변하면 persist 되지 않은 것.
+    recall_pending = None
+    try:
+        _ensure_scripts_path()
+        import binggu_recall_trace as RT
+        recall_pending = RT.count_pending(home=_operating_home())
+    except Exception:
+        recall_pending = None       # trace store 부재·opt-in off 면 None(조회 실패로 status 를 죽이지 않는다)
+    try:
+        import datetime as _dt                       # utcfromtimestamp 는 3.12 deprecated — aware 로
+        ledger_mtime = _dt.datetime.fromtimestamp(
+            os.path.getmtime(ledger), _dt.timezone.utc).isoformat()
+    except Exception:
+        ledger_mtime = None
     return {"action": "status", "mode": "read", "ledger_exists": True,
             "active": n, "deprecated": d, "pending_reviews": p, "accepted": acc,
-            "audit_chain": "INTACT" if chain else "BROKEN"}
+            "audit_chain": "INTACT" if chain else "BROKEN",
+            "nodes_total": n + d, "recall_pending": recall_pending,
+            "ledger_mtime": ledger_mtime}
 
 
 def _u_list(params=None):
@@ -1452,7 +1484,12 @@ TOOLS = {
                                                      "files": {"type": "string"}},
                                       "required": []}},
     "trace_review": {"path_params": [], "underlying": _u_trace_review, "mode": "read",
-                     "input_schema": {"properties": {}, "required": []}},
+                     "input_schema": {"properties": {
+                         "count_only": {"type": "boolean",
+                                        "description": "true 면 판정 대기 **수만** 반환(목록 생략). "
+                                                       "마무리·상태 점검처럼 '얼마나 밀렸나'만 알면 될 때 — "
+                                                       "기본 false 는 종전대로 전체 목록."}},
+                      "required": []}},
     # use-time AI 도장 — write-gated(trace store write). confirm 앵커 없음이 **의도**:
     #   ai_stamp 는 AI 자기신고 축이라 사람 승인 위조 개념이 없고(§13 C-11-1 자동 열외 · owner
     #   2026-07-29 설계 지시), actor 서버 하드 고정이라 human 도장 위조도 불가. 저장(SAVE)·승격·

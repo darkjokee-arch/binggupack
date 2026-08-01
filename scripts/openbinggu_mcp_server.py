@@ -78,12 +78,14 @@ _TOOL_DESC = {
     "save_candidate": "선택 후보 staging 저장(dry-run 기본·SAVE n confirm·actor 하드 reader·자동호출 차단)",
     "recall": "query 관련 기억 회상(read·랭킹순·저장 0)",
     "preflight": "작업 전 회상 — 기억할 것+위험패턴+선호(read)",
-    "trace_review": "미판정 회상 목록(효용 판정 대기·read)",
+    "trace_review": ("미판정 회상 목록(효용 판정 대기·read) — 수만 필요하면 count_only=true "
+                     "(목록 생략 · 마무리/상태 점검용)"),
     "trace_stamp": ("use-time AI 회상 도장 — recall/why 인출을 판단에 쓴 직후 그 자리서 "
                     "used/ignored/corrected 기입(trace_id+i · actor=ai_stamp 하드 · owner 판정이 "
                     "덮어씀 · 자동주입 preflight 는 대상 아님)"),
     "trace_show": "판단 노드 근거 사슬 다홉(read·node_id 필요)",
-    "status": "장부 요약 — active/deprecated/검증예정/수용/audit chain(read)",
+    "status": ("장부 요약 — active/deprecated/검증예정/수용/audit chain + nodes_total·"
+               "recall_pending(회상 판정 대기 수)·ledger_mtime(저장 전후 대조 기준값)(read)"),
     "list": "저장 후보 목록(status/kind 필터·read)",
     "reminders": "due 경과 판단 리마인더(read)",
     "pair": "owner+ai 페어 저장. dry-run=미리보기만 — MCP 로는 실행 불가(fail-closed·사람 앵커 없음·approval_id 무효). 실제 저장은 owner 로컬 CLI: binggu pair",
