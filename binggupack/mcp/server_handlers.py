@@ -777,10 +777,20 @@ def _u_reminders(params=None):
 # MCP 표면에서만 approval 요청/소비가 사라졌다. 응답에 아래 필드를 실어 "confirm 이나 approval_id 로
 # 실행된다"는 오해를 제거한다. dry-run 미리보기(confirm_expected 포함)는 호환 위해 유지. 실제 mutation
 # 은 owner 로컬 CLI 로.
+# 2026-08-02: 거부만 하고 "그럼 무엇을 하라"를 안 줘서, 붙어 있는 에이전트가 매번 CLI 경로를
+# 다시 찾는다(실측 — 도구 검색 1회 + `--help` 1회를 거쳐서야 명령에 도달했다). 막는 것은 그대로 두고
+# **실행 가능한 명령**을 응답에 함께 싣는다. 명령은 언어 무관하므로 영문 안내 + 한국어 한 줄 병기.
 _FAIL_CLOSED_GUIDANCE = (
-    "MCP mutation is fail-closed. A confirmation phrase alone is not human approval, and "
-    "approval_id no longer promotes MCP writes (removed 2026-07-13). Use the owner's local "
-    "CLI (binggu) for mutations — the only human anchor is the owner's own 'preview + save n' input.")
+    "MCP mutation is fail-closed: a confirmation phrase alone is not human approval, and "
+    "approval_id no longer promotes MCP writes (removed 2026-07-13). The only human anchor is the "
+    "owner typing 'SAVE n' in chat after seeing the preview — a UserPromptSubmit hook records that "
+    "utterance, and the owner's local CLI then executes it:\n"
+    "  binggu save-batch                            # preview; these numbers are canonical\n"
+    "  binggu save-batch --confirm \"SAVE 3,4\"       # batch save, only after the owner's SAVE utterance\n"
+    "  binggu pair --confirm \"<confirm_expected>\"   # paired save; use confirm_expected from this response\n"
+    "Without that anchor the CLI is blocked as well (actor=reader), so do not retry through MCP. "
+    "한국어: MCP 저장은 사람 승인을 증명할 수 없어 막혀 있습니다. 사장님이 채팅에 'SAVE n' 을 "
+    "입력하시면 그 발화가 앵커가 되고, 그 뒤 위 CLI 로 집행합니다.")
 # dry-run 응답용(reason 필드가 없으므로 fail-closed reason 을 함께 노출).
 _MCP_FAIL_CLOSED = {"write_available": False, "reason": "human_save_required",
                     "owner_action": "use_local_cli", "guidance": _FAIL_CLOSED_GUIDANCE}
