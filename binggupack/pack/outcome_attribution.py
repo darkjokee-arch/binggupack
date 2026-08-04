@@ -88,6 +88,7 @@ def record_run_outcome(trace_id, applied_node_ids, application, result,
         return {"recorded": False, "reason": "invalid_evidence_kind"}
     if not evidence_digest:
         return {"recorded": False, "reason": "evidence_required"}  # fail-closed(합격기준4)
+    ts = RT._ts_iso(ts)  # epoch 호출자 방어 — (ts, outcome_id) 순번(overturn N) 오염 차단
     applied = list(dict.fromkeys(applied_node_ids or []))  # 순서보존 dedup
     con = RT._open_store(home)  # sibling store(recall_trace.sqlite) — ledger 미접촉
     try:
@@ -159,6 +160,7 @@ def overturn_run_outcome(seq, ts, home=None):
     """owner 1-발화 정정(binggu outcome --overturn N) — 원본 보존 + reversal 행 append(합격기준7).
 
     삭제/UPDATE 0. 이미 정정된 원본은 재정정 거부(already_overturned)."""
+    ts = RT._ts_iso(ts)  # epoch 호출자 방어 — record_run_outcome 와 동일 규약
     rows = list_run_outcomes(home, limit=0)
     hit = next((r for r in rows if r["seq"] == seq), None)
     if not hit:

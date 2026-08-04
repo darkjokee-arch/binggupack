@@ -209,6 +209,25 @@ def _trace_id(kind, query_sha, node_ids, ts):
     return "rtr-" + hashlib.sha256(raw.encode("utf-8", "replace")).hexdigest()[:16]
 
 
+def _ts_iso(ts):
+    """epoch(숫자·숫자 문자열) ts → store 규약 ISO Z 정규화. 이미 ISO 면 그대로 반환.
+
+    recall_outcomes/recall_run_outcomes 의 ts 는 TEXT 라 ORDER BY ts 가 문자열 정렬이다 —
+    epoch 이 섞이면 '17…' < '2026-…' 로 모든 ISO 행보다 앞에 끼어, 최근순 진단이 human 도장을
+    못 보고(2026-08-04 B-07 오진의 한 원인) run 순번(overturn N)이 통째로 밀린다(실측 32+6행).
+    epoch 초 범위(1e9~1e11)만 변환 — 그 밖 숫자·파싱 불가는 원형 유지(보수)."""
+    try:
+        if isinstance(ts, bool):
+            return ts
+        v = float(ts) if isinstance(ts, (int, float)) else float(str(ts).strip())
+        if 1e9 <= v < 1e11:
+            return datetime.datetime.fromtimestamp(
+                v, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except Exception:
+        pass
+    return ts
+
+
 # ---------------- 세션 근사 귀속 (MCP 회상용) ----------------
 
 def latest_session_id(home=None, before_ts=None, within_minutes=30):
@@ -343,6 +362,7 @@ def record_outcome(trace_id, node_id, verdict, ctx, ts, *, reason_code=None, hom
         return {"recorded": False, "reason": "invalid_verdict"}
     if reason_code is not None and reason_code not in REASON_CODES.get(verdict, ()):
         return {"recorded": False, "reason": "invalid_reason_code"}  # 원문/오타 차단
+    ts = _ts_iso(ts)  # epoch 호출자(hook 등) 방어 — TEXT 정렬 오염 차단(_ts_iso 참조)
     oid = "rto-" + hashlib.sha256(
         ("%s|%s|%s" % (trace_id, node_id, ts)).encode("utf-8", "replace")).hexdigest()[:16]
     con = _open_store(home)
