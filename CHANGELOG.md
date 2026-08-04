@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed — owner 교정 캡처 수율 3중 수리 (2026-08-04)
+깔때기 실측(최근 7일): 버퍼 114건(교정계열 62) → 노드 매칭 38건(교정계열 17 · **73% 유실**) → 교정 엣지 29건. 운영 owner 노드에 6~15자 절단문("사전 자체를 다"·"쿼리를 꼭 페이지 열릴때마다") 다수 — 버퍼엔 전문이 잔존하는데 저장이 잘랐다.
+- **pair 전문 저장**: batch 대화쌍 경로가 `owner_pick=1` 고정이라 `_SENT_SPLIT` 문자클래스 lookbehind(`[.!?다음임함됨까요]`) 오분리(부사 '다'·'~마다'를 어미로 오판) 시 첫 조각만 owner 노드가 되고 나머지 교정 원문이 무음 유실되던 것을 `save_paired(..., owner_whole=True)` + `_whole_utterance_node`(분리 없이 전문 1노드 · PII/secret/A0 게이트 동일 강제)로 수리. 전문 저장 불가 시 종전 분리 경로 폴백 + `owner_whole_fallback` 사유 반환(§C-13 owner 원문 그대로).
+- **구조 신호 relation**: `relation_from_signals(signals, text=None)` — 신호명 3종(어미 하드코딩) 무매치여도 owner 부정/정정 표현(`_CORRECTION_HINT`)이 있으면 `owner_refutes` 제안(구조 신호 = 직전 AI말 존재 + 부정 표현). 확정은 여전히 owner SAVE(§8-1 자동확정 0).
+- **깔때기 계수기**: ①`mark_saved`(cmd_save_batch 배선) — 저장 성공분 상태 전이 `captured_candidate→saved_to_ledger`(preview 재등장·중복 SAVE 유도 차단) ②TTL purge 직전 `funnel_events` 계수(미저장/교정계열 분리) ③preview note 에 "⚠ TTL 소멸(미저장) n건(교정계열 m)" 상시 노출 — 조용한 유실 제거.
+- 회귀: `tests/test_owner_correction_capture_yield.py` 4건 신설 · 캡처/저장/pair/preview 계열 87건 GREEN · CI ruff 게이트(`--select F`) 통과.
+
 ### Added — 지능 루프 계기판 + doctor automation 줄 + hosted sdist 번들 (평가 4추천 ①③④)
 - `binggu status`(=`binggu doctor` 별칭) 에 "지능 루프" 롤업(read-only): automation 스위치(capture/preflight/trace/crab_sync) 1줄 + 히트(use_count 수동 recall --record 신호)·사람판정(회상 효용 used)·결과-귀속(signal_only)·golden_drift 재검토 후보. 잠김(trace OFF)·N=0 은 액션 힌트로 가시화. 운영홈 write 0(집계는 mode=ro read-only 커넥션).
 - `binggupack/pack/recall_trace.py`·`outcome_attribution.py` 에 `_open_store_ro`(mode=ro URI) — 집계가 사이드카 store 를 apply_schema/makedirs 로 건드리던 write 제거(ledger + recall_trace.sqlite mtime 불변 실증).
