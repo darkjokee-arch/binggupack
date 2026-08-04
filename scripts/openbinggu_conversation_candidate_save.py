@@ -24,7 +24,8 @@ for _p in (_ROOT, _HERE):
         sys.path.insert(0, _p)                              # binggupack 패키지 + 형제 bare-name
 
 from binggupack.schema.evidence_grade import live_capture_confidence  # 등급 정본(D10)
-from openbinggu_conversation_capture_preview import capture_preview, _PREVIEW_PII_EXTRA  # 정본 재실행
+from openbinggu_conversation_capture_preview import (capture_preview, _PREVIEW_PII_EXTRA,  # 정본 재실행
+                                                     MAX_NODE_SENTENCE)
 from openbinggu_staging_write_selftest import (staging_apply, OPERATING_PATHS, _hash,
                                                loc_row, excerpt_sha)
 from openbinggu_deprecate_and_remind_g3 import open_g3, set_review_due
@@ -354,6 +355,35 @@ def _pick_one_node(text, pick, speaker, explicit=None):
             "sentence": sent, "semantic_subtype": c.get("semantic_subtype"), "speaker": speaker}
 
 
+def _whole_utterance_node(text, speaker):
+    """발화 **전문**을 문장 분리 없이 1개 node dict 로. 실패 시 에러코드(str).
+
+    왜(2026-08-04 owner 교정 캡처 수율 수리): pair 저장은 대표문 1개(owner_pick=1) 고정인데
+    _pick_one_node 의 문장 분리(_SENT_SPLIT)가 종결어미 문자클래스 오분리("사전 자체를 다 |
+    쪼개야지…" — '다'는 부사)로 첫 조각만 남기면 **owner 교정 원문의 나머지가 조용히 버려졌다**
+    (운영 실측: 6~15자 절단 owner 노드 다수 · 버퍼엔 전문 잔존). owner 발화는 원문 그대로가
+    원칙(§C-13) — 전문을 한 노드로 저장한다. 안전 게이트(PII/secret/A0/상한)는 _pick_one_node
+    와 동일하게 강제(완화 0). 공백 정규화(개행→공백)만 — 요약·절단 0."""
+    sent = re.sub(r"\s+", " ", str(text or "")).strip()   # 문장 내 개행 0 불변식 유지
+    if not sent:
+        return "empty_text"
+    if len(sent) > MAX_NODE_SENTENCE:
+        return "over_max_sentence"    # 호출부가 종전 분리 경로로 폴백(전문 불가 시에도 유실 0)
+    pii = scan_residual_pii(sent) + [k for k, rx in _PREVIEW_PII_EXTRA if rx.search(sent)]
+    if pii or any(p.search(sent) for p in v011.SECRET_PATTERNS):
+        return "pii_or_secret"
+    kind, _rule = lkmap.classify_label_kind(sent)
+    verdict = a0.classify_node({"id": "pre:" + _sent_hash(sent), "sentence": sent,
+                                "node_type": lkmap.KO2EN[kind], "evidence_refs": ["pre"]},
+                               status="candidate")
+    if verdict["verdict"] == "FAIL":
+        _form_exempt = {"node_1_word", "node_1_meaning"}   # 대화 원문 형식 면제(§8-1 ⑥ · _pick_one_node 동일)
+        if not (speaker in ("owner", "ai") and verdict.get("guard") in _form_exempt):
+            return "a0_fail"
+    return {"id": "node:CONV:" + _sent_hash(sent), "type": lkmap.KO2EN[kind],
+            "sentence": sent, "semantic_subtype": None, "speaker": speaker}
+
+
 def _self_evidence(node):
     """노드의 conv-self 자기증빙 evidence + evidence_supports 엣지(헌법: 전 노드 증빙)."""
     h = _sent_hash(node["sentence"])
@@ -368,12 +398,16 @@ def _self_evidence(node):
 
 def save_paired(db, owner_text, ai_text, ctx, snap_dir,
                 relation_kind="ai_accepts", owner_pick=1, ai_pick=1, due_date=None,
-                owner_origin=None, ai_origin=None):
+                owner_origin=None, ai_origin=None, owner_whole=False):
     """owner 발화 + ai 요약을 각각 독립 노드로 저장하고 연결 엣지로 묶는다(ai_text=None → owner 단독).
 
     owner_origin/ai_origin: 앞막이 출처 dict(선택 · _source_coords). 각 화자 발화의 원본 좌표를
     저장 시점에 동결한다. 미지정이어도 원문 발화 기준 좌표를 남기며, locator 적재 실패는
-    저장을 절대 롤백시키지 않는다(결과는 반환 dict 의 'locator')."""
+    저장을 절대 롤백시키지 않는다(결과는 반환 dict 의 'locator').
+    owner_whole=True: owner 노드를 문장 분리 없이 **발화 전문**으로 저장(2026-08-04 교정 캡처
+    수율 수리 — batch 대화쌍 경로 전용). 전문 저장 불가(상한 초과 등)면 종전 분리 경로로
+    폴백하고 사유를 반환 dict 'owner_whole_fallback' 에 남긴다(무음 폐기 금지). 기본 False =
+    기존 동작 그대로(회귀 0)."""
     # 사람-발화 게이트 재승격 — save_selected 와 대칭(pair 만 빠져 있던 갭, 2026-07-13 owner 지적).
     # MCP/비터미널 경로도 사람이 'SAVE n(세이브 n)' 을 실제 발화했으면(훅 도장) human 승격.
     # all-or-nothing: owner 축 + (paired 면) ai 축 둘 다 도장돼야 승격(단축 승격 없음·fail-closed).
@@ -404,7 +438,17 @@ def save_paired(db, owner_text, ai_text, ctx, snap_dir,
     if ctx.get("confirm") != expected:
         return block("confirm_phrase_mismatch")
 
-    own = _pick_one_node(owner_text, owner_pick, "owner", explicit=_mode)
+    owner_whole_fallback = None
+    own = None
+    if owner_whole:
+        own = _whole_utterance_node(owner_text, "owner")
+        if isinstance(own, str):
+            # 전문 저장 불가 → 종전 분리 경로 폴백(교정 원문을 아예 잃는 것보다 조각이라도 저장).
+            # 사유는 반환에 남긴다 — 조용한 유실 금지. PII/secret 은 폴백 경로에서도 동일 강제.
+            owner_whole_fallback = own
+            own = None
+    if own is None:
+        own = _pick_one_node(owner_text, owner_pick, "owner", explicit=_mode)
     if isinstance(own, str):
         return block("owner_" + own)
     nodes_pack, edges_pack, ev_pack = [own], [], []
@@ -470,6 +514,8 @@ def save_paired(db, owner_text, ai_text, ctx, snap_dir,
     return {"applied": True, "saved": len(nodes_pack), "reason": None, "pack_id": pack["pack_id"],
             "paired": paired, "relation": relation_kind if paired else None,
             "owner_node_id": own["id"],   # pair --accept 통합용(저장 직후 확정 대상)
+            "owner_whole": bool(owner_whole and owner_whole_fallback is None),
+            "owner_whole_fallback": owner_whole_fallback,   # 전문 저장 폴백 사유(무음 폐기 금지)
             "locator": r.get("locator"),  # 앞막이 결과(사유 포함) — 저장 성패와 독립
             "snapshot": r.get("snapshot"), "due_set": due_set}
 
