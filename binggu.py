@@ -1148,7 +1148,19 @@ def cmd_save_batch(a):
         ok = sum(1 for x in ress if x.get("applied"))
         dup = sum(1 for x in ress if x.get("reason") == "pair_partial_exists")
         note = (" (중복 %d)" % dup) if dup else ""
+        fb = [x.get("owner_whole_fallback") for x in ress if x.get("owner_whole_fallback")]
+        if fb:   # 전문 저장 폴백(분리 저장) 사유 표면화 — 조용한 절단 금지(2026-08-04)
+            note += " (전문 폴백: %s)" % ",".join(fb)
         print("  candidate %s → %d건 저장%s" % (cand, ok, note))
+    # 깔때기 상태 전이(2026-08-04): 저장 성공 candidate 를 버퍼에 saved_to_ledger 로 표기 —
+    # preview 재등장(중복 SAVE 유도)·TTL 소멸 집계의 '미저장 유실' 오염을 막는다.
+    # pair_partial_exists(이미 원장에 존재)도 동일 취지로 전이 대상.
+    applied_idx = {res["cand"] for res in r["results"]
+                   if res.get("applied") or res.get("reason") == "pair_partial_exists"}
+    marked = buf.mark_saved([it.get("buffer_id") for it in items
+                             if it.get("idx") in applied_idx])
+    if marked:
+        print("  버퍼 상태 전이: saved_to_ledger %d건" % marked)
     return 0
 
 

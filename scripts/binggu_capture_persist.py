@@ -14,6 +14,7 @@ hook은 등록하지 않음(미래 별도 GO). 본 모듈은 should_capture 게�
 import hashlib
 import json
 import os
+import re
 import shutil
 import sqlite3
 import time
@@ -43,13 +44,24 @@ DIALECTIC_RELATION = {"AI교정": "owner_refutes", "반문": "owner_refutes",
 DEFAULT_PAIR_RELATION = "owner_revises"   # 신호 매핑 실패 시 중립(수정) 기본
 
 
-def relation_from_signals(signals):
+# 구조 신호 보강(2026-08-04 owner 교정 캡처 수율): 교정 감지의 1차 근거는 '직전 AI말이 있고
+#   owner 가 그에 반응했다'는 **구조**다. 신호명 3종(어미 하드코딩)이 못 잡은 발화도 owner
+#   부정/정정 표현이 있으면 반박(refutes)으로 제안한다 — 제안일 뿐 확정은 owner SAVE(§8-1).
+#   실측 근거: 7일 교정계열 62건 중 신호가 '선긋기금지' 등으로 분류돼 중립 revises 로 굳던 건 다수.
+_CORRECTION_HINT = re.compile(
+    r"아니(야|냐|라|지|잖|다)|않(나|아|을|잖|는)|(?:^|\s)왜\s|틀렸|틀린|잘못|하지\s*마|말라|금지|안\s*[돼되]")
+
+
+def relation_from_signals(signals, text=None):
     """dialectic 신호 목록 → owner↔AI 관계 제안(owner_refutes/owner_revises). refutes(교정·반문)
-    우선 → revises(약한교정) → 매치 없으면 중립 DEFAULT_PAIR_RELATION. AI 자동확정 아님(제안)."""
+    우선 → revises(약한교정) → 신호 무매치 시 text 의 부정/정정 표현(구조 신호)로 refutes 판정
+    → 그래도 없으면 중립 DEFAULT_PAIR_RELATION. AI 자동확정 아님(제안)."""
     sset = set(signals or [])
     for sig in ("AI교정", "반문", "약한교정(맥락1턴)"):
         if sig in sset:
             return DIALECTIC_RELATION[sig]
+    if text and _CORRECTION_HINT.search(str(text)):
+        return "owner_refutes"
     return DEFAULT_PAIR_RELATION
                         # 문장 전체 보존(80자 발췌 폐기 — 개인 온톨로지 정체성). 1000 초과 = 대화 덩어리 → 절단(원문=대화 전문 저장 금지).
 DEFAULT_TTL_DAYS = 7    # TTL 자동 폐기 기본값
@@ -304,6 +316,17 @@ class PersistentCaptureBuffer:
                 cwd TEXT,
                 session_id TEXT,
                 length INTEGER)"""
+        )
+        # 깔때기 계수기(2026-08-04): candidate 가 저장 없이 TTL 로 소멸할 때 '몇 건이 왜' 사라졌는지
+        # 를 남긴다(원문 미저장 — 건수·교정계열 수만). 지금까지는 미저장 소멸이 완전 무음이라
+        # 캡처→노드 단계의 유실(실측 7일 교정계열 45/62 = 73%)을 아무도 몰랐다.
+        c.execute(
+            """CREATE TABLE IF NOT EXISTS funnel_events(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                at REAL NOT NULL,
+                event TEXT NOT NULL,
+                n INTEGER NOT NULL,
+                n_correction INTEGER NOT NULL DEFAULT 0)"""
         )
         # ② 하위호환 ALTER — **컬럼별 개별 try**. 통짜 try/except 는 한 컬럼 실패가 뒤 컬럼을
         #    통째로 건너뛰게 해 '컬럼 일부만 있는' 상태를 만든다. 실패는 사유를 남긴다(삼키지 않음).
@@ -613,12 +636,74 @@ class PersistentCaptureBuffer:
             if own:
                 c.close()
 
+    SAVED_STATE = "saved_to_ledger"       # 저장 성공 후 상태 전이 값(TTL 소멸 집계에서 '정상 청소'로 분리)
+    _FUNNEL_KEEP_DAYS = 30                # 계수기 자체 보존 기간(무한 증식 방지)
+
+    def mark_saved(self, buffer_ids, now=None):
+        """저장 성공한 candidate 의 상태 전이(captured_candidate → saved_to_ledger). 반환=전이 건수.
+
+        왜(2026-08-04): 저장돼도 버퍼 상태가 안 바뀌어 ①preview 에 재등장(중복 SAVE 유도)
+        ②TTL 소멸 시 '미저장 유실'과 구분 불가(깔때기 계측 불능)였다. graceful — 실패는 0 반환
+        (상태 전이 실패가 이미 성공한 ledger 저장을 되돌릴 이유가 없다)."""
+        ids = [int(i) for i in (buffer_ids or []) if i is not None]
+        if not ids:
+            return 0
+        try:
+            c = self._conn()
+            try:
+                cur = c.execute(
+                    "UPDATE capture_candidates SET state=? WHERE id IN (%s)"
+                    " AND state='captured_candidate'" % ",".join("?" * len(ids)),
+                    [self.SAVED_STATE] + ids)
+                c.commit()
+                return cur.rowcount
+            finally:
+                c.close()
+        except Exception:
+            return 0
+
+    def _count_ttl_loss(self, c, cutoff, now):
+        """TTL 삭제 **직전**에 '몇 건이 어떤 상태로' 사라지는지 계수(funnel_events). 무음 유실 금지.
+
+        state 별(미저장 captured_candidate vs 저장 완료 saved_to_ledger) + 교정계열(신호에
+        교정/반문 포함) 분리. 계수 실패가 purge/저장을 막으면 본말전도 — 카운트만 포기한다."""
+        try:
+            rows = c.execute(
+                "SELECT state, COUNT(*),"
+                " SUM(CASE WHEN signals LIKE '%교정%' OR signals LIKE '%반문%' THEN 1 ELSE 0 END)"
+                " FROM capture_candidates WHERE captured_at < ? GROUP BY state", (cutoff,)).fetchall()
+            for state, n, n_corr in rows:
+                if n:
+                    c.execute("INSERT INTO funnel_events(at,event,n,n_correction) VALUES(?,?,?,?)",
+                              (now, "ttl_purged_" + str(state or "unknown"), int(n), int(n_corr or 0)))
+            c.execute("DELETE FROM funnel_events WHERE at < ?",
+                      (now - self._FUNNEL_KEEP_DAYS * 86400,))
+        except Exception:
+            pass    # 계수기는 best-effort — 실패해도 capture/purge 본연 동작 무영향
+
+    def _ttl_loss_recent(self, now, conn=None):
+        """최근 TTL 소멸 집계(미저장분) — preview note 노출용. {'unsaved','unsaved_correction'}."""
+        own = conn is None
+        c = conn or self._conn()
+        try:
+            row = c.execute(
+                "SELECT COALESCE(SUM(n),0), COALESCE(SUM(n_correction),0) FROM funnel_events"
+                " WHERE event='ttl_purged_captured_candidate' AND at >= ?",
+                (now - self.ttl_days * 86400,)).fetchone()
+            return {"unsaved": int(row[0]), "unsaved_correction": int(row[1])}
+        except Exception:
+            return {"unsaved": 0, "unsaved_correction": 0}
+        finally:
+            if own:
+                c.close()
+
     def _purge(self, now, conn=None):
-        """TTL 경과분 삭제. 반환=삭제 건수(candidate + bulk_vetoes)."""
+        """TTL 경과분 삭제. 반환=삭제 건수(candidate + bulk_vetoes). 삭제 직전 계수(무음 유실 금지)."""
         cutoff = now - self.ttl_days * 86400
         own = conn is None
         c = conn or self._conn()
         try:
+            self._count_ttl_loss(c, cutoff, now)
             n = c.execute("DELETE FROM capture_candidates WHERE captured_at < ?", (cutoff,)).rowcount
             c.execute("DELETE FROM bulk_vetoes WHERE captured_at < ?", (cutoff,))
             c.commit()
@@ -632,19 +717,26 @@ class PersistentCaptureBuffer:
         2026-07-10). semantic 인자는 테스트 주입용(미지정 시 opt-in ON에서 lazy 생성)."""
         now = time.time() if now is None else now
         # 동적 SELECT — 구 ledger(신규 컬럼 없음)에서 컬럼 하드코딩은 조용한 무동작/에러가 된다(R6).
-        _want = ["text", "pinned", "confidence", "cwd", "ai_context", "signals", "src_id", "src_sha"]
+        _want = ["id", "text", "pinned", "confidence", "cwd", "ai_context", "signals", "src_id", "src_sha"]
         c = self._conn()
         try:
             self._purge(now, conn=c)
             live = set(self._live_cols)
             sel = [col for col in _want if col in live]
             base = "SELECT %s FROM capture_candidates " % ",".join(sel)
+            # 저장 완료(saved_to_ledger) 상태는 제외 — 이미 ledger 에 있는 발화가 preview 에
+            # 재등장해 중복 SAVE 를 유도하던 것 차단(2026-08-04 · 기존 행은 전부 captured_candidate).
+            conds, params = [], []
+            if "state" in live:
+                conds.append("state='captured_candidate'")
             if session_id is not None and "session_id" in live:
-                rows = c.execute(base + "WHERE session_id=? ORDER BY pinned DESC, id ASC",
-                                 (session_id,)).fetchall()
-            else:
-                rows = c.execute(base + "ORDER BY pinned DESC, id ASC").fetchall()
+                conds.append("session_id=?")
+                params.append(session_id)
+            if conds:
+                base += "WHERE " + " AND ".join(conds) + " "
+            rows = c.execute(base + "ORDER BY pinned DESC, id ASC", params).fetchall()
             bulk_vetoed = self._bulk_veto_count(now, session_id, conn=c)
+            ttl_lost = self._ttl_loss_recent(now, conn=c)
         finally:
             c.close()
         items = []
@@ -663,7 +755,9 @@ class PersistentCaptureBuffer:
             if ai_ctx:
                 tags.append("대화쌍")
                 try:
-                    pair_rel = relation_from_signals(json.loads(sig_json) if sig_json else [])
+                    # 신호명 매핑 우선 + 무매치 시 owner 부정/정정 표현(구조 신호)로 refutes 제안
+                    pair_rel = relation_from_signals(json.loads(sig_json) if sig_json else [],
+                                                     text=text)
                 except Exception:
                     pair_rel = DEFAULT_PAIR_RELATION
             # 출처(Fable5-A 권장): candidate 가 명시 배제(deny) cwd 에서 유입됐으면 SAVE 식별용 경고
@@ -678,12 +772,18 @@ class PersistentCaptureBuffer:
                 "cwd": cwd, "foreign": foreign, "ai_context": ai_ctx, "pair_relation": pair_rel,
                 # 앞막이 좌표 재료(저장 경로가 evidence_locator 로 넘긴다). 번호축·label 불변.
                 "src_id": r.get("src_id"), "src_sha": r.get("src_sha"),
+                # buffer 행 id — 저장 성공 시 mark_saved 로 상태 전이할 키(표시·번호축과 무관).
+                "buffer_id": r.get("id"),
                 "label": f"{i}. {text}{tag}", "state": "captured_candidate",
             })
         if self.scope.semantic_preview():
             self._attach_semantic(items, semantic)
         result = {"count": len(items), "items": items, "bulk_vetoed": bulk_vetoed,
                   "note": "owner 승인 전 candidate (active 아님)"}
+        if ttl_lost.get("unsaved"):   # 무음 유실 금지 — 저장 없이 TTL 소멸한 건수를 상시 노출
+            result["ttl_lost"] = ttl_lost
+            result["note"] += (" · ⚠ TTL 소멸(미저장) %d건(교정계열 %d)"
+                               % (ttl_lost["unsaved"], ttl_lost["unsaved_correction"]))
         _fb = self.fallback_pending()
         if _fb:   # 무음 유실 금지 — 복구 대기분을 목록 위에 상시 노출
             result["fallback_pending"] = _fb

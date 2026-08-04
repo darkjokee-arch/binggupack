@@ -129,19 +129,24 @@ def save_candidates_batch(db, snap_dir, buffer_items, indices, gate_log_path=Non
         ai_ctx = it.get("ai_context")
         if ai_ctx:
             # B(대화쌍): owner 발화 ↔ 직전 AI말 pair(노드2+엣지1) 저장. relation=신호 제안값(owner
-            #   SAVE 앵커가 승인 · §8-1 정체성 축). 대표문(owner_pick=1) 1 pair — 같은 ai 노드가
+            #   SAVE 앵커가 승인 · §8-1 정체성 축). 대표문 1 pair — 같은 ai 노드가
             #   여러 pick 에 재등장하면 save_paired 가 pair_partial_exists 로 막으므로 분할 안 함.
+            # ★owner_whole=True(2026-08-04): 종전 owner_pick=1 은 _SENT_SPLIT 오분리 시 첫 조각만
+            #   저장해 owner 교정 원문의 나머지를 조용히 버렸다("사전 자체를 다" 류 절단 노드).
+            #   owner 발화는 원문 그대로(§C-13) — 전문 1노드. 불가 시 save_paired 가 폴백+사유.
             relation = it.get("pair_relation") or DEFAULT_PAIR_RELATION
             ctx = dict(human_base)
             ctx["confirm"] = "PAIR %s owner:1 ai:1" % relation
             r = save_paired(db, text, ai_ctx, ctx, snap_dir,
                             relation_kind=relation, owner_pick=1, ai_pick=1,
-                            owner_origin=_origin_of(it))
+                            owner_origin=_origin_of(it), owner_whole=True)
             if r.get("applied"):
                 total_saved += 1
             results.append({"cand": idx, "pick": 1, "applied": bool(r.get("applied")),
                             "reason": r.get("reason"), "pack_id": r.get("pack_id"),
-                            "paired": True, "relation": relation})
+                            "paired": True, "relation": relation,
+                            "owner_whole": r.get("owner_whole"),
+                            "owner_whole_fallback": r.get("owner_whole_fallback")})
             continue
         pv = capture_preview(text, explicit=True)
         sents = pv.get("candidates", [])
