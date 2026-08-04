@@ -238,7 +238,10 @@ def _run(data):
                             # (전체 누적 목록이 덮어쓴 뒤 세션 번호로 찍는 사고를 막는다 — 2026-07-27 실측)
                             exp_scope = snap.get("scope")
                             exp_sess = snap.get("session_id")
-                            ts = time.time()
+                            # store 규약은 ISO ts — epoch float 를 넘기면 TEXT 정렬(ORDER BY ts)에서
+                            # ISO 행보다 앞에 끼어 최근순 진단·run 순번이 틀어진다(2026-08-04
+                            # 실측 32+6행 오염 — B-07 오진의 한 원인). 코어 _ts_iso 와 이중 방어.
+                            ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                             oa = _outcome_attribution_module(sd)
                             reason_map = hs.get("reason") or {}  # {idx: (verdict, reason_code)} — 미스 라벨 세분
                             for vkey, default_verdict in (("hit", "used"), ("miss", "ignored")):
@@ -509,9 +512,15 @@ def _selftest():
             n_run = con_run.execute(
                 "SELECT COUNT(*) FROM recall_run_outcomes"
                 " WHERE application='applied' AND result='unknown'").fetchone()[0]
+            n_float_ts = (con_run.execute(
+                "SELECT COUNT(*) FROM recall_outcomes WHERE ts NOT LIKE '____-__-__T%'").fetchone()[0]
+                + con_run.execute(
+                "SELECT COUNT(*) FROM recall_run_outcomes WHERE ts NOT LIKE '____-__-__T%'").fetchone()[0])
             con_run.close()
             check(n_run == 1,
                   "T18d 히트 도장 → C 결과-귀속 applied 1건 append(evidence-gated · owner 히트 트리거 · AI 자동판정 0)")
+            check(n_float_ts == 0,
+                  "T18h 도장 ts ISO 정규화(hook epoch 유입 0 — TEXT 정렬 오염 차단·2026-08-04)")
             # T18e(2026-07-21 히트↔use_count 끊김 수정): 같은 '히트 1' 이 운영 ledger use_count++ 도
             #   배선한다(랭킹 utility 축 연결 · CLI --record 와 동일 의미 · 사람 도장만 진입).
             check(_uc("node:CONV:hk1") == 1,
