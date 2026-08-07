@@ -46,6 +46,7 @@ from binggupack.pack.recall_trace import (  # noqa: E402,F401  (전체 명시 re
     record_outcome,
     list_pending,
     count_pending,
+    pending_stats,
     save_review_snapshot,
     _load_review_snapshot,
     mark_by_index,
