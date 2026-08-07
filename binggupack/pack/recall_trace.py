@@ -637,6 +637,30 @@ AUTOINJECT_JUDGE_TOP_N = int(os.environ.get("BINGGU_AUTOINJECT_JUDGE_TOP_N", "2"
 AUTOINJECT_JUDGE_REL_MIN = float(os.environ.get("BINGGU_AUTOINJECT_JUDGE_REL_MIN", "0.6"))
 AUTOINJECT_KINDS = ("preflight",)
 
+# ---------------- 자동주입 판정 시효 (2026-08-07 owner B-02 GO) ----------------
+#
+# B안 컷이 유입을 줄였지만 배수구가 없어 누적 미판정이 다시 자랐다(8/1 280 → 8/7 실측
+# 1,005 · 사람 도장 총 21 · AI use-time 도장 434 로는 유입을 못 따라간다). 자동주입은
+# 그 세션의 AI 만 "읽었는지" 알 수 있으므로(v6 owner 원문) 세션이 지나가면 판정 자체가
+# 불가하다 — TTL 을 넘긴 미판정 자동주입은 판정 대기에서 접는다(expired).
+#   ① 판정 날조 0 — verdict 를 만들지 않는다(usefulness·drift 집계 불오염).
+#   ② trace 원본 불변 — 읽기 측 필터일 뿐 store 는 한 줄도 안 지운다(기록 보존).
+#   ③ 직접 인출(mcp_recall/mcp_why/why_search)은 owner 가 물어본 것 — 무시효(v7 원칙 유지).
+#   ④ 접힌 수는 pending_stats 가 따로 세서 표시한다(silent drop 금지).
+#   ⑤ 기준 시각 = store 내 최신 trace ts(벽시계 미사용 — 이 모듈의 결정성 정책[record_trace
+#      "Date.now 미사용"] 정합). "최근 활동 N일치"만 대기로 남고, 사용 공백기가 있어도
+#      오접힘이 없다. 고정 ts fixture 시험도 무접힘(같은 날 fixture 는 서로 시효 안).
+# 0 = 무시효(종전 그대로).
+AUTOINJECT_PENDING_TTL_DAYS = int(os.environ.get("BINGGU_AUTOINJECT_PENDING_TTL_DAYS", "7"))
+
+
+def _ts_utc(ts):
+    """trace ts → aware UTC datetime. naive ISO 는 UTC 로 간주, 실패 시 None(시효 미적용 안전)."""
+    t = _parse_iso_utc(ts)
+    if t is not None and t.tzinfo is None:
+        t = t.replace(tzinfo=datetime.timezone.utc)
+    return t
+
 
 def _autoinject_judgeable(nodes):
     """자동주입 회상 중 판정 대상만 골라 낸다(관련도 상위 N + 하한). 컷이 0이면 전량."""
@@ -651,7 +675,8 @@ def _autoinject_judgeable(nodes):
             if (n.get("relevance") or 0) >= AUTOINJECT_JUDGE_REL_MIN]
 
 
-def list_pending(home=None, ledger_path=None, session_id=None, include_ai_stamped=False):
+def list_pending(home=None, ledger_path=None, session_id=None, include_ai_stamped=False,
+                 now_ts=None, include_expired=False):
     """미판정 (trace,node) 펼침 목록 + ledger claim join(표시용 · store 원문 0 유지).
 
     claim 은 ledger(read-only)에서 node_id 로 조회한 표시 텍스트일 뿐 — trace store 엔
@@ -661,6 +686,8 @@ def list_pending(home=None, ledger_path=None, session_id=None, include_ai_stampe
     include_ai_stamped(2026-07-27): True 면 **AI 자기신고 도장(ai_stamp)이 찍힌 것도 목록에 남긴다**
       — owner 가 마무리 preview 에서 보고 다르게 찍어 덮어쓸 수 있어야 하므로(사람 > AI).
       사람 판정(human)·T0 관측은 그대로 제외(확정분).
+    now_ts/include_expired(2026-08-07 B-02): 자동주입 판정 시효(AUTOINJECT_PENDING_TTL_DAYS)의
+      기준 시각(시험 결정성 · None=현재)과 시효 무시 스위치(pending_stats 의 접힌 수 계산용).
     반환 [{idx, trace_id, node_id, category, rank, relevance, kind, claim, ai_verdict}] (idx=1부터)."""
     if not os.path.exists(trace_store_path(home)):
         return []
@@ -680,6 +707,19 @@ def list_pending(home=None, ledger_path=None, session_id=None, include_ai_stampe
     finally:
         con.close()
 
+    # B-02 시효 기준 시각: now_ts(명시 · 시험 결정성) 또는 조회된 rows 의 최신 trace ts.
+    # 벽시계 미사용 — "최근 활동 TTL일치"만 대기로 남는다(상수 블록 ⑤ 참조).
+    cutoff = None
+    if AUTOINJECT_PENDING_TTL_DAYS > 0 and not include_expired:
+        base = _ts_utc(now_ts)
+        if base is None:
+            for _r in rows:
+                t = _ts_utc(_r[3])
+                if t is not None and (base is None or t > base):
+                    base = t
+        if base is not None:
+            cutoff = base - datetime.timedelta(days=AUTOINJECT_PENDING_TTL_DAYS)
+
     # ledger claim 조회(read-only · 표시용) — binggu_recall._load_graph 재사용.
     by_id = {}
     if ledger_path and os.path.exists(ledger_path):
@@ -691,6 +731,12 @@ def list_pending(home=None, ledger_path=None, session_id=None, include_ai_stampe
 
     pending = []
     for trace_id, kind, rj, _ts in rows:
+        # 시효 경과 자동주입 = 판정 불가분(세션 컨텍스트 소실) — 대기에서 접는다(B-02).
+        # 파싱 불가 ts 는 접지 않는다(오접힘 < 잔류 · 접힌 수는 pending_stats 가 표시).
+        if cutoff is not None and kind in AUTOINJECT_KINDS:
+            t = _ts_utc(_ts)
+            if t is not None and t < cutoff:
+                continue
         try:
             nodes = json.loads(rj)
         except Exception:
@@ -732,6 +778,21 @@ def count_pending(home=None, session_id=None, include_ai_stamped=False):
     """
     return len(list_pending(home=home, ledger_path=None,
                             session_id=session_id, include_ai_stamped=include_ai_stamped))
+
+
+def pending_stats(home=None, session_id=None, include_ai_stamped=False, now_ts=None):
+    """판정 대기 수 + 시효로 접힌 자동주입 수 (2026-08-07 B-02 · silent drop 금지).
+
+    접힘은 읽기 측 필터라 store 에 흔적이 없다 — 접힌 규모를 여기서 따로 세서
+    trace_review count_only 응답에 동봉한다("대기 N" 이 줄어든 이유를 숨기지 않는다).
+    선별 로직은 list_pending 위임(정본 1곳): 전체(include_expired)와 시효 내의 차 = 접힌 수.
+    반환 {"pending", "expired_autoinject", "ttl_days"}."""
+    kw = dict(home=home, ledger_path=None, session_id=session_id,
+              include_ai_stamped=include_ai_stamped, now_ts=now_ts)
+    live = len(list_pending(**kw))
+    total = len(list_pending(include_expired=True, **kw))
+    return {"pending": live, "expired_autoinject": total - live,
+            "ttl_days": AUTOINJECT_PENDING_TTL_DAYS}
 
 
 SNAPSHOT_SCHEMA = "recall_review_snapshot_v2"

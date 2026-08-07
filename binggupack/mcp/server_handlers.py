@@ -641,9 +641,12 @@ def _u_trace_review(params=None):
     _ensure_scripts_path()
     import binggu_recall_trace as RT
     if count_only:
-        # ledger join(표시용 claim) 자체를 건너뛰는 경로 — 세는 데 그래프 로드가 필요 없다
+        # ledger join(표시용 claim) 자체를 건너뛰는 경로 — 세는 데 그래프 로드가 필요 없다.
+        # B-02(2026-08-07): 시효로 접힌 자동주입 수를 동봉한다(count 가 줄어든 이유 가시화).
+        st = RT.pending_stats(home=home)
         return {"action": "trace_review", "mode": "read", "count_only": True,
-                "count": RT.count_pending(home=home)}
+                "count": st["pending"], "expired_autoinject": st["expired_autoinject"],
+                "ttl_days": st["ttl_days"]}
     pend = RT.list_pending(home=home, ledger_path=ledger)
     return {"action": "trace_review", "mode": "read", "count": len(pend),
             "pending": [{"idx": p["idx"], "claim": p.get("claim"), "category": p.get("category"),
