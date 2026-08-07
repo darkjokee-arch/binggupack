@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed — save-batch 기저장 재등장·조용한 실패 표면화 (B-08, 2026-08-07)
+2026-08-04 심야 SAVE 집행 중 발견: ①이미 원장에 저장된 발화(node:CONV:60·79)가 preview 후보 2·3 으로 재등장 ②전건 실패 배치에서 CLI 가 `BLOCK: None` 만 출력(개별 사유 `results[].reason` 증발).
+- **원장 대조 사전 제외**(`stale_ledger_ids`): CLI preview 가 저장 경로와 **같은 함수**(`_whole_utterance_node`/`_pick_one_node` → node id)로 후보의 기존재를 판정해 제외 + `saved_to_ledger` 전이. 세션 귀속 필터가 못 거르는 경로(구형 앵커=전체 목록·이전 세션 잔존·배치 밖 경로 저장)의 재등장을 원천 차단. 판정 불확실은 유지(보수 원칙 — 잘못 제외가 더 큰 손실). 전이 후 재조회라 앵커/confirm idx·pref 패리티 불변.
+- **전이 성공/실패 공통화**(`transition_targets`): all-fail(전건 `pair_partial_exists`) 배치가 조기 return 으로 상태 전이를 건너뛰어 같은 후보가 세션마다 되살아나던 루프 차단.
+- **전건 실패 reason 집계**: 최상위 reason 상시 None → `all_failed(pair_partial_exists×2, …)` + CLI BLOCK 시 candidate/pick 별 개별 사유 전체 출력(조용한 실패 금지).
+- 회귀: `tests/test_save_batch_b08_dup_surface.py` 7건 신설 · save_batch selftest 8 checks GO · preflight 16/16 · `binggu --selftest` 71/71 · tree scan CLEAN · 운영홈 ledger mtime 불변.
+
 ### Fixed — owner 교정 캡처 수율 3중 수리 (2026-08-04)
 깔때기 실측(최근 7일): 버퍼 114건(교정계열 62) → 노드 매칭 38건(교정계열 17 · **73% 유실**) → 교정 엣지 29건. 운영 owner 노드에 6~15자 절단문("사전 자체를 다"·"쿼리를 꼭 페이지 열릴때마다") 다수 — 버퍼엔 전문이 잔존하는데 저장이 잘랐다.
 - **pair 전문 저장**: batch 대화쌍 경로가 `owner_pick=1` 고정이라 `_SENT_SPLIT` 문자클래스 lookbehind(`[.!?다음임함됨까요]`) 오분리(부사 '다'·'~마다'를 어미로 오판) 시 첫 조각만 owner 노드가 되고 나머지 교정 원문이 무음 유실되던 것을 `save_paired(..., owner_whole=True)` + `_whole_utterance_node`(분리 없이 전문 1노드 · PII/secret/A0 게이트 동일 강제)로 수리. 전문 저장 불가 시 종전 분리 경로 폴백 + `owner_whole_fallback` 사유 반환(§C-13 owner 원문 그대로).

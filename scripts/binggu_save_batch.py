@@ -180,8 +180,82 @@ def save_candidates_batch(db, snap_dir, buffer_items, indices, gate_log_path=Non
             results.append({"cand": idx, "pick": lit.get("label"),
                             "applied": bool(r.get("applied")), "reason": r.get("reason"),
                             "pack_id": r.get("pack_id"), "paired": False, "relation": None})
-    return {"applied": total_saved > 0, "reason": None, "saved": total_saved,
+    reason = None
+    if not total_saved and results:
+        # B-08 ②(2026-08-07): 전건 실패 배치의 최상위 reason 을 개별 사유 집계로 채운다.
+        # 종전엔 상시 None 이라 CLI 가 'BLOCK: None' 만 찍고 results[].reason 이 증발했다
+        # (조용한 실패 — 2026-08-04 심야 전건 pair_partial_exists 배치에서 실측).
+        cnt = {}
+        for res in results:
+            k = str(res.get("reason"))
+            cnt[k] = cnt.get(k, 0) + 1
+        reason = "all_failed(%s)" % ", ".join(
+            "%s×%d" % (k, n) for k, n in sorted(cnt.items(), key=lambda kv: (-kv[1], kv[0])))
+    return {"applied": total_saved > 0, "reason": reason, "saved": total_saved,
             "skipped": skipped, "results": results}
+
+
+def transition_targets(results):
+    """버퍼 상태 전이(saved_to_ledger) 대상 candidate 번호 집합 — 저장 성공 + '이미 원장에
+    존재(pair_partial_exists)' 둘 다. all-fail 배치에서도 전이해야 기저장 발화가 다음 preview
+    에 재등장하는 루프가 끊긴다(B-08 ① · 2026-08-07)."""
+    return {res.get("cand") for res in (results or [])
+            if res.get("applied") or res.get("reason") == "pair_partial_exists"}
+
+
+def stale_ledger_ids(db, buffer_items):
+    """이미 원장에 있어 SAVE 해도 새 노드가 0인 candidate 의 buffer_id 목록(read-only).
+
+    왜(B-08 ① 2026-08-07): 세션 귀속 필터가 못 거르는 경로(구형 앵커=전체 목록·이전 세션
+    잔존·배치 밖 경로로 저장된 발화)로 기저장 후보가 preview 에 재등장했다. 판정은 저장
+    경로와 **같은 함수**(_whole_utterance_node/_pick_one_node → node id)로 계산해 패리티를
+    보장한다. 보수 원칙: 게이트 에러코드 등 판정 불확실은 유지 — 잘못 제외해 저장 기회를
+    잃는 쪽이 재등장 소음보다 큰 손실이다."""
+    from openbinggu_conversation_candidate_save import _pick_one_node, _whole_utterance_node
+    from openbinggu_conversation_capture_preview import capture_preview
+
+    def _exists(nid):
+        return bool(db.con.execute("SELECT 1 FROM nodes WHERE node_id=?", (nid,)).fetchone())
+
+    out = []
+    for it in (buffer_items or []):
+        if not isinstance(it, dict) or it.get("buffer_id") is None:
+            continue
+        text = it.get("text") or ""
+        if not text.strip():
+            continue
+        try:
+            if it.get("ai_context"):
+                # pair 경로: owner 노드는 전문(owner_whole) 우선 → 불가 시 pick1 폴백(저장과 동일).
+                # owner 든 ai 든 한쪽이라도 기존재면 save_paired 가 pair_partial_exists 로 전건
+                # 차단하므로 이 candidate 에서 새로 저장될 노드는 없다.
+                own = _whole_utterance_node(text, "owner")
+                if isinstance(own, str):
+                    own = _pick_one_node(text, 1, "owner", explicit=True)
+                if isinstance(own, str):
+                    continue
+                stale = _exists(own["id"])
+                if not stale:
+                    ain = _pick_one_node(it["ai_context"], 1, "ai", explicit=True)
+                    stale = (not isinstance(ain, str)) and _exists(ain["id"])
+            else:
+                # 단독 경로: 주 목록 전 pick + L-lane(비 blob) 이 전부 기존재일 때만 stale —
+                # 일부만 있으면 나머지가 새로 저장되므로 유지.
+                pv = capture_preview(text, explicit=True)
+                picks = list(range(1, len(pv.get("candidates") or []) + 1))
+                picks += [x.get("label") for x in (pv.get("long_candidates") or [])
+                          if not x.get("blob_suspect")]
+                if not picks:
+                    continue
+                nodes = [_pick_one_node(text, p, "owner", explicit=True) for p in picks]
+                if any(isinstance(n, str) for n in nodes):
+                    continue
+                stale = all(_exists(n["id"]) for n in nodes)
+            if stale:
+                out.append(it["buffer_id"])
+        except Exception:
+            continue      # 대조 실패 = 유지(preview 는 죽지 않는다)
+    return out
 
 
 def _selftest():
@@ -248,11 +322,20 @@ def _selftest():
         # 미발화 idx 는 승격 안 됨(부분 우회 차단·all-or-nothing)
         check("promote_partial_false", gate_human_for_ref(pref, [3], path=gate_log) is False)
 
+    # 8) transition_targets(B-08 ①): 저장 성공 + 기존재(pair_partial_exists) = 전이 대상,
+    #    그 외 실패(pii 등)는 제외 — 전이가 과하면 미저장 발화가 preview 에서 사라진다(유실).
+    tt = transition_targets([
+        {"cand": 1, "applied": True, "reason": None},
+        {"cand": 2, "applied": False, "reason": "pair_partial_exists"},
+        {"cand": 3, "applied": False, "reason": "pii_or_secret"},
+    ])
+    check("transition_targets", tt == {1, 2})
+
     if fails:
         print("save_batch selftest FAIL: %s" % ", ".join(fails))
         print("GATE=NO-GO")
         return 1
-    print("save_batch selftest: 7 checks pass (순수함수 3 + 앵커/게이트 fail-closed·승격 4)")
+    print("save_batch selftest: 8 checks pass (순수함수 3 + 앵커/게이트 fail-closed·승격 4 + 전이판정 1)")
     print("GATE=GO")
     return 0
 

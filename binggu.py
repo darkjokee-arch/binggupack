@@ -1105,7 +1105,8 @@ def cmd_save_batch(a):
     발화별 pair preview→SAVE 반복(N번) UX 제거(2026-07-18 owner 지적). owner 는 세션 마무리
     preview 를 보고 'SAVE 6,11,13' 한 번만 발화. 승인 경계: owner SAVE 앵커가 유일 근거
     (gate_human_for_ref 검증) · 각 candidate 는 기존 save_paired 로 저장(무변경) · 자동저장 0."""
-    from binggu_save_batch import stage_batch_anchor, render_batch_preview, save_candidates_batch
+    from binggu_save_batch import (stage_batch_anchor, render_batch_preview,
+                                   save_candidates_batch, stale_ledger_ids, transition_targets)
     from binggu_capture_persist import PersistentCaptureBuffer
     home = os.path.dirname(os.path.abspath(a.ledger))
     anchor_path = os.path.join(home, "last_preview_candidates.json")
@@ -1114,12 +1115,38 @@ def cmd_save_batch(a):
     #   앵커 부재/구형(session_id 없음) → 전체 목록(하위호환).
     _sid = _anchor_session_id(anchor_path)
     buf = PersistentCaptureBuffer(home=home)
-    items = (buf.render_preview(session_id=_sid) if _sid is not None
-             else buf.render_preview()).get("items", [])
+
+    def _fetch_items():
+        return (buf.render_preview(session_id=_sid) if _sid is not None
+                else buf.render_preview()).get("items", [])
+
+    items = _fetch_items()
     if not items:
         print("배치 저장 후보 0건 — 세션 마무리 candidate 가 없습니다.")
         return 0
     if a.confirm is None:
+        # B-08 ①(2026-08-07): 원장 대조로 '이미 저장된 후보' 를 preview 에서 제외 + 상태 전이.
+        # 세션 귀속 필터가 못 거르는 경로(구형 앵커=전체 목록·이전 세션 잔존·배치 밖 경로 저장)
+        # 의 재등장을 원천 차단한다. 판정은 저장 경로와 같은 함수로 node id 재계산(패리티) —
+        # 불확실하면 유지. 전이 후 재조회라 confirm 의 재현 목록과 idx/pref 가 항상 일치한다.
+        stale = []
+        try:
+            if os.path.exists(_ledger_paths(a.ledger)[0]):
+                db, _sd = _open(a.ledger)
+                try:
+                    stale = stale_ledger_ids(db, items)
+                finally:
+                    db.close()
+        except Exception:
+            stale = []          # 대조 실패 = 현행 유지(preview 는 죽지 않는다)
+        if stale:
+            marked = buf.mark_saved(stale)
+            if marked:
+                print("  (기저장 %d건 제외 — 원장 대조·버퍼 상태 전이 saved_to_ledger)" % marked)
+                items = _fetch_items()
+            if not items:
+                print("배치 저장 후보 0건 — 세션 마무리 candidate 가 없습니다.")
+                return 0
         # preview + 번호축 앵커 생성(owner 'SAVE n' 발화 대조용 · 저장 0 · session_id 보존)
         stage_batch_anchor(items, path=anchor_path, session_id=_sid)
         print(render_batch_preview(items))
@@ -1133,8 +1160,21 @@ def cmd_save_batch(a):
     db, snap_dir = _open(a.ledger)
     r = save_candidates_batch(db, snap_dir, items, indices,
                               gate_log_path=_gate_log_for_ledger(a.ledger))
+    # 깔때기 상태 전이(2026-08-04 · B-08 ① 개정 2026-08-07): 성공/실패 **공통**으로 실행 —
+    # 종전엔 all-fail(전건 pair_partial_exists) 배치가 아래 조기 return 으로 전이를 건너뛰어
+    # 같은 기저장 후보가 다음 preview 에 또 나왔다(재등장 루프). 저장 성공 + 이미 원장에
+    # 존재 둘 다 saved_to_ledger 로 전이한다(TTL '미저장 유실' 집계 오염도 함께 차단).
+    applied_idx = transition_targets(r.get("results"))
+    marked = buf.mark_saved([it.get("buffer_id") for it in items
+                             if it.get("idx") in applied_idx])
     if not r.get("applied"):
         print("BLOCK: %s — 저장 0건." % r.get("reason"))
+        for res in r.get("results", []):   # 개별 사유 전체 노출(B-08 ② — 조용한 실패 금지)
+            print("  candidate %s pick %s → %s"
+                  % (res.get("cand"), res.get("pick"), res.get("reason")))
+        if marked:
+            print("  버퍼 상태 전이: saved_to_ledger %d건(기저장 정리 — preview 재등장 차단)"
+                  % marked)
         if r.get("reason") == "no_save_gate_ref":
             print("  owner 의 'SAVE %s' 발화 앵커가 없습니다 — preview(save-batch) 먼저 → "
                   "SAVE 발화 → 재실행." % ",".join(str(i) for i in indices))
@@ -1152,13 +1192,6 @@ def cmd_save_batch(a):
         if fb:   # 전문 저장 폴백(분리 저장) 사유 표면화 — 조용한 절단 금지(2026-08-04)
             note += " (전문 폴백: %s)" % ",".join(fb)
         print("  candidate %s → %d건 저장%s" % (cand, ok, note))
-    # 깔때기 상태 전이(2026-08-04): 저장 성공 candidate 를 버퍼에 saved_to_ledger 로 표기 —
-    # preview 재등장(중복 SAVE 유도)·TTL 소멸 집계의 '미저장 유실' 오염을 막는다.
-    # pair_partial_exists(이미 원장에 존재)도 동일 취지로 전이 대상.
-    applied_idx = {res["cand"] for res in r["results"]
-                   if res.get("applied") or res.get("reason") == "pair_partial_exists"}
-    marked = buf.mark_saved([it.get("buffer_id") for it in items
-                             if it.get("idx") in applied_idx])
     if marked:
         print("  버퍼 상태 전이: saved_to_ledger %d건" % marked)
     return 0
