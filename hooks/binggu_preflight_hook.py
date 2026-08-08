@@ -282,7 +282,7 @@ def _is_stamp_prompt(prompt):
         return False
 
 
-def _render_stamp_footer(res, prompt):
+def _render_stamp_footer(res, prompt, trace_id=None):
     """회상 도장 번호 블록 + staging 기록(작업A2 — 사람 도장 = owner 채팅 1-발화 "히트 N").
 
     표시 순서(1-base)→node_id 를 <home>/last_recall_candidates.json 에 영속(gate_log.
@@ -322,7 +322,21 @@ def _render_stamp_footer(res, prompt):
                  '## 회상 도장 번호 (유용했으면 채팅 정확형 1줄 "히트 N" · 아니면 "미스 N")']
         for i, (_nid, claim) in enumerate(ordered, 1):
             lines.append("  %d. %s" % (i, claim))
-        lines.append("(도장 후 소비: binggu mark-hit --from-recall --index N — 자동 기록 0 · 사람 도장만)")
+        # ★ 2026-08-08 — **AI 도장 손잡이(trace_id)를 함께 준다.**
+        #   종전 안내는 "사람 도장만" 이었다(2026-07-25 축). 그 뒤 owner 가 두 번 뒤집었다 —
+        #   07-27 "쓰는 순간의 AI 가 가장 잘 안다"(§C-11-1 예외 신설) · 08-01 "실제로 썼냐 안
+        #   썼냐가 히트/미스 아니야?"(자동주입도 판정 대상). 그런데 이 푸터는 번호만 주고
+        #   trace_id 를 안 줘서 **AI 가 찍고 싶어도 찍을 수가 없었다**(실측 자동주입 1,373건 중
+        #   AI 도장 0건). 낡은 안내가 남아 개정된 축을 막고 있던 자리다.
+        if trace_id:
+            lines.append('[AI 도장 — 이 턴 안에 찍어라] trace_stamp(trace_id="%s", '
+                         'items=[{i:번호, verdict:"used"|"ignored"|"corrected", '
+                         'reason_code:...}]). 판단에 썼으면 used · 안 썼으면 ignored'
+                         '(회상은 맞았는데 안 썼으면 reason_code="not_applied"). '
+                         '도장은 owner 가 아니라 **쓰는 순간의 네가** 찍는 것이 정본이다'
+                         '(CLAUDE.md §C-11-1). owner 가 나중에 다르게 찍으면 사람 판정이 덮어쓴다.'
+                         % trace_id)
+        lines.append("(사람 도장: owner 채팅 정확형 1줄 \"히트 N\" / \"미스 N\" — AI 도장을 덮어쓴다)")
         return "\n".join(lines)
     except Exception:
         return None
@@ -406,7 +420,7 @@ def _run(data):
         res = RC.preflight_context(str(ledger), prompt=prompt, cwd=cwd)
         # 다리c: 이미 계산된 dom(회상 시점 프로젝트)과 situation(의도 상황)을 trace 에 함께 기록.
         #   dom 은 종전 scope 게이트용으로만 쓰고 record 경로로 안 넘겨 recall_traces.domain 이 전부 NULL 이었음.
-        _maybe_record_trace(prompt, res, domain=dom, session_id=data.get("session_id"))  # Phase 2: opt-in 일 때만 회상 메타 기록(원문 0·실패 흡수)
+        trace_id = _maybe_record_trace(prompt, res, domain=dom, session_id=data.get("session_id"))  # Phase 2: opt-in 일 때만 회상 메타 기록(원문 0·실패 흡수)
         # 회수→조언(loop 완성): 회상 결과(res)를 answer_rules '이렇게 하세요' 조언으로 변환해
         #   content-tier 주 블록으로 출력(render_block 재구성 superset · 중복 노출 0 · content_only 노출).
         #   detect_conflicts 는 접근 가능한 구조화 mandates 가 있을 때만(옵션 파일) 연결 — 없으면
@@ -418,7 +432,7 @@ def _run(data):
         person = _render_person_principles(str(ledger), prompt, cwd, RC) if level == "full" else None
         trust = _render_trust(str(ledger)) if level == "full" else None
         # 작업A2: 조언이 실제 표시될 때만 도장 staging+번호 푸터(표시 0 이면 staging 도 0 — stale 덮어쓰기 방지).
-        stamp = _render_stamp_footer(res, prompt) if block else None
+        stamp = _render_stamp_footer(res, prompt, trace_id=trace_id) if block else None
         parts = [b for b in (block, person, trust, stamp) if b]
         return "\n\n".join(parts) if parts else None
     except Exception:
@@ -449,6 +463,10 @@ def _maybe_record_trace(prompt, res, domain=None, session_id=None):
                 OA.stage_last_trace(r["trace_id"], r.get("node_ids"), "preflight", ts, home=h)
             except Exception:
                 pass
+            # ★ 2026-08-08 — **도장 푸터가 쓸 trace_id 를 돌려준다.** 종전엔 여기서 버려서
+            #   AI 가 자동주입 회상의 trace_id 를 알 방법이 없었고, 그래서 판정이 영영 안 남았다
+            #   (실측: 자동주입 1,373건 중 판정 16건 = 1.2% · 그마저 전부 사람 도장 · AI 도장 0건).
+            return r.get("trace_id")
     except Exception:
         return
 
