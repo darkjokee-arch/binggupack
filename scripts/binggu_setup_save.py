@@ -414,6 +414,12 @@ def enforce_hooks_step(settings_path, apply=False, register_fn=None):
     specs = [
         ("user-prompt-enforce-recall", "user-prompt-enforce-recall.js", ("UserPromptSubmit",)),
         ("stop-enforce-recall", "stop-enforce-recall.js", ("Stop",)),
+        # ★ 2026-08-08 신설 — 회상을 인출하고 **도장을 안 찍은 채** 턴을 끝내는 것을 막는다.
+        #   도장은 사람이 아니라 **쓰는 순간의 AI** 가 찍는 것이 정본인데(CLAUDE.md §C-11-1 ·
+        #   2026-07-27 owner 지시: 세션 끝 목록만 보는 사람보다 쓰는 순간의 AI 판정이 정확하다),
+        #   실측 결과 그 예외를 받은 쪽이 이행하지 않았다 — 회상 1,454회 중 판정 109회(**7%**).
+        #   도장이 랭킹(use_count)으로 이어지므로 안 찍으면 좋은 회상이 위로 못 올라온다.
+        ("stop-enforce-recall-stamp", "stop-enforce-recall-stamp.js", ("Stop",)),
         ("user-prompt-learn-outcome", "user-prompt-learn-outcome.js", ("UserPromptSubmit",)),
         ("pre-enforce-guard", "pre-enforce-guard.js", ("PreToolUse",)),
     ]
@@ -841,6 +847,9 @@ def _selftest():
         and _ehas(_epts, "pre-enforce-guard"))
     chk("s11d stop-enforce SYNC(exit2 차단력·async 키 없음)",
         _ehas(_estops, "stop-enforce-recall") and _esync(_estops, "stop-enforce-recall"))
+    # 도장 강제도 **반드시 SYNC** — async 면 exit 2 가 무시돼 차단력이 0 이다(회상 강제와 같은 함정).
+    chk("s11d2 stop-enforce-recall-stamp SYNC(회상 인출 후 도장 누락 차단)",
+        _ehas(_estops, "stop-enforce-recall-stamp") and _esync(_estops, "stop-enforce-recall-stamp"))
     _enb = len(_eups)
     _er2 = enforce_hooks_step(st_enf, apply=True)
     _ed2 = json.load(open(st_enf, encoding="utf-8"))
