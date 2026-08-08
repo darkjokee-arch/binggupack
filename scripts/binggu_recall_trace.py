@@ -24,7 +24,7 @@ for _p in (ROOT, HERE):
         sys.path.insert(0, _p)   # binggupack 패키지 + scripts/ 형제 import 경로
 
 from binggupack.pack.recall_trace import *  # noqa: E402,F401,F403
-from binggupack.pack.recall_trace import (  # noqa: E402,F401  (전체 명시 re-export — _ 심볼 포함)
+from binggupack.pack.recall_trace import (  # noqa: E402,F401  (계약 심볼 명시 re-export — 문서 겸용)
     VALID_VERDICTS,
     REASON_CODES,
     _SIGNAL_NOTE,
@@ -53,6 +53,19 @@ from binggupack.pack.recall_trace import (  # noqa: E402,F401  (전체 명시 re
     aggregate,
     _selftest,
 )
+
+# ★ 2026-08-08 — **정본에 새로 생긴 `_` 심볼을 자동으로 따라간다.**
+#   `import *` 는 밑줄 심볼을 안 가져오므로 위 목록을 손으로 관리해 왔는데, 2026-08-01 에
+#   정본으로 들어온 `_autoinject_judgeable`(자동주입 회상의 판정 대상 판별 · owner B안)이
+#   목록에 안 들어갔다. 그 결과 shim 을 경유하는 `server_handlers._u_trace_stamp` 가
+#   AttributeError 로 죽었고, **자동주입 회상 1,373건이 도장 한 번 못 받았다**(판정 16건 = 1.2% ·
+#   그마저 전부 사람 도장 · AI 도장 0건). 정본을 고치고 사본을 안 고친 전형이다.
+#   → 목록은 계약 문서로 남기되, 빠진 `_` 심볼은 여기서 자동 보강한다(setdefault 라 위 명시분 불변).
+from binggupack.pack import recall_trace as _rt_src  # noqa: E402
+for _name in dir(_rt_src):
+    if _name.startswith("_") and not _name.startswith("__"):
+        globals().setdefault(_name, getattr(_rt_src, _name))
+del _name
 
 
 if __name__ == "__main__":
