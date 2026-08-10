@@ -61,6 +61,32 @@ def _note(stage, exc):
     return reason
 
 
+def _stamp_failure_path():
+    return Path(os.path.expanduser("~/.binggupack")) / "stamp_failures.jsonl"
+
+
+def _record_stamp_failure(idx, verdict, res, scope, session, ts):
+    """owner 도장이 거부된 사건을 남긴다 — 2026-08-10 신설.
+
+    ★왜: hook 이 mark_by_index 반환을 안 보던 탓에 거부가 무증상이었다. 사장님이 '히트 5,6' 을
+    발화해도 스냅샷이 다른 목록으로 덮여 있으면(stale_snapshot) 조용히 사라지고, CLI 는 엉뚱하게
+    'stamp_not_found' 만 말했다. 사람의 판정이 증발하는 것은 가장 비싼 조용한 실패다.
+    원문은 안 적는다(번호·사유·스냅샷 메타만) — 유출 0 계약 불변."""
+    try:
+        p = _stamp_failure_path()
+        os.makedirs(os.path.dirname(str(p)), exist_ok=True)
+        with open(str(p), "a", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "idx": idx, "verdict": verdict, "ts": ts,
+                "reason": (res or {}).get("reason"),
+                "snapshot_scope": (res or {}).get("snapshot_scope"),
+                "snapshot_session": (res or {}).get("snapshot_session"),
+                "expected_scope": scope, "expected_session": session,
+            }, ensure_ascii=False) + "\n")
+    except Exception as e:
+        _note("도장 거부 기록 실패", e)
+
+
 def _scripts_dir():
     env = os.environ.get("BINGGU_SCRIPTS")
     if env:
@@ -250,10 +276,17 @@ def _run(data):
                                         rv = reason_map.get(i)  # '미스 3 무관/틀림' → verdict 승격 + reason_code
                                         verdict = rv[0] if rv else default_verdict
                                         rcode = rv[1] if rv else None
-                                        rt.mark_by_index(i, verdict, {"actor": "human"}, ts,
-                                                         reason_code=rcode,
-                                                         expect_scope=exp_scope,
-                                                         expect_session=exp_sess)
+                                        res = rt.mark_by_index(i, verdict, {"actor": "human"}, ts,
+                                                               reason_code=rcode,
+                                                               expect_scope=exp_scope,
+                                                               expect_session=exp_sess)
+                                        # ★ 2026-08-10 — **반환값을 버리지 않는다.** 종전에는 호출만 하고
+                                        #   결과를 안 봐서 stale_snapshot/bad_index 로 거부돼도 완전 무증상이었다
+                                        #   (실측: recall_outcomes 행 0 — owner 도장이 한 번도 안 들어갔다).
+                                        #   거부는 owner 발화가 사라진 사건이다. 반드시 흔적을 남긴다.
+                                        if not (res or {}).get("recorded"):
+                                            _record_stamp_failure(i, verdict, res, exp_scope, exp_sess, ts)
+                                            continue
                                         if vkey == "hit":
                                             # 히트(사람) → 운영 ledger use_count++ (랭킹 utility 축 연결
                                             #   · 2026-07-21 4cli+Fable5: 히트↔use_count 끊김 배선).

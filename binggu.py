@@ -1467,6 +1467,17 @@ def _mark_from_recall(a, ledger, outcome):
               "(미도장/verdict 불일치/신선도 창 초과/staging 변조 전부 거부 · fail-closed).")
         print('  채팅에 정확형 1줄로 "%s %d" 를 입력한 뒤 다시 실행하세요.'
               % ("히트" if outcome == "hit" else "미스", idx))
+        # ★ 2026-08-10 — **번호 채널을 헷갈리는 것이 이 BLOCK 의 최다 원인이다.** 번호는 세 갈래이고
+        #   서로 다른 목록이다: ①세션 마무리 preview(hook 이 효용 장부에 직접 도장 — 이 명령 불필요)
+        #   ②`binggu trace review` 누적 목록(`binggu trace mark N ...`) ③직전 `binggu recall`(이 명령).
+        #   2026-08-09 실측: owner 가 ①의 5·6번을 발화했는데 이 명령을 돌려 stamp_not_found 를 봤다.
+        #   목록이 서로 달라 그대로 밀었으면 엉뚱한 항목에 도장이 찍혔을 것이다(게이트가 막았다).
+        print("  ※ 번호 채널 확인 — 세션 마무리 preview 번호면 이 명령이 아닙니다"
+              "(발화만으로 효용 장부에 기록됩니다).")
+        print("     · 마무리 preview 번호 → 발화로 끝(거부되면 ~/.binggupack/stamp_failures.jsonl 에 사유가 남습니다)")
+        print("     · 누적 미판정 목록 번호 → %s trace review 로 목록을 띄운 뒤 %s trace mark N used|ignored|corrected"
+              % (HINT, HINT))
+        print("     · 직전 %s recall 번호 → 이 명령(mark-hit --from-recall)" % HINT)
         return 1
     # 사람 증명 = 도장(재계산 ref 대조 통과) — _resolve_human_ctx 경유(인벤토리 계약: 리터럴 0).
     ctx = _resolve_human_ctx(ledger, stamp_ctx="recall_stamp_ref")
