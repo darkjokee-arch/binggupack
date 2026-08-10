@@ -49,6 +49,8 @@ ENABLE_ENV = "BINGGU_CRAB_UPLOAD"       # owner 토글 — '1' 이어야 live �
 CRAB_TOOL = "opencrab_crab_agent"
 DEFAULT_MAX_TRIES = 8
 RETRYABLE_RX = re.compile(r"statement timeout|http_5\d\d|fetch_error", re.I)
+# 비동기 접수 응답 — 실패가 아니라 성공이다(2026-08-10). package_id 는 나중에 붙는다.
+ACCEPTED_RX = re.compile(r"upload accepted|processing the pack|asynchronous", re.I)
 TOKEN_IN_CMD_RX = re.compile(r"X-OpenCrab-Upload-Token: ([A-Za-z0-9_-]+)'")
 
 TEXT_EXTS = {".md", ".markdown", ".txt", ".csv", ".tsv", ".json", ".jsonl",
@@ -666,6 +668,19 @@ def upload_crab_pack(zip_path, pack_name, purpose, *, data_folder=None, project_
         if isinstance(fin, dict) and fin.get("status") == "ok":
             pkg = ((fin.get("package") or {}).get("package_id"))
             out.update({"ok": True, "stage": "done", "package_id": pkg, "reason": None})
+            return out
+        # ★ 2026-08-10 — 비동기 접수를 실패로 읽던 것 수리.
+        #   오픈크랩이 비동기 처리로 바뀌어 finalize 가 즉시 package 를 주지 않고
+        #   "Upload accepted. OpenCrab is processing the pack asynchronously." 만 돌려준다.
+        #   종전에는 이것이 UPLOAD_FAIL 로 떨어져 두 가지가 났다:
+        #     ① 로그가 거짓 — 성공인데 실패로 적혀 진짜 실패와 구분이 안 됐다
+        #     ② state 가 저장 안 돼 **매일 같은 팩을 다시 빌드·업로드**했다
+        #        (person_split_upload 로그에서 P2 만 NO_CHANGE 이고 P1·P3·P4 가 매일 재업로드된 이유)
+        #   package_id 는 이 시점에 없다 — 없는 것을 '못 받았다'로 남기고 접수는 성공으로 센다.
+        detail = str((fin or {}).get("detail") or fin or "")
+        if ACCEPTED_RX.search(detail):
+            out.update({"ok": True, "stage": "accepted", "package_id": None,
+                        "async_accepted": True, "reason": None})
             return out
         last = str((fin or {}).get("detail") or fin)[:150]
         out["stage"] = "finalize"
