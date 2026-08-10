@@ -11,7 +11,7 @@
     "centroid:gen": "echo '실 centroid 재생성: wrangler dev --remote --config wrangler.embed_probe.toml --port 8799 후, py ../../scripts/binggu_hosted_centroid_gen.py --endpoint http://127.0.0.1:8799'"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20260719.1",
+    "@cloudflare/workers-types": "^5.20260804.1",
     "typescript": "^7.0.2",
     "wrangler": "^4.114.0"
   },
