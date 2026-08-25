@@ -55,5 +55,20 @@ capture install(+--force)/--with-capture 옵트인 · owner sticky OFF 존중,
 (6) CI 확대(typecheck-python mypy 게이트 · npm audit 비게이팅 잡 · dependabot 주간).
 저장소 보안 강화 병행(secret scanning · push protection · branch protection 필수검사 13 ·
 PyPI env admin bypass 차단). production 로직/스키마/의존성 변경 0(설치본 결함 수정·문구·게이트).
+
+v1.23.0 — 회상 효용 축 재설계 + 긴 발화 저장(L-lane) + 저장 정직성. 핵심:
+(1) **use-time AI 도장**(trace_stamp) — 회상이 도움됐는지는 쓰는 순간의 AI 가 가장 잘 안다는
+owner 판단(2026-07-27)을 코드로. actor=ai_stamp 로 사람 도장과 분리 집계하고 owner 가 다르게
+찍으면 덮어쓴다. 실측 이행률 7% → 67.6%(hook 물리 차단 + 세 화면 숫자 통일).
+(2) **화면 통일**(2026-08-25) — `trace review` 가 include_ai_stamped 기본값 탓에 AI 도장분을
+아예 안 보여줘, CLI(748건 미판정)와 세션 preview(73% 도장)와 status(표시 없음)가 같은 저장소를
+보고도 다른 그림을 냈다. 요약 도장률 상시 표기 · `--all` · status 동일 줄로 봉합.
+(3) **L-lane 긴 발화 저장** — 잘라야만 저장되던 것을 전문으로. 배치 SAVE 한 번에 긴 발화까지.
+(4) **저장 정직성** — save-batch 기저장 재등장 차단(B-08) · 전건 실패 사유 표면화(조용한 실패 0) ·
+owner 교정 캡처 수율 3중 수리(전문 저장 · 구조 신호 relation · TTL 소멸 계수기).
+(5) **회상 잡음 억제** — 자동주입 판정 대상 상위 N + 관련도 하한(owner B안) · 판정 TTL(B-02) ·
+정렬 동점 IDF 2차 키 · preflight_rel_min=0.25.
+(6) py↔ts 골든 왕복 parity(divergence 6건 검출·4건 수리) · Claim label 80자 절단 해소.
+저장 확정은 여전히 사람 SAVE 앵커만(자동저장 0 · 헌법 불변).
 """
-__version__ = "1.22.0"
+__version__ = "1.23.0"

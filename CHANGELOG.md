@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [1.23.0] - 2026-08-25
+
+### Fixed — 회상 도장이 한 화면에서만 보이던 것 (2026-08-25)
+owner 질문 "온톨로지 히트미스 회상체크 잘 하고있니" 에서 드러났다. `trace review` 가 748건을 보여줘 "AI 가 하나도 안 찍었다" 고 보고했으나 **틀렸다** — 실측하니 이미 1,557건이 찍혀 있었다(used 577 · ignored 978 · corrected 2 · 이행률 67.6%).
+- 뿌리는 `list_pending(include_ai_stamped=…)` 기본값. 세션 마무리 preview 는 `True` 로 불러 AI 도장분을 `AI:used` 로 보여주고 owner 가 덮어쓰게 하는데, CLI 는 기본값(`False`)이라 **AI 가 찍은 것을 아예 안 보여줬다.** 같은 저장소를 보고도 CLI(748건 미판정)·preview(73% 도장)·status(표시 없음)가 서로 다른 그림을 냈다.
+- `trace review` 요약에 도장률을 **언제나** 적는다(미도장만 볼 때도) · `--all` 로 AI 도장분까지 보고 항목에 `AI:verdict/reason` 표기(세션 preview 와 같은 형식) · `status` 에도 같은 줄(표시 전용이라 예외를 삼켜 status 자체는 안 죽는다 · MF5 정합).
+- 목록 기본값은 미도장만 유지 — 사람이 찍을 것을 앞에 둔다.
+- 회귀: `tests/test_trace_review_stamp_visibility.py` 5건 신설 · 전체 pytest GREEN · 벤더 drift `--check` 16 modules byte-identical.
+
+### Fixed — 도장 거부를 조용히 넘기지 않는다 (B-10, 2026-08-10)
+`trace mark` 가 actor 게이트에 막혀도 사유 없이 넘어가던 것을 표면화하고, BLOCK 메시지에 번호 채널 안내를 넣었다. 함께: B-10 진단 정정 — "효용 장부 0행" 은 틀린 파일을 본 것이었다.
+
+
 ### Fixed — save-batch 기저장 재등장·조용한 실패 표면화 (B-08, 2026-08-07)
 2026-08-04 심야 SAVE 집행 중 발견: ①이미 원장에 저장된 발화(node:CONV:60·79)가 preview 후보 2·3 으로 재등장 ②전건 실패 배치에서 CLI 가 `BLOCK: None` 만 출력(개별 사유 `results[].reason` 증발).
 - **원장 대조 사전 제외**(`stale_ledger_ids`): CLI preview 가 저장 경로와 **같은 함수**(`_whole_utterance_node`/`_pick_one_node` → node id)로 후보의 기존재를 판정해 제외 + `saved_to_ledger` 전이. 세션 귀속 필터가 못 거르는 경로(구형 앵커=전체 목록·이전 세션 잔존·배치 밖 경로 저장)의 재등장을 원천 차단. 판정 불확실은 유지(보수 원칙 — 잘못 제외가 더 큰 손실). 전이 후 재조회라 앵커/confirm idx·pref 패리티 불변.
