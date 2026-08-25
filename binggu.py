@@ -572,9 +572,32 @@ def _ai_stamp_use_count(ledger, res, verdict, use_ai):
         return None, "error(%s)" % type(e).__name__
 
 
-def _trace_review(RT, ledger, home):
-    """미판정 회상 목록 + 번호→(trace,node) 스냅샷 저장(원문 0). 효용 판정 대기."""
+def _trace_review(RT, ledger, home, show_ai=False):
+    """미판정 회상 목록 + 번호→(trace,node) 스냅샷 저장(원문 0). 효용 판정 대기.
+
+    ★ 2026-08-25 owner 지시 "이어" — **한 축인데 화면이 둘로 갈려 있었다.**
+      세션 마무리 preview 는 `include_ai_stamped=True` 로 불러 AI 도장분을 `AI:used` 로
+      보여주고 owner 가 덮어쓰게 하는데, 이 CLI 는 기본값(False)이라 **AI 가 찍은 것을
+      아예 안 보여줬다.** 그래서 같은 저장소를 보고도 두 화면의 그림이 달랐다:
+
+        CLI  `trace review`  →  748건 (밀린 것처럼 보인다)
+        세션 preview         →  33건 중 24건 도장 (73% 한 것처럼 보인다)
+
+      실측(2026-08-25): 전체 pending 2,305 중 **AI 도장 1,557**(used 577 · ignored 978 ·
+      corrected 2) · 미도장 748. 이행률 **67.6%** 인데 CLI 만 보면 0% 로 읽힌다.
+      그 오독으로 이 세션에서 "잘 하고 있지 않다" 고 잘못 보고했다.
+
+      → 요약 줄에 **도장률을 함께 적고**, `--all` 로 AI 도장분까지 볼 수 있게 한다.
+        목록 기본값은 미도장만 유지한다(사람이 찍을 것을 앞에 두는 편이 낫다).
+    """
     pend = RT.list_pending(home=home, ledger_path=ledger)
+    # 도장률은 언제나 센다 — 숫자가 안 보이면 화면이 다시 갈린다.
+    everything = RT.list_pending(home=home, ledger_path=ledger, include_ai_stamped=True)
+    stamped = [q for q in everything if q.get("ai_verdict")]
+    total = len(everything)
+    rate = (100.0 * len(stamped) / total) if total else 0.0
+    if show_ai:
+        pend = everything
     if not pend:
         print("미판정 회상이 없습니다.")
         print("(preflight 자동주입이 일어나고 opt-in 이 켜져 있어야 쌓입니다 — binggu trace enable)")
@@ -582,12 +605,26 @@ def _trace_review(RT, ledger, home):
     # scope="all" 명시 — 마무리 preview(scope="session")와 같은 파일을 쓰므로, 이 목록으로
     # 덮은 뒤 세션 번호로 도장하면 오도장이 난다. mark 가 expect_scope 로 대조해 막는다.
     RT.save_review_snapshot(pend, home=home, scope="all")
-    print("# 미판정 회상 %d건 — 효용 판정 대기 (candidate · 사람 판정만)" % len(pend))
+    from collections import Counter
+    dist = Counter(q["ai_verdict"] for q in stamped)
+    print("# 회상 효용 도장 — 전체 %d건 · AI 도장 %d건(%.1f%%) · 미도장 %d건"
+          % (total, len(stamped), rate, total - len(stamped)))
+    if stamped:
+        print("#   AI 도장 내역: used %d · ignored %d · corrected %d  (owner 가 다르게 찍으면 덮어씀)"
+              % (dist.get("used", 0), dist.get("ignored", 0), dist.get("corrected", 0)))
+    print("# 아래 목록: %s (candidate · 사람 판정이 AI 를 이긴다)"
+          % ("전체 %d건 — AI 도장 포함" % len(pend) if show_ai else "미도장 %d건" % len(pend)))
+    if not show_ai and stamped:
+        print("#   AI 가 찍은 것까지 보려면: binggu trace review --all")
     for p in pend:
         cat = (" [%s]" % p["category"]) if p["category"] else ""
         rank = (" score=%.2f" % p["rank"]) if isinstance(p["rank"], (int, float)) else ""
         claim = p["claim"] or ("(원문 미상 · node_id %s)" % p["node_id"])
-        print("  %d. %s%s%s" % (p["idx"], claim, cat, rank))
+        # AI 가 이미 찍은 항목은 그 판정을 달아 준다 — 세션 preview 와 같은 표기.
+        av = p.get("ai_verdict")
+        rc = p.get("ai_reason_code")
+        tag = (" `AI:%s%s`" % (av, ("/" + rc) if rc else "")) if av else ""
+        print("  %d.%s %s%s%s" % (p["idx"], tag, claim, cat, rank))
         print("     판정: binggu trace mark %d used|ignored|corrected [--note <code>]" % p["idx"])
     print("\nreason_code(--note 또는 --reason): ignored→%s · corrected→%s"
           % (_reason_hint("ignored"), _reason_hint("corrected")))
@@ -680,7 +717,7 @@ def cmd_trace(a):
             _reindex_after_write(ledger)   # use_count 변화 → fresh_index rank 반영(기존 규약)
         return 0
     if a1 in (None, "review"):
-        return _trace_review(RT, ledger, home)
+        return _trace_review(RT, ledger, home, show_ai=bool(getattr(a, 'show_all', False)))
     # show <node_id> | <node:CONV:...> (judgment_trace · 하위호환)
     node_id = a.a2 if a1 == "show" else a1
     return _judgment_trace_show(ledger, node_id)
@@ -763,6 +800,20 @@ def cmd_status(a):
             print("  결과-귀속(signal_only · 인과 아님): trace %d · 적용 %d(성공 %d/실패 %d) · 미결 %d"
                   % (_oa["traces"], _oa["applied"], _oa["applied_success"],
                      _oa["applied_failure"], _oa["pending_traces"]))
+            # ★ 2026-08-25 owner 지시 "이어" — 도장률을 여기서도 말한다.
+            #   종전에는 status 가 '사람판정' 과 '재검토 후보' 만 보여줘서, AI 가 이미 찍은
+            #   1,557건이 어느 화면에도 안 나왔다. CLI `trace review` 는 미도장 748건만 세고
+            #   세션 preview 는 이번 세션분만 세니, 같은 저장소를 보고도 세 화면의 그림이 달랐다.
+            #   숫자가 한 곳에서만 보이면 다시 갈린다 — 세 화면이 같은 말을 하게 둔다.
+            try:
+                _all = RT.list_pending(home=home, include_ai_stamped=True)
+                _tot_p = len(_all)
+                _st = [q for q in _all if q.get("ai_verdict")]
+                if _tot_p:
+                    print("  회상 도장(AI use-time · owner 가 덮어씀): %d/%d(%.0f%%) · 미도장 %d건 — %s trace review [--all]"
+                          % (len(_st), _tot_p, 100.0 * len(_st) / _tot_p, _tot_p - len(_st), HINT))
+            except Exception:
+                pass                                  # 표시 전용 — 실패해도 status 를 죽이지 않는다
             _drift = len(_ag["golden_drift_candidates"])
             if _drift:
                 print("  재검토 후보 %d건(golden_drift · 사람 raw 확인 후 도장 · 자동변경 0): %s trace review"
@@ -1467,6 +1518,17 @@ def _mark_from_recall(a, ledger, outcome):
               "(미도장/verdict 불일치/신선도 창 초과/staging 변조 전부 거부 · fail-closed).")
         print('  채팅에 정확형 1줄로 "%s %d" 를 입력한 뒤 다시 실행하세요.'
               % ("히트" if outcome == "hit" else "미스", idx))
+        # ★ 2026-08-10 — **번호 채널을 헷갈리는 것이 이 BLOCK 의 최다 원인이다.** 번호는 세 갈래이고
+        #   서로 다른 목록이다: ①세션 마무리 preview(hook 이 효용 장부에 직접 도장 — 이 명령 불필요)
+        #   ②`binggu trace review` 누적 목록(`binggu trace mark N ...`) ③직전 `binggu recall`(이 명령).
+        #   2026-08-09 실측: owner 가 ①의 5·6번을 발화했는데 이 명령을 돌려 stamp_not_found 를 봤다.
+        #   목록이 서로 달라 그대로 밀었으면 엉뚱한 항목에 도장이 찍혔을 것이다(게이트가 막았다).
+        print("  ※ 번호 채널 확인 — 세션 마무리 preview 번호면 이 명령이 아닙니다"
+              "(발화만으로 효용 장부에 기록됩니다).")
+        print("     · 마무리 preview 번호 → 발화로 끝(거부되면 ~/.binggupack/stamp_failures.jsonl 에 사유가 남습니다)")
+        print("     · 누적 미판정 목록 번호 → %s trace review 로 목록을 띄운 뒤 %s trace mark N used|ignored|corrected"
+              % (HINT, HINT))
+        print("     · 직전 %s recall 번호 → 이 명령(mark-hit --from-recall)" % HINT)
         return 1
     # 사람 증명 = 도장(재계산 ref 대조 통과) — _resolve_human_ctx 경유(인벤토리 계약: 리터럴 0).
     ctx = _resolve_human_ctx(ledger, stamp_ctx="recall_stamp_ref")
@@ -2292,6 +2354,8 @@ def main():
     #   같은 도장을 두 이름으로 쳐야 했다(실사용 시 --reason 로 치고 무시됨 → 사유 유실).
     #   같은 dest 별칭으로 흡수 — 기존 --note 계약 불변(둘 다 주면 뒤에 온 값).
     tp.add_argument("--reason", dest="note", default=None)
+    # review 전용: AI 가 이미 찍은 도장까지 함께 본다(2026-08-25 — 화면이 둘로 갈리던 것 봉합).
+    tp.add_argument("--all", dest="show_all", action="store_true")
     # AI 자기신고 도장(2026-07-27 owner 지시 — 히트/미스만 열외). actor=ai_stamp 로 원문 보존,
     # human 을 참칭하지 않는다. owner 가 나중에 같은 항목을 찍으면 사람 판정이 덮어쓴다.
     tp.add_argument("--ai", action="store_true")
