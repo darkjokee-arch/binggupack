@@ -52,6 +52,10 @@ def test_readchk_only_escalates_material_unresolved_ambiguity():
     assert blocked["needs_user_question"] is True
     assert blocked["question"] == "keep compatibility or break it"
 
+    conflict = reconstruct_intent("Constraints:\n- Must use public CLI.\n- Never use public CLI.")
+    assert conflict["needs_user_question"] is True
+    assert "conflicting constraints" in conflict["question"]
+
 
 def test_hate_returns_one_load_bearing_objection_and_cheapest_test():
     objections = [
@@ -71,6 +75,7 @@ def test_hate_returns_one_load_bearing_objection_and_cheapest_test():
     assert select_load_bearing_objection([], test_result="pass")["status"] == "NO_BLOCKER"
     assert select_load_bearing_objection(objections, test_result="pass")["status"] == "FALSIFIED"
     assert select_load_bearing_objection(objections, test_result="fail")["status"] == "BLOCKER_CONFIRMED"
+    assert select_load_bearing_objection(objections, change_kinds=["typo"])["status"] == "SKIP"
 
 
 def test_sip_proposes_ephemeral_typed_candidates_without_duplicates_or_authority():
@@ -194,4 +199,3 @@ def test_behavioral_eval_returns_honest_bounded_verdict():
     out = evaluate_behavioral_runs(runs, {"verdict": "PASS", "findings": []})
     assert out["verdict"] == "IMPROVED"
     assert out["comparisons"]["C_vs_B"]["task_completion"] > 0
-

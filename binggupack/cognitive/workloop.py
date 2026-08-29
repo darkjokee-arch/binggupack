@@ -31,7 +31,8 @@ def run_cognitive_workloop(spec: dict[str, Any]) -> dict[str, Any]:
         ambiguity_candidates=spec.get("ambiguities"),
     )
     hate = select_load_bearing_objection(
-        list(spec.get("objections") or []), test_result=spec.get("falsification_result")
+        list(spec.get("objections") or []), test_result=spec.get("falsification_result"),
+        change_kinds=spec.get("change_kinds"),
     )
     sip = propose_sip_candidates(
         list(spec.get("candidate_items") or []),

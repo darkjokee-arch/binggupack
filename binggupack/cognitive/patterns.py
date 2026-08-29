@@ -26,6 +26,10 @@ _EXTERNAL_TYPES = {
     "external_api", "library", "version", "external_spec", "law", "regulation",
     "standard", "paper", "external_repository", "product", "model", "public_service",
 }
+_HIGH_RISK_CHANGES = {
+    "architecture", "memory_semantics", "approval", "recall_behavior",
+    "outcome_attribution", "public_interface", "release_candidate",
+}
 
 
 def _clean_line(line: str) -> str:
@@ -91,6 +95,19 @@ def reconstruct_intent(
 
     resolved: list[dict[str, str]] = []
     unresolved: list[dict[str, Any]] = []
+    positive = [line for line in constraints if not any(
+        word in line.casefold() for word in ("never", "must not", "do not", "금지", "하지 마")
+    )]
+    negative = [line for line in constraints if line not in positive]
+    for yes in positive:
+        yes_tokens = {t.casefold() for t in re.findall(r"[A-Za-z0-9_+-]+|[가-힣]{2,}", yes)}
+        for no in negative:
+            no_tokens = {t.casefold() for t in re.findall(r"[A-Za-z0-9_+-]+|[가-힣]{2,}", no)}
+            overlap = (yes_tokens & no_tokens) - _STOPWORDS - {"must", "preserve", "never"}
+            if overlap:
+                unresolved.append({"text": "conflicting constraints: %s <> %s" % (yes, no),
+                                   "material": True, "source": "request"})
+                break
     for ambiguity in ambiguity_candidates or []:
         text = str(ambiguity.get("text") or "").strip()
         if not text:
@@ -129,9 +146,13 @@ def reconstruct_intent(
 
 
 def select_load_bearing_objection(
-    objections: list[dict[str, Any]], *, test_result: str | None = None
+    objections: list[dict[str, Any]], *, test_result: str | None = None,
+    change_kinds: list[str] | None = None,
 ) -> dict[str, Any]:
     """Return one high-impact objection and its cheapest falsification test."""
+    if change_kinds is not None and not _HIGH_RISK_CHANGES.intersection(change_kinds):
+        return {"status": "SKIP", "objection": None, "falsification_test": None,
+                "considered": [], "reason": "no high-risk change kind"}
     if not objections:
         return {"status": "NO_BLOCKER", "objection": None, "falsification_test": None,
                 "considered": []}

@@ -229,7 +229,8 @@ def build_catchup(
                    "confidence": "high", "evidence": ["outcome:pending"]}
         elif failures:
             nba = {"next_best_action": "Run the cheapest regression for the most relevant known failure",
-                   "confidence": "medium", "evidence": [failures[0].get("source_ref")]}
+                   "confidence": "medium",
+                   "evidence": [str(failures[0].get("source_ref") or "memory:unknown")]}
         else:
             nba = {"next_best_action": "Execute the smallest verifiable step toward the current goal",
                    "confidence": "low", "evidence": []}

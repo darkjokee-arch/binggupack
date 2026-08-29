@@ -35,6 +35,15 @@ def audit_benchmark(manifest: dict[str, Any]) -> dict[str, Any]:
             break
     if unfair:
         add("UNFAIR_BASELINE", "high", "baseline and treatment differ outside the cognitive layer")
+    group_conditions = dict(manifest.get("recall_group_conditions") or {})
+    recall_on = dict(group_conditions.get("recall_on") or {})
+    recall_off = dict(group_conditions.get("recall_off") or {})
+    if recall_on and recall_off:
+        comparable_on = {k: v for k, v in recall_on.items() if k != "recall"}
+        comparable_off = {k: v for k, v in recall_off.items() if k != "recall"}
+        if comparable_on != comparable_off:
+            add("RECALL_GROUP_CONDITION_MISMATCH", "high",
+                "recall and non-recall groups differ beyond recall availability")
     if manifest.get("selection_strategy") != "fixed_manifest":
         add("CHERRY_PICKING", "high", "examples were not fixed before treatment results")
     metrics = {str(m) for m in manifest.get("primary_metrics") or []}
