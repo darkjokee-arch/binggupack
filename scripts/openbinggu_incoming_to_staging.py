@@ -55,7 +55,6 @@ __all__ = [
 ]
 
 BASE = Path(__file__).resolve().parent.parent
-SCRIPTS = Path(__file__).resolve().parent
 SELFTEST_REPORT = BASE / "reports" / "openbinggu_v011_selftest.json"
 STAGING_PLAN_REPORT = BASE / "reports" / "openbinggu_v011_staging_plan.json"
 
