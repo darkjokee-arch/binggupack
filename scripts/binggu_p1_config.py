@@ -88,9 +88,10 @@ __all__ = (
     'user_ontology_path',
     'load_user_ontology',
     'ontology_status',
+    'binggu_home',
 )
 
-try:  # 패키지/스크립트 양쪽 import 호환(기존 모듈과 동일 관용)
+try:  # package/script import compatibility
     from binggu_capture_persist import binggu_home
 except ImportError:  # pragma: no cover
     import binggu_platform as _plat

@@ -102,7 +102,7 @@ def _open(ledger, must_exist=True):
     if must_exist and not os.path.exists(ledger):
         print("장부가 없습니다: %s" % ledger)
         print(f"먼저 만드세요:  {HINT} init")
-        sys.exit(2)
+        raise SystemExit(2)
     os.makedirs(snap_dir, exist_ok=True)
     # 손상 장부 내성: sqlite 로 못 여는 장부는 traceback 대신 restore 안내(exit 2 = 장부없음과 일관).
     try:
@@ -122,7 +122,7 @@ def _open(ledger, must_exist=True):
             print("  (confirm 없이 실행하면 dry-run 검증 + 교체용 --confirm 문구를 안내합니다)")
         else:
             print(f"백업 폴더가 비어 있습니다: %s — ledger_*.sqlite 백업을 찾아 {HINT} restore <백업> 하세요." % bdir)
-        sys.exit(2)
+        raise SystemExit(2)
 
 
 def _node_id_of(db, index, status="all", kind=None):

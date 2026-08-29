@@ -54,6 +54,23 @@ from binggupack.pack.scope_envelope import (  # noqa: E402,F401  (전체 명시 
     _UNDECIDED_TOKENS,
 )
 
+__all__ = (
+    "PUBLISH_REGRESSION_STATE",
+    "regression_guard",
+    "publish_decision",
+    "classify_source_pointer",
+    "classify_source_pointers",
+    "_ip_is_internal",
+    "_host_is_internal",
+    "_WIN_ABSPATH",
+    "_FILE_URI",
+    "_UNC",
+    "_UNIX_PRIVATE",
+    "_INTERNAL_NAME",
+    "_INTERNAL_OCTET",
+    "_UNDECIDED_TOKENS",
+)
+
 NS_A = "user_a"
 NS_B = "user_b"
 

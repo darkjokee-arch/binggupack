@@ -451,7 +451,7 @@ def _maybe_record_trace(prompt, res, domain=None, session_id=None):
         import binggu_recall_trace as RT
         h = str(_home())
         if not RT.trace_enabled(home=h):
-            return
+            return None
         from datetime import datetime, timezone
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         situation = RT.classify_situation(prompt)  # 의도 상황(lookup/decision/change/ambiguous)
