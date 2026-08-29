@@ -15,8 +15,10 @@ CLI:
 """
 import json
 import os
+import re
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))   # <repo>/scripts
@@ -38,6 +40,10 @@ from binggupack.pack.incoming_to_staging import (  # noqa: E402
 )
 
 __all__ = [
+    "json",
+    "re",
+    "tempfile",
+    "Path",
     "SECRET_PATTERNS",
     "_base_pack",
     "_content",

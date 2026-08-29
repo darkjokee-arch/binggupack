@@ -5,10 +5,12 @@ from binggupack.pack import cloud_query_wire as canonical_cloud_query
 from binggupack.pack.incoming_to_staging import scan_secrets
 from binggupack.pack import person_pack_sync as canonical_person_pack
 from binggupack.studio import server as studio_server
-from scripts import binggu_cloud_query_wire, binggu_crab_pack_wire, binggu_discover
+from scripts import binggu_capture_buffer, binggu_capture_classifier, binggu_cloud_query_wire
+from scripts import binggu_crab_pack_wire, binggu_discover
 from scripts import binggu_outcome_attribution, binggu_person_crab_sync, binggu_person_pack_sync
 from scripts import binggu_platform, binggu_setup_save
 from scripts import binggu_session_close, openbinggu_mcp_server_handlers
+from scripts import openbinggu_doctor
 from scripts import openbinggu_incoming_to_staging as incoming_wrapper
 
 
@@ -100,8 +102,18 @@ def test_script_facades_preserve_public_exports():
         (binggu_outcome_attribution, ("list_run_outcomes_ro",)),
         (binggu_session_close, ("register_close_suffix",)),
         (openbinggu_mcp_server_handlers, ("reason_code_hint",)),
-        (binggu_person_crab_sync, ("extra_signature", "merge_extra_sources", "DEFAULT_PACK_TITLE")),
-        (binggu_crab_pack_wire, ("scan_data", "TEXT_EXTS", "MAX_FILE")),
+        (binggu_capture_buffer, ("BULK_HARD_LEN", "BULK_NL_MIN", "BULK_SOFT_LEN")),
+        (binggu_capture_classifier, ("META_CONFIRM_REBUTTABLE", "PREV_AI_STANCE")),
+        (binggu_person_crab_sync, (
+            "extra_signature", "merge_extra_sources", "DEFAULT_PACK_TITLE", "DEFAULT_OWNER_LABEL",
+            "DEFAULT_PACK_PURPOSE", "ENABLE_ENV", "EXTRA_SOURCES_DIR", "PACK_CONFIG_FILE",
+        )),
+        (binggu_crab_pack_wire, (
+            "scan_data", "TEXT_EXTS", "MAX_FILE", "ACCEPTED_RX", "CLAIM_HINTS", "LEAK_PATTERNS",
+            "RETRYABLE_RX", "TOKEN_IN_CMD_RX", "TOKEN_RX",
+        )),
+        (openbinggu_doctor, ("KO2EN",)),
+        (incoming_wrapper, ("json", "re", "tempfile", "Path")),
     )
     for facade, names in facade_contracts:
         for name in names:

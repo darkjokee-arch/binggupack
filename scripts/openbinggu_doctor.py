@@ -28,6 +28,7 @@ for _p in (ROOT, HERE):
         sys.path.insert(0, _p)   # binggupack 패키지 + scripts/ 형제 import 경로
 
 from binggupack.pack.doctor import (  # noqa: E402,F401  (전체 명시 re-export — _ 심볼 포함)
+    KO2EN,
     run_doctor,
     oi1_stamp_divergence,
     oi2_evidence_closure,
@@ -52,6 +53,7 @@ from binggupack.pack.doctor import (  # noqa: E402,F401  (전체 명시 re-expor
 )
 
 __all__ = (
+    'KO2EN',
     'run_doctor',
     'oi1_stamp_divergence',
     'oi2_evidence_closure',

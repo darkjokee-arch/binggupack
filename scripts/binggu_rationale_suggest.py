@@ -18,6 +18,7 @@ if ROOT not in sys.path:
 
 from binggupack.pack.rationale_suggest import (  # noqa: E402,F401  (전체 명시 re-export — _ 심볼 포함)
     SUPPORTS,
+    VERB_EDGES,
     SUPPORTS_SRC,
     CAVEAT_NODE,
     CAVEAT_EDGE,
@@ -31,6 +32,7 @@ from binggupack.pack.rationale_suggest import (  # noqa: E402,F401  (전체 명�
 
 __all__ = (
     'SUPPORTS',
+    'VERB_EDGES',
     'SUPPORTS_SRC',
     'CAVEAT_NODE',
     'CAVEAT_EDGE',
