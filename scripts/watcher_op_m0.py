@@ -35,7 +35,6 @@ if ROOT not in sys.path:
 if HERE not in sys.path:
     sys.path.insert(0, HERE)   # scripts 형제(importer 호환) 호환
 
-from binggupack.pack.op_m0 import *  # noqa: E402,F401,F403
 from binggupack.pack.op_m0 import (  # noqa: E402,F401  (전체 명시 re-export)
     _sha8,
     _has_secret,
@@ -44,6 +43,16 @@ from binggupack.pack.op_m0 import (  # noqa: E402,F401  (전체 명시 re-export
     mvp1,
     mvp2,
     mp,
+)
+
+__all__ = (
+    '_sha8',
+    '_has_secret',
+    'verify_step3_review_only',
+    '_per_run_gate',
+    'mvp1',
+    'mvp2',
+    'mp',
 )
 
 BASE = Path(__file__).resolve().parent.parent
@@ -146,11 +155,13 @@ def run_selftest():
     if not FIXTURE_DIR.is_dir():
         print("[FAIL] fixture 디렉토리 없음:", FIXTURE_DIR)
         sys.exit(1)
-    fixtures = sorted(FIXTURE_DIR.glob("*.diff"))
+    fixture_inputs = [(fp.stem, fp.read_text(encoding="utf-8"))
+                      for fp in sorted(FIXTURE_DIR.glob("*.diff"))]
+    if not any(run == "secret" for run, _ in fixture_inputs):
+        synthetic_secret = "api" + "_key = " + ("Ab1" * 8)
+        fixture_inputs.append(("secret", "diff --git a/x b/x\n+++ b/x\n@@ -0,0 +1 @@\n+" + synthetic_secret))
     cases = []
-    for fp in fixtures:
-        diff_text = fp.read_text(encoding="utf-8")
-        run = fp.stem
+    for run, diff_text in fixture_inputs:
         # 멱등: 2회 처리해 incoming_nodes byte 동일 비교
         r1, out_dir = process_one(diff_text, run)
         b1 = (out_dir / "incoming_nodes.jsonl").read_bytes()

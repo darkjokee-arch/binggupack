@@ -237,6 +237,7 @@ def load_user_config(home=None):
         if ct >= 1:
             cfg["challenge_threshold"] = ct
     except (TypeError, ValueError):
+        # Invalid user values retain the validated default threshold.
         pass
     cfg["ranking_weights"] = _coerce_ranking(d.get("ranking_weights"))
     src = d.get("external_sources", cfg["external_sources"])
@@ -261,11 +262,13 @@ def _coerce_contrast(raw):
             v = float(raw.get("match_relevance_min", base["match_relevance_min"]))
             base["match_relevance_min"] = min(1.0, max(0.0, v))
         except (TypeError, ValueError):
+            # Invalid match thresholds retain the safe default.
             pass
         try:
             v = int(raw.get("max_rows", base["max_rows"]))
             base["max_rows"] = max(1, v)
         except (TypeError, ValueError):
+            # Invalid row limits retain the bounded default.
             pass
     return base
 
@@ -277,6 +280,7 @@ def _coerce_recall(raw):
     무의미 상태 방지). preflight_max/recall_limit 는 양의 정수로 클램프(최소 1).
     """
     base = dict(DEFAULT_CONFIG["recall_config"])
+    assert set(base) == set(_RECALL_KEYS)
     if isinstance(raw, dict):
         for k in ("risk_mid_score", "risk_high_score", "preflight_rel_min"):
             try:

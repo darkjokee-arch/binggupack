@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """Binggu App Path read core 회귀 — 5 tool contract·안전 게이트·candidate/evidence·read-only.
 synthetic pack 만 사용 · 운영 ~/.binggupack 미접촉 · 네트워크 0."""
+from contextlib import suppress
 import hashlib
 import json
+import importlib
 import os
 import subprocess
 import sys
@@ -27,11 +29,9 @@ def _snap(root):
     for r, _, fs in os.walk(root):
         for fn in fs:
             p = os.path.join(r, fn)
-            try:
+            with suppress(OSError):
                 with open(p, "rb") as fh:
                     out[os.path.relpath(p, root)] = hashlib.sha256(fh.read()).hexdigest()
-            except OSError:
-                pass
     return out
 
 
@@ -220,8 +220,8 @@ def test_repeated_calls_byte_identical(repo):
 
 # ── packaging ──
 def test_wheel_contains_app_read_core():
-    import binggupack.app.read_core as rc
-    import binggupack.app.conformance as cf
+    rc = importlib.import_module("binggupack.app.read_core")
+    cf = importlib.import_module("binggupack.app.conformance")
     assert hasattr(rc, "PackService") and hasattr(cf, "selftest")
     with open(os.path.join(ROOT, "pyproject.toml"), encoding="utf-8") as f:
         pj = f.read()

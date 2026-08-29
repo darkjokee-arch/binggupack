@@ -16,11 +16,12 @@ classify_path 는 순수 판정(write 0, raw 경로 미노출 — verdict/reason
   - write 0
 read-only. write 0.
 """
+from contextlib import suppress
 import os
 import sys
 
-import openbinggu_path_safety_gate as psg  # noqa: E402  (호출처와 동일 형태)
 from openbinggu_path_safety_gate import classify_path  # noqa: E402
+psg = sys.modules["openbinggu_path_safety_gate"]
 
 _KEYS = {"verdict", "reason_code", "path_id"}
 ROOT = os.path.normpath(os.path.join(os.environ.get("TEMP", "/tmp"), "bgp_s2_char_allow_root"))
@@ -62,11 +63,9 @@ def run():
     _saved_pd = os.environ.get("BINGGU_PRIVATE_DENY")
     try:
         os.environ["BINGGU_PRIVATE_DENY"] = _pp_file
-        try:                                          # gate 내부 캐시 무효화(있으면·없어도 무관)
+        with suppress(Exception):                                          # gate 내부 캐시 무효화(있으면·없어도 무관)
             from binggupack.safety.path_safety import _OWNER_DENY_CACHE as _odc
             _odc.clear()
-        except Exception:
-            pass
         ck("deny_private_project",
            block_is("examples/example-project/x.py", "deny_private_project"),
            "소유자 사설 프로젝트(런타임 deny 토큰)")
@@ -75,11 +74,9 @@ def run():
             os.environ.pop("BINGGU_PRIVATE_DENY", None)
         else:
             os.environ["BINGGU_PRIVATE_DENY"] = _saved_pd
-        try:
+        with suppress(Exception):
             from binggupack.safety.path_safety import _OWNER_DENY_CACHE as _odc2
             _odc2.clear()
-        except Exception:
-            pass
         _sh.rmtree(_pp_dir, ignore_errors=True)
     ck("deny_cert_npki", block_is("C:/Users/fixture-user/NPKI/yessign/cert.der", "deny_cert_npki"), "NPKI 인증서")
     ck("deny_opencrab", block_is("data/localcrab_index.sqlite", "deny_opencrab_store"), "opencrab store")

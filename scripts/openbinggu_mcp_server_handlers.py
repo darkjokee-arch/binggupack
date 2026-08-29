@@ -16,7 +16,6 @@ ROOT = os.path.dirname(HERE)                         # <repo>
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)   # binggupack 패키지 import 경로
 
-from binggupack.mcp.server_handlers import *  # noqa: E402,F401,F403
 from binggupack.mcp.server_handlers import (  # noqa: E402,F401  (밑줄 + 전체 명시 re-export)
     handle_tool,
     TOOLS,
@@ -32,6 +31,23 @@ from binggupack.mcp.server_handlers import (  # noqa: E402,F401  (밑줄 + 전�
     _u_capture_classify,
     _u_capture_preview,
     _u_save_candidate,
+)
+
+__all__ = (
+    'handle_tool',
+    'TOOLS',
+    '_FORBIDDEN',
+    'main',
+    '_selftest',
+    '_SAVE_CONVO',
+    '_u_pack_build',
+    '_u_pack_validate',
+    '_u_consumer_smoke',
+    '_u_publish_guard_dryrun',
+    '_u_selftest',
+    '_u_capture_classify',
+    '_u_capture_preview',
+    '_u_save_candidate',
 )
 
 if __name__ == "__main__":

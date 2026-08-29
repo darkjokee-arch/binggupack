@@ -20,6 +20,8 @@ bundle 로 만들어 atomic all-or-nothing 저장. 부분저장 금지 · 원문
 정직 경계: 사람 저장 게이트 assurance = L1. shell/PTY 가능 agent 상대 hard security 아님(SECURITY.md · Track B RFC).
 CLI: python binggu_hosted_bundle.py --selftest   (temp 전용)
 """
+from contextlib import suppress
+from pathlib import Path
 import hashlib
 import json
 import os
@@ -168,12 +170,10 @@ def _reconcile_archive(staging_dir, members, base_meta, archive_dir):
 def _fail_audit(db, rid, reason):
     """실패한 bundle write 를 tamper-evident audit_log 에 1행 기록(Fable5 사후 R3-1 · 사일런트 실패 0).
     txn ROLLBACK 후 호출(자체 commit)."""
-    try:
+    with suppress(Exception):
         ck = db.store_checksum()
         db.audit_append("reader", "hosted_bundle_fail", str(rid or ""), "BLOCK",
                         str(reason)[:80], ck, ck)
-    except Exception:
-        pass
 
 
 def commit_bundle(db, home, staging_dir, selected_intent_ids, ctx, confirm, snap_dir, now_ts,
@@ -325,10 +325,8 @@ def commit_bundle(db, home, staging_dir, selected_intent_ids, ctx, confirm, snap
         con.execute("COMMIT")             # ★ 정확히 1회 — 여기 통과 = 전체 확정
         _failpoint("after_commit")        # COMMIT 후 archive 전 crash → 재시도 = 멱등(docstring ★)
     except Exception as _e:
-        try:
+        with suppress(Exception):
             con.execute("ROLLBACK")       # 단일 txn 원복 — 부분 bundle 0
-        except Exception:
-            pass
         _fail_audit(db, bid, "bundle_txn_exception:%s" % type(_e).__name__)
         return {"applied": 0, "write": 0, "reason": "bundle_exception",
                 "bundle_id": bid, "quarantined": quarantined,
@@ -412,7 +410,7 @@ def _selftest():
     arch_ok = all(not os.path.isfile(os.path.join(staging, x + ".json"))
                   and os.path.isfile(os.path.join(staging, "_archive", x + ".processed.json"))
                   for x in (i1, i2))
-    prov = json.load(open(os.path.join(staging, "_archive", i1 + ".processed.json"), encoding="utf-8"))
+    prov = json.loads(Path(os.path.join(staging, '_archive', i1 + '.processed.json')).read_text(encoding='utf-8'))
     ck(r3["write"] == 1 and r3["applied"] == 2 and n_active >= 2 and arch_ok
        and prov["_provenance"]["bundle_id"] == r3["bundle_id"]
        and prov["_provenance"]["actor_source"] == "cli_command" and apr_count(db) == 0,
@@ -463,8 +461,8 @@ def _selftest():
     # 7) quarantine — 변조 intent(재해시 불일치) → bundle_prevalidation_failed · write 0
     i7 = mk(staging, S[0], [1])
     p7 = os.path.join(staging, i7 + ".json")
-    b7 = json.load(open(p7, encoding="utf-8")); b7["text"] = b7["text"] + " 변조."
-    json.dump(b7, open(p7, "w", encoding="utf-8"), ensure_ascii=False)
+    b7 = json.loads(Path(p7).read_text(encoding='utf-8')); b7["text"] = b7["text"] + " 변조."
+    Path(p7).write_text(json.dumps(b7, ensure_ascii=False), encoding='utf-8')
     r7 = commit_bundle(db, home, staging, [i7], HUMAN, "SAVE 1", snap, NOW)
     ck(r7["write"] == 0 and r7["reason"] == "bundle_prevalidation_failed"
        and any(q["reason"] == "intent_id_mismatch" for q in r7["quarantined"])

@@ -28,7 +28,6 @@ for _p in (ROOT, HERE):
     if _p not in sys.path:
         sys.path.insert(0, _p)   # binggupack 패키지 + scripts/ 형제 import 경로
 
-from binggupack.pack.recall import *  # noqa: E402,F401,F403
 from binggupack.pack.recall import (  # noqa: E402,F401  (전체 명시 re-export — _ 심볼 포함)
     RANK,
     CFG,
@@ -53,6 +52,32 @@ from binggupack.pack.recall import (  # noqa: E402,F401  (전체 명시 re-expor
     match_risk_patterns,
     _domain_from_cwd,
     preflight_context,
+)
+
+__all__ = (
+    'RANK',
+    'CFG',
+    '_SUBTYPE_WHY',
+    'RISK_SUBTYPE_WEIGHT',
+    'RISK_SUBTYPES',
+    'JUDGMENT_KINDS',
+    '_tokens',
+    '_relevance',
+    '_load_graph',
+    '_SEMANTIC_FLOOR',
+    '_embed_cache_path',
+    '_open_embed_cache',
+    '_sent_sha',
+    '_pack_vec',
+    '_unpack_vec',
+    'precompute_embeddings',
+    '_semantic_scorer',
+    'why_search',
+    'judgment_trace',
+    '_risk_question',
+    'match_risk_patterns',
+    '_domain_from_cwd',
+    'preflight_context',
 )
 
 

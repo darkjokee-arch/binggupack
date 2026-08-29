@@ -447,6 +447,7 @@ def purge_review(home, request_id):
         if os.path.exists(p):
             os.remove(p)
     except OSError:
+        # The approval is already invalidated; a locked review file remains non-authoritative.
         pass
 
 

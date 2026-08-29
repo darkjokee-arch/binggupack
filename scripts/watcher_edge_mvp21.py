@@ -33,7 +33,6 @@ if ROOT not in sys.path:
 if HERE not in sys.path:
     sys.path.insert(0, HERE)   # scripts 형제(importer 호환) 호환
 
-from binggupack.pack.edge_mvp21 import *  # noqa: E402,F401,F403
 from binggupack.pack.edge_mvp21 import (  # noqa: E402,F401  (밑줄 내부 심볼 + 전체 명시 re-export)
     EVIDENCE_FANOUT_CAP,
     NODE_INDEGREE_CAP,
@@ -45,6 +44,19 @@ from binggupack.pack.edge_mvp21 import (  # noqa: E402,F401  (밑줄 내부 심�
     _freshness_from_chunks,
     build_edges,
     v011,
+)
+
+__all__ = (
+    'EVIDENCE_FANOUT_CAP',
+    'NODE_INDEGREE_CAP',
+    'EDGE_KEYS',
+    'EDGE_PROP_KEYS',
+    'REDACT_RE',
+    '_sha8',
+    '_has_secret',
+    '_freshness_from_chunks',
+    'build_edges',
+    'v011',
 )
 
 import binggupack.pack.capture_mvp1 as mvp1       # capture / to_evidence

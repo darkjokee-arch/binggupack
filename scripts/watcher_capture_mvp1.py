@@ -27,7 +27,6 @@ if ROOT not in sys.path:
 if HERE not in sys.path:
     sys.path.insert(0, HERE)   # scripts 형제(importer 호환) 호환
 
-from binggupack.pack.capture_mvp1 import *  # noqa: E402,F401,F403
 from binggupack.pack.capture_mvp1 import (  # noqa: E402,F401  (전체 명시 re-export)
     CAPTURED_AT,
     SCOPE,
@@ -40,6 +39,20 @@ from binggupack.pack.capture_mvp1 import (  # noqa: E402,F401  (전체 명시 re
     to_evidence,
     build_incoming_pack,
     v011,
+)
+
+__all__ = (
+    'CAPTURED_AT',
+    'SCOPE',
+    '_sha8',
+    'redact_text',
+    '_has_secret',
+    '_parse_diff',
+    '_path_from_header',
+    'capture',
+    'to_evidence',
+    'build_incoming_pack',
+    'v011',
 )
 
 BASE = Path(__file__).resolve().parent.parent

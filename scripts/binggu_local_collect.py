@@ -27,6 +27,7 @@ topic_to_pack.py 미접촉(자체 조립). 운영 store/ledger 미접촉(temp ho
                 home=None, out_dir=None) -> {topic, source, aspects:[{name, pack,
                 doc_count, queries, lang, ...}], plan}
 """
+from pathlib import Path
 import os
 import sys
 
@@ -233,7 +234,7 @@ def _selftest():
     chk("C5 aspect 별 out 디렉토리 분리·manifest 기록",
         a_route["written"] and a_food["written"] and a_route["written"] != a_food["written"]
         and os.path.exists(os.path.join(a_route["written"], "manifest.json")))
-    mani = json.load(open(os.path.join(a_route["written"], "manifest.json"), encoding="utf-8"))
+    mani = json.loads(Path(os.path.join(a_route['written'], 'manifest.json')).read_text(encoding='utf-8'))
     import openbinggu_pack_validate as PV
     chk("C5b 기록 manifest 독립 재검증 PASS", PV.validate_pack(mani)["verdict"] in ("PASS", "REVIEW_ONLY"))
     chk("C5c promotion_allowed_default=false(안전 불변)", mani["promotion_allowed_default"] is False)

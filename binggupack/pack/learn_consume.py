@@ -165,6 +165,7 @@ def preview(ledger_path, qpath, home=None, top=3):
                 for j, n in enumerate((res.get("relevant_nodes") or [])[:top], 1):
                     recall_top.append({"index": j, "claim": n.get("claim")})
             except Exception:
+                # Recall enrichment is optional; the stored learning outcome is still returned.
                 pass
         items.append({
             "qi": qi,

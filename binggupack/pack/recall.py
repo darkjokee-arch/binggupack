@@ -198,6 +198,7 @@ def _gc_stale_models(cache, model):
         cache.execute("DELETE FROM embed_cache WHERE model<>?", (model,))
         cache.commit()
     except Exception:
+        # Cache cleanup is non-authoritative and must not interrupt recall.
         pass
 
 
@@ -373,6 +374,7 @@ def _semantic_scorer(home=None, embed_fn=None):
                 try:
                     _cache.close()
                 except Exception:
+                    # Closing an already invalidated cache handle is intentionally idempotent.
                     pass
 
         score.prefill = prefill

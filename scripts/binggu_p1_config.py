@@ -30,7 +30,6 @@ for _p in (ROOT, HERE):
     if _p not in sys.path:
         sys.path.insert(0, _p)   # binggupack 패키지 + scripts/ 형제 import 경로
 
-from binggupack.safety.p1_config import *  # noqa: E402,F401,F403
 from binggupack.safety.p1_config import (  # noqa: E402,F401  (전체 명시 re-export)
     SAFETY_BELT,
     confirm_actor,
@@ -59,6 +58,36 @@ from binggupack.safety.p1_config import (  # noqa: E402,F401  (전체 명시 re-
     user_ontology_path,
     load_user_ontology,
     ontology_status,
+)
+
+__all__ = (
+    'SAFETY_BELT',
+    'confirm_actor',
+    'is_confirm_actor',
+    'assert_human',
+    'preserves_unsupported_notes',
+    'auto_value_judgment_allowed',
+    'auto_fact_observation_allowed',
+    'auto_signal_ranking_direct_forbidden',
+    't1_negative_gate_enabled',
+    'DEFAULT_CONFIG',
+    '_RECALL_KEYS',
+    '_RANKING_KEYS',
+    'config_path',
+    '_coerce_ranking',
+    'load_user_config',
+    '_coerce_contrast',
+    '_coerce_recall',
+    'recall_config',
+    'contrast_config',
+    'save_user_config',
+    'challenge_threshold',
+    'ranking_weights',
+    'external_sources',
+    '_ONTOLOGY_DEFAULT_NAMES',
+    'user_ontology_path',
+    'load_user_ontology',
+    'ontology_status',
 )
 
 try:  # 패키지/스크립트 양쪽 import 호환(기존 모듈과 동일 관용)

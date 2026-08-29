@@ -21,7 +21,6 @@ for _p in (ROOT, HERE):
     if _p not in sys.path:
         sys.path.insert(0, _p)   # binggupack 패키지 + scripts/ 형제 import 경로
 
-from binggupack.safety.t3_filter import *  # noqa: E402,F401,F403
 from binggupack.safety.t3_filter import (  # noqa: E402,F401  (전체 명시 re-export — _ 심볼 포함)
     T3_PAST_TERMS,
     T3_PAST_TERMS_HANJA,
@@ -32,6 +31,18 @@ from binggupack.safety.t3_filter import (  # noqa: E402,F401  (전체 명시 re-
     t3_report,
     filter_uploadable,
     _selftest,
+)
+
+__all__ = (
+    'T3_PAST_TERMS',
+    'T3_PAST_TERMS_HANJA',
+    'T3_PAST_TERMS_EN',
+    'past_hits',
+    '_pii_present',
+    'is_t3_blocked',
+    't3_report',
+    'filter_uploadable',
+    '_selftest',
 )
 
 

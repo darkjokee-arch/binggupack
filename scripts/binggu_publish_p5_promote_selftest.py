@@ -4,6 +4,7 @@ temp ledger(open_g3) 전용. 실 ledger write 0 / mtime 불변.
 검증: 명시 승격 · idempotent(이미 active) · 정합 BLOCK · node_not_found BLOCK · auto BLOCK · 백업 · 승격전후 정합.
 GATE=GO 조건: 전 항목 PASS.
 """
+from contextlib import suppress
 import os
 import sys
 import tempfile
@@ -111,10 +112,8 @@ def main():
         check("17.실 ledger 무접촉(파일 없음)", True)
 
     for d in (db, db2, db3, db4, db5):
-        try:
+        with suppress(Exception):
             d.con.close()
-        except Exception:
-            pass
 
     passed = sum(1 for _, ok in results if ok)
     total = len(results)

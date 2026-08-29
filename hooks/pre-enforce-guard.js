@@ -41,9 +41,6 @@ const ENFORCE_HOOK_NAMES = [
 ];
 const DISABLED_FLAG_NAME = 'recall_enforce_disabled';
 
-// confirm 문구 — owner 명시 의도. 있으면 무조건 통과.
-const CONFIRM_TOKENS = ['DISABLE ENFORCE', 'GUARD OK'];
-
 function log(record) {
   try {
     fs.mkdirSync(path.dirname(LOG_PATH), { recursive: true });

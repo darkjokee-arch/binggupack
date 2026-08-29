@@ -224,6 +224,7 @@ def _ts_iso(ts):
             return datetime.datetime.fromtimestamp(
                 v, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     except Exception:
+        # Non-epoch input is returned unchanged by the textual timestamp fallback below.
         pass
     return ts
 
@@ -1514,7 +1515,6 @@ def _selftest():
         os.makedirs(home9, exist_ok=True)
         nodes9 = [{"node_id": "node:CONV:c%d" % k, "relevance": r, "rank": r}
                   for k, r in enumerate([0.69, 0.63, 0.58, 0.31], 1)]
-        _record_trace_for_test = record_trace if "record_trace" in dir() else None
         con9 = _open_store(home9)
         for tid, kind9 in (("rtr-cut-auto", "preflight"), ("rtr-cut-direct", "mcp_recall")):
             con9.execute(
@@ -1551,7 +1551,6 @@ def _selftest():
         ck(os.path.exists(ledger) and os.path.getmtime(ledger) == ledger_mt0,
            "운영 ledger.sqlite sentinel 미접촉(별도 store · write 0)")
     finally:
-        CFG_home = None  # noqa: F841
         shutil.rmtree(tmp, ignore_errors=True)
 
     op_after = {p: (os.path.getmtime(p) if os.path.exists(p) else None) for p in OPERATING_PATHS}

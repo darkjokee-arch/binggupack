@@ -130,6 +130,7 @@ def _snap(root):
                 with open(pth, "rb") as fh:
                     out[os.path.relpath(pth, root)] = hashlib.sha256(fh.read()).hexdigest()
             except OSError:
+                # Unreadable files are omitted from this best-effort diagnostic fingerprint.
                 pass
     return out
 

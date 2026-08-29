@@ -35,6 +35,7 @@ CLI:
   python binggu_setup_cloud.py --apply --deploy   # 위 + wrangler deploy(비가역)
   python binggu_setup_cloud.py --selftest  # mock 으로 멱등 로직 검증(실 CF 미접촉)
 """
+from pathlib import Path
 import argparse
 import os
 import re
@@ -577,7 +578,7 @@ def _selftest():
     chk("24.kv_put 파일 부재 → SKIP", kv_put_step(os.path.join(work, "no.json"), mock_kv, apply=True)["status"] == SKIP)
     # 25. kv_put 정상
     pj = os.path.join(work, "packs.json")
-    open(pj, "w").write("{}")
+    Path(pj).write_text('{}')
     chk("25.kv_put 적재 OK", kv_put_step(pj, mock_kv, apply=True)["status"] == OK)
 
     # 26. deploy 기본 skip(--deploy 없음)
@@ -606,7 +607,7 @@ def _selftest():
 
     # 33. capture flag write 0 — capture profile/flag 를 쓰는 호출/대입 코드 부재.
     #     (검사 토큰은 분리 조립 — 이 줄 자체가 자기검출에 걸리지 않게.)
-    src = open(os.path.abspath(__file__), encoding="utf-8").read()
+    src = Path(os.path.abspath(__file__)).read_text(encoding='utf-8')
     bad_writes = [
         "init_" + "profile(",        # capture profile 설치 호출
         "capture_" + "enabled =",    # flag 직접 대입
@@ -615,13 +616,13 @@ def _selftest():
     chk("33.capture flag write 코드 0", not any(t in src for t in bad_writes))
 
     # 34. 전체 오케스트레이터 dry-run — 변경 0(toml 무수정), 모든 단계 STOP 아님
-    before = open(tp, encoding="utf-8").read()
+    before = Path(tp).read_text(encoding='utf-8')
     res = run_setup(apply=False, os_name="windows",
                     login_runner=mock_login_ok, kv_runner=mock_kv_track,
                     task_exists=False, toml_path=tp,
                     preflight_kwargs={"py_version": (3, 11), "which_wrangler": "C:/w"},
                     autopush_run_fn=mock_autopush)
-    after = open(tp, encoding="utf-8").read()
+    after = Path(tp).read_text(encoding='utf-8')
     chk("34.dry-run 변경 0(toml 불변)", before == after and res["halted_at"] is None)
     # 35. 미로그인 → halted_at=1, 이후 단계 미실행
     res2 = run_setup(apply=True, os_name="windows", login_runner=mock_login_no, kv_runner=mock_kv,
@@ -632,7 +633,7 @@ def _selftest():
     # 37. 실 toml 존재 점검(repo 정합) — 읽기만
     chk("37.실 wrangler.real.toml 존재", os.path.exists(WRANGLER_REAL))
     # 38. 실 toml 은 이미 실 id(placeholder 아님) → setup 멱등 skip 확인
-    real_id = read_kv_id(open(WRANGLER_REAL, encoding="utf-8").read())
+    real_id = read_kv_id(Path(WRANGLER_REAL).read_text(encoding='utf-8'))
     chk("38.실 toml id 이미 채워짐(멱등 skip)", not is_placeholder_id(real_id))
 
     # ── [0d] wrangler 로컬 설치 (신규 사용자 회귀 차단) ──
@@ -640,7 +641,7 @@ def _selftest():
     wdir = tempfile.mkdtemp(prefix="wlocal_st_")
     binp = os.path.join(wdir, "node_modules", ".bin")
     os.makedirs(binp)
-    open(os.path.join(binp, "wrangler.cmd"), "w").write("")
+    Path(os.path.join(binp, 'wrangler.cmd')).write_text('')
     chk("39.로컬 wrangler 탐지", _wrangler_local_path(wdir) is not None)
     # 40. _wrangler_local_path: 없으면 None
     chk("40.로컬 미설치 → None", _wrangler_local_path(tempfile.mkdtemp(prefix="wempty_st_")) is None)

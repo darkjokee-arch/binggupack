@@ -52,7 +52,6 @@ def prepare(pack_dir):
         raise UploadError("failed local validation: pack is not public-safe or malformed")
 
     # 2) explicit public/private scan (owner-visible verdict; read core already gates .jsonl).
-    scan_verdict = "unknown"
     scan_reasons = {}
     try:
         from binggupack.safety.public_tree_scan import scan_public_tree
@@ -124,7 +123,7 @@ def resolve_token():
 
 def run(pack_dir, endpoint, dry_run=True, out=None, tty_confirm=None):
     """Owner upload flow. Returns a result dict. Never prints raw tokens or storage paths."""
-    out = out or (lambda s: print(s))
+    out = out or print
     preview, tar_bytes = prepare(pack_dir)
     out(preview_text(preview))
     if dry_run:
@@ -137,7 +136,7 @@ def run(pack_dir, endpoint, dry_run=True, out=None, tty_confirm=None):
     if tty_confirm is None:
         if not sys.stdin.isatty():
             raise UploadError("upload requires an interactive terminal (owner confirmation)")
-        tty_confirm = lambda prompt: input(prompt)  # noqa: E731
+        tty_confirm = input
     ans = tty_confirm("Type the pack_id to confirm upload (%s): " % preview["pack_id"])
     if (ans or "").strip() != preview["pack_id"]:
         raise UploadError("confirmation mismatch — upload aborted")

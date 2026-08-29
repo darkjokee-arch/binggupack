@@ -23,7 +23,6 @@ for _p in (ROOT, HERE):
     if _p not in sys.path:
         sys.path.insert(0, _p)   # binggupack 패키지 + scripts/ 형제 import 경로
 
-from binggupack.pack.person_pack_sync import *  # noqa: E402,F401,F403
 from binggupack.pack.person_pack_sync import (  # noqa: E402,F401  (전체 명시 re-export — _ 심볼 포함)
     PACK_ID,
     STATE_FILE,
@@ -47,6 +46,31 @@ from binggupack.pack.person_pack_sync import (  # noqa: E402,F401  (전체 명�
     confirm_delta,
     _selftest,
     main,
+)
+
+__all__ = (
+    'PACK_ID',
+    'STATE_FILE',
+    'PACK_TITLE',
+    '_PACK_HEADER',
+    '_SENT_HASH_LEN',
+    '_home',
+    '_ledger',
+    '_state_path',
+    '_owner_sentences',
+    '_render_pack',
+    'build_pack_text',
+    'load_state',
+    'save_state',
+    '_hash',
+    '_sent_hash',
+    'sync',
+    'confirm',
+    '_render_delta',
+    'sync_delta',
+    'confirm_delta',
+    '_selftest',
+    'main',
 )
 
 

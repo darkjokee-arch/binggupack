@@ -20,6 +20,7 @@ CLI:
   python openbinggu_finalize_dryrun.py --selftest                      # synthetic/temp 전 과정 (권장)
   python openbinggu_finalize_dryrun.py --pack-dir <batch_pack> --out <빈 출력 디렉터리>
 """
+from pathlib import Path
 import os
 import sys
 import json
@@ -183,18 +184,18 @@ def _selftest():
         out1 = os.path.join(tmp, "out1")
         r = build_finalize_dryrun(pack, out1)
         rec("F1", "레이아웃 11종 전부 생성 + GATE=GO", r["gate"] == "GO" and not r["layout_missing"])
-        m = json.load(open(os.path.join(out1, "manifest.json"), encoding="utf-8"))
+        m = json.loads(Path(os.path.join(out1, 'manifest.json')).read_text(encoding='utf-8'))
         rec("F2", "license = L1 {personal, MIT}", m["license"] == LICENSE_L1)
         rec("F3", "R1/E1: release_mode·entitlement 키 부재",
             all(k not in m for k in FORBIDDEN_MANIFEST_KEYS) and r["forbidden_keys_absent"])
         rec("F4", "canonical graph counts 일치",
             m["counts"] == {"nodes": 3, "edges": 3, "evidence": 3})
-        cy = open(os.path.join(out1, "neo4j", "import.cypher"), encoding="utf-8").read()
+        cy = Path(os.path.join(out1, 'neo4j', 'import.cypher')).read_text(encoding='utf-8')
         rec("F5", "cypher: CREATE 노드 3 + 엣지 3 (텍스트 생성만)",
             cy.count("CREATE (:Candidate") == 3 and cy.count("CREATE (a)-[") == 3)
-        es = json.load(open(os.path.join(out1, "neo4j", "export_status.json"), encoding="utf-8"))
+        es = json.loads(Path(os.path.join(out1, 'neo4j', 'export_status.json')).read_text(encoding='utf-8'))
         rec("F6", "export_status = NOT_RUN (Neo4j 미실행)", es["status"] == "NOT_RUN")
-        q = json.load(open(os.path.join(out1, "quality", "report.json"), encoding="utf-8"))
+        q = json.loads(Path(os.path.join(out1, 'quality', 'report.json')).read_text(encoding='utf-8'))
         rec("F7", "quality: candidate_all=True + promotion true 0건",
             q["candidate_all"] and not q["promotion_allowed_any_true"])
         # PII pack → NO-GO (출력 미생성)
@@ -210,7 +211,7 @@ def _selftest():
         # 결정적 재생성 (동일 입력 → 동일 manifest counts/license)
         out3 = os.path.join(tmp, "out3")
         r3 = build_finalize_dryrun(pack, out3)
-        m3 = json.load(open(os.path.join(out3, "manifest.json"), encoding="utf-8"))
+        m3 = json.loads(Path(os.path.join(out3, 'manifest.json')).read_text(encoding='utf-8'))
         rec("F10", "결정적 재생성 (manifest 동일)", r3["gate"] == "GO" and m3 == m)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

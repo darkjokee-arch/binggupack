@@ -24,6 +24,8 @@
 
 전부 통과 = GATE=GO exit 0 / 실패 = BLOCK exit 1.
 """
+from contextlib import suppress
+from pathlib import Path
 import hashlib
 import json
 import os
@@ -106,7 +108,8 @@ def main():
             time.sleep(1.0)
         rec("S0", "dev 기동", ready)
         if not ready:
-            return finish(marker, log_path, logf, proc)
+            finish(marker, log_path, logf, proc)
+            return None
 
         st, rb = http("POST", mcp_url, json.dumps(mcp(1, "initialize", {"protocolVersion": "2025-06-18"})).encode())
         j = json.loads(rb) if st == 200 else {}
@@ -192,7 +195,8 @@ def main():
         rec("A2", "disable 후 tools/call isError(inbox_disabled)",
             res.get("isError") is True and "inbox_disabled" in json.dumps(res))
 
-        return finish(marker, log_path, logf, proc)
+        finish(marker, log_path, logf, proc)
+        return None
     finally:
         if proc.poll() is None:
             subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True)
@@ -203,17 +207,15 @@ def finish(marker, log_path, logf, proc):
         subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True)
         time.sleep(2.0)
     logf.flush(); logf.close()
-    log_text = open(log_path, "r", encoding="utf-8", errors="replace").read()
+    log_text = Path(log_path).read_text(encoding='utf-8', errors='replace')
     hits = 1 if marker in log_text else 0
     wlog = os.path.join(WP, ".wrangler")
     for dp, _d, fs in (os.walk(wlog) if os.path.isdir(wlog) else []):
         for fn in fs:
             p = os.path.join(dp, fn)
-            try:
-                if os.path.getsize(p) < 50 * 1024 * 1024 and marker.encode() in open(p, "rb").read():
+            with suppress(OSError):
+                if os.path.getsize(p) < 50 * 1024 * 1024 and marker.encode() in Path(p).read_bytes():
                     hits += 1
-            except OSError:
-                pass
     rec("R1", "dev 로그·산출물 marker 잔존 0 (hits=%d)" % hits, hits == 0)
     os.unlink(log_path)
     n_ok = sum(1 for _c, _d, ok in RESULTS if ok)

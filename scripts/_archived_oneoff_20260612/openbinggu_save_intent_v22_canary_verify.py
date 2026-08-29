@@ -107,7 +107,8 @@ def main():
         time.sleep(3)
     rec("P", "secret 전파 확인", propagated)
     if not propagated:
-        return finish()
+        finish()
+        return None
 
     st, rb = http("POST", base + "/intent", body, sig(sm, body))
     rec("L1", "기본 비활성 503 inbox_disabled", st == 503 and "inbox_disabled" in rb)
@@ -146,7 +147,8 @@ def main():
     time.sleep(4)
     st, rb = http("POST", base + "/pull", eb, sig(sm, eb))
     rec("L13", "TTL 만료 라이브 소각 pull 0건", st == 200 and json.loads(rb).get("intents") == [])
-    return finish(base, sm)
+    finish(base, sm)
+    return None
 
 
 def finish(base=None, sm=None):

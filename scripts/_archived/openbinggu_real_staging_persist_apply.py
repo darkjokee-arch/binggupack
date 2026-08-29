@@ -23,7 +23,7 @@ from openbinggu_staging_write_selftest import StagingDB, staging_apply, OPERATIN
 try:
     from openbinggu_real_staging_apply_once import (  # noqa: E402  (무수정 재사용)
         load_m1_batch_pack, gate_recheck, _wal_checkpoint,
-        REAL_STAGING_DIR, REAL_STAGING_DB, SNAP_DIR, GO_PHRASE, FLAG_ON, EMERGENCY, STATE_DIR,
+        REAL_STAGING_DB, SNAP_DIR, GO_PHRASE, FLAG_ON, EMERGENCY, STATE_DIR,
     )
 except ImportError:
     print("이 스크립트는 비공개 운영 모듈이 필요합니다(openbinggu_real_staging_apply_once — 공개 repo 범위 밖).")

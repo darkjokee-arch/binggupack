@@ -150,6 +150,9 @@ def build_graph_confirm(graph_preview, approve=None, reject=None, defer=None):
         if i in reject:                               # 충돌 시 reject 우선
             rejected.append({**base, "decision": "rejected"})
             continue
+        if i in defer:
+            deferred.append({**base, "decision": "deferred"})
+            continue
         if i in approve:
             # 안전 재검증: supports_judgment · evidence 필수 · 매트릭스
             edge_obj = {"id": "c%d" % i, "source": e.get("source_id"), "target": e.get("target_id"),

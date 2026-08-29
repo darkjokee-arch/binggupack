@@ -33,6 +33,13 @@ from pathlib import Path
 from binggupack.pack import batch_m1 as batchm1
 from binggupack.pack import candidate_mvp2 as mvp2  # noqa: F401
 
+__all__ = [
+    "SCOPE", "ALLOWED_SUFFIXES", "OPERATING_STORE_FILES", "make_evc_id", "_text_hash",
+    "_is_excluded", "scan_markdown_files", "_classify_block_type",
+    "parse_markdown_preserve_blocks", "make_evidence_chunks", "redact_and_validate",
+    "_store_snapshot", "adapt_incoming_folder", "batchm1", "mvp2",
+]
+
 SCOPE = "project:openbinggu"
 ALLOWED_SUFFIXES = (".md", ".txt")
 
@@ -52,8 +59,6 @@ _EXCLUDE_DIR_TOKENS = ("_backup", ".git", "__pycache__", "node_modules", ".venv"
 
 # 코드펜스 시작/끝 (``` 또는 ~~~, 들여쓰기 3칸까지 허용)
 _FENCE_RE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
-# 표 행 (| 로 시작하거나 셀 구분 | 포함). 보수적으로 '|' 가 줄에 존재.
-_TABLE_ROW_RE = re.compile(r"^\s{0,3}\|.*\|?\s*$|^\s{0,3}[^\n|]*\|[^\n|]*$")
 # 표 구분선 (---|--- 형태)
 _TABLE_SEP_RE = re.compile(r"^\s{0,3}\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$")
 # 리스트 아이템 (-, *, +, 또는 1. 형태, 들여쓰기 허용)
@@ -105,7 +110,7 @@ def scan_markdown_files(input_dirs):
             if _is_excluded(p):
                 continue
             found.append(p)
-    return sorted(found, key=lambda x: str(x))
+    return sorted(found, key=str)
 
 
 def _classify_block_type(lines):

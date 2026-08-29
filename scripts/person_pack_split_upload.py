@@ -18,6 +18,7 @@ owner 는 person_pack.json 에 owner_label 을 명시해 개인 호칭("사장�
       안 바뀐 버킷은 NO_CHANGE 스킵(네트워크 0), 바뀐 버킷만 재빌드·재업로드
       (같은 pack_name = 제자리 교체·package_id 유지). state 에 hash/package_id 기록.
 """
+from contextlib import suppress
 import hashlib
 import json
 import os
@@ -104,12 +105,10 @@ def ledger_done():
         return set()
     done = set()
     for ln in LEDGER.read_text(encoding="utf-8").splitlines():
-        try:
+        with suppress(json.JSONDecodeError):
             r = json.loads(ln)
             if r.get("status") == "DONE":
                 done.add(r["bucket"])
-        except json.JSONDecodeError:
-            pass
     return done
 
 

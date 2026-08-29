@@ -543,9 +543,8 @@ def _selftest():
         human_answer="독립적인 사람 답", commit_ts=2000, reveal_ts=3000)
     ck("keyring_default_secret_works", rk["permanent"] is True)
     # secret 파일이 temp HOME 에 생성됐는지(실제 ~/.binggupack 아님)
-    import hag_keyring as _kr
     ck("keyring_secret_file_in_temp_home",
-       os.path.exists(_kr.secret_path(kr_home)))
+       os.path.exists(kr.secret_path(kr_home)))
     orch_kr.close()
 
     # ===== 10) 결정론: 동일 입력 두 실행 → 동일 seal/도장 결과 =====

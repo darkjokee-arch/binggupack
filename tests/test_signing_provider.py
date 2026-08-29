@@ -14,6 +14,7 @@ Windows pytest foreground 실행 전제(background/255 회피). PII/시크릿 �
 """
 from __future__ import annotations
 
+from pathlib import Path
 import json
 import os
 import sys
@@ -367,7 +368,7 @@ def test_mint_local_owner_byte_identical_no_sig(tmp_path, kind):
                      "ledger_id", "approval_nonce", "approved_at", "expires_at",
                      "approver_channel", "record_type"}
     assert set(rec.keys()) == expected_keys
-    raw = open(ta.event_store_path(home), "r", encoding="utf-8").read()
+    raw = Path(ta.event_store_path(home)).read_text(encoding='utf-8')
     assert '"sig"' not in raw
 
 

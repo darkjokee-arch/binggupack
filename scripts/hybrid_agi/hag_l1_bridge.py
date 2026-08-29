@@ -22,6 +22,7 @@ CLI: python hag_l1_bridge.py --selftest  ->  'GATE: GO' | 'GATE: STOP'
 """
 from __future__ import annotations
 
+from contextlib import suppress
 import argparse
 import hashlib
 import json
@@ -178,11 +179,9 @@ def _dir_sig(d):
     for root, _dirs, files in os.walk(d):
         for f in sorted(files):
             p = os.path.join(root, f)
-            try:
+            with suppress(OSError):
                 st = os.stat(p)
                 sig.append((os.path.relpath(p, d), st.st_size, int(st.st_mtime)))
-            except OSError:
-                pass
     return tuple(sorted(sig))
 
 

@@ -18,7 +18,6 @@ ROOT = os.path.dirname(HERE)                         # <repo>
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)   # binggupack 패키지 import 경로
 
-from binggupack.pack.incoming_loader import *  # noqa: E402,F401,F403
 from binggupack.pack.incoming_loader import (  # noqa: E402,F401  (전체 명시 re-export)
     VALID_SPACE,
     VALID_NTYPE,
@@ -26,6 +25,15 @@ from binggupack.pack.incoming_loader import (  # noqa: E402,F401  (전체 명시
     VALID_REL,
     _jl,
     load_incoming,
+)
+
+__all__ = (
+    'VALID_SPACE',
+    'VALID_NTYPE',
+    'VALID_KIND',
+    'VALID_REL',
+    '_jl',
+    'load_incoming',
 )
 
 

@@ -12,6 +12,7 @@ profile = capture_enabled 플래그 + capture_scope.json + (선택) settings.jso
 
 settings.json 실편집은 호출자(binggu.py)가 실제 경로를 줄 때만. 셀프테스트는 temp 경로 전용.
 """
+from contextlib import suppress
 import json
 import re
 from pathlib import Path
@@ -194,12 +195,10 @@ def init_profile(home, cwd, hook_command=None, settings_path=None, global_scope=
         except Exception:
             existing_scope = None
     if existing_scope is not None:
-        try:  # 병합 전 기존 scope 백업(원복 지점 · 1회)
+        with suppress(Exception):  # 병합 전 기존 scope 백업(원복 지점 · 1회)
             bak = p["scope"].with_suffix(".json.bak")
             if not bak.exists():
                 bak.write_text(json.dumps(existing_scope, ensure_ascii=False, indent=2), encoding="utf-8")
-        except Exception:
-            pass
         prefixes = [str(x) for x in existing_scope.get("allowed_cwd_prefixes", [])]
         cwd_prefix = str(Path(cwd).resolve())
         if not global_scope and cwd_prefix not in prefixes:

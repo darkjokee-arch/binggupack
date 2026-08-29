@@ -62,7 +62,7 @@ def run():
     ck("feed_render_shape_fixed", shape_ok, "feed 3키 + render 3키 + valid action")
 
     # ---- buffer 의 classify 와 package classify 동일 판정 (import 경로 정합) ----
-    import binggu_capture_buffer as bbmod
+    bbmod = sys.modules["binggu_capture_buffer"]
     from binggupack.classifier import classify as pkg_classify
     same = True
     for utt in ["이거 저장해", "B안으로 결정", "commit 진행해라", "빙구팩 저장해", "와 대박"]:

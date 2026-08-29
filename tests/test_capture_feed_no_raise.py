@@ -15,8 +15,6 @@ import os
 import sqlite3
 import sys
 
-import pytest
-
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 for _p in (_ROOT, os.path.join(_ROOT, "scripts")):
     if _p not in sys.path:
@@ -194,9 +192,6 @@ def test_feed_never_raises_across_injected_failures(tmp_path, monkeypatch):
     monkeypatch.setattr(cap.sqlite3, "connect", _explode)
     monkeypatch.setattr(cap.PersistentCaptureBuffer, "_fallback_append",
                         lambda self, payload, note: False)
-    try:
-        r = buf.feed(OWNER, CWD, session_id="S-TOTAL")
-    except Exception as ex:                                # pragma: no cover - 실패 시 진단용
-        pytest.fail("feed 가 raise 했다: %r" % (ex,))
+    r = buf.feed(OWNER, CWD, session_id="S-TOTAL")
     assert r["stored"] is False
     assert "FALLBACK-WRITE-FAILED" in r["store_note"]       # 최악의 경우도 사유는 남는다

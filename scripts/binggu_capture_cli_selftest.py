@@ -16,8 +16,8 @@ read-only(영속). write 0.
 """
 import sys
 
-import binggu_capture_cli as cli  # noqa: E402
 from binggu_capture_cli import run_batch  # noqa: E402
+cli = sys.modules["binggu_capture_cli"]
 
 _OUT_KEYS = {"trigger", "buffer_size", "preview", "note"}
 

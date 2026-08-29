@@ -20,7 +20,6 @@ for _p in (ROOT, HERE):
     if _p not in sys.path:
         sys.path.insert(0, _p)   # binggupack 패키지 + scripts/ 형제 import 경로
 
-from binggupack.pack.pack_edges import *  # noqa: E402,F401,F403
 from binggupack.pack.pack_edges import (  # noqa: E402,F401  (전체 명시 re-export — _ 심볼 포함)
     RELATIONS,
     WORKFLOW_TOOL,
@@ -31,6 +30,18 @@ from binggupack.pack.pack_edges import (  # noqa: E402,F401  (전체 명시 re-e
     build_workflow_payload_from_edges,
     sync_edges_to_workflow,
     _selftest,
+)
+
+__all__ = (
+    'RELATIONS',
+    'WORKFLOW_TOOL',
+    'SYNC_ENABLE_ENV',
+    'DEFAULT_CLIENT',
+    'infer_edges',
+    'to_workflow_nodes_edges',
+    'build_workflow_payload_from_edges',
+    'sync_edges_to_workflow',
+    '_selftest',
 )
 
 

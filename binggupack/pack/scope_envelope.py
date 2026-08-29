@@ -137,6 +137,7 @@ def _host_is_internal(host):
             if 0 <= num <= 0xFFFFFFFF:
                 return _ip_is_internal(ipaddress.ip_address(num))
     except (ValueError, TypeError):
+        # Malformed alternate IPv4 encodings are conservatively treated as non-matches.
         pass
     return False
 

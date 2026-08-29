@@ -24,6 +24,7 @@ CLI: python scripts/binggu_schema.py --selftest
 """
 from __future__ import annotations
 
+from contextlib import suppress
 import contextlib
 import hashlib
 import json
@@ -645,10 +646,8 @@ def _connect_source_readonly(path):
         con.execute("SELECT count(*) FROM sqlite_master").fetchone()   # 실제 열림 확인
         return con, "mode=ro"
     except Exception:   # noqa: BLE001  (sqlite3.Error·URI 변환 실패 모두 폴백 대상)
-        try:
+        with suppress(Exception):
             con.close()
-        except Exception:
-            pass
         con = sqlite3.connect(path)
         con.execute("PRAGMA query_only=ON")
         return con, "query_only"
@@ -678,10 +677,8 @@ def _begin_read_snapshot(src_con):
 
 def _end_read_snapshot(src_con):
     """읽기 트랜잭션 해제. src 는 write 0(mode=ro/query_only)이라 rollback 으로 충분."""
-    try:
+    with suppress(sqlite3.Error):
         src_con.rollback()
-    except sqlite3.Error:
-        pass
 
 
 def _backup_verify(src_con, dst_path):

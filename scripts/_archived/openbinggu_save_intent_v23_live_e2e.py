@@ -165,7 +165,7 @@ def main():
         rec("C4-2", "러너 자동 재시도 0", r3["applied"] == 0)
         rec("C4-3", "적용 시 스냅샷 생성", len(os.listdir(snap)) >= 1)
     finally:
-        st, rb = http("POST", base + "/admin/disable", eb, sig(sm, eb, base + "/admin/disable"))
+        http("POST", base + "/admin/disable", eb, sig(sm, eb, base + "/admin/disable"))
         st2, rb2 = http("POST", base + "/intent", body, sig(sm, body, base + "/intent"))
         rec("C4-4", "종료 시 inbox disable(재잠금 503)",
             st2 == 503 and "inbox_disabled" in rb2)

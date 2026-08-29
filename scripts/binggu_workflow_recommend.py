@@ -19,13 +19,20 @@ for _p in (ROOT, HERE):
     if _p not in sys.path:
         sys.path.insert(0, _p)   # binggupack 패키지 + scripts/ 형제 import 경로
 
-from binggupack.pack.workflow_recommend import *  # noqa: E402,F401,F403
 from binggupack.pack.workflow_recommend import (  # noqa: E402,F401  (전체 명시 re-export)
     WORKFLOW_TEMPLATES,
     _tokens,
     _pack_tokens,
     recommend,
     _selftest,
+)
+
+__all__ = (
+    'WORKFLOW_TEMPLATES',
+    '_tokens',
+    '_pack_tokens',
+    'recommend',
+    '_selftest',
 )
 
 

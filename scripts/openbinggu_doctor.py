@@ -27,7 +27,6 @@ for _p in (ROOT, HERE):
     if _p not in sys.path:
         sys.path.insert(0, _p)   # binggupack 패키지 + scripts/ 형제 import 경로
 
-from binggupack.pack.doctor import *  # noqa: E402,F401,F403
 from binggupack.pack.doctor import (  # noqa: E402,F401  (전체 명시 re-export — _ 심볼 포함)
     run_doctor,
     oi1_stamp_divergence,
@@ -50,6 +49,30 @@ from binggupack.pack.doctor import (  # noqa: E402,F401  (전체 명시 re-expor
     _NODE_ID_RE,
     _EVC_ID_RE,
     _GATE_RE,
+)
+
+__all__ = (
+    'run_doctor',
+    'oi1_stamp_divergence',
+    'oi2_evidence_closure',
+    'oi3_exit_label_count',
+    '_run_oi_checks',
+    '_run_selftest',
+    '_real_tree_scan',
+    '_default_ledger',
+    '_secret_scan_stub',
+    '_store_snapshot',
+    '_print_oi',
+    '_build_temp_ledger',
+    '_oi_selftest',
+    'main',
+    '_HERE',
+    '_ROOT',
+    '_OP_STORE',
+    '_CHECKS',
+    '_NODE_ID_RE',
+    '_EVC_ID_RE',
+    '_GATE_RE',
 )
 
 

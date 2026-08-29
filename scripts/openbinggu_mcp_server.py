@@ -16,6 +16,7 @@ OpenBinggu MCP server (stdio JSON-RPC) wrapper 후보 — 실 등록/공개 前.
 CLI: python openbinggu_mcp_server.py --selftest      # 프로토콜 synthetic 검증
      python openbinggu_mcp_server.py --serve <ROOT>  # 실 stdio 서버(설정 등록은 owner)
 """
+from contextlib import suppress
 import sys
 import os
 import json
@@ -280,17 +281,13 @@ def serve_stdio(allow_root, profile="advanced", server_name="openbinggu"):
     def _wire(m):
         if not _wire_on:
             return
-        try:
+        with suppress(Exception):
             with open(_wp, "a", encoding="utf-8") as _f:
                 _f.write("%s %s\n" % (_t.strftime("%H:%M:%S"), m))
-        except Exception:
-            pass
 
-    try:
+    with suppress(Exception):
         sys.stdin.reconfigure(encoding="utf-8")
         sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
     _wire("=== START pid=%s in=%s out=%s ===" % (os.getpid(), sys.stdin.encoding, sys.stdout.encoding))
     while True:
         try:

@@ -29,6 +29,7 @@ from __future__ import annotations
 import os
 import sys
 import json
+import importlib
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -214,6 +215,6 @@ def recompute_root_from_jsonl(jsonl_path):
 
 if __name__ == "__main__":
     if "--selftest" in sys.argv:
-        import binggu_hit_export_selftest as st
+        st = importlib.import_module("binggu_hit_export_selftest")
         sys.exit(st.run())
     print("binggu_hit_export: --selftest 로 검증 실행 (binggu_hit_export_selftest.run)")

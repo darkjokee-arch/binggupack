@@ -8,6 +8,7 @@
   ③ 지우기 전에 export(jsonl) 로 전량이 나와 있어야 하고(행수 대조)
   ④ 그 변화가 전용 무결성 축(locator_checksum / verify_locator_tail)에 잡혀야 한다.
 """
+from pathlib import Path
 import json
 import os
 import sys
@@ -122,9 +123,9 @@ def test_mirror_jsonl_is_append_only_second_copy(tmp_path):
     try:
         insert_locators(db.con, _rows_of("M1"), db_path=db.path)
         path = evloc_mirror_path(db.path)
-        first = open(path, "r", encoding="utf-8").read().splitlines()
+        first = Path(path).read_text(encoding='utf-8').splitlines()
         insert_locators(db.con, _rows_of("M2"), db_path=db.path)
-        second = open(path, "r", encoding="utf-8").read().splitlines()
+        second = Path(path).read_text(encoding='utf-8').splitlines()
         assert second[:len(first)] == first          # 기존 줄 재작성 0
         assert len(second) == len(first) + 3
         rec = json.loads(second[-1])

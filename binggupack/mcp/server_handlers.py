@@ -39,9 +39,6 @@ from binggupack.classifier.capture_classifier import classify
 # ★ 이 5개는 미결선 stub 이다 — 실제 검사/빌드 로직 0(고정 응답). 실 검사는 CLI/scripts 경로
 #   (python scripts/openbinggu_*.py --selftest 등)에 있다. MCP 표면에서 "성공"처럼 읽혀 실검증
 #   통과로 오인되지 않도록 synthetic=True + NOT_IMPLEMENTED 를 명시한다(응답만 정직화, 기능 무변경).
-_STUB_NOTE = "미결선 stub — 실제 검사는 CLI/scripts 경로. MCP 노출은 존재/경로 안내용."
-
-
 def _u_pack_build(params=None):
     # 실 결선(2026-07-17): input_dir → in-package incoming_folder 파이프라인(scan + markdown 블록파싱 +
     # batch_redact/scan_residual_pii 잔존 시 전체 STOP 게이트) → candidate_mvp2.to_nodes →
@@ -1311,6 +1308,8 @@ def _u_contrast(params=None):
     # read 3함수만 import — 기록계열 write 함수는 import 0(구조적 write 차단).
     from binggupack.safety.contrast_protocol import (
         detect_conflicts, build_contrast_table, render_contrast_md)
+    read_fns = dict(zip(_CONTRAST_READ_FNS,
+                        (detect_conflicts, build_contrast_table, render_contrast_md)))
     if not os.path.exists(ledger):
         preflight_out = {"avoid_patterns": [], "preferences": [], "risk_level": "낮음"}
     else:
@@ -1320,11 +1319,12 @@ def _u_contrast(params=None):
         preflight_out = RECALL.preflight_context(
             ledger, prompt=params.get("prompt"), cwd=params.get("cwd") or os.getcwd(),
             domain=params.get("domain"), files_changed=files or None, home=_operating_home())
-    conflicts = detect_conflicts(preflight_out, mandates, home=_operating_home(), env=os.environ)
+    conflicts = read_fns["detect_conflicts"](
+        preflight_out, mandates, home=_operating_home(), env=os.environ)
     tables = []
     for c in conflicts:
-        t = build_contrast_table(c, home=_operating_home())
-        md = _mask_node_ids(_redact_pii(render_contrast_md(t)))  # node_id·PII 제거(D-1/PII)
+        t = read_fns["build_contrast_table"](c, home=_operating_home())
+        md = _mask_node_ids(_redact_pii(read_fns["render_contrast_md"](t)))  # node_id·PII 제거(D-1/PII)
         tables.append({
             "conflict_id": t["conflict_id"], "match_via": t.get("match_via"),
             "relevance": t.get("relevance"),

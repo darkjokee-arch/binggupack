@@ -81,6 +81,7 @@ class _Auth:
                             (self.request_id,))
                 con.commit()
             except Exception:
+                # Consumption already succeeded; stale-state cleanup remains best-effort.
                 pass
             ta.purge_review(self.home, self.request_id)
             # tamper-evident receipt(mark 패리티 포함 — hit_events 는 audit_log row 없음).
@@ -91,6 +92,7 @@ class _Auth:
                                      "receipt=%s" % (self.receipt.get("node_ids") or self.request_id),
                                      ck, ck)
             except Exception:
+                # Audit receipt failure cannot retroactively change the bound approval result.
                 pass
         elif ta.is_transient(reason):
             ta.release(con, self._nonce)     # 재시도 가능 — 승인 소각 0
@@ -177,6 +179,7 @@ def authorize(operation, params, home, db):
                         if isinstance(_i, int) and 1 <= _i <= len(_rows):
                             review_payload["_target_sentence"] = _rows[_i - 1].get("sentence")
                     except Exception:
+                        # Human-readable target text is optional and excluded from the digest.
                         pass
                 elif operation in ("due", "resolve"):
                     # node_id 기반(index 아님 · P1-B M2) — nodes.sentence 조회. digest 불변(_target_sentence 무시).
@@ -188,9 +191,11 @@ def authorize(operation, params, home, db):
                             if _row:
                                 review_payload["_target_sentence"] = _row[0]
                     except Exception:
+                        # Human-readable target text is optional and excluded from the digest.
                         pass
                 ta.write_review(home, rid, operation, review_payload, digest)
             except Exception:
+                # Review-file UX is advisory; authorization stays denied without approval.
                 pass
             auth.reason = "approval_required"
         else:

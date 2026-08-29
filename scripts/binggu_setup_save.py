@@ -100,6 +100,15 @@ def read_dev_vars(path):
     return d
 
 
+def _read_text(path):
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
+
+
+def _read_json(path):
+    return json.loads(_read_text(path))
+
+
 def write_dev_vars(path, d):
     """KEY=VALUE 재작성(순서 고정 — diff 안정). 디렉토리 없으면 생성."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -186,7 +195,7 @@ def secrets_put_step(keys, secret_runner=None, apply=False, deploy=False):
                    WORKERS_DIR, keys[k])
         if r.get("rc") != 0:
             return step("s4", STOP, "secret put 실패: %s" % k,
-                        "원문: %s" % (r.get("stderr") or r.get("stdout") or "(no output)"))
+                        "외부 명령 출력은 입력 secret echo 가능성 때문에 표시하지 않음")
     return step("s4", OK, "worker secret 주입 완료(%s) — 값은 stdin 경유(노출 0)"
                 % ", ".join(KEY_FIELDS))
 
@@ -209,17 +218,17 @@ def upsert_worker_url(wp_dir, url, apply=False):
 
 # ── [s6] 커넥터 안내 (기본 마스킹) ──────────────────────────────────
 def connector_step(wp_dir, show_url=False):
-    """ChatGPT 커넥터 URL 안내. 기본 마스킹 — 전체 URL 은 --show-url 옵트인."""
+    """ChatGPT 커넥터 URL 안내. 경로 secret 은 명시 옵션에도 출력하지 않는다."""
     d = read_dev_vars(os.path.join(wp_dir, VARS_NAME))
     base, tok = d.get("WORKER_URL"), d.get("SAVE_PATH_TOKEN")
     if not (base and tok):
         return step("s6", INFO, "커넥터 URL 형식: <WORKER_URL>/mcp2/<SAVE_PATH_TOKEN>\n"
                     "  키 생성([s2])·deploy([s3]) 후 다시 실행하면 실제 주소 안내")
-    shown = base.rstrip("/") + "/mcp2/" + (tok if show_url else mask(tok))
+    shown = base.rstrip("/") + "/mcp2/" + mask(tok)
     hint = ("ChatGPT: 설정 → 커넥터 → 새 커넥터 → MCP 서버 URL 에 위 주소 붙여넣기.\n"
             "이 URL 은 비밀입니다(경로키 포함) — 공유/스크린샷 금지."
-            + ("" if show_url else "\n전체 URL 보기: --show-url (본인 화면에서만)"))
-    return step("s6", OK if show_url else INFO, "커넥터 URL: %s" % shown, hint)
+            + ("\n--show-url 은 보안상 폐기되어 마스킹 출력을 유지합니다." if show_url else ""))
+    return step("s6", INFO, "커넥터 URL: %s" % shown, hint)
 
 
 # ── [s7] auto-pull 스케줄러 (멱등·OS 분기) ──────────────────────────
@@ -668,11 +677,11 @@ def _selftest():
     chk("20.동일 값 재기입 → SKIP", upsert_worker_url(wp2, "https://a.workers.dev", apply=True)["status"] == SKIP)
     chk("21.URL 없음 → SKIP", upsert_worker_url(wp2, None, apply=True)["status"] == SKIP)
 
-    # 22~24. connector — 기본 마스킹 / --show-url / 미완성 안내
+    # 22~24. connector — 모든 경로에서 마스킹 / 미완성 안내
     s = connector_step(wp2, show_url=False)
     chk("22.커넥터 기본 마스킹(전문 0)", FAKE not in s["msg"] and "/mcp2/" in s["msg"])
     s = connector_step(wp2, show_url=True)
-    chk("23.--show-url → 전체 URL", "/mcp2/" + FAKE in s["msg"])
+    chk("23.--show-url 도 전체 URL 출력 금지", FAKE not in s["msg"] and "폐기" in s["hint"])
     chk("24.키/URL 없으면 형식 안내", "형식" in connector_step(tempfile.mkdtemp(prefix="setup_save_e_"))["msg"])
 
     # 25~28. 스케줄러 분기
@@ -719,7 +728,7 @@ def _selftest():
         and os.path.dirname(default_wp_dir()) == os.path.dirname(REPO))
 
     # 33. capture flag write 0 (setup_cloud 케이스33 패턴 — 자기검출 회피 분리 조립)
-    src = open(os.path.abspath(__file__), encoding="utf-8").read()
+    src = _read_text(os.path.abspath(__file__))
     bad = ["init_" + "profile(", "capture_" + "enabled =", "set_" + "capture"]
     chk("33.capture flag write 코드 0", not any(t in src for t in bad))
 
@@ -758,7 +767,7 @@ def _selftest():
             person_pack_config_step(apply=False, home=_pph)["status"] == INFO)
         s44 = person_pack_config_step(apply=True, home=_pph, username="테스터")
         cfgp = os.path.join(_pph, "person_pack.json")
-        cfgj = json.load(open(cfgp, encoding="utf-8"))
+        cfgj = _read_json(cfgp)
         chk("44.s9 apply → OK + auto_create config 생성",
             s44["status"] == OK and cfgj["auto_create"] is True and cfgj["pack_id"] == ""
             and "테스터" in cfgj["title"])
@@ -792,12 +801,12 @@ def _selftest():
                 register_opencrab_mcp(None, apply=True, claude_json_path=_cj)["status"] == INFO)
             chk("50.s10 형식 오류 → STOP + 미변경",
                 register_opencrab_mcp("https://evil.example/x", apply=True, claude_json_path=_cj)["status"] == STOP
-                and "opencrab-cloud" not in json.load(open(_cj, encoding="utf-8"))["mcpServers"])
+                and "opencrab-cloud" not in _read_json(_cj)["mcpServers"])
             chk("51.s10 dry-run → INFO + 파일 변경 0",
                 register_opencrab_mcp(_URL, apply=False, claude_json_path=_cj)["status"] == INFO
-                and "opencrab-cloud" not in json.load(open(_cj, encoding="utf-8"))["mcpServers"])
+                and "opencrab-cloud" not in _read_json(_cj)["mcpServers"])
             r49 = register_opencrab_mcp(_URL, apply=True, claude_json_path=_cj)
-            _cjj = json.load(open(_cj, encoding="utf-8"))
+            _cjj = _read_json(_cj)
             chk("52.s10 apply → OK + 등록 + 기존 서버/키 보존",
                 r49["status"] == OK
                 and _cjj["mcpServers"]["opencrab-cloud"] == {"type": "http", "url": _URL}
@@ -807,7 +816,7 @@ def _selftest():
             r50 = register_opencrab_mcp(_URL2, apply=True, claude_json_path=_cj)
             chk("54.s10 URL 변경 → OK(업데이트) + 백업 생성",
                 r50["status"] == OK
-                and json.load(open(_cj, encoding="utf-8"))["mcpServers"]["opencrab-cloud"]["url"] == _URL2
+                and _read_json(_cj)["mcpServers"]["opencrab-cloud"]["url"] == _URL2
                 and any(f.startswith(".claude.json.binggu-bak.") for f in os.listdir(_cjd)))
             chk("55.s10 토큰 평문 0(마스킹)",
                 ("ocm_" + "a" * 24) not in register_opencrab_mcp(_URL, apply=False, claude_json_path=_cj)["msg"])
@@ -825,7 +834,7 @@ def _selftest():
         json.dump({"statusLine": {"x": 1}, "permissions": {"allow": ["a"]}, "hooks": {}},
                   _ef, ensure_ascii=False)
     _er = enforce_hooks_step(st_enf, apply=True)
-    _ed = json.load(open(st_enf, encoding="utf-8"))
+    _ed = _read_json(st_enf)
     chk("s11a enforce_hooks 등록 OK", _er["status"] == OK)
     chk("s11b 멀티키 소실 0(statusLine·permissions 보존)",
         _ed.get("statusLine") == {"x": 1} and _ed.get("permissions") == {"allow": ["a"]})
@@ -852,7 +861,7 @@ def _selftest():
         _ehas(_estops, "stop-enforce-recall-stamp") and _esync(_estops, "stop-enforce-recall-stamp"))
     _enb = len(_eups)
     _er2 = enforce_hooks_step(st_enf, apply=True)
-    _ed2 = json.load(open(st_enf, encoding="utf-8"))
+    _ed2 = _read_json(st_enf)
     chk("s11e idempotent 재실행 SKIP+중복 0",
         _er2["status"] == SKIP and len(_ed2["hooks"].get("UserPromptSubmit", [])) == _enb)
     chk("s11f dry-run(apply=False) 무변경 INFO", enforce_hooks_step(st_enf, apply=False)["status"] == INFO)
@@ -864,11 +873,11 @@ def _selftest():
     hc = os.path.join(wp, "sc_home")
     os.makedirs(hc, exist_ok=True)
     _scr = session_close_hook_step(st_sc, apply=True, home=hc)
-    _scd = json.load(open(st_sc, encoding="utf-8"))
+    _scd = _read_json(st_sc)
     chk("s12a session_close hook 등록 OK", _scr["status"] == OK and any(
         "binggu_session_close_hook" in (h.get("command") or "")
         for g in _scd["hooks"].get("UserPromptSubmit", []) for h in g["hooks"]))
-    _cp = json.load(open(os.path.join(hc, "close_phrases.json"), encoding="utf-8"))
+    _cp = _read_json(os.path.join(hc, "close_phrases.json"))
     chk("s12b close_phrases 기본 표현('빙구팩 저장해') 등록", "빙구팩 저장해" in _cp.get("phrases", []))
     chk("s12b2 close 접미(suffixes '하자') seed · 부정계 없음", "하자" in _cp.get("suffixes", [])
         and not any(neg in _cp.get("suffixes", []) for neg in ("안", "못", "말", "마", "않")))
@@ -891,7 +900,7 @@ def main(argv=None):
                                 description="저장 채널(save_mcp) 셋업 — 멱등·실패정지·dry-run 기본")
     p.add_argument("--apply", action="store_true", help="실제 변경(키 생성/스케줄러)")
     p.add_argument("--deploy", action="store_true", help="(--apply 와) deploy+secret put — 비가역")
-    p.add_argument("--show-url", action="store_true", help="커넥터 전체 URL 표시(본인 화면에서만)")
+    p.add_argument("--show-url", action="store_true", help="호환용(보안상 전체 URL은 출력하지 않음)")
     p.add_argument("--webmcp", action="store_true",
                    help="웹 MCP 로그온 자동가동 등록 옵트인(공개 터널=본인 결정 · --apply 와 함께)")
     p.add_argument("--opencrab-url", default=None,

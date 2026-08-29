@@ -15,6 +15,7 @@ signing_provider(PW-Core1) 의 순수함수(ed25519_publickey/ed25519_sign/ed255
 """
 from __future__ import annotations
 
+from pathlib import Path
 import json
 import os
 import sys
@@ -35,7 +36,7 @@ def _hex_to_bytes(h):
 def main():
     from binggupack.safety import signing_provider as sp
 
-    data = json.load(open(VECTORS, encoding="utf-8"))
+    data = json.loads(Path(VECTORS).read_text(encoding='utf-8'))
     fails = []
     n_pos = n_neg = 0
 

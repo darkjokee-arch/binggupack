@@ -17,6 +17,7 @@ import re
 import sys
 import json
 import time
+from urllib.parse import urlsplit
 
 # harvest 재사용(생산자/소비자 분리) — source_id·등록·공개안전성 게이트를 그대로 빌려 씀.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -58,7 +59,7 @@ class SearchProvider:
     source = 실제 결과를 낸 엔진명(선택). 미제공 시 discover 가 provider.name 으로 채운다."""
     name = "base"
 
-    def search(self, query, limit=10):
+    def search(self, query, limit=10, lang=None):
         raise NotImplementedError
 
 
@@ -77,7 +78,7 @@ class DDGProvider(SearchProvider):
     def __init__(self, runner=None):
         self._runner = runner  # runner(url)->{"ok","text"} 주입(selftest mock)
 
-    def search(self, query, limit=10):
+    def search(self, query, limit=10, lang=None):
         from urllib.parse import urlencode
         url = self.ENDPOINT + "?" + urlencode({"q": query})
         if self._runner is not None:
@@ -134,7 +135,7 @@ class DdgsProvider(SearchProvider):
     def __init__(self, runner=None):
         self._runner = runner
 
-    def search(self, query, limit=10):
+    def search(self, query, limit=10, lang=None):
         if self._runner is not None:
             return list(self._runner(query, limit) or [])[:limit]
         from ddgs import DDGS  # lazy — 미설치여도 모듈 로드 OK
@@ -152,7 +153,7 @@ class SerperProvider(SearchProvider):
     def __init__(self, runner=None):
         self._runner = runner
 
-    def search(self, query, limit=10):
+    def search(self, query, limit=10, lang=None):
         if self._runner is not None:
             return list(self._runner(query, limit) or [])[:limit]
         key = os.environ.get("SERPER_API_KEY")
@@ -180,7 +181,7 @@ class NaverProvider(SearchProvider):
     def __init__(self, runner=None):
         self._runner = runner
 
-    def search(self, query, limit=10):
+    def search(self, query, limit=10, lang=None):
         if self._runner is not None:
             return list(self._runner(query, limit) or [])[:limit]
         cid = os.environ.get("NAVER_CLIENT_ID")
@@ -213,7 +214,7 @@ class TavilyProvider(SearchProvider):
     def __init__(self, runner=None):
         self._runner = runner
 
-    def search(self, query, limit=10):
+    def search(self, query, limit=10, lang=None):
         if self._runner is not None:
             return list(self._runner(query, limit) or [])[:limit]
         key = os.environ.get("TAVILY_API_KEY")
@@ -244,7 +245,7 @@ class DataGoKrProvider(SearchProvider):
         self._runner = runner
         self._service_key = service_key
 
-    def search(self, query, limit=10):
+    def search(self, query, limit=10, lang=None):
         if self._runner is not None:
             return list(self._runner(query, limit) or [])[:limit]
         key = self._service_key or os.environ.get("DATA_GO_KR_SERVICE_KEY")
@@ -293,7 +294,7 @@ class KiprisProvider(SearchProvider):
         self._runner = runner
         self._service_key = service_key
 
-    def search(self, query, limit=10):
+    def search(self, query, limit=10, lang=None):
         if self._runner is not None:
             return list(self._runner(query, limit) or [])[:limit]
         key = self._service_key or os.environ.get("KIPRIS_SERVICE_KEY")
@@ -341,10 +342,10 @@ class FallbackProvider(SearchProvider):
     def __init__(self, providers):
         self.providers = [p for p in providers if p is not None]
 
-    def search(self, query, limit=10):
+    def search(self, query, limit=10, lang=None):
         for p in self.providers:
             try:
-                res = p.search(query, limit)
+                res = p.search(query, limit, lang=lang)
             except Exception:
                 continue
             if res:
@@ -363,11 +364,11 @@ class CompositeProvider(SearchProvider):
     def __init__(self, providers):
         self.providers = [p for p in providers if p is not None]
 
-    def search(self, query, limit=10):
+    def search(self, query, limit=10, lang=None):
         merged, seen, used = [], set(), []
         for p in self.providers:
             try:
-                res = p.search(query, limit) or []
+                res = p.search(query, limit, lang=lang) or []
             except Exception:
                 continue  # child 실패는 건너뜀(예외 전파 0)
             got = False
@@ -393,11 +394,11 @@ OFFICIAL_CONNECTORS = (
     {"name": "kipris",
      "keywords": ("특허", "실용신안", "patent", "상표", "디자인권", "지식재산", "특허권"),
      "env": ("KIPRIS_SERVICE_KEY",),
-     "factory": lambda: KiprisProvider()},
+     "factory": KiprisProvider},
     {"name": "data_go_kr",
      "keywords": ("공공데이터", "통계", "조달", "입찰", "행정", "데이터셋", "공공"),
      "env": ("DATA_GO_KR_SERVICE_KEY",),
-     "factory": lambda: DataGoKrProvider()},
+     "factory": DataGoKrProvider},
 )
 
 
@@ -435,11 +436,14 @@ def default_provider(topic=None):
         chain.append(NaverProvider())
     if os.environ.get("TAVILY_API_KEY"):
         chain.append(TavilyProvider())
+    ddgs_available = False
     try:
         import ddgs  # noqa: F401
-        chain.append(DdgsProvider())
+        ddgs_available = True
     except Exception:
-        pass
+        ddgs_available = False
+    if ddgs_available:
+        chain.append(DdgsProvider())
     chain.append(DDGProvider())  # 최후 폴백(키/인프라 0)
     general = FallbackProvider(chain) if len(chain) > 1 else chain[0]
     off = select_official_providers(topic) if topic else []
@@ -461,7 +465,7 @@ def _parse_ddg_html(html, limit=10):
             try:
                 href = unquote(parse_qs(urlparse(href).query).get("uddg", [href])[0])
             except Exception:
-                pass
+                href = m.group(1)
         title = re.sub(r"<[^>]+>", "", title_html).strip()
         out.append({"url": href, "title": title, "snippet": ""})
         if len(out) >= limit:
@@ -504,11 +508,17 @@ def vet_url(url):
 
 
 # ── kind 추론 / 랭킹 ──────────────────────────────────────────────────
+def _host_is_or_subdomain(url, domain):
+    host = (urlsplit(url).hostname or "").lower().rstrip(".")
+    domain = domain.lower().rstrip(".")
+    return host == domain or host.endswith("." + domain)
+
+
 def infer_kind(url):
     u = url.lower()
-    if "arxiv.org" in u:
+    if _host_is_or_subdomain(url, "arxiv.org"):
         return "arxiv"
-    if "github.com" in u:
+    if _host_is_or_subdomain(url, "github.com"):
         return "github"
     if u.endswith((".rss", ".xml", "/feed", "/rss")) or "/rss" in u or "/feed" in u:
         return "rss"
@@ -607,7 +617,7 @@ def _provider_search(provider, topic, limit, lang):
             if "lang" in inspect.signature(provider.search).parameters:
                 return provider.search(topic, limit=limit, lang=lang) or []
         except (TypeError, ValueError):
-            pass
+            return provider.search(topic, limit=limit) or []
     return provider.search(topic, limit=limit) or []
 
 
@@ -681,7 +691,7 @@ def promote_discovery(source_id, sources_path_=None, discover_path_=None):
 def _mock_provider(hits):
     p = SearchProvider()
     p.name = "mock"
-    p.search = lambda query, limit=10: list(hits)[:limit]
+    p.search = lambda query, limit=10, lang=None: list(hits)[:limit]
     return p
 
 
@@ -742,10 +752,10 @@ def _selftest():
     # FallbackProvider — 첫 provider 빈결과/예외 → 다음으로
     class _Empty(SearchProvider):
         name = "empty"
-        def search(self, q, limit=10): return []
+        def search(self, q, limit=10, lang=None): return []
     class _Boom(SearchProvider):
         name = "boom"
-        def search(self, q, limit=10): raise RuntimeError("down")
+        def search(self, q, limit=10, lang=None): raise RuntimeError("down")
     fb = FallbackProvider([_Boom(), _Empty(), dg])
     chk("D12 폴백 체인 — 예외/빈결과 건너뛰고 ddgs 채택", fb.search("q")[0]["url"] == "https://a.com")
     chk("D12b 채택 provider 라벨", fb.name == "fallback:ddgs")
@@ -918,7 +928,7 @@ def _selftest():
 
     class _Boom2(SearchProvider):
         name = "boom2"
-        def search(self, q, limit=10): raise RuntimeError("down")
+        def search(self, q, limit=10, lang=None): raise RuntimeError("down")
     comp = CompositeProvider([_offp, _Boom2(), _genp])
     _cres = comp.search("q")
     chk("D30 Composite 공식 결과가 맨 위", _cres[0]["url"] == "https://data.go.kr/d/1")
@@ -938,9 +948,9 @@ def _selftest():
                          "snippet": "조달 입찰 통계"}])])
     _rc = discover("조달 입찰 통계", provider=_comp_disc, home=home, persist=False)
     chk("D31 공식 .go.kr 후보가 최상위(domain_trust 1.0)",
-        "data.go.kr" in _rc["candidates"][0]["url"])
+        _host_is_or_subdomain(_rc["candidates"][0]["url"], "data.go.kr"))
     chk("D31a 일반 hit 도 후보 보존(무손실)",
-        any("general.com" in c["url"] for c in _rc["candidates"]))
+        any((urlsplit(c["url"]).hostname or "") == "general.com" for c in _rc["candidates"]))
 
     # D32 공식 커넥터 dirty url 도 vet_url 로 rejected(공식 신뢰가 SSRF 게이트 우회 못 함)
     _dirty = CompositeProvider([

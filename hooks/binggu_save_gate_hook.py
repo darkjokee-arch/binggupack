@@ -168,6 +168,7 @@ def _stamp_run_applied(oa, snap, idx, ts):
         ).hexdigest()[:16]
         oa.record_run_outcome(item["trace_id"], [item["node_id"]],
                               "applied", "unknown", "user", digest, ts)
+        return None
     except Exception as e:
         # 결과-귀속 append 실패는 도장 자체를 막지 않는다(계속) — 다만 삼키지 않고 사유를 남긴다.
         return _note("결과-귀속(applied) append 실패", e)
@@ -208,6 +209,7 @@ def _stamp_use_count(snap, idx):
                             use_key=RANK.adoption_key("__session_close__", None))
         finally:
             db.close()
+        return None
     except Exception as e:
         return _note("use_count 도장 실패", e)
 

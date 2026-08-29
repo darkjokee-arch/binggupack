@@ -9,6 +9,7 @@
 실 네트워크는 provider/fetch_runner 주입(owner 스케줄러). selftest 는 전부 mock — 실 네트워크 0.
 운영 store/ledger 미접촉(temp home·out_dir 만). 검색 provider 는 교체 가능(중심은 수집→파싱→팩).
 """
+from pathlib import Path
 import os
 import sys
 
@@ -346,7 +347,7 @@ def _selftest():
     # 기록 manifest 독립 재검증(pack_validate 직접 호출)
     import json
     import openbinggu_pack_validate as PV
-    mani = json.load(open(os.path.join(out, "manifest.json"), encoding="utf-8"))
+    mani = json.loads(Path(os.path.join(out, 'manifest.json')).read_text(encoding='utf-8'))
     chk("E10 기록 manifest 독립 재검증 PASS", PV.validate_pack(mani)["verdict"] in ("PASS", "REVIEW_ONLY"))
     chk("E11 promotion_allowed_default=false(안전 불변)", mani["promotion_allowed_default"] is False)
 

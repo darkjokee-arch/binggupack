@@ -24,7 +24,7 @@ import tempfile
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "scripts"))
 
-from openbinggu_staging_write_selftest import OPERATING_PATHS, _hash  # noqa: E402
+from openbinggu_staging_write_selftest import OPERATING_PATHS  # noqa: E402
 from openbinggu_deprecate_and_remind_g3 import set_review_due, resolve_review  # noqa: E402
 from openbinggu_candidate_list_view import list_candidates  # noqa: E402
 from openbinggu_conversation_candidate_save import save_selected  # noqa: E402

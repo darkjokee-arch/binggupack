@@ -22,6 +22,7 @@ Run recipe (local, two wrangler dev workers + seeded AUTH KV):
 For a LIVE canary, seed the credentials on the deployed AUTH KV (owner) and point
 --endpoint at the deployed gateway. Never seed real packs — this uses a synthetic one.
 """
+from pathlib import Path
 import argparse
 import base64
 import hashlib
@@ -93,8 +94,8 @@ def _call(endpoint, path, token=None, body=None, rawbody=None):
 
 
 def run(endpoint, state_dir):
-    creds = json.load(open(os.path.join(state_dir, "creds.json")))
-    packb64 = open(os.path.join(state_dir, "packA.b64")).read().strip()
+    creds = json.loads(Path(os.path.join(state_dir, 'creds.json')).read_text())
+    packb64 = Path(os.path.join(state_dir, 'packA.b64')).read_text().strip()
     RA, WA, RB = creds["READ_A"]["token"], creds["WRITE_A"]["token"], creds["READ_B"]["token"]
 
     def mcp(tok, method, params=None):

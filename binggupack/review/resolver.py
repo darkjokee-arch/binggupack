@@ -32,8 +32,6 @@ def resolve(items, decisions):
         rid = it["review_id"]
         kind = it.get("kind", "review")
         dec = decisions.get(rid, "")
-        result, reason = None, None
-
         if dec in APPROVE:
             if kind == "d9_protected":
                 result, reason = "STOPPED", "D9 protected 는 approve 불가 (보호 상태 변경 금지)"

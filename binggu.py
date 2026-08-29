@@ -25,6 +25,8 @@
 
 장부 위치 변경: --ledger <sqlite 경로> (기본 ~/.binggupack/ledger.sqlite)
 """
+from contextlib import suppress
+from pathlib import Path
 import argparse
 import datetime
 import os
@@ -36,7 +38,8 @@ sys.path.insert(0, os.path.join(BASE, "scripts"))
 
 # 트랙 C(C3): storage 진입점은 facade 경유로 정리(호출 경계). scripts 직접 import 도 호환 유지.
 from binggupack.storage import (  # noqa: E402
-    OPERATING_PATHS, set_review_due, resolve_review, list_due_reminders)
+    OPERATING_PATHS as _OPERATING_PATHS,
+    set_review_due, resolve_review, list_due_reminders)
 from openbinggu_candidate_list_view import list_candidates  # noqa: E402
 from binggupack.storage import save_selected  # noqa: E402  (트랙 C: scripts 직접 import → storage facade)
 from openbinggu_conversation_capture_preview import capture_preview  # noqa: E402
@@ -48,7 +51,10 @@ from binggu_capture_profile import (  # noqa: E402
     init_profile, pause as cap_pause, resume as cap_resume,
     disable_capture as cap_disable, enable_capture as cap_enable,
     uninstall as cap_uninstall, status as cap_status,
-    register_hook, unregister_hook, hook_registered, hook_health)
+    register_hook, unregister_hook, hook_registered as _hook_registered, hook_health)
+
+OPERATING_PATHS = _OPERATING_PATHS
+hook_registered = _hook_registered
 
 SAVE_GATE_MARKER = "binggu_save_gate_hook"  # 사람-발화 저장 게이트 hook 식별 토큰
 PREFLIGHT_MARKER = "binggu_preflight_hook"  # preflight 자동주입 hook 식별 토큰
@@ -199,7 +205,7 @@ def cmd_init(a):
         print(f"자동 후보 수집은 꺼져 있습니다. 켜려면:  {HINT} capture install")
     # 환경 점검(옵션1, 4cli 20260615_1900) — 무엇이 켜지고 무엇을 더 깔면 뭐가 생기는지 1회 안내.
     # 점검만 — 자동 설치 안 함(없는 건 명령만 안내). 실패해도 init 흐름엔 영향 0.
-    try:
+    with suppress(Exception):
         import sys as _sys
         _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
         import binggu_env_check as _ec
@@ -207,8 +213,6 @@ def cmd_init(a):
         print()
         print(_ec.render_report(_ec.check_env(settings_path=gate_settings)))
         print()
-    except Exception:
-        pass
     print(f"다음:  {HINT} preview \"오늘 정리하고 싶은 문장들\"")
     return 0
 
@@ -327,22 +331,18 @@ def _reindex_after_write(ledger_arg):
 
     색인은 순수 파생(ledger mode=ro read 만) — write 는 색인 sqlite 만. 실패는 침묵(회상은
     stale 색인도 graceful, 다음 `binggu index update`/자동 빌드로 자기치유)."""
-    try:
+    with suppress(Exception):
         from binggupack.pack import fresh_index as FI
         ledger, _ = _ledger_paths(ledger_arg)
         home = os.path.dirname(ledger)
         FI.index_update(ledger, home=home)
-    except Exception:
-        pass
     # Deep 임베드 캐시 선워밍(감사 #6) — owner 가 semantic 회상을 켠 경우에만(이중 게이트는
     # precompute 내부 CS.enabled() + 여기 recall_config 스위치). 변경분만 배치 왕복·실패 침묵.
-    try:
+    with suppress(Exception):
         from binggupack.pack import recall as RC
         from binggupack.safety.p1_config import recall_config as _rcfg
         if _rcfg(home).get("semantic_recall_enabled", False):
             RC.precompute_embeddings(ledger, home=home)
-    except Exception:
-        pass
 
 
 def _recall_staging_for_ledger(ledger):
@@ -841,11 +841,9 @@ def cmd_preview(a, explicit=False):
     # SAVE 게이트 대조용 — 직전 preview 후보를 last_preview 에 영속(hook 이 사람 'SAVE n' 발화 시 이걸 읽어 도장).
     # 이 연결이 없으면 CLI preview→save 흐름이 save_gate_log 와 분리돼 autopush 이중게이트가 영구 BLOCK.
     # explicit 모드도 함께 기록 — save/pair/core 재승격이 동일 모드로 pref 재계산(MUST_FIX 2).
-    try:
+    with suppress(Exception):
         import binggu_save_gate as _sg
         _sg.write_last_preview(pv.get("candidates") or [], explicit=explicit)
-    except Exception:
-        pass
     pid = _preview_id(a.text)
     print("\npreview_id: %s" % pid)
     if pv["candidates"]:
@@ -879,11 +877,9 @@ def cmd_reflect(a):
     print(pv["preview_markdown"])
     # preview 와 동일하게 last_preview 영속 → 사람 'SAVE n' 발화 시 save_gate 가 도장(autopush 호환).
     # reflect 후보 재도출은 기본 모드 — explicit=False 기록(save pref 재계산 패리티 · MUST_FIX 2).
-    try:
+    with suppress(Exception):
         import binggu_save_gate as _sg
         _sg.write_last_preview(pv.get("candidates") or [], explicit=False)
-    except Exception:
-        pass
     pid = _preview_id(text)
     print("\npreview_id: %s" % pid)
     if pv["candidates"]:
@@ -1008,7 +1004,7 @@ def cmd_save(a):
     # 승인 정책: preview 를 실제로 본 텍스트만 저장 가능 — raw text 직행 저장 차단
     if getattr(a, "from_file", None):
         try:
-            a.text = open(a.from_file, encoding="utf-8").read()
+            a.text = Path(a.from_file).read_text(encoding='utf-8')
         except OSError as e:
             print("저장 파일을 열 수 없습니다: %s (%s)" % (a.from_file, e))
             return 1
@@ -1026,11 +1022,9 @@ def cmd_save(a):
         import binggu_save_gate as _sg
         import json as _json
         _mode = _explicit
-        try:
+        with suppress(Exception):
             with open(_sg.last_preview_path(), "r", encoding="utf-8") as _f:
                 _mode = bool(_json.load(_f).get("explicit", _mode))
-        except Exception:
-            pass
         _cands = capture_preview(a.text, explicit=_mode)["candidates"]
         _refs = [(_sg.preview_ref_for_candidates(_cands), idx)]
     except Exception:
@@ -1103,11 +1097,9 @@ def cmd_pair(a):
         import binggu_save_gate as _sg
         import json as _json
         _mode = True
-        try:
+        with suppress(Exception):
             with open(_sg.last_preview_path(), "r", encoding="utf-8") as _f:
                 _mode = bool(_json.load(_f).get("explicit", _mode))
-        except Exception:
-            pass
         _oc = capture_preview(a.owner_text, explicit=_mode)["candidates"]
         _refs = [(_sg.preview_ref_for_candidates(_oc), [a.owner_pick])]
         _ac = []
@@ -2081,11 +2073,9 @@ def _canonical_path(p):
 def _same_path(x, y):
     """두 경로가 같은 실제 대상인지. 둘 다 존재하면 os.path.samefile(장치/inode 동일성)으로,
     아니면 canonical 문자열로 비교(심링크·대소문자 별칭 포함). 존재/미존재 어느 쪽이든 안전."""
-    try:
+    with suppress(OSError):
         if os.path.exists(x) and os.path.exists(y):
             return os.path.samefile(x, y)
-    except OSError:
-        pass
     return _canonical_path(x) == _canonical_path(y)
 
 

@@ -32,7 +32,6 @@ if ROOT not in sys.path:
 if HERE not in sys.path:
     sys.path.insert(0, HERE)   # scripts 형제(importer 호환) 호환
 
-from binggupack.pack.candidate_mvp2 import *  # noqa: E402,F401,F403
 from binggupack.pack.candidate_mvp2 import (  # noqa: E402,F401  (전체 명시 re-export)
     DOMAIN,
     REDACT_RE,
@@ -49,6 +48,24 @@ from binggupack.pack.candidate_mvp2 import (  # noqa: E402,F401  (전체 명시 
     v07loader,
     lkmap,
     a0,
+)
+
+__all__ = (
+    'DOMAIN',
+    'REDACT_RE',
+    'GENERATED_BY',
+    'NODE_KEYS',
+    'PROP_KEYS',
+    'EVIDX_KEYS',
+    '_sha8',
+    '_has_secret',
+    '_meaningful',
+    'to_nodes',
+    'mvp1',
+    'v011',
+    'v07loader',
+    'lkmap',
+    'a0',
 )
 
 BASE = Path(__file__).resolve().parent.parent
