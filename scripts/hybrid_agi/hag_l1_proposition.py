@@ -16,7 +16,6 @@
 
 운영 ledger(~/.binggupack/*.sqlite) 절대 미접촉 — 본 모듈은 어떤 파일/DB 도 열지 않음.
 """
-import os
 import sys
 
 EXTRACT_HUMAN = "human"            # 사람 명시 추출 → 자체 영구

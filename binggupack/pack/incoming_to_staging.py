@@ -17,6 +17,11 @@ from pathlib import Path
 # v0.10 contract validator 재사용 (선행 gate) — 정본 패키지 모듈.
 from binggupack.pack import contract_validate as v010
 
+__all__ = [
+    "json", "re", "tempfile", "Path", "v010", "SECRET_PATTERNS", "scan_secrets",
+    "assess_incoming", "_expected_from_name", "_base_pack", "_content", "synthesize_fixtures",
+]
+
 # --- secret-like content 검사 (박제: 단어≠값, 값 패턴 기반 과탐 회피) ---
 # key=value 형태에서 value 가 실제 시크릿처럼 긴 경우만 STOP. 단어 자체("key","token")는 무죄.
 SECRET_PATTERNS = [
@@ -50,9 +55,8 @@ def scan_secrets(content):
         for pat in SECRET_PATTERNS:
             m = pat.search(text)
             if m:
-                snippet = m.group(0)
-                masked = snippet[:8] + "…(masked, len=%d)" % len(snippet)
-                hits.append({"item_id": it.get("item_id", "?"), "pattern": pat.pattern[:40], "masked": masked})
+                hits.append({"item_id": it.get("item_id", "?"), "pattern": pat.pattern[:40],
+                             "masked": "[redacted]"})
                 break
     return hits
 

@@ -15,7 +15,6 @@ ROOT = os.path.dirname(HERE)                         # <repo>
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)   # binggupack 패키지 import 경로
 
-from binggupack.classifier.capture_classifier import *  # noqa: E402,F401,F403
 from binggupack.classifier.capture_classifier import (  # noqa: E402,F401  (밑줄 + 전체 명시 re-export)
     PREVIEW_TRIGGER,
     EXPLICIT_SAVE,
@@ -26,11 +25,32 @@ from binggupack.classifier.capture_classifier import (  # noqa: E402,F401  (밑�
     OPS_IMPERATIVE,
     OPS_REPORT,
     META_CONFIRM,
+    META_CONFIRM_REBUTTABLE,
+    PREV_AI_STANCE,
     GENERALIZE_EXEMPT,
     classify,
     _hits,
     _any,
     _selftest,
+)
+
+__all__ = (
+    'PREVIEW_TRIGGER',
+    'EXPLICIT_SAVE',
+    'SIGNAL_PATTERNS',
+    'HEDGE',
+    'VETO_PATTERNS',
+    'OPS_VERBS',
+    'OPS_IMPERATIVE',
+    'OPS_REPORT',
+    'META_CONFIRM',
+    'META_CONFIRM_REBUTTABLE',
+    'PREV_AI_STANCE',
+    'GENERALIZE_EXEMPT',
+    'classify',
+    '_hits',
+    '_any',
+    '_selftest',
 )
 
 if __name__ == "__main__":

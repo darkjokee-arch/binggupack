@@ -69,7 +69,6 @@ def run_e2e(root: str | None = None) -> dict:
     created_root = root is None
     safe_root: str = _make_safe_root() if root is None else root
     results: list[ScenarioResult] = []
-    kat_rc, kat_tail = 1, ""
     try:
         # (1)(2) 공유 격리 홈 1개 생성 + 격리 단언(운영 홈 밖·symlink 아님) + init.
         home = writer.new_home(safe_root)

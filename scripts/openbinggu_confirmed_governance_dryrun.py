@@ -22,13 +22,20 @@ if ROOT not in sys.path:
 if HERE not in sys.path:
     sys.path.insert(0, HERE)   # scripts/ 형제 import 경로(미이관 bare-name 대비)
 
-from binggupack.safety.confirmed_governance import *  # noqa: E402,F401,F403
 from binggupack.safety.confirmed_governance import (  # noqa: E402,F401  (전체 명시 re-export)
     ALLOWED_STATUS,
     TRANSITIONS,
     evaluate_confirm,
     _selftest,
     main,
+)
+
+__all__ = (
+    'ALLOWED_STATUS',
+    'TRANSITIONS',
+    'evaluate_confirm',
+    '_selftest',
+    'main',
 )
 
 

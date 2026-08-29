@@ -25,6 +25,7 @@ CLI:
   python openbinggu_promotion_preview.py --pack-dir <batch_pack 디렉터리> --domain <D코드> [--sample N]
       # OPENBINGGU_OPERATING_DB 지정 시 그 DB를 read-only로 대조, 미지정 시 synthetic temp DB
 """
+from pathlib import Path
 import os
 import re
 import sys
@@ -295,7 +296,7 @@ def _selftest():
         # 충돌 검출: seed id를 가진 pack
         d11 = _make_synthetic_pack(tmp, "pv_coll", n=1)
         nl = os.path.join(d11, "nodes.jsonl")
-        rows = [json.loads(x) for x in open(nl, encoding="utf-8")]
+        rows = [json.loads(x) for x in Path(nl).read_text(encoding='utf-8').splitlines(keepends=True)]
         rows[0]["id"] = "node:SEED:1"
         with open(nl, "w", encoding="utf-8") as f:
             for rr in rows:

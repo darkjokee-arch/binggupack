@@ -21,7 +21,6 @@ for _p in (ROOT, HERE):
     if _p not in sys.path:
         sys.path.insert(0, _p)   # binggupack 패키지 + scripts/ 형제 import 경로
 
-from binggupack.pack.knowledge_graph import *  # noqa: E402,F401,F403
 from binggupack.pack.knowledge_graph import (  # noqa: E402,F401  (전체 명시 re-export — _ 심볼 포함)
     LOCAL_COLLECT,
     WORKFLOW_TOOL,
@@ -40,6 +39,26 @@ from binggupack.pack.knowledge_graph import (  # noqa: E402,F401  (전체 명시
     _mock_graph,
     _selftest,
     _main,
+)
+
+__all__ = (
+    'LOCAL_COLLECT',
+    'WORKFLOW_TOOL',
+    'BRANCH_RELATION',
+    'DEFAULT_WORKFLOW_STATUS',
+    'graph_to_workflow_nodes_edges',
+    'build_workflow_payload',
+    'build_workflow_sync_plan',
+    'select_nodes',
+    'collect_nodes',
+    'graph_stats',
+    'serialize_graph',
+    '_node_id',
+    '_child_ids',
+    '_category',
+    '_mock_graph',
+    '_selftest',
+    '_main',
 )
 
 

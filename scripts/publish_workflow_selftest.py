@@ -11,6 +11,7 @@
   · publish_no_token_fallback         — API 토큰/비밀번호 fallback 없음(OIDC 전용)
   · publish_release_autotrigger_disabled — GitHub Release published 자동 트리거 비활성
   · publish_privatepath_scan_registered  — private_path_scan 을 소스+빌드산출물에서 실행
+  · publish_third_party_actions_pinned   — 외부 배포 action 은 immutable commit SHA 에 고정
 
 정적 검사만(워크플로 실행 안 함) · read-only · FS write 0 · 네트워크 0.
 CLI: python scripts/publish_workflow_selftest.py [--selftest]
@@ -115,6 +116,15 @@ def run_selftest():
     rec("publish_privatepath_scan_registered",
         ("private_path_scan.py --source" in yml) and ("private_path_scan.py --tree" in yml),
         "source + built-artifact 스캔")
+
+    # 10) supply-chain 변경 방지: 외부 publish action은 움직이는 tag/branch가 아닌 SHA 고정
+    publish_action = re.search(
+        r"uses:\s*pypa/gh-action-pypi-publish@([^\s#]+)", yml
+    )
+    publish_ref = publish_action.group(1) if publish_action else ""
+    rec("publish_third_party_actions_pinned",
+        bool(re.fullmatch(r"[0-9a-f]{40}", publish_ref)),
+        "pypa publish ref=%s" % (publish_ref or "missing"))
 
     print("=" * 74)
     print("BingguPack publish.yml fail-closed 계약 정적 selftest")

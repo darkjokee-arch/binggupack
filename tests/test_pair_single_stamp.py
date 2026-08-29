@@ -8,6 +8,7 @@
     에이전트 세션에서도 소비. 도장=사람 키보드만 원칙·fail-closed 는 그대로(완화 0).
 CLAUDECODE=1 주입으로 에이전트 세션(deny 전용)을 시뮬 — 도장만이 사람 증명.
 """
+from pathlib import Path
 import json
 import os
 import sqlite3
@@ -76,7 +77,7 @@ def test_pair_combined_preview_single_stamp(tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
     assert "결합 번호축" in r.stdout
     assert "| 1 | owner |" in r.stdout and "| 2 | ai |" in r.stdout, r.stdout
-    lp = json.load(open(os.path.join(home, "last_preview_candidates.json"), encoding="utf-8"))
+    lp = json.loads(Path(os.path.join(home, 'last_preview_candidates.json')).read_text(encoding='utf-8'))
     assert lp["explicit"] is True and len(lp["items"]) == 2
     assert OWNER_TEXT not in json.dumps(lp, ensure_ascii=False)   # 원문 미저장(hash 만)
     assert _active_sentences(ledger) == []                        # preview 는 ledger 미접촉
@@ -124,7 +125,7 @@ def test_learn_consume_stamp_promotes(tmp_path):
                          "evidence": {"feedback": "산으로 간다 다시 봐라"}, "consumed": False}])
     r = _run(["--ledger", ledger, "learn-consume"], env)           # dry-run = 스테이징
     assert r.returncode == 0 and "세이브 N+1" in r.stdout, r.stdout + r.stderr
-    lp = json.load(open(os.path.join(home, "last_preview_candidates.json"), encoding="utf-8"))
+    lp = json.loads(Path(os.path.join(home, 'last_preview_candidates.json')).read_text(encoding='utf-8'))
     assert len(lp["items"]) == 1
     _stamp("세이브 1", env)                                        # qi=0 → 도장 번호 1
     r2 = _run(["--ledger", ledger, "learn-consume", "--confirm", "CONSUME 0"], env)

@@ -99,6 +99,7 @@ def _make_handler(ledger, session):
                 try:
                     self.wfile.write(body)
                 except Exception:
+                    # Client disconnects after headers are harmless to the read-only server.
                     pass
 
         def _text(self, code, msg, head_only=False):
@@ -295,10 +296,12 @@ def serve(ledger, port=0, open_browser=True):
         try:
             webbrowser.open(url)
         except Exception:
+            # Browser launch is optional; the printed URL remains usable.
             pass
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
+        # Interactive shutdown proceeds through the server cleanup in finally.
         pass
     finally:
         httpd.shutdown()

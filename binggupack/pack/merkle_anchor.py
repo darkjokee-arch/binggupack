@@ -422,6 +422,7 @@ def _selftest():
             if locals_obj is not None:
                 locals_obj.close()
         except Exception:
+            # Test cleanup is best-effort and the invariant check below records any residue.
             pass
 
     after_mtime = {p: (os.path.getmtime(p) if os.path.exists(p) else None) for p in OPERATING_PATHS}

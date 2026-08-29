@@ -145,16 +145,16 @@ def run():
            "'saved': 1" not in r.stdout and node_count() == n0)
 
         # STRICT=false 로도 에이전트 세션 save fail-open 안 됨.
-        r = _cli(home, ledger, ["save", txt, "--preview-id", pid, "--pick", "1", "--confirm", "SAVE 1"],
-                 env_extra={"CLAUDECODE": "1", "BINGGU_STRICT_HUMAN_GATE": "false"}, stdin_text="")
+        _cli(home, ledger, ["save", txt, "--preview-id", pid, "--pick", "1", "--confirm", "SAVE 1"],
+             env_extra={"CLAUDECODE": "1", "BINGGU_STRICT_HUMAN_GATE": "false"}, stdin_text="")
         ck("C2_strict_flag_false_cannot_fail_open(save)", node_count() == n0)
 
         # pair 에이전트 세션·앵커없음 → 노드 0.
         n1 = node_count()
-        r = _cli(home, ledger, ["pair", "이건 내 직감으로 판단한 거다", "AI 가 제안한 방향",
-                                "--by", "owner", "--relation", "refutes",
-                                "--confirm", "PAIR owner_refutes owner:1 ai:1"],
-                 env_extra={"CLAUDECODE": "1"}, stdin_text="")
+        _cli(home, ledger, ["pair", "이건 내 직감으로 판단한 거다", "AI 가 제안한 방향",
+                            "--by", "owner", "--relation", "refutes",
+                            "--confirm", "PAIR owner_refutes owner:1 ai:1"],
+             env_extra={"CLAUDECODE": "1"}, stdin_text="")
         ck("D2_agent_session_pair_no_anchor → write0(fail-closed)", node_count() == n1)
 
         # D3) 터미널(CLAUDECODE 부재) = 명령 직접 입력이 곧 save n → 저장 성공(스펙 ②).

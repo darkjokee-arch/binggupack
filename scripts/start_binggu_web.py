@@ -16,6 +16,8 @@ Cloudflare 에 붙이면 named tunnel 로 고정 가능(수동).
 
 스케줄러 등록은 scripts/register_webmcp.ps1 (본인 직접 실행 — 공개 터널 노출은 사람 결정).
 """
+from contextlib import suppress
+from pathlib import Path
 import os
 import re
 import shutil
@@ -55,20 +57,18 @@ def named_config():
     p = os.path.join(HOME_DIR, "web_tunnel.json")
     if not os.path.exists(p):
         return None
-    try:
+    with suppress(Exception):
         import json
-        d = json.loads(open(p, encoding="utf-8").read())
+        d = json.loads(Path(p).read_text(encoding='utf-8'))
         if d.get("tunnel_name") and d.get("hostname"):
             return d["tunnel_name"], d["hostname"]
-    except Exception:
-        pass
     return None
 
 
 def ensure_token():
     """경로 토큰 — 없으면 최초 1회 생성(48hex). 값은 파일에만(화면/로그 출력 0)."""
     if os.path.exists(TOKFILE):
-        return open(TOKFILE, encoding="ascii").read().strip()
+        return Path(TOKFILE).read_text(encoding='ascii').strip()
     import secrets
     tok = secrets.token_hex(24)
     os.makedirs(HOME_DIR, exist_ok=True)

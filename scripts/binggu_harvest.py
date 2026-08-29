@@ -35,6 +35,7 @@
 """
 from __future__ import annotations
 
+from pathlib import Path
 import hashlib
 import json
 import os
@@ -857,7 +858,7 @@ def _selftest():
     # T7 secret 잔존 → STOP(후보 미생성). secret 문장은 to_evidence 단계 STOP.
     SECRET_URL = "https://github.com/owner/repo"
     add_source("github", SECRET_URL, path=sp)
-    r = run(runner=mock_fetch(SECRET_SAMPLE))
+    run(runner=mock_fetch(SECRET_SAMPLE))
     con = sqlite3.connect(lp)
     leaked = con.execute("SELECT count(*) FROM nodes WHERE sentence LIKE '%AKIA%'").fetchone()[0]
     con.close()
@@ -935,12 +936,12 @@ def _selftest():
 
     # T12 fetch 어댑터가 urllib(표준) 만 — 실제 import 문에 서드파티 0.
     #   (이 selftest 문자열 자체가 오탐되지 않게 실제 import 행만 골라 검사.)
-    import_lines = [ln.strip() for ln in open(os.path.abspath(__file__), encoding="utf-8")
+    import_lines = [ln.strip() for ln in Path(os.path.abspath(__file__)).read_text(encoding='utf-8').splitlines(keepends=True)
                     if ln.strip().startswith(("import ", "from "))]
     third = ("requests", "feedparser", "bs4", "lxml", "aiohttp", "httpx")
     chk("T12 서드파티 import 0 + urllib 사용",
         not any(any(t in ln for t in third) for ln in import_lines)
-        and "urllib.request" in open(os.path.abspath(__file__), encoding="utf-8").read())
+        and "urllib.request" in Path(os.path.abspath(__file__)).read_text(encoding='utf-8'))
 
     # ── T13~T15 전방위 파싱 2층(원문보존 + 파생) — raw_bytes 주는 mock 으로 harvest_one 직접 검증 ──
     def raw_runner(raw_bytes, ctype):
@@ -962,7 +963,7 @@ def _selftest():
     raw_p = os.path.join(harvest_raw_dir(home), raw_sha + ".bin")
     chk("T13c raw 원문 그대로 보관(조건1)", os.path.exists(raw_p))
     chk("T13d 보관 raw == 원본 bytes(무변형)",
-        os.path.exists(raw_p) and open(raw_p, "rb").read() == html_raw)
+        os.path.exists(raw_p) and Path(raw_p).read_bytes() == html_raw)
     chk("T13e derived 노드도 candidate=1/promotion=0",
         all(n["properties"]["candidate"] is True and n["promotion_allowed"] is False
             for n in one["nodes"]))

@@ -21,7 +21,7 @@ BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "scripts"))
 
 from openbinggu_phase2_local_persistence_selftest import phase2_apply, user_staging_path  # noqa: E402
-from openbinggu_staging_write_selftest import base_pack, OPERATING_PATHS, _hash  # noqa: E402
+from openbinggu_staging_write_selftest import base_pack, OPERATING_PATHS  # noqa: E402
 
 
 def ro_connect(path):

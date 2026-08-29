@@ -142,7 +142,7 @@ class _Win32DpapiCredBackend(_KeychainBackendBase):
     # ── ctypes 구조체/함수 바인딩(내부 lazy) ────────────────────────────────────
     def _bind(self):
         import ctypes
-        from ctypes import wintypes
+        import ctypes.wintypes as wintypes
 
         class DATA_BLOB(ctypes.Structure):
             _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]

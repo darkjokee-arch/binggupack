@@ -15,8 +15,11 @@
 
 정본 무변경(import 호출만): classify_label_kind · scan_residual_pii · SECRET_PATTERNS · _PREVIEW_PII_EXTRA.
 """
+from contextlib import suppress
+from pathlib import Path
 import hashlib
 import hmac
+import importlib
 import json
 import math
 import os
@@ -30,7 +33,7 @@ sys.path.insert(0, HERE)
 # --- L1 rule layer 정본 (무변경·호출만) ---
 from watcher_batch_m1 import scan_residual_pii                         # noqa: E402
 from openbinggu_incoming_to_staging import SECRET_PATTERNS            # noqa: E402
-import openbinggu_conversation_capture_preview as _cap               # _PREVIEW_PII_EXTRA  # noqa: E402
+_cap = importlib.import_module("openbinggu_conversation_capture_preview")  # SCC lazy edge
 from openbinggu_label_kind_map import classify_label_kind            # canonical 도장  # noqa: E402
 import binggu_platform as _plat                                       # noqa: E402
 
@@ -50,12 +53,10 @@ def _resolve_seed_path(name):
     try:
         from importlib.resources import files
         res = files("binggupack.data").joinpath("semantic", name)
-        try:
+        with suppress(Exception):
             if res.is_file():
                 return str(res)
-        except Exception:
-            pass
-        try:
+        with suppress(Exception):
             from importlib.resources import as_file
             import atexit
             import tempfile
@@ -63,15 +64,13 @@ def _resolve_seed_path(name):
             if cached and os.path.exists(cached):
                 return cached
             with as_file(res) as ap:
-                data = open(ap, "rb").read()
+                data = Path(ap).read_bytes()
             fd, tmp = tempfile.mkstemp(prefix="binggu_seed_", suffix="_" + name)
             with os.fdopen(fd, "wb") as f:
                 f.write(data)
             _SEED_TMP_CACHE[name] = tmp
             atexit.register(lambda p=tmp: os.path.exists(p) and os.remove(p))
             return tmp
-        except Exception:
-            pass
     except Exception:
         pass
     return os.path.join(HERE, "..", "tests", "fixtures", "semantic", name)
@@ -172,7 +171,7 @@ def model_digest():
     if memo is not None:
         return memo
     dig = None
-    try:
+    with suppress(Exception):
         with urllib.request.urlopen(OLLAMA + "/api/tags", timeout=10) as r:
             d = json.loads(r.read())
         for m in d.get("models", []):
@@ -181,8 +180,6 @@ def model_digest():
                 if cand:
                     dig = cand
                     break
-    except Exception:
-        pass
     if dig is None:
         dig = hashlib.sha256(MODEL.encode()).hexdigest()[:16]
     _DIGEST_MEMO["v"] = dig
@@ -193,7 +190,7 @@ def model_digest():
 class SemanticShadow:
     def __init__(self, seed_path=SEED_PATH, embed_fn=None, centroids=None):
         self.embed_fn = embed_fn or _embed
-        self.rows = [json.loads(l) for l in open(seed_path, encoding="utf-8") if l.strip()]
+        self.rows = [json.loads(l) for l in Path(seed_path).read_text(encoding='utf-8').splitlines(keepends=True) if l.strip()]
         self.digest = model_digest()
         self.build_hash = self._build_hash(seed_path)
         # centroids 주입(영속 캐시 hit) 시 ~62 seed embed 재계산 스킵 — 콜드 프로세스 저장 병목 제거.
@@ -282,14 +279,12 @@ def _centroid_cache_path(home=None):
 def _load_persisted_centroids(key, home=None):
     """디스크에 저장된 centroid 로드 — key(seed+임계+model_digest) 일치 + 6 subtype 완비만 채택.
     불일치/파손/부재 → None(재빌드). centroid 벡터는 seed 문장 파생물(원문 아님·PII 0)."""
-    try:
+    with suppress(Exception):
         with open(_centroid_cache_path(home), encoding="utf-8") as f:
             d = json.load(f)
         cent = d.get("centroids") if d.get("key") == key else None
         if cent and set(cent.keys()) == set(SUBTYPES):
             return cent
-    except Exception:
-        pass
     return None
 
 
@@ -297,15 +292,13 @@ def _persist_centroids(key, centroids, home=None):
     """centroid 를 홈에 원자적 저장(멱등). 실패는 조용히 무시(캐시는 최적화일 뿐 정확성 무관)."""
     if not centroids or set(centroids.keys()) != set(SUBTYPES):
         return
-    try:
+    with suppress(Exception):
         p = _centroid_cache_path(home)
         os.makedirs(os.path.dirname(p), exist_ok=True)
         tmp = p + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump({"key": key, "centroids": centroids}, f)
         os.replace(tmp, p)               # atomic
-    except Exception:
-        pass
 
 
 def get_cached_shadow(seed_path=SEED_PATH, embed_fn=None, home=None):
@@ -407,7 +400,7 @@ def _selftest():
     TXT = "마감 직전에 화면이 바뀌면 자동화가 깨지니 미리 점검한다."
     rec = sh.classify(TXT)
     safe = shadow_log(rec, path=logp)
-    blob = open(logp, encoding="utf-8").read()
+    blob = Path(logp).read_text(encoding='utf-8')
     ck(TXT not in blob and TXT[:12] not in blob, "#2 shadow.jsonl 원문 전문 미저장")
     ck(set(safe.keys()) <= _ALLOWED and len(safe["hmac_id"]) == 16,
        "#2·#4 화이트리스트 필드 + HMAC id(평문 해시 아님)")
@@ -431,8 +424,6 @@ if __name__ == "__main__":
     # --eval: 실제 Ollama로 seed LOO 정확도(설치0 centroid 실측 재현)
     if sys.argv[1] == "--eval":
         sh = SemanticShadow()
-        rows = sh.rows
-        clear = [r for r in rows if r["band"] == "clear"]
         print("centroid 분류기 로드 — digest=%s build=%s, centroid %d subtype"
               % (sh.digest, sh.build_hash, len(sh.centroids)))
         print("(정확도 실측은 tmp/semantic_l1_improve.py 참조 — 본 모듈은 분류 API)")

@@ -14,6 +14,7 @@ should_capture(사람 판정)와 category(사람 의도 reason)에서만 파생�
 
 실행: python tests/build_golden.py   → tests/fixtures/classifier_consistency/golden_100.json 갱신
 """
+from pathlib import Path
 import json
 import os
 
@@ -30,7 +31,7 @@ LABEL_BY_CATEGORY = {
 
 
 def build():
-    cases = json.load(open(_FIX, encoding="utf-8"))["cases"]
+    cases = json.loads(Path(_FIX).read_text(encoding='utf-8'))["cases"]
     out = []
     for c in cases:
         cap = bool(c["should_capture"])

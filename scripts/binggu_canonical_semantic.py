@@ -16,6 +16,8 @@ seed: binggupack/data/semantic/seed_canonical_5.jsonl (설치본 동봉·5종×1
 
 CLI: python binggu_canonical_semantic.py --selftest
 """
+from contextlib import suppress
+from pathlib import Path
 import hashlib
 import json
 import os
@@ -39,12 +41,10 @@ def _resolve_seed_path(name):
     try:
         from importlib.resources import files
         res = files("binggupack.data").joinpath("semantic", name)
-        try:
+        with suppress(Exception):
             if res.is_file():
                 return str(res)
-        except Exception:
-            pass
-        try:
+        with suppress(Exception):
             from importlib.resources import as_file
             import atexit
             import tempfile
@@ -52,15 +52,13 @@ def _resolve_seed_path(name):
             if cached and os.path.exists(cached):
                 return cached
             with as_file(res) as ap:
-                data = open(ap, "rb").read()
+                data = Path(ap).read_bytes()
             fd, tmp = tempfile.mkstemp(prefix="binggu_seed_", suffix="_" + name)
             with os.fdopen(fd, "wb") as f:
                 f.write(data)
             _SEED_TMP_CACHE[name] = tmp
             atexit.register(lambda p=tmp: os.path.exists(p) and os.remove(p))
             return tmp
-        except Exception:
-            pass
     except Exception:
         pass
     return os.path.join(_HERE, "..", "tests", "fixtures", "semantic", name)
@@ -117,7 +115,7 @@ class CanonicalSemantic:
     def __init__(self, seed_path=SEED_PATH, embed_fn=None, use_cache=True):
         self.embed_fn = embed_fn or S._embed
         self.seed_path = seed_path
-        self.rows = [json.loads(l) for l in open(seed_path, encoding="utf-8") if l.strip()]
+        self.rows = [json.loads(l) for l in Path(seed_path).read_text(encoding='utf-8').splitlines(keepends=True) if l.strip()]
         self.digest = S.model_digest()
         self.centroids = self._load_or_build(use_cache)
 
@@ -132,23 +130,19 @@ class CanonicalSemantic:
         real = self.embed_fn is S._embed
         cf = self._cache_file()
         if use_cache and real:
-            try:
+            with suppress(Exception):
                 with open(cf, encoding="utf-8") as f:
                     c = json.load(f)
                 if set(c.keys()) == set(KINDS):
                     return c
-            except Exception:
-                pass
         cent = self._centroids()
         if use_cache and real and set(cent.keys()) == set(KINDS):
-            try:
+            with suppress(Exception):
                 os.makedirs(_cache_dir(), exist_ok=True)
                 tmp = cf + ".tmp"
                 with open(tmp, "w", encoding="utf-8") as f:
                     json.dump(cent, f)
                 os.replace(tmp, cf)            # atomic
-            except Exception:
-                pass
         return cent
 
     def _centroids(self):

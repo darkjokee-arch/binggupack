@@ -16,6 +16,7 @@ ledger read-only(P4 재사용). 실 ledger write 0.
 """
 from __future__ import annotations
 
+from pathlib import Path
 import hashlib
 import json
 import os
@@ -315,7 +316,7 @@ def repair_from_ledger(ledger_path=P4.DEFAULT_LEDGER, zip_path=None, ts="t0"):
     if zip_path:
         write_pack_zip(files, zip_path)
         out["zip_path"] = zip_path
-        out["bundle_hash"] = _sha256(open(zip_path, "rb").read())
+        out["bundle_hash"] = _sha256(Path(zip_path).read_bytes())
         out["node_hash"] = _sha256(files["graph/nodes.jsonl"])
         out["evidence_hash"] = _sha256(files["evidence/index.jsonl"])
     return out

@@ -26,7 +26,6 @@ for _p in (ROOT, HERE):
     if _p not in sys.path:
         sys.path.insert(0, _p)   # binggupack 패키지 + scripts/ 형제 import 경로
 
-from binggupack.safety.contrast_protocol import *  # noqa: E402,F401,F403
 from binggupack.safety.contrast_protocol import (  # noqa: E402,F401  (전체 명시 re-export — _ 심볼 포함)
     _SAFETY_DOMAINS,
     _BINGGU_FORCED_CONS,
@@ -46,6 +45,27 @@ from binggupack.safety.contrast_protocol import (  # noqa: E402,F401  (전체 �
     _ensure_snapshot_table,
     record_contrast,
     verify_snapshot,
+)
+
+__all__ = (
+    '_SAFETY_DOMAINS',
+    '_BINGGU_FORCED_CONS',
+    '_BINGGU_TRUST',
+    '_BINGGU_FORBID_SUBTYPE',
+    '_BINGGU_REQUIRE_SUBTYPE',
+    '_snap_sha',
+    '_policy_is_safety',
+    '_mandate_stance',
+    '_quote_verify',
+    '_binggu_side_items',
+    'detect_conflicts',
+    'build_contrast_table',
+    '_fmt_quote',
+    'render_contrast_md',
+    '_SNAPSHOT_SCHEMA',
+    '_ensure_snapshot_table',
+    'record_contrast',
+    'verify_snapshot',
 )
 
 

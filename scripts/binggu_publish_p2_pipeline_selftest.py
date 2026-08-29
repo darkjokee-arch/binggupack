@@ -3,6 +3,7 @@
 temp 전용. cloud upload 0 / DB insert 0 / 운영 mtime 불변.
 GATE=GO 조건: 전 항목 PASS.
 """
+from pathlib import Path
 import json
 import os
 import sys
@@ -58,7 +59,7 @@ def main():
           and dp.get("live_check", {}).get("executed") is False)
     check("9.synthetic → release_status degraded", rep["release_status"] == "degraded")
     # manifest 파일도 cloud_upload/db_insert False
-    man = json.load(open(os.path.join(out1, "manifest.json"), encoding="utf-8"))
+    man = json.loads(Path(os.path.join(out1, 'manifest.json')).read_text(encoding='utf-8'))
     check("10.manifest cloud_upload/db_insert False",
           man.get("cloud_upload") is False and man.get("db_insert") is False)
 
@@ -97,15 +98,15 @@ def main():
 
     # 19b. new_predicates 주입 (G22)
     gr_path = os.path.join(out4, "reports", "graphrag.json")
-    gr = json.load(open(gr_path, encoding="utf-8")); gr["new_predicates"] = 2
-    json.dump(gr, open(gr_path, "w", encoding="utf-8"))
+    gr = json.loads(Path(gr_path).read_text(encoding='utf-8')); gr["new_predicates"] = 2
+    Path(gr_path).write_text(json.dumps(gr), encoding='utf-8')
     expect_block("20.new_predicates!=0 → G22 BLOCK",
                  lambda: P2.check_permanent_guards(out4, build4))
-    gr["new_predicates"] = 0; json.dump(gr, open(gr_path, "w", encoding="utf-8"))  # 복구
+    gr["new_predicates"] = 0; Path(gr_path).write_text(json.dumps(gr), encoding='utf-8')  # 복구
 
     # 20b. verb edge evidence 제거 (G27)
     ed_path = os.path.join(out4, "graph", "edges.jsonl")
-    edges = [json.loads(l) for l in open(ed_path, encoding="utf-8") if l.strip()]
+    edges = [json.loads(l) for l in Path(ed_path).read_text(encoding='utf-8').splitlines(keepends=True) if l.strip()]
     for e in edges:
         if e.get("edge_kind") == "verb":
             e["evidence_refs"] = []
@@ -129,7 +130,7 @@ def main():
     out5 = _fresh_out(tmp, "g23")
     build5 = EXP.build_cloud_pack(out5, nodes, evidence, g, conf)
     nd_path = os.path.join(out5, "graph", "nodes.jsonl")
-    nrows = [json.loads(l) for l in open(nd_path, encoding="utf-8") if l.strip()]
+    nrows = [json.loads(l) for l in Path(nd_path).read_text(encoding='utf-8').splitlines(keepends=True) if l.strip()]
     for n in nrows:
         if n.get("node_type") == "Claim":
             n["semantic_subtype"] = n.get("label_kind")  # subtype을 canonical로 승격

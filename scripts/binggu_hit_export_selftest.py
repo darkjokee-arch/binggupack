@@ -15,6 +15,8 @@ GATE=GO 조건: 전 케이스 PASS AND operating_store_unchanged AND governance_
 """
 from __future__ import annotations
 
+from contextlib import suppress
+from pathlib import Path
 import os
 import sys
 import json
@@ -72,7 +74,7 @@ def run():
         # ---- T2 PII 제외 ----
         out2 = os.path.join(tmp, "out2")
         r2 = ex.export_hit_raw(db1, out2, ts="2026-06-21T00:00:00Z")
-        jsonl_txt = open(r2["written"][0], encoding="utf-8").read()
+        jsonl_txt = Path(r2['written'][0]).read_text(encoding='utf-8')
         allowed = set(ex._LEAF_EVENT_COLS)
         keys_ok = True
         for line in jsonl_txt.splitlines():
@@ -102,7 +104,7 @@ def run():
         _seed(db4, 7)
         out4 = os.path.join(tmp, "out4")
         r4 = ex.export_hit_raw(db4, out4, ts="2026-06-21T00:00:00Z")
-        manifest4 = json.load(open(r4["written"][1], encoding="utf-8"))
+        manifest4 = json.loads(Path(r4['written'][1]).read_text(encoding='utf-8'))
         recomputed = ex.recompute_root_from_jsonl(r4["written"][0])
         rec(4, "외부 재계산 동치: jsonl→merkle_root == manifest.merkle_root",
             recomputed == manifest4["merkle_root"] == r4["merkle_root"])
@@ -140,7 +142,7 @@ def run():
                          ts="2026-06-20T00:00:00Z")
         out6 = os.path.join(tmp, "out6")
         r6 = ex.export_hit_raw(db6, out6, ts="2026-06-21T00:00:00Z")
-        manifest6 = json.load(open(r6["written"][1], encoding="utf-8"))
+        manifest6 = json.loads(Path(r6['written'][1]).read_text(encoding='utf-8'))
         db_head = db6.con.execute(
             "SELECT value FROM audit_meta WHERE key='head_entry_hash'").fetchone()[0]
         rec(6, "audit_anchor 동기: manifest.head_entry_hash == db audit_meta",
@@ -150,16 +152,14 @@ def run():
         db7 = StagingDB(os.path.join(tmp, "t7.sqlite")); dbs.append(db7)
         out7 = os.path.join(tmp, "out7")
         r7 = ex.export_hit_raw(db7, out7, ts="2026-06-21T00:00:00Z")
-        empty_jsonl = open(r7["written"][0], encoding="utf-8").read().strip()
+        empty_jsonl = Path(r7['written'][0]).read_text(encoding='utf-8').strip()
         rec(7, "빈 그래프 graceful: event_count 0·root='EMPTY'·에러 0",
             r7["event_count"] == 0 and r7["merkle_root"] == "EMPTY" and empty_jsonl == "")
 
     finally:
         for d in dbs:
-            try:
+            with suppress(Exception):
                 d.close()
-            except Exception:
-                pass
 
     # ---- T8 self-modifying 0: 거버넌스 자산 mtime 불변 ----
     op_after = {p: (os.path.getmtime(p) if os.path.exists(p) else None) for p in OPERATING_PATHS}

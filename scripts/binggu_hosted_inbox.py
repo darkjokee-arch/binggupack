@@ -18,6 +18,7 @@ commit_bundle 에 위임한다 — 옛 direct process_outbox(actor=human) 경로
 (1 intent = 1 row · sentence=intent 원문 · 해시만 저장 — 세이브 n 의 n = inbox 번호 1:1).
 candidate-only·A0·PII·rollback 불변. 요약 단계 ledger write 0. 원문 전문 출력 0(80자 발췌·
 sha8·count·PII/secret flag 만)."""
+from pathlib import Path
 import hashlib
 import json
 import os
@@ -319,7 +320,7 @@ def _selftest():
         lp = os.path.join(home, "last_preview_candidates.json")
         with open(lp, "r", encoding="utf-8") as f:
             pv = json.load(f)
-        raw = open(lp, encoding="utf-8").read()
+        raw = Path(lp).read_text(encoding='utf-8')
         ck(pref and pv.get("pref") == pref
            and [r["idx"] for r in pv["items"]] == [it["idx"] for it in s_all["items"]]
            and SENTS[0] not in raw and PII not in raw and "1234-5678" not in raw,

@@ -117,4 +117,4 @@ class AdvisoryClassifier(Protocol):
 
         구현은 절대 저장(write)·게이트 통과·자동 적재를 수행하지 않는다(advisory only).
         """
-        ...
+        pass

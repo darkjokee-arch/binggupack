@@ -32,7 +32,7 @@ from openbinggu_staging_write_selftest import (
     StagingDB, c2_check, staging_apply, base_pack, OPERATING_PATHS, tombstone, _hash)
 from openbinggu_conversation_candidate_save import (
     save_selected, _maybe_promote_actor_by_gate, CONVO)
-import openbinggu_conversation_candidate_save as cs_mod  # E7 monkeypatch 대상(scan_residual_pii)
+cs_mod = sys.modules["openbinggu_conversation_candidate_save"]  # E7 monkeypatch 대상
 import openbinggu_a0_node_dryrun as a0mod  # E6 monkeypatch 대상(classify_node)
 from openbinggu_conversation_capture_preview import capture_preview
 from openbinggu_deprecate_and_remind_g3 import (
@@ -134,7 +134,7 @@ def run():
         db.close()
 
         # ============ F2~F4 — _maybe_promote_actor_by_gate fail-closed 4분기 ============
-        import binggu_save_gate as sgate
+        sgate = sys.modules["binggu_save_gate"]
         # 격리 gate 기록장(BINGGU_HOME temp 이미 설정 — gate_path() 가 그 아래)
         # F1: actor 이미 human → ctx 그대로(승격 무관·키 미부여)
         ctx_h = {"actor": "human", "x": 1}

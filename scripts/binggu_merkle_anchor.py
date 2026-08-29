@@ -22,7 +22,6 @@ for _p in (ROOT, HERE):
     if _p not in sys.path:
         sys.path.insert(0, _p)   # binggupack 패키지 + scripts/ 형제 import 경로
 
-from binggupack.pack.merkle_anchor import *  # noqa: E402,F401,F403
 from binggupack.pack.merkle_anchor import (  # noqa: E402,F401  (전체 명시 re-export — _ 심볼 포함)
     CHAIN_VER,
     _LEAF_EVENT_COLS,
@@ -37,6 +36,22 @@ from binggupack.pack.merkle_anchor import (  # noqa: E402,F401  (전체 명시 r
     verify_chain,
     verify_from_db,
     _selftest,
+)
+
+__all__ = (
+    'CHAIN_VER',
+    '_LEAF_EVENT_COLS',
+    '_canon',
+    '_hash',
+    '_canon_event',
+    '_leaf_hash',
+    'merkle_root',
+    'seal_event',
+    'record_and_seal',
+    'find_unsealed_events',
+    'verify_chain',
+    'verify_from_db',
+    '_selftest',
 )
 
 

@@ -1,0 +1,135 @@
+import builtins
+
+from binggupack.pack import branch_explorer
+from binggupack.pack import cloud_query_wire as canonical_cloud_query
+from binggupack.pack.incoming_to_staging import scan_secrets
+from binggupack.pack import person_pack_sync as canonical_person_pack
+from binggupack.studio import server as studio_server
+from scripts import binggu_capture_buffer, binggu_capture_classifier, binggu_cloud_query_wire
+from scripts import binggu_crab_pack_wire, binggu_discover
+from scripts import binggu_outcome_attribution, binggu_person_crab_sync, binggu_person_pack_sync
+from scripts import binggu_platform, binggu_setup_save
+from scripts import binggu_session_close, openbinggu_mcp_server_handlers
+from scripts import openbinggu_doctor
+from scripts import openbinggu_incoming_to_staging as incoming_wrapper
+
+
+def test_setup_report_never_reveals_connector_token(tmp_path):
+    fixture_value = "secret-" + "token-value-123456789"
+    binggu_setup_save.write_dev_vars(
+        str(tmp_path / binggu_setup_save.VARS_NAME),
+        {"WORKER_URL": "https://example.workers.dev", "SAVE_PATH_TOKEN": fixture_value},
+    )
+
+    result = binggu_setup_save.connector_step(str(tmp_path), show_url=True)
+
+    assert fixture_value not in result["msg"]
+    assert fixture_value not in (result.get("hint") or "")
+
+
+def test_secret_runner_echo_is_never_returned_in_report():
+    fixture_value = "secret-" + "runner-echo-123456789"
+
+    def echoing_failure(_args, _cwd, _input):
+        return {"rc": 1, "stdout": fixture_value, "stderr": "failed: " + fixture_value}
+
+    result = binggu_setup_save.secrets_put_step(
+        {key: fixture_value for key in binggu_setup_save.KEY_FIELDS},
+        secret_runner=echoing_failure,
+        apply=True,
+        deploy=True,
+    )
+
+    assert fixture_value not in str(result)
+
+
+def test_secret_scan_result_contains_no_secret_prefix():
+    fixture_value = "ghp_" + "Abc123SecretValue987654321"
+    hits = scan_secrets({"items": [{"item_id": "one", "text": fixture_value}]})
+
+    assert hits
+    assert fixture_value[:8] not in str(hits)
+    assert fixture_value not in str(hits)
+
+
+def test_discover_kind_uses_hostname_boundaries():
+    assert binggu_discover.infer_kind("https://github.com/org/repo") == "github"
+    assert binggu_discover.infer_kind("https://docs.github.com/page") == "github"
+    assert binggu_discover.infer_kind("https://evilgithub.com/repo") == "url"
+    assert binggu_discover.infer_kind("https://github.com.evil/repo") == "url"
+    assert binggu_discover.infer_kind("https://export.arxiv.org/abs/1") == "arxiv"
+    assert binggu_discover.infer_kind("https://arxiv.org.evil/abs/1") == "url"
+
+
+def test_control_character_filter_matches_only_intended_boundaries():
+    for codepoint in (*range(0x00, 0x09), 0x0B, 0x0C, *range(0x0E, 0x20), 0xFFFD):
+        assert branch_explorer._CONTROL_RE.search(chr(codepoint))
+    for text in ("\t", "\n", "\r", "A", "한"):
+        assert branch_explorer._CONTROL_RE.search(text) is None
+
+
+def test_static_reader_rejects_unlisted_paths_before_open(monkeypatch):
+    calls = []
+
+    def forbidden_open(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("unlisted path reached open")
+
+    monkeypatch.setattr(studio_server, "_res_files", None)
+    monkeypatch.setattr(builtins, "open", forbidden_open)
+    for name in ("../index.html", "/etc/passwd", "%2e%2e/index.html", "index.html/../../x"):
+        assert studio_server._read_static(name) is None
+    assert calls == []
+
+
+def test_incoming_wrapper_preserves_legacy_exports():
+    for name in (
+        "SECRET_PATTERNS", "scan_secrets", "assess_incoming", "_expected_from_name",
+        "_base_pack", "_content", "synthesize_fixtures", "v010",
+    ):
+        assert hasattr(incoming_wrapper, name)
+
+
+def test_script_facades_preserve_public_exports():
+    for name in ("run_search", "_extract_search_evidence"):
+        assert hasattr(canonical_cloud_query, name)
+        assert hasattr(binggu_cloud_query_wire, name)
+    for name in ("pack_create_required", "record_pack_id", "DEFAULT_OWNER_LABEL", "PACK_CONFIG_FILE"):
+        assert hasattr(canonical_person_pack, name)
+        assert hasattr(binggu_person_pack_sync, name)
+    assert "invocation_prefix" in binggu_platform.__all__
+    facade_contracts = (
+        (binggu_outcome_attribution, ("list_run_outcomes_ro",)),
+        (binggu_session_close, ("register_close_suffix",)),
+        (openbinggu_mcp_server_handlers, ("reason_code_hint",)),
+        (binggu_capture_buffer, ("BULK_HARD_LEN", "BULK_NL_MIN", "BULK_SOFT_LEN")),
+        (binggu_capture_classifier, ("META_CONFIRM_REBUTTABLE", "PREV_AI_STANCE")),
+        (binggu_person_crab_sync, (
+            "extra_signature", "merge_extra_sources", "DEFAULT_PACK_TITLE", "DEFAULT_OWNER_LABEL",
+            "DEFAULT_PACK_PURPOSE", "ENABLE_ENV", "EXTRA_SOURCES_DIR", "PACK_CONFIG_FILE",
+        )),
+        (binggu_crab_pack_wire, (
+            "scan_data", "TEXT_EXTS", "MAX_FILE", "ACCEPTED_RX", "CLAIM_HINTS", "LEAK_PATTERNS",
+            "RETRYABLE_RX", "TOKEN_IN_CMD_RX", "TOKEN_RX",
+        )),
+        (openbinggu_doctor, ("KO2EN",)),
+        (incoming_wrapper, ("json", "re", "tempfile", "Path")),
+    )
+    for facade, names in facade_contracts:
+        for name in names:
+            assert hasattr(facade, name)
+            assert name in facade.__all__
+
+
+def test_discover_composites_accept_legacy_two_argument_provider():
+    class LegacyProvider:
+        name = "legacy"
+
+        def search(self, query, limit=10):
+            return [{"url": "https://example.test/item", "title": query}][:limit]
+
+    fallback = binggu_discover.FallbackProvider([LegacyProvider()])
+    composite = binggu_discover.CompositeProvider([LegacyProvider()])
+
+    assert fallback.search("topic", limit=1, lang="ko")
+    assert composite.search("topic", limit=1, lang="ko")

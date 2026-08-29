@@ -107,7 +107,8 @@ def main():
                 time.sleep(1.0)
         rec("S0", "wrangler dev 기동 (DO 포함)", ready)
         if not ready:
-            return finish(marker, log_path, logf, proc)
+            finish(marker, log_path, logf, proc)
+            return None
 
         it = mk_intent("합성 v21 대화 — " + marker + " — 이 입찰은 마진이 낮아 보류한다.", [1])
         body = json.dumps(it).encode("utf-8")
@@ -195,7 +196,8 @@ def main():
             st = -1
         rec("S14", "GET 405", st == 405)
 
-        return finish(marker, log_path, logf, proc)
+        finish(marker, log_path, logf, proc)
+        return None
     finally:
         if proc.poll() is None:
             subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],

@@ -20,7 +20,6 @@ for _p in (ROOT, HERE):
     if _p not in sys.path:
         sys.path.insert(0, _p)   # binggupack 패키지 + scripts/ 형제 import 경로
 
-from binggupack.pack.semantic_clean import *  # noqa: E402,F401,F403
 from binggupack.pack.semantic_clean import (  # noqa: E402,F401  (전체 명시 re-export — _ 심볼 포함)
     clean_chunks,
     build_clean_prompt,
@@ -33,6 +32,20 @@ from binggupack.pack.semantic_clean import (  # noqa: E402,F401  (전체 명시 
     _norm_hints,
     _chunk_text,
     _selftest,
+)
+
+__all__ = (
+    'clean_chunks',
+    'build_clean_prompt',
+    'default_ollama_transport',
+    '_structural_keep',
+    '_parse_verdicts',
+    '_extract_json',
+    '_strip_fences',
+    '_coerce_verdict',
+    '_norm_hints',
+    '_chunk_text',
+    '_selftest',
 )
 
 

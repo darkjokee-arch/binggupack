@@ -23,7 +23,10 @@ watcher_batch_m1 은 thin shim), harvest·t3_filter 가 이를 재사용한다(�
 그래서 이 모듈은 서브모듈 import 전용으로 두고, binggupack.safety.__init__ 에는 노출하지
 않는다(패키지 import 비용 회귀 방지).
 """
-from binggupack.pack.batch_m1 import batch_redact, scan_residual_pii  # noqa: F401
+from binggupack.pack import batch_m1 as _batch_m1
+
+batch_redact = _batch_m1.batch_redact
+scan_residual_pii = _batch_m1.scan_residual_pii
 
 #: 정본(canonical) 모듈 위치 — 문서/디버깅용 상수.
 CANONICAL_MODULE = "binggupack/pack/batch_m1.py"

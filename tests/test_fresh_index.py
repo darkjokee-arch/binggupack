@@ -6,6 +6,7 @@
 provider timeout+lexical fallback·색인 손상 후 rebuild·중간종료 정합성·PII/시크릿 미노출·
 owner approval·mutation 경계 무회귀. (Windows/Python 3.14 실경로 + 3.10~3.13 무회귀는 CI 매트릭스.)
 """
+from pathlib import Path
 import hashlib
 import os
 import sqlite3
@@ -221,7 +222,6 @@ def test_no_query_time_embedding(env, monkeypatch):
     import inspect
     assert "semantic" not in inspect.signature(FI.hot_recall).parameters
     assert "semantic_used" not in res
-    import sqlite3
     con = sqlite3.connect(FI.index_path(home))
     tables = {r[0] for r in con.execute(
         "SELECT name FROM sqlite_master WHERE type='table'")}
@@ -248,11 +248,11 @@ def test_atomicity_consistency(env):
     home, ledger = env
     _mk_ledger(ledger, [_row("n1", "릴리스 승인")])
     FI.index_update(ledger, home=home)
-    h_before = hashlib.sha256(open(ledger, "rb").read()).hexdigest()
+    h_before = hashlib.sha256(Path(ledger).read_bytes()).hexdigest()
     # 재실행은 멱등 — ledger 불변, 색인 정합
     FI.index_update(ledger, home=home)
     FI.index_status(ledger, home=home)
-    h_after = hashlib.sha256(open(ledger, "rb").read()).hexdigest()
+    h_after = hashlib.sha256(Path(ledger).read_bytes()).hexdigest()
     assert h_before == h_after  # ledger 불변
     st = FI.index_status(ledger, home=home)
     assert st["pending_changes"] == 0
@@ -288,13 +288,13 @@ def test_pii_secret_not_exposed(env):
 def test_mutation_boundary_no_ledger_write(env):
     home, ledger = env
     _mk_ledger(ledger, [_row("n1", "릴리스 승인")])
-    h0 = hashlib.sha256(open(ledger, "rb").read()).hexdigest()
+    h0 = hashlib.sha256(Path(ledger).read_bytes()).hexdigest()
     FI.index_update(ledger, home=home)
     FI.index_status(ledger, home=home)
     FI.hot_recall("릴리스", home=home)
     FI.set_pin("n1", home=home)
     FI.index_rebuild(ledger, home=home)
-    h1 = hashlib.sha256(open(ledger, "rb").read()).hexdigest()
+    h1 = hashlib.sha256(Path(ledger).read_bytes()).hexdigest()
     assert h0 == h1  # 어떤 색인 연산도 ledger 를 변경하지 않음
 
 
@@ -399,7 +399,7 @@ def test_file_pii_redacted(env):
 def test_file_and_node_coexist_ledger_unchanged(env):
     home, ledger = env
     _mk_ledger(ledger, [_row("n1", "릴리스 승인 노드")])
-    h0 = hashlib.sha256(open(ledger, "rb").read()).hexdigest()
+    h0 = hashlib.sha256(Path(ledger).read_bytes()).hexdigest()
     d = _docs_dir(home)
     _write(os.path.join(d, "rel.md"), "# 릴리스 승인 문서\n릴리스 승인 절차 문서")
     FI.add_allowed_path(d, home=home)
@@ -407,7 +407,8 @@ def test_file_and_node_coexist_ledger_unchanged(env):
     res = FI.hot_recall("릴리스 승인", home=home, limit=10)
     kinds = {x.get("kind") for x in res["relevant_nodes"]}
     assert "node" in kinds and "file" in kinds
-    assert h0 == hashlib.sha256(open(ledger, "rb").read()).hexdigest()  # ledger 불변
+    h1 = hashlib.sha256(Path(ledger).read_bytes()).hexdigest()
+    assert h0 == h1  # ledger 불변
 
 
 def test_remove_path_drops_file_items(env):

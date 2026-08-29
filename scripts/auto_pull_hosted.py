@@ -14,6 +14,7 @@ ChatGPT/claude 채팅에서 저장한 것(클라우드 inbox 적재분)을 주�
 안전: 회수(drain)는 HMAC 서명(.dev.vars.save_mcp)으로만 가능 — 인증 없으면 no-op.
 PII/secret flag 후보도 staging 에만 남고 사람 검토로 위임(무인 반영 0).
 """
+from contextlib import suppress
 import subprocess
 import re
 import os
@@ -42,12 +43,10 @@ if os.name == "nt":
 
 def _log(msg):
     """pythonw 실행 시 stdout 이 안 보이므로 결과를 로그 파일에 남긴다(무인 추적)."""
-    try:
+    with suppress(Exception):
         os.makedirs(HOME_DIR, exist_ok=True)
         with open(os.path.join(HOME_DIR, "auto_pull.log"), "a", encoding="utf-8") as f:
             f.write("%s %s\n" % (datetime.datetime.now().isoformat(timespec="seconds"), msg))
-    except Exception:
-        pass
 
 
 def _run(args):

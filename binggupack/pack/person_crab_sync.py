@@ -93,7 +93,8 @@ def load_state(home=None):
     p = _state_path(home)
     if os.path.exists(p):
         try:
-            return json.load(open(p, encoding="utf-8"))
+            with open(p, encoding="utf-8") as handle:
+                return json.load(handle)
         except Exception:  # 손상 → 빈 상태(재빌드로 자연 복구)
             return {}
     return {}
@@ -222,7 +223,8 @@ def _chunk_cap(home=None):
     """청크 크기 — person_pack.json "crab_chunk_cap" > 기본 2400.
     finalize 한도가 총 청크 수(~350선 실측)에 걸릴 때 키워서 1팩 유지."""
     try:
-        cfg = json.load(open(os.path.join(_home(home), PACK_CONFIG_FILE), encoding="utf-8"))
+        with open(os.path.join(_home(home), PACK_CONFIG_FILE), encoding="utf-8") as handle:
+            cfg = json.load(handle)
         v = int(cfg.get("crab_chunk_cap") or 0)
         return v if 500 <= v <= 8000 else 2400
     except Exception:
@@ -305,7 +307,11 @@ def sync_auto(env=None, ledger=None, home=None, config_path=None, **inject):
     """
     cfg_path = os.path.join(_home(home), PACK_CONFIG_FILE)
     try:
-        cfg = json.load(open(cfg_path, encoding="utf-8")) if os.path.exists(cfg_path) else {}
+        if os.path.exists(cfg_path):
+            with open(cfg_path, encoding="utf-8") as handle:
+                cfg = json.load(handle)
+        else:
+            cfg = {}
     except Exception:
         cfg = {}
     if cfg.get("crab_auto_sync") is not True:

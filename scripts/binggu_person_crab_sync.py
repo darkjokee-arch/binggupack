@@ -16,19 +16,48 @@ for _p in (ROOT, HERE):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from binggupack.pack.person_crab_sync import *  # noqa: E402,F401,F403
 from binggupack.pack.person_crab_sync import (  # noqa: E402,F401  (명시 re-export)
     DEFAULT_PACK_NAME,
+    DEFAULT_PACK_TITLE,
+    DEFAULT_OWNER_LABEL,
+    DEFAULT_PACK_PURPOSE,
+    ENABLE_ENV,
+    EXTRA_SOURCES_DIR,
+    PACK_CONFIG_FILE,
     PACK_TITLE,
     PACK_PURPOSE,
     STATE_FILE,
     export_docs,
+    extra_signature,
+    merge_extra_sources,
     load_state,
     save_state,
     sync,
     sync_auto,
     _selftest,
     main,
+)
+
+__all__ = (
+    'DEFAULT_PACK_NAME',
+    'DEFAULT_PACK_TITLE',
+    'DEFAULT_OWNER_LABEL',
+    'DEFAULT_PACK_PURPOSE',
+    'ENABLE_ENV',
+    'EXTRA_SOURCES_DIR',
+    'PACK_CONFIG_FILE',
+    'PACK_TITLE',
+    'PACK_PURPOSE',
+    'STATE_FILE',
+    'export_docs',
+    'extra_signature',
+    'merge_extra_sources',
+    'load_state',
+    'save_state',
+    'sync',
+    'sync_auto',
+    '_selftest',
+    'main',
 )
 
 

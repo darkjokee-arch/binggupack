@@ -15,6 +15,7 @@ selftest 는 provider/corpus/llm/transport 를 전부 mock 하는 자기완결�
 CLI: python scripts/binggu_subtopic_decompose.py [--selftest] | --topic '<주제>' [--use-search] [--max N]
 import: decompose(topic) -> [{subtopic, rationale, query}]
 """
+from contextlib import suppress
 import os
 import sys
 
@@ -24,7 +25,6 @@ for _p in (ROOT, HERE):
     if _p not in sys.path:
         sys.path.insert(0, _p)   # binggupack 패키지 + scripts/ 형제 import(binggu_discover) 경로
 
-from binggupack.pack.subtopic_decompose import *  # noqa: E402,F401,F403
 from binggupack.pack.subtopic_decompose import (  # noqa: E402,F401  (전체 명시 re-export — _ 심볼 포함)
     STOPWORDS,
     DOMAIN_TEMPLATES,
@@ -45,6 +45,28 @@ from binggupack.pack.subtopic_decompose import (  # noqa: E402,F401  (전체 명
     _dedup,
     decompose_detail,
     decompose,
+)
+
+__all__ = (
+    'STOPWORDS',
+    'DOMAIN_TEMPLATES',
+    'GENERIC_FACETS',
+    '_tokens',
+    '_token_list',
+    'detect_domain',
+    '_make_query',
+    'template_subtopics',
+    'frequent_terms',
+    '_search_corpus',
+    '_normalize_llm_items',
+    'llm_decompose',
+    '_build_llm_payload',
+    '_parse_llm_response',
+    'llm_transport_decompose',
+    'default_llm_transport',
+    '_dedup',
+    'decompose_detail',
+    'decompose',
 )
 
 
@@ -178,14 +200,8 @@ def _selftest():
         and calls["payloads"][0].get("topic") == "신혼여행")
 
     # S17 — transport=None → transport 경로 미호출(룰기반만)
-    sentinel = {"n": 0}
-
-    def _t_spy(payload):
-        sentinel["n"] += 1
-        return []
-
     det_n2 = decompose_detail("신혼여행", transport=None, max_subtopics=30)
-    chk("S17a transport=None → spy 미호출", sentinel["n"] == 0)
+    chk("S17a transport=None → LLM 기여 없음", "llm" not in det_n2["source"])
     chk("S17b transport=None → 룰기반 source(llm 기여 없음·llm_runner도 None)",
         "llm" not in det_n2["source"])
 
@@ -254,10 +270,8 @@ if __name__ == "__main__":
     if "--max" in sys.argv:
         i = sys.argv.index("--max")
         if i + 1 < len(sys.argv):
-            try:
+            with suppress(ValueError):
                 max_n = int(sys.argv[i + 1])
-            except ValueError:
-                pass
     if topic:
         prov = None
         if use_search:

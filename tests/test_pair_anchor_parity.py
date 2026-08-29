@@ -8,6 +8,7 @@
 CLAUDECODE=1 을 명시 주입해 에이전트 세션(deny 전용)을 시뮬 — 도장만이 사람 증명인 환경에서
 승격/차단을 결정적으로 검증한다(로컬/CI 환경 차이 제거).
 """
+from pathlib import Path
 import json
 import os
 import re
@@ -62,7 +63,7 @@ def _preview_candidates(home, env):
     cands = re.findall(r"^\| (\d+) \| \S+ \| (.+?) \|", r.stdout, re.M)
     lp = os.path.join(home, "last_preview_candidates.json")
     assert os.path.exists(lp)
-    meta = json.load(open(lp, encoding="utf-8"))
+    meta = json.loads(Path(lp).read_text(encoding='utf-8'))
     assert len(meta["items"]) == len(cands)
     return {int(i): s.strip() for i, s in cands}
 

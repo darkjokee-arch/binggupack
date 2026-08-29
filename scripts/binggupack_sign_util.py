@@ -20,12 +20,18 @@ for _p in (ROOT, HERE):
     if _p not in sys.path:
         sys.path.insert(0, _p)   # binggupack 패키지 + scripts/ 형제 import 경로
 
-from binggupack.safety.sign_util import *  # noqa: E402,F401,F403
 from binggupack.safety.sign_util import (  # noqa: E402,F401  (전체 명시 re-export — _ 심볼 포함)
     signed_headers,
     signed_headers_legacy,
     _pathname,
     _selftest,
+)
+
+__all__ = (
+    'signed_headers',
+    'signed_headers_legacy',
+    '_pathname',
+    '_selftest',
 )
 
 

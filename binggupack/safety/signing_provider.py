@@ -28,6 +28,7 @@ CLI: python -m binggupack.safety.signing_provider --selftest   ->  GATE=GO | GAT
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import os
 import secrets
@@ -303,7 +304,7 @@ def default_keychain_backend() -> KeychainBackend:
     """
     try:
         # 후속 core 에서 실 백엔드 모듈이 생기면 여기서만 lazy import(top-level 금지).
-        from binggupack.safety import keychain_backend as _kb  # type: ignore
+        _kb = importlib.import_module("binggupack.safety.keychain_backend")
     except Exception:
         return _UnavailableKeychainBackend()
     try:

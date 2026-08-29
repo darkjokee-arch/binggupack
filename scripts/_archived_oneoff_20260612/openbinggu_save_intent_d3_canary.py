@@ -125,7 +125,8 @@ def main():
     try:
         if not wait_ready():
             rec("P0", "wrangler dev 기동", False)
-            return finish(marker, log_path, logf, proc)
+            finish(marker, log_path, logf, proc)
+            return None
         rec("P0", "wrangler dev 기동", True)
 
         body = {"schema_ver": 1, "intent_id": iid, "text": canary_text,
@@ -181,7 +182,8 @@ def main():
         rec("P5", "2차 pull 0건 (store non-retention)",
             st == 200 and json.loads(rb).get("intents") == [])
 
-        return finish(marker, log_path, logf, proc, tmp_outbox)
+        finish(marker, log_path, logf, proc, tmp_outbox)
+        return None
     finally:
         if proc.poll() is None:
             subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],

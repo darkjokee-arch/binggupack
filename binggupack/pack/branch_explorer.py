@@ -108,7 +108,7 @@ def _coerce_labels(resp):
 _LABEL_MAX_LEN = 40                                   # 정상 라벨=짧은 명사구. 초과=깨진 출력
 _JSON_FRAGMENT_RE = re.compile(r'[{}\[\]"]')          # 배열/객체 텍스트 파편(정상 명사구엔 부재)
 _REPEAT_RUN_RE = re.compile(r"(.{1,4}?)\1{2,}", re.S)  # 1~4자 단위 3회+ 연속 반복(シャシャシャ)
-_CONTROL_RE = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f�]")  # 제어문자·U+FFFD(깨진 유니코드)
+_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\uFFFD]")  # 제어문자·U+FFFD
 
 
 def _is_broken_label(label):

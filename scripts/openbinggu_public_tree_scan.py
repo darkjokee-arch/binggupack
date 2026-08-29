@@ -25,7 +25,6 @@ for _p in (ROOT, HERE):
     if _p not in sys.path:
         sys.path.insert(0, _p)   # binggupack 패키지 + scripts/ 형제 import 경로
 
-from binggupack.safety.public_tree_scan import *  # noqa: E402,F401,F403
 from binggupack.safety.public_tree_scan import (  # noqa: E402,F401  (전체 명시 re-export — _ 심볼 포함)
     scan_public_tree,
     PUBLIC_IGNORE,
@@ -34,6 +33,16 @@ from binggupack.safety.public_tree_scan import (  # noqa: E402,F401  (전체 명
     _open_text,
     _selftest,
     main,
+)
+
+__all__ = (
+    'scan_public_tree',
+    'PUBLIC_IGNORE',
+    '_secret_kv_match',
+    '_ignored',
+    '_open_text',
+    '_selftest',
+    'main',
 )
 
 

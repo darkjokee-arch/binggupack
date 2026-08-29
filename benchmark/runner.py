@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+from contextlib import suppress
 import argparse
 import importlib
 import json
@@ -94,10 +95,8 @@ def _run_one(mod, adapter, root: str, op_fp_before) -> ScenarioResult:
                              reason="실행 오류: %r" % e)
     finally:
         if home is not None:
-            try:
+            with suppress(Exception):
                 adapter.cleanup(home)
-            except Exception:
-                pass
 
     # 사후 sentinel: 운영 정본 fingerprint 불변 재검사(content 기준 · mtime 외부활동 오탐 제외).
     op_fp_after = adapter.operating_fingerprint()

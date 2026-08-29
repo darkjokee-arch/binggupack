@@ -35,7 +35,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import sys
-from typing import Dict, Optional
+from typing import Dict
 
 
 def _normalize(s: str) -> str:

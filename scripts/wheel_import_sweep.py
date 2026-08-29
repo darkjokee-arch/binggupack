@@ -132,7 +132,7 @@ def sweep(site: str | None = None, timeout: int = 120) -> int:
         if m.startswith("scripts.") and sc_dir:
             # 역사적 소비 계약: scripts/ 를 sys.path 에 얹고 bare name 으로 import(binggu.py 와 동일)
             ok2, why2 = _try([sys.executable, "-c",
-                              "import sys; sys.path.insert(0, sys.argv[2]); "
+                              "import sys; sys.path.insert(0, sys.argv[2]); " +
                               "import importlib; importlib.import_module(sys.argv[1])",
                               m.split(".", 1)[1], sc_dir])
             if ok2:

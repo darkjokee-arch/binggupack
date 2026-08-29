@@ -21,7 +21,6 @@ ROOT = os.path.dirname(HERE)                         # <repo>
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)   # binggupack 패키지 import 경로
 
-from binggupack.pack.parser_adapter import *  # noqa: E402,F401,F403
 from binggupack.pack.parser_adapter import (  # noqa: E402,F401  (전체 명시 re-export — _ 심볼 포함)
     ERR_UNSUPPORTED,
     ERR_NOT_WIRED,
@@ -41,6 +40,27 @@ from binggupack.pack.parser_adapter import (  # noqa: E402,F401  (전체 명시 
     _default_backends,
     _looks_corrupt,
     _selftest,
+)
+
+__all__ = (
+    'ERR_UNSUPPORTED',
+    'ERR_NOT_WIRED',
+    'ERR_CALL_FAILED',
+    'ERR_MISSING',
+    'ERR_FAILED',
+    'ERR_CORRUPT',
+    'ERR_EMPTY',
+    'ParserBackend',
+    'PlainTextBackend',
+    'MarkItDownBackend',
+    'KorDocBackend',
+    'detect_format',
+    'parse_document',
+    '_which',
+    '_run_cli',
+    '_default_backends',
+    '_looks_corrupt',
+    '_selftest',
 )
 
 

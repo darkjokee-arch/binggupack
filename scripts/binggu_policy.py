@@ -23,7 +23,6 @@ for _p in (ROOT, HERE):
     if _p not in sys.path:
         sys.path.insert(0, _p)   # binggupack 패키지 + scripts/ 형제 import 경로
 
-from binggupack.safety.policy import *  # noqa: E402,F401,F403
 from binggupack.safety.policy import (  # noqa: E402,F401  (전체 명시 re-export)
     SCHEMA_VERSION,
     CATEGORIES,
@@ -37,6 +36,21 @@ from binggupack.safety.policy import (  # noqa: E402,F401  (전체 명시 re-exp
     is_immutable,
     evaluate,
     _selftest,
+)
+
+__all__ = (
+    'SCHEMA_VERSION',
+    'CATEGORIES',
+    'SAFETY_CATEGORY',
+    'REQUIRED_IMMUTABLE',
+    'policy_path',
+    'pin_path',
+    'compute_digest',
+    'load_policy',
+    'classify_clause',
+    'is_immutable',
+    'evaluate',
+    '_selftest',
 )
 
 

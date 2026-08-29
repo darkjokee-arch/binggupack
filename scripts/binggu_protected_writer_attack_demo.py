@@ -35,6 +35,7 @@ CLI: python scripts/binggu_protected_writer_attack_demo.py --selftest
 """
 from __future__ import annotations
 
+from contextlib import suppress
 import json
 import os
 import secrets
@@ -246,11 +247,9 @@ def run():
            kc_before == kc_after)
 
         for d in (home_l1, home_l2):
-            try:
+            with suppress(Exception):
                 import shutil
                 shutil.rmtree(d, ignore_errors=True)
-            except Exception:
-                pass
 
     gate = "GO" if not fails else "BLOCK"
     print("\n" + "=" * 64)

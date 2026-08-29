@@ -16,13 +16,21 @@ for _p in (ROOT, HERE):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from binggupack.pack.crab_pack_wire import *  # noqa: E402,F401,F403
 from binggupack.pack.crab_pack_wire import (  # noqa: E402,F401  (명시 re-export — _ 심볼 포함)
     ENABLE_ENV,
     CRAB_TOOL,
     DEFAULT_MAX_TRIES,
+    TEXT_EXTS,
+    MAX_FILE,
+    ACCEPTED_RX,
+    CLAIM_HINTS,
+    LEAK_PATTERNS,
+    RETRYABLE_RX,
+    TOKEN_IN_CMD_RX,
+    TOKEN_RX,
     ascii_pack_name,
     build_crab_pack,
+    scan_data,
     chunk_doc,
     derive_claims,
     derive_concepts,
@@ -34,6 +42,34 @@ from binggupack.pack.crab_pack_wire import (  # noqa: E402,F401  (명시 re-expo
     _parse_session,
     _selftest,
     main,
+)
+
+__all__ = (
+    'ENABLE_ENV',
+    'CRAB_TOOL',
+    'DEFAULT_MAX_TRIES',
+    'TEXT_EXTS',
+    'MAX_FILE',
+    'ACCEPTED_RX',
+    'CLAIM_HINTS',
+    'LEAK_PATTERNS',
+    'RETRYABLE_RX',
+    'TOKEN_IN_CMD_RX',
+    'TOKEN_RX',
+    'ascii_pack_name',
+    'build_crab_pack',
+    'scan_data',
+    'chunk_doc',
+    'derive_claims',
+    'derive_concepts',
+    'derive_queries',
+    'default_put_fn',
+    'default_post_fn',
+    'upload_crab_pack',
+    '_mcp_call',
+    '_parse_session',
+    '_selftest',
+    'main',
 )
 
 

@@ -38,7 +38,6 @@ ROOT = os.path.dirname(HERE)                         # <repo>
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)   # binggupack 패키지 import 경로
 
-from binggupack.pack.contract_validate import *  # noqa: E402,F401,F403
 from binggupack.pack.contract_validate import (  # noqa: E402,F401  (전체 명시 re-export)
     REQUIRED_FIELDS,
     PACK_TYPE_ALLOWED,
@@ -51,6 +50,20 @@ from binggupack.pack.contract_validate import (  # noqa: E402,F401  (전체 명�
     HARD_FALSE_FLAGS,
     validate_pack,
     _expected_from_name,
+)
+
+__all__ = (
+    'REQUIRED_FIELDS',
+    'PACK_TYPE_ALLOWED',
+    'STATUS_ALLOWED',
+    'RISK_ALLOWED',
+    'MERGE_MODE_ALLOWED',
+    'MERGE_TARGET_ALLOWED',
+    'CROSS_PACK_ALLOWED',
+    'NON_PRODUCTION_PACK_TYPES',
+    'HARD_FALSE_FLAGS',
+    'validate_pack',
+    '_expected_from_name',
 )
 
 BASE = Path(__file__).resolve().parent.parent

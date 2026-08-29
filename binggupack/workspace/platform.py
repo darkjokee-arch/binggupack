@@ -128,6 +128,7 @@ def invocation_prefix(argv0=None):
         if base and not base.lower().endswith(".py"):
             return "binggu"
     except Exception:
+        # Ambiguous launch metadata falls back to the repository-safe invocation below.
         pass
     return "python binggu.py"
 

@@ -5,6 +5,7 @@ cmd_save_batch 는 render_preview()(전체 누적)로 저장 → idx 축이 어�
 번호로 'SAVE n' 쳐도 다른 원문 저장(또는 pref 불일치로 저장 실패). session_id 를 앵커에
 심어 3자(마무리 preview · 앵커 · 저장)를 같은 세션 목록으로 통일한다.
 """
+from pathlib import Path
 import json
 import os
 import sys
@@ -68,7 +69,7 @@ def test_anchor_carries_session_id_and_pref_parity():
         anchor = os.path.join(home, "last_preview_candidates.json")
         stage_batch_anchor(s2, path=anchor, session_id="S2")
 
-        data = json.loads(open(anchor, encoding="utf-8").read())
+        data = json.loads(Path(anchor).read_text(encoding='utf-8'))
         assert data.get("session_id") == "S2"
 
         import binggu
@@ -117,7 +118,7 @@ def test_no_session_id_anchor_falls_back_full():
         anchor = os.path.join(home, "last_preview_candidates.json")
         stage_batch_anchor(full, path=anchor)  # session_id 미전달 = 구형
 
-        data = json.loads(open(anchor, encoding="utf-8").read())
+        data = json.loads(Path(anchor).read_text(encoding='utf-8'))
         assert "session_id" not in data            # 필드 미기록(구 앵커와 byte 호환)
         import binggu
         assert binggu._anchor_session_id(anchor) is None

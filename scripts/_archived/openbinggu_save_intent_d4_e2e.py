@@ -24,6 +24,7 @@
 
 전부 통과 = GATE=GO exit 0 / 실패 = GATE=BLOCK exit 1 (fail-closed).
 """
+from pathlib import Path
 import hashlib
 import json
 import os
@@ -184,7 +185,7 @@ def main():
         exp_path = old_path + ".expired"
         rec("C4-1", "TTL 만료 .expired 마킹만·미적용",
             r4["expired"] == 1 and r4["applied"] == 0 and os.path.exists(exp_path) and n_b == n_a)
-        marked = json.load(open(exp_path, encoding="utf-8")) if os.path.exists(exp_path) else {}
+        marked = json.loads(Path(exp_path).read_text(encoding='utf-8')) if os.path.exists(exp_path) else {}
         rec("C4-2", "마킹 파일 원문 미보관(text 0·text_sha 대체)",
             "text" not in marked and "text_sha" in marked)
         r5 = process_outbox(db, outbox, ctx, snap_dir, now)

@@ -21,6 +21,7 @@
   python tests/classifier_consistency_harness.py --assert-consistent  # 불일치>0 이면 exit 1
   python tests/classifier_consistency_harness.py --semantic-on   # semantic 켜고 측정(비교용)
 """
+from pathlib import Path
 import json
 import os
 import sys
@@ -94,7 +95,7 @@ def evaluate(semantic_off=True):
 
 def check_golden(res):
     """구현 산출(res.rows)을 golden 사람 기준과 대조. 어떤 문장이 어떤 필드에서 왜 달라졌는지 반환."""
-    golden = {g["id"]: g for g in json.load(open(_GOLDEN, encoding="utf-8"))["cases"]}
+    golden = {g["id"]: g for g in json.loads(Path(_GOLDEN).read_text(encoding='utf-8'))["cases"]}
     diffs = []
     for r in res["rows"]:
         g = golden.get(r["id"])

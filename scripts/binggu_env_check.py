@@ -9,6 +9,8 @@
 CLI: python binggu_env_check.py            # 점검 리포트 출력
      python binggu_env_check.py --selftest # 12/12 GATE=GO 기대
 """
+from contextlib import suppress
+from pathlib import Path
 import os
 import shutil
 import sys
@@ -29,12 +31,10 @@ def _seed_resolvable(name="seed_canonical_5.jsonl"):
     """seed 파일 실존(bool) — 무거운 semantic 모듈 import 없이 경량 조회.
     ① 설치본/clone: importlib.resources 로 binggupack.data/semantic/<name>
     ② 폴백: 스크립트 상대 ../tests/fixtures/semantic/<name>(committed 자산 → 결정론)."""
-    try:
+    with suppress(Exception):
         from importlib.resources import files
         if files("binggupack.data").joinpath("semantic", name).is_file():
             return True
-    except Exception:
-        pass
     here = os.path.dirname(os.path.abspath(__file__))
     return os.path.exists(os.path.join(here, "..", "tests", "fixtures", "semantic", name))
 
@@ -140,7 +140,7 @@ def run_selftest():
     rep_off = render_report(check_env(os_name="windows", ollama_probe=False, node_probe=False))
     rec("9.render 설치 명령 안내", "winget" in rep_off and "ollama pull bge-m3" in rep_off)
     # 10. 자동 설치 안 함 — 외부 명령 실행 코드 부재. 검사 토큰은 분리 조립(자기검출 회피).
-    src = open(os.path.abspath(__file__), encoding="utf-8").read()
+    src = Path(os.path.abspath(__file__)).read_text(encoding='utf-8')
     bad = ["sub" + "process", "os." + "system", "Pop" + "en", "check_" + "output", "os." + "popen"]
     rec("10.외부 명령 실행 코드 부재(자동설치 X)", not any(t in src for t in bad))
     # 11. write 0 — save/write/persist 함수 부재

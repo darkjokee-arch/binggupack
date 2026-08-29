@@ -26,6 +26,7 @@ CLI:
   python openbinggu_upload_preflight.py --selftest
   python openbinggu_upload_preflight.py <pack_dir> [<temp_staging_db>]
 """
+from contextlib import suppress
 import hashlib
 import json
 import re
@@ -524,10 +525,8 @@ def _tree_sha(root):
 
 
 def run_selftest():
-    try:
+    with suppress(Exception):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
     print("=" * 70)
     print("OpenCrab private upload preflight — G1~G7 fail-closed selftest")
     print("=" * 70)
@@ -654,10 +653,8 @@ def run_selftest():
 
 
 def run_single(pack_dir, db_path=None):
-    try:
+    with suppress(Exception):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
     res = preflight(pack_dir, db_path)
     out = {k: res[k] for k in ("verdict", "pack_id", "reason_codes",
                                "bundle_hash8", "expected_phrase")}

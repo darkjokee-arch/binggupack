@@ -95,6 +95,7 @@ def cmd_hosted(a):
                 _sg.write_last_preview(_staged_cands(_now),
                                        path=os.path.join(home, "last_preview_candidates.json"))
             except Exception:
+                # Preview staging is advisory; the hosted pull result remains authoritative.
                 pass
         return 0
 

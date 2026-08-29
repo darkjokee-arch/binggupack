@@ -19,6 +19,7 @@ CLI:
   python watcher_batch_m1.py <batch_manifest.json>
 """
 import hashlib
+import importlib
 import json
 import re
 import sys
@@ -35,21 +36,39 @@ import watcher_capture_mvp1 as mvp1
 import watcher_candidate_mvp2 as mvp2
 import watcher_edge_mvp21 as edgemod
 import watcher_op_m0 as m0
-import openbinggu_pack_review_e2e as reviewe2e
-import openbinggu_pack_consumer_smoke as consumer
+# Preserve the module-shaped collaborators while keeping this SCC lazy.
+reviewe2e = importlib.import_module("openbinggu_pack_review_e2e")
+consumer = importlib.import_module("openbinggu_pack_consumer_smoke")
 
 # strangler: PII 복합 판단(batch_redact) + 독립 잔존 scanner(scan_residual_pii) 및 관련
 # 정규식/상수 정본은 binggupack.pack.batch_m1 로 byte-identical 이관됐다. 모듈속성으로
 # re-export 하여 기존 bare-name 소비처(bm1.batch_redact 등)·monkeypatch 호환을 유지한다.
 sys.path.insert(0, str(BASE))
-from binggupack.pack.batch_m1 import (  # noqa: E402  (모듈속성 re-export)
-    batch_redact,
-    scan_residual_pii,
-    PII_SHAPES,  # noqa: F401 — shim 재수출(하위호환)
-    BIZNO_SHAPE,  # noqa: F401 — shim 재수출(하위호환)
-    WHITELIST_CONTEXT,  # noqa: F401 — shim 재수출(하위호환)
-    DENYLIST_CONTEXT,  # noqa: F401 — shim 재수출(하위호환)
-    _SCAN_SHAPES,  # noqa: F401 — shim 재수출(하위호환)
+_batch_m1 = importlib.import_module("binggupack.pack.batch_m1")
+
+
+def batch_redact(text, field_name=""):
+    return _batch_m1.batch_redact(text, field_name)
+
+
+def scan_residual_pii(text):
+    return _batch_m1.scan_residual_pii(text)
+
+
+PII_SHAPES = _batch_m1.PII_SHAPES
+BIZNO_SHAPE = _batch_m1.BIZNO_SHAPE
+WHITELIST_CONTEXT = _batch_m1.WHITELIST_CONTEXT
+DENYLIST_CONTEXT = _batch_m1.DENYLIST_CONTEXT
+_SCAN_SHAPES = _batch_m1._SCAN_SHAPES
+
+__all__ = (
+    "batch_redact",
+    "scan_residual_pii",
+    "PII_SHAPES",
+    "BIZNO_SHAPE",
+    "WHITELIST_CONTEXT",
+    "DENYLIST_CONTEXT",
+    "_SCAN_SHAPES",
 )
 
 SCOPE = "project:openbinggu"
