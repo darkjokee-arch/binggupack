@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+## [1.24.0] - 2026-08-29
+
+### Added — Paperthin 7개 선택 패턴의 BingguPack식 폐루프 통합
+- 읽기 전용 `binggu catchup`: live repository state를 canonical recall·previous outcome과 합성하되 `LIVE STATE > MEMORY`, context hard cap, superseded/overturned 필터, write 0을 강제한다.
+- `readchk`·`hate`·`sip`·`nba`·`factchk`를 별도 런타임이 아닌 순수 cognitive adapter로 추가했다. SIP는 ephemeral SAVE candidate만 제안하며 저장·승인·commit 권한은 없다.
+- `mandela`를 runtime과 분리된 eval-only 감사로 추가해 answer leakage, scorer coupling, contamination, unfair baseline, metric gaming을 fail-closed 검사한다.
+- recall → decision → action artifact → recall trace → outcome → next-session catchup/NBA로 이어지는 통합 fixture를 추가했다.
+
+### Safety
+- `G4_no_auto`, human approval, exact binding, immutable bundle, rollback, provenance/evidence 원문 보존 계약은 변경하지 않았다.
+- 외부 factual candidate는 구조화 evidence exact binding이 없으면 `EPHEMERAL_ONLY`로 차단하며, outcome은 기존 `signal_only` 계약대로 자동 랭킹 입력에 사용하지 않는다.
+- Paperthin runtime·global hook·updater·installer·별도 memory/SSOT는 도입하지 않았다.
+
+### Verified
+- PR #165 CI 39/39, full pytest 503 passed/4 skipped, cognitive closed-loop 20 passed, core selftest 71/71, publish regression 56/56, lifecycle E2E 12/12.
+
 ## [1.23.0] - 2026-08-25
 
 ### Fixed — 회상 도장이 한 화면에서만 보이던 것 (2026-08-25)

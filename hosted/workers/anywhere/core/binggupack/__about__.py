@@ -70,5 +70,11 @@ owner 교정 캡처 수율 3중 수리(전문 저장 · 구조 신호 relation �
 정렬 동점 IDF 2차 키 · preflight_rel_min=0.25.
 (6) py↔ts 골든 왕복 parity(divergence 6건 검출·4건 수리) · Claim label 80자 절단 해소.
 저장 확정은 여전히 사람 SAVE 앵커만(자동저장 0 · 헌법 불변).
+
+v1.24.0 — Paperthin 7개 선택 패턴을 별도 런타임 없이 BingguPack식 cognitive adapter로
+통합. 읽기 전용 catchup, readchk/hate/sip/nba/factchk 순수 판단 계층, eval-only mandela,
+recall→decision→action→outcome→next recall 폐루프 fixture가 핵심. SIP는 ephemeral 후보만
+제안하고 factual evidence exact binding이 없으면 fail-closed한다. G4_no_auto·human approval·
+immutable bundle·provenance·rollback은 불변이며 Paperthin runtime/hook/별도 SSOT는 도입하지 않았다.
 """
-__version__ = "1.23.0"
+__version__ = "1.24.0"
