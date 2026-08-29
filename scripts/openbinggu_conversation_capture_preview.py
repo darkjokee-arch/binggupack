@@ -185,7 +185,7 @@ def _long_display(item):
             % (s[:L_HEAD], s[-L_TAIL:], item["length"], item["sha"][:8], item["label"]))
 
 
-def capture_preview(text, max_candidates=DEFAULT_MAX, explicit=False):
+def capture_preview(text, max_candidates=DEFAULT_MAX, explicit=False, semantic_off=False):
     """대화 발췌 → 핵심문장 후보 미리보기. 순수 함수(write 0). 반환 dict.
 
     explicit: 명시 저장 의도 경로(pair/remember 등 사용자가 직접 '이걸 기억해'라고 친 입력)면 True.
@@ -263,12 +263,12 @@ def capture_preview(text, max_candidates=DEFAULT_MAX, explicit=False):
         kind, rule_id = lkmap.classify_label_kind(sent)   # 종결어 규칙 = 기본/fallback
         # 영구금지26 개정(owner GO 2026-06-14): opt-in 시 도장을 의미(semantic)로 제안.
         # hi=확정 / ambiguous=확인권장 / lo·차단·실패=None→종결어 규칙 유지. 저장 0·사람 confirm 게이트.
-        sem = canon.suggest_label_kind(sent)
+        sem = None if semantic_off else canon.suggest_label_kind(sent)
         if sem is not None:
             kind = sem["kind"]
             rule_id = "semantic_%s_%.2f" % (sem["band"], sem["conf"])
         # 보조 semantic_subtype(6종) — label_kind(5종 도장)와 별개 축. 있으면 채움, 없으면 None(NULL).
-        semantic_subtype = _suggest_subtype(sent)
+        semantic_subtype = None if semantic_off else _suggest_subtype(sent)
         verdict = a0.classify_node(
             {"id": "preview:" + h, "sentence": sent, "node_type": lkmap.KO2EN[kind],
              "evidence_refs": ["preview"]}, status="candidate")

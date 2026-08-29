@@ -156,6 +156,53 @@ def list_run_outcomes(home=None, limit=10):
     return out[-limit:] if limit else out
 
 
+def list_run_outcomes_ro(home=None, limit=10):
+    """Read outcome observations without creating or migrating the trace store."""
+    path = RT.trace_store_path(home)
+    if not os.path.exists(path):
+        return []
+    if os.path.exists(path + "-wal") and not os.path.exists(path + "-shm"):
+        return []
+    try:
+        con = RT._open_store_ro(home)
+    except Exception:
+        return []
+    try:
+        tables = {row[0] for row in con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )}
+        if "recall_run_outcomes" not in tables:
+            return []
+        rows = con.execute(
+            "SELECT outcome_id,trace_id,applied_node_ids_json,application,result,"
+            "evidence_digest,evidence_kind,trust_tier,supersedes,ts FROM recall_run_outcomes"
+            " ORDER BY ts,outcome_id"
+        ).fetchall()
+    except Exception:
+        return []
+    finally:
+        con.close()
+    superseded = {row[8] for row in rows if row[8]}
+    out = []
+    seq = 0
+    for row in rows:
+        if row[8]:
+            continue
+        seq += 1
+        try:
+            nodes = json.loads(row[2]) if row[2] else []
+        except Exception:
+            nodes = []
+        out.append({
+            "seq": seq, "outcome_id": row[0], "trace_id": row[1],
+            "applied_node_ids": nodes, "application": row[3], "result": row[4],
+            "evidence_digest": row[5], "evidence_kind": row[6],
+            "trust_tier": row[7], "ts": row[9], "overturned": row[0] in superseded,
+            "signal_only": True,
+        })
+    return out[-limit:] if limit else out
+
+
 def overturn_run_outcome(seq, ts, home=None):
     """owner 1-발화 정정(binggu outcome --overturn N) — 원본 보존 + reversal 행 append(합격기준7).
 
