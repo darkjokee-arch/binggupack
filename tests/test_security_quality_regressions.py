@@ -5,8 +5,10 @@ from binggupack.pack import cloud_query_wire as canonical_cloud_query
 from binggupack.pack.incoming_to_staging import scan_secrets
 from binggupack.pack import person_pack_sync as canonical_person_pack
 from binggupack.studio import server as studio_server
-from scripts import binggu_cloud_query_wire, binggu_discover, binggu_person_pack_sync
+from scripts import binggu_cloud_query_wire, binggu_crab_pack_wire, binggu_discover
+from scripts import binggu_outcome_attribution, binggu_person_crab_sync, binggu_person_pack_sync
 from scripts import binggu_platform, binggu_setup_save
+from scripts import binggu_session_close, openbinggu_mcp_server_handlers
 from scripts import openbinggu_incoming_to_staging as incoming_wrapper
 
 
@@ -94,6 +96,17 @@ def test_script_facades_preserve_public_exports():
         assert hasattr(canonical_person_pack, name)
         assert hasattr(binggu_person_pack_sync, name)
     assert "invocation_prefix" in binggu_platform.__all__
+    facade_contracts = (
+        (binggu_outcome_attribution, ("list_run_outcomes_ro",)),
+        (binggu_session_close, ("register_close_suffix",)),
+        (openbinggu_mcp_server_handlers, ("reason_code_hint",)),
+        (binggu_person_crab_sync, ("extra_signature", "merge_extra_sources", "DEFAULT_PACK_TITLE")),
+        (binggu_crab_pack_wire, ("scan_data", "TEXT_EXTS", "MAX_FILE")),
+    )
+    for facade, names in facade_contracts:
+        for name in names:
+            assert hasattr(facade, name)
+            assert name in facade.__all__
 
 
 def test_discover_composites_accept_legacy_two_argument_provider():

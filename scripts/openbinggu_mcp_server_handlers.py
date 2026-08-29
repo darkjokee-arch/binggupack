@@ -18,6 +18,7 @@ if ROOT not in sys.path:
 
 from binggupack.mcp.server_handlers import (  # noqa: E402,F401  (밑줄 + 전체 명시 re-export)
     handle_tool,
+    reason_code_hint,
     TOOLS,
     _FORBIDDEN,
     main,
@@ -35,6 +36,7 @@ from binggupack.mcp.server_handlers import (  # noqa: E402,F401  (밑줄 + 전�
 
 __all__ = (
     'handle_tool',
+    'reason_code_hint',
     'TOOLS',
     '_FORBIDDEN',
     'main',

@@ -18,10 +18,13 @@ for _p in (ROOT, HERE):
 
 from binggupack.pack.person_crab_sync import (  # noqa: E402,F401  (명시 re-export)
     DEFAULT_PACK_NAME,
+    DEFAULT_PACK_TITLE,
     PACK_TITLE,
     PACK_PURPOSE,
     STATE_FILE,
     export_docs,
+    extra_signature,
+    merge_extra_sources,
     load_state,
     save_state,
     sync,
@@ -32,10 +35,13 @@ from binggupack.pack.person_crab_sync import (  # noqa: E402,F401  (명시 re-ex
 
 __all__ = (
     'DEFAULT_PACK_NAME',
+    'DEFAULT_PACK_TITLE',
     'PACK_TITLE',
     'PACK_PURPOSE',
     'STATE_FILE',
     'export_docs',
+    'extra_signature',
+    'merge_extra_sources',
     'load_state',
     'save_state',
     'sync',
