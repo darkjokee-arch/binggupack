@@ -729,6 +729,16 @@ def cmd_preflight(a):
     return _m.cmd_preflight(a)
 
 
+def cmd_catchup(a):
+    from binggupack.cli import cognitive as _m
+    return _m.cmd_catchup(a)
+
+
+def cmd_workloop(a):
+    from binggupack.cli import cognitive as _m
+    return _m.cmd_workloop(a)
+
+
 def cmd_status(a):
     db, _ = _open(a.ledger)
     home = os.path.dirname(os.path.abspath(a.ledger))
@@ -2374,6 +2384,14 @@ def main():
     pfp.add_argument("--enable", action="store_true")     # 자동주입 ON(플래그)
     pfp.add_argument("--disable", action="store_true")    # 자동주입 OFF(플래그 삭제)
     pfp.add_argument("--auto-status", dest="auto_status", action="store_true")  # 등록/활성 상태
+    cup = sub.add_parser("catchup")
+    cup.add_argument("--repo", "--cwd", dest="repo", default=None)
+    cup.add_argument("--query", default=None)
+    cup.add_argument("--max-chars", dest="max_chars", type=int, default=8000)
+    cup.add_argument("--test-state", dest="test_state", default=None)
+    cup.add_argument("--json", action="store_true")
+    wlp = sub.add_parser("workloop")
+    wlp.add_argument("--input", required=True, help="JSON spec path, or - for stdin")
     for name in ("deprecate", "accept", "unaccept"):
         sp = sub.add_parser(name); sp.add_argument("n", type=int); sp.add_argument("id8")
         sp.add_argument("--reason", required=True); sp.add_argument("--confirm", required=True)
@@ -2529,6 +2547,7 @@ def main():
           "abstraction": cmd_abstraction, "promote": cmd_promote,
           "reminders": cmd_reminders, "capture": cmd_capture,
           "recall": cmd_recall, "why": cmd_recall, "trace": cmd_trace, "preflight": cmd_preflight,
+          "catchup": cmd_catchup, "workloop": cmd_workloop,
           "hosted": cmd_hosted, "harvest": cmd_harvest, "setup-cloud": cmd_setup_cloud,
           "onboard": cmd_onboard,
           "confirm-edges": cmd_confirm_edges, "pair": cmd_pair, "trust": cmd_trust,
