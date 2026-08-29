@@ -1,9 +1,12 @@
 import builtins
 
 from binggupack.pack import branch_explorer
+from binggupack.pack import cloud_query_wire as canonical_cloud_query
 from binggupack.pack.incoming_to_staging import scan_secrets
+from binggupack.pack import person_pack_sync as canonical_person_pack
 from binggupack.studio import server as studio_server
-from scripts import binggu_discover, binggu_setup_save
+from scripts import binggu_cloud_query_wire, binggu_discover, binggu_person_pack_sync
+from scripts import binggu_platform, binggu_setup_save
 from scripts import openbinggu_incoming_to_staging as incoming_wrapper
 
 
@@ -81,3 +84,27 @@ def test_incoming_wrapper_preserves_legacy_exports():
         "_base_pack", "_content", "synthesize_fixtures", "v010",
     ):
         assert hasattr(incoming_wrapper, name)
+
+
+def test_script_facades_preserve_public_exports():
+    for name in ("run_search", "_extract_search_evidence"):
+        assert hasattr(canonical_cloud_query, name)
+        assert hasattr(binggu_cloud_query_wire, name)
+    for name in ("pack_create_required", "record_pack_id", "DEFAULT_OWNER_LABEL", "PACK_CONFIG_FILE"):
+        assert hasattr(canonical_person_pack, name)
+        assert hasattr(binggu_person_pack_sync, name)
+    assert "invocation_prefix" in binggu_platform.__all__
+
+
+def test_discover_composites_accept_legacy_two_argument_provider():
+    class LegacyProvider:
+        name = "legacy"
+
+        def search(self, query, limit=10):
+            return [{"url": "https://example.test/item", "title": query}][:limit]
+
+    fallback = binggu_discover.FallbackProvider([LegacyProvider()])
+    composite = binggu_discover.CompositeProvider([LegacyProvider()])
+
+    assert fallback.search("topic", limit=1, lang="ko")
+    assert composite.search("topic", limit=1, lang="ko")

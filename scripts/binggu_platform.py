@@ -48,6 +48,7 @@ __all__ = (
     'default_ledger',
     'default_settings',
     'python_cmd',
+    'invocation_prefix',
     'resolve_npx',
     'shared_opt_in',
     'to_wsl_path',

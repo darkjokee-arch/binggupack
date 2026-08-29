@@ -26,7 +26,11 @@ for _p in (ROOT, HERE):
 from binggupack.pack.person_pack_sync import (  # noqa: E402,F401  (전체 명시 re-export — _ 심볼 포함)
     PACK_ID,
     STATE_FILE,
+    PACK_CONFIG_FILE,
+    DEFAULT_OWNER_LABEL,
     PACK_TITLE,
+    pack_create_required,
+    record_pack_id,
     _PACK_HEADER,
     _SENT_HASH_LEN,
     _home,
@@ -51,7 +55,11 @@ from binggupack.pack.person_pack_sync import (  # noqa: E402,F401  (전체 명�
 __all__ = (
     'PACK_ID',
     'STATE_FILE',
+    'PACK_CONFIG_FILE',
+    'DEFAULT_OWNER_LABEL',
     'PACK_TITLE',
+    'pack_create_required',
+    'record_pack_id',
     '_PACK_HEADER',
     '_SENT_HASH_LEN',
     '_home',

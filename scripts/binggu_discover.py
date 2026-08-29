@@ -345,7 +345,7 @@ class FallbackProvider(SearchProvider):
     def search(self, query, limit=10, lang=None):
         for p in self.providers:
             try:
-                res = p.search(query, limit, lang=lang)
+                res = _provider_search(p, query, limit, lang)
             except Exception:
                 continue
             if res:
@@ -368,7 +368,7 @@ class CompositeProvider(SearchProvider):
         merged, seen, used = [], set(), []
         for p in self.providers:
             try:
-                res = p.search(query, limit, lang=lang) or []
+                res = _provider_search(p, query, limit, lang)
             except Exception:
                 continue  # child 실패는 건너뜀(예외 전파 0)
             got = False
