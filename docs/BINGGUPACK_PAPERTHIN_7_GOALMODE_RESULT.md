@@ -114,6 +114,7 @@ outcome은 기존 헌법상 랭킹 입력이 아니다. 따라서 마지막 선�
 4. Mandela의 독립 scorer/observer 신원은 암호학적으로 증명하지 않는다. 그래서 자체 reference 결과는 PASS가 아니라 `INSUFFICIENT EVIDENCE`다.
 5. WAL residue에서 SHM이 없으면 catchup은 memory를 생략하고 fail-closed한다. repository live state는 계속 제공한다.
 6. MCP, global hook, Paperthin runtime을 추가하지 않았다. 선택 패턴은 agent-side 순수 adapter와 catchup CLI로만 제공한다.
+7. 운영 ledger 내용은 읽지 않았다. 작업 중 메타데이터가 `2056192 / 2026-08-29T03:36:56Z / 31A0FA04`에서 `2056192 / 2026-08-29T04:10:13Z / B3CF3F01`로 바뀐 동시 외부 mutation을 관찰했다. 모든 본 작업 writer/test는 격리 경로였고 인과 귀속은 하지 않는다.
 
 ## H. Commits
 
