@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import sqlite3
 import subprocess
@@ -109,16 +110,59 @@ def test_catchup_performs_zero_repository_and_database_writes(tmp_path):
     ledger = _ledger(tmp_path / "ledger.sqlite", [
         ("d1", "judgment", "release requires regression", "active", "결정", None),
     ])
-    before_repo = _tree_fingerprint(repo)
+    before_tree = _tree_fingerprint(tmp_path)
     before_db = (ledger.stat().st_size, ledger.stat().st_mtime_ns, hashlib.sha256(ledger.read_bytes()).hexdigest())
     out = collect_catchup(repo, query="release", ledger_path=ledger,
                           now="2026-08-29T00:00:00Z")
-    after_repo = _tree_fingerprint(repo)
+    after_tree = _tree_fingerprint(tmp_path)
     after_db = (ledger.stat().st_size, ledger.stat().st_mtime_ns, hashlib.sha256(ledger.read_bytes()).hexdigest())
     assert out["safety"]["writes"] == 0
-    assert before_repo == after_repo
+    assert before_tree == after_tree
     assert before_db == after_db
     assert not (tmp_path / "recall_trace.sqlite").exists()
+
+
+def test_catchup_fails_closed_on_wal_without_shm(tmp_path):
+    repo = _repo(tmp_path)
+    ledger = tmp_path / "ledger.sqlite"
+    ledger.write_bytes(b"not opened when unsafe WAL residue exists")
+    (tmp_path / "ledger.sqlite-wal").write_bytes(b"residue")
+    before = _tree_fingerprint(tmp_path)
+    out = collect_catchup(repo, query="release", ledger_path=ledger)
+    assert out["relevant_memory"] == []
+    assert _tree_fingerprint(tmp_path) == before
+    assert not (tmp_path / "ledger.sqlite-shm").exists()
+
+
+def test_catchup_disables_repository_fsmonitor_hook(tmp_path):
+    repo = _repo(tmp_path)
+    marker = repo / "fsmonitor-ran.txt"
+    hook = repo / "fsmonitor-hook"
+    hook.write_text("#!/bin/sh\necho ran > fsmonitor-ran.txt\necho\n", encoding="utf-8")
+    hook.chmod(0o755)
+    _git(repo, "config", "core.fsmonitor", str(hook))
+    collect_catchup(repo, query="release", ledger_path=None)
+    assert not marker.exists()
+
+
+def test_catchup_hard_caps_large_dirty_state():
+    out = build_catchup(
+        repo_state={"available": True, "repo": "x" * 300, "branch": "main", "head": "a" * 40,
+                    "clean": False, "changed": [f"M file-{i}-{'x' * 80}" for i in range(100)],
+                    "last_commit": "a base", "test_state": "not run"},
+        recall_result={"relevant_nodes": []}, outcomes=[],
+        outcome_summary={"overall": {"pending_traces": 0}}, superseded=[],
+        query="large", max_chars=500,
+    )
+    context = {key: out[key] for key in (
+        "current_state", "what_changed", "relevant_memory", "decisions", "known_constraints",
+        "known_failures", "unresolved", "next_best_action",
+    )}
+    assert len(json.dumps(context, ensure_ascii=False, sort_keys=True)) <= 500
+    assert out["budget"]["cap_satisfied"] is True
+    assert out["budget"]["omitted_count"] > 0
+    assert "changed" not in out["current_state"]
+    assert len(render_catchup(out)) <= 500
 
 
 def test_build_catchup_handles_no_memory_and_explicit_test_state():
@@ -132,3 +176,16 @@ def test_build_catchup_handles_no_memory_and_explicit_test_state():
     assert out["relevant_memory"] == []
     assert out["current_state"]["test_state"] == "17 passed"
 
+
+def test_catchup_does_not_resurrect_human_overturned_failure():
+    out = build_catchup(
+        repo_state={"available": True, "branch": "main", "head": "abc", "clean": True,
+                    "changed": [], "last_commit": "abc initial", "test_state": "green"},
+        recall_result={"relevant_nodes": []},
+        outcomes=[{"outcome_id": "o1", "result": "failure", "overturned": True,
+                   "evidence_digest": "a" * 64, "signal_only": True}],
+        outcome_summary={"overall": {"pending_traces": 0}}, superseded=[],
+        query="corrected", max_chars=2000,
+    )
+    assert out["known_failures"] == []
+    assert "known failure" not in out["next_best_action"]["next_best_action"].lower()

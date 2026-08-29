@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timezone
 
-from binggupack.cognitive.mandela import audit_benchmark, evaluate_behavioral_runs
 from binggupack.cognitive.patterns import (
     fact_check_candidate,
     propose_sip_candidates,
@@ -10,6 +10,7 @@ from binggupack.cognitive.patterns import (
     select_load_bearing_objection,
     select_next_best_action,
 )
+from binggupack.eval.paperthin import audit_benchmark, evaluate_behavioral_runs
 
 
 def test_readchk_reconstructs_intent_constraints_deliverables_and_query():
@@ -52,6 +53,14 @@ def test_readchk_only_escalates_material_unresolved_ambiguity():
     assert blocked["needs_user_question"] is True
     assert blocked["question"] == "keep compatibility or break it"
 
+    known = reconstruct_intent(
+        "Implement the interface.",
+        available_facts={"surface": "CLI"},
+        ambiguity_candidates=[{"text": "CLI or MCP", "material": True, "fact_key": "surface"}],
+    )
+    assert known["needs_user_question"] is False
+    assert known["resolved_ambiguities"][0]["resolution"] == "CLI"
+
     conflict = reconstruct_intent("Constraints:\n- Must use public CLI.\n- Never use public CLI.")
     assert conflict["needs_user_question"] is True
     assert "conflicting constraints" in conflict["question"]
@@ -73,8 +82,14 @@ def test_hate_returns_one_load_bearing_objection_and_cheapest_test():
     assert len(out["considered"]) == 2
 
     assert select_load_bearing_objection([], test_result="pass")["status"] == "NO_BLOCKER"
-    assert select_load_bearing_objection(objections, test_result="pass")["status"] == "FALSIFIED"
-    assert select_load_bearing_objection(objections, test_result="fail")["status"] == "BLOCKER_CONFIRMED"
+    proof = {"test": "compare ledger hash before and after", "digest": "a" * 64}
+    assert select_load_bearing_objection(
+        objections, test_result="pass", test_evidence=proof
+    )["status"] == "FALSIFIED"
+    assert select_load_bearing_objection(
+        objections, test_result="fail", test_evidence=proof
+    )["status"] == "BLOCKER_CONFIRMED"
+    assert select_load_bearing_objection(objections, test_result="pass")["status"] == "TEST_REQUIRED"
     assert select_load_bearing_objection(objections, change_kinds=["typo"])["status"] == "SKIP"
 
 
@@ -100,6 +115,25 @@ def test_sip_proposes_ephemeral_typed_candidates_without_duplicates_or_authority
     assert propose_sip_candidates([])["candidates"] == []
 
 
+def test_sip_forces_pure_preview_even_when_semantic_mode_is_enabled(tmp_path, monkeypatch):
+    import scripts.openbinggu_conversation_capture_preview as preview
+
+    monkeypatch.setenv("BINGGU_HOME", str(tmp_path))
+    (tmp_path / "semantic_label_enabled").write_text("1", encoding="utf-8")
+    monkeypatch.setattr(preview.canon, "suggest_label_kind", lambda _text: (_ for _ in ()).throw(
+        AssertionError("semantic classifier must stay off")
+    ))
+    monkeypatch.setattr(preview, "_suggest_subtype", lambda _text: (_ for _ in ()).throw(
+        AssertionError("semantic subtype must stay off")
+    ))
+    before = sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*") if path.is_file())
+    out = propose_sip_candidates([{"kind": "lesson", "text": "Always run the regression test."}])
+    after = sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*") if path.is_file())
+    assert out["candidates"]
+    assert out["candidates"][0]["canonical_gate_eligible"] is True
+    assert before == after
+
+
 def test_factchk_is_conditional_and_preserves_provenance():
     now = datetime(2026, 8, 29, tzinfo=timezone.utc)
     internal = {"kind": "decision", "text": "Use catchup first", "external_claims": []}
@@ -112,27 +146,36 @@ def test_factchk_is_conditional_and_preserves_provenance():
             {"claim_id": "c1", "claim": "API v2 supports JSON", "claim_type": "external_api"}
         ],
     }
+    claim_digest = hashlib.sha256("API v2 supports JSON".encode()).hexdigest()
     verified = fact_check_candidate(candidate, [{
         "claim_id": "c1", "stance": "supports", "source_uri": "https://example.test/spec",
-        "source_digest": "a" * 64, "checked_at": "2026-08-28T00:00:00Z",
+        "source_digest": "a" * 64, "claim_digest": claim_digest,
+        "checked_at": "2026-08-28T00:00:00Z",
     }], now=now)
     assert verified["status"] == "VERIFIED"
     assert verified["claims"][0]["evidence"][0]["source_digest"] == "a" * 64
 
     contradicted = fact_check_candidate(candidate, [{
         "claim_id": "c1", "stance": "refutes", "source_uri": "https://example.test/spec",
-        "source_digest": "b" * 64, "checked_at": "2026-08-28T00:00:00Z",
+        "source_digest": "b" * 64, "claim_digest": claim_digest,
+        "checked_at": "2026-08-28T00:00:00Z",
     }], now=now)
     assert contradicted["status"] == "CONTRADICTED"
     assert fact_check_candidate(candidate, [], now=now)["status"] == "UNVERIFIED"
     stale = fact_check_candidate(candidate, [{
         "claim_id": "c1", "stance": "supports", "source_uri": "https://example.test/old",
-        "source_digest": "c" * 64, "checked_at": "2025-01-01T00:00:00Z",
+        "source_digest": "c" * 64, "claim_digest": claim_digest,
+        "checked_at": "2025-01-01T00:00:00Z",
     }], now=now, max_age_days=30)
     assert stale["status"] == "STALE"
+    malformed = fact_check_candidate(candidate, [{
+        "claim_id": "c1", "stance": "supports", "checked_at": "2099-01-01T00:00:00Z",
+    }], now=now)
+    assert malformed["status"] == "UNVERIFIED"
+    assert malformed["provenance_complete"] is False
 
 
-def test_nba_uses_recall_and_outcome_and_exposes_counterfactual():
+def test_nba_uses_recall_but_keeps_outcome_signal_out_of_ranking():
     actions = [
         {"id": "ship", "action": "Ship now", "value": 0.9, "urgency": 0.8,
          "effort": 0.1, "risk": 0.2, "memory_ids": ["m-risk"]},
@@ -150,6 +193,8 @@ def test_nba_uses_recall_and_outcome_and_exposes_counterfactual():
     assert recalled["counterfactual_without_recall"] == "ship"
     assert recalled["recall_changed_decision"] is True
     assert recalled["evidence"]
+    assert recalled["outcome_used_for_ranking"] is False
+    assert recalled["outcome_signals"]
 
     low = select_next_best_action([
         {"id": "a", "action": "A", "value": 0.5},
@@ -159,16 +204,34 @@ def test_nba_uses_recall_and_outcome_and_exposes_counterfactual():
 
 
 def test_mandela_detects_leakage_coupling_contamination_and_metric_gaming():
-    clean = audit_benchmark({
+    manifest = {
+        "manifest_id": "m1", "fixture_ids": ["s1", "s2"],
+        "fixture_digests": {"s1": "a" * 64, "s2": "b" * 64},
         "designer_id": "designer-a", "scorer_id": "scorer-b",
         "expected_answers_visible": False,
         "benchmark_source_ids": ["eval-1"], "training_source_ids": ["train-1"],
         "baseline_conditions": {"task": "same", "tools": "same"},
         "treatment_conditions": {"task": "same", "tools": "same", "cognitive_layer": True},
+        "recall_group_conditions": {
+            "recall_off": {"task": "same", "recall": False},
+            "recall_on": {"task": "same", "recall": True},
+        },
         "selection_strategy": "fixed_manifest", "primary_metrics": ["task_completion"],
+        "metric_directions": {"task_completion": "higher"},
         "outcome_labels_visible_before_decision": False,
-    })
+        "independent_observation_source": True,
+    }
+    observations = [
+        {"scenario": scenario, "variant": variant, "fixture_digest": manifest["fixture_digests"][scenario],
+         "scorer_id": "scorer-b", "task_completion": 1}
+        for scenario in ("s1", "s2") for variant in ("A", "B", "C")
+    ]
+    clean = audit_benchmark(manifest, observations)
     assert clean["verdict"] == "PASS"
+
+    self_report = audit_benchmark(manifest)
+    assert self_report["verdict"] == "BLOCK"
+    assert "OBSERVATIONS_MISSING" in {item["code"] for item in self_report["findings"]}
 
     bad = audit_benchmark({
         "designer_id": "same", "scorer_id": "same", "expected_answers_visible": True,
@@ -185,7 +248,7 @@ def test_mandela_detects_leakage_coupling_contamination_and_metric_gaming():
 
 
 def test_behavioral_eval_returns_honest_bounded_verdict():
-    insufficient = evaluate_behavioral_runs([], {"verdict": "PASS", "findings": []})
+    insufficient = evaluate_behavioral_runs([], {}, {"verdict": "PASS", "findings": []})
     assert insufficient["verdict"] == "INSUFFICIENT EVIDENCE"
 
     runs = [
@@ -196,6 +259,19 @@ def test_behavioral_eval_returns_honest_bounded_verdict():
         {"scenario": "s2", "variant": "B", "task_completion": 0, "factual_error": 1},
         {"scenario": "s2", "variant": "C", "task_completion": 1, "factual_error": 0},
     ]
-    out = evaluate_behavioral_runs(runs, {"verdict": "PASS", "findings": []})
+    manifest = {
+        "fixture_ids": ["s1", "s2"],
+        "primary_metrics": ["task_completion", "factual_error"],
+        "metric_directions": {"task_completion": "higher", "factual_error": "lower"},
+    }
+    out = evaluate_behavioral_runs(runs, manifest, {"verdict": "PASS", "findings": []})
     assert out["verdict"] == "IMPROVED"
     assert out["comparisons"]["C_vs_B"]["task_completion"] > 0
+
+    regressed = [dict(row) for row in runs]
+    for row in regressed:
+        if row["variant"] == "C":
+            row["factual_error"] = 2
+    assert evaluate_behavioral_runs(
+        regressed, manifest, {"verdict": "PASS"}
+    )["verdict"] == "REGRESSED"

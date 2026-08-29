@@ -38,19 +38,3 @@ def test_catchup_cli_is_usable_and_does_not_create_missing_ledger(tmp_path: Path
     assert out["safety"]["writes"] == 0
     assert not ledger.exists()
     assert hashlib.sha256((repo / "a.txt").read_bytes()).hexdigest() == before
-
-
-def test_workloop_cli_runs_the_combined_read_only_surface(tmp_path: Path):
-    spec = tmp_path / "workloop.json"
-    spec.write_text(json.dumps({
-        "request": "Implement and test catchup without writes",
-        "candidate_items": [],
-        "actions": [{"id": "test", "action": "Run tests", "value": 1.0}],
-    }), encoding="utf-8")
-    env = dict(os.environ)
-    env["BINGGU_HOME"] = str(tmp_path / "isolated-home")
-    proc = _run("workloop", "--input", str(spec), env=env)
-    assert proc.returncode == 0, proc.stderr
-    out = json.loads(proc.stdout)
-    assert out["nba"]["action_id"] == "test"
-    assert out["safety"]["writes"] == 0

@@ -10,6 +10,7 @@ _semantic_scorer() 초기화·recall_embed_cache open·Ollama/embed/network 를 
 ranking 만 쓴다. use_count/recall_trace 기록도 하지 않는다(호출측 record 미선택).
 """
 import hashlib
+import os
 import unicodedata
 
 from binggupack.cli import daily              # _ro_connect · _table_exists · safe_excerpt · _ensure_scripts_path
@@ -326,6 +327,53 @@ def collect_memory_detail_snapshot(ledger, node_id):
         con.close()
     detail["explain_summary"], detail["confidence"] = _explain_summary(ledger, node_id, st)
     return detail
+
+
+def collect_superseded_decision_snapshot(ledger, query, limit=5):
+    """Return relevant historical decisions through the canonical read model."""
+    ledger_path = os.path.abspath(str(ledger))
+    if os.path.exists(ledger_path + "-wal") and not os.path.exists(ledger_path + "-shm"):
+        return []
+    con = daily._ro_connect(ledger)
+    if con is None:
+        return []
+    try:
+        if not daily._table_exists(con, "nodes"):
+            return []
+        cols = _ncols(con)
+        if not {"node_id", "sentence", "state"} <= cols:
+            return []
+        subtype_col = "semantic_subtype" if "semantic_subtype" in cols else "NULL"
+        supersedes_col = "supersedes" if "supersedes" in cols else "NULL"
+        rows = con.execute(
+            "SELECT node_id,sentence,state,%s,%s FROM nodes ORDER BY node_id"
+            % (subtype_col, supersedes_col)
+        ).fetchall()
+    except Exception:
+        return []
+    finally:
+        con.close()
+    decisions = {"결정", "판단", "decision"}
+    query_tokens = {token.casefold() for token in str(query or "").split() if len(token) >= 2}
+    replaced_by = {row[4]: row[0] for row in rows if row[4]}
+    out = []
+    for node_id, sentence, state, subtype, _supersedes in rows:
+        if state in (None, "active", "confirmed") or subtype not in decisions:
+            continue
+        sentence_tokens = {token.casefold() for token in str(sentence or "").split() if len(token) >= 2}
+        if query_tokens and not query_tokens.intersection(sentence_tokens):
+            continue
+        out.append({
+            "node_id": node_id,
+            "claim": daily.safe_excerpt(sentence, _CLAIM_CAP),
+            "semantic_subtype": subtype,
+            "superseded": True,
+            "superseded_by": replaced_by.get(node_id),
+            "source_ref": "memory:%s" % node_id8(node_id),
+        })
+        if len(out) >= limit:
+            break
+    return out
 
 
 def _lexical_only_scorer(query, sentence):

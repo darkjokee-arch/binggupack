@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from datetime import datetime, timezone
 from typing import Any, Iterable
+from urllib.parse import urlparse
 
 _CONSTRAINT_WORDS = (
     "must", "never", "do not", "without", "preserve", "required",
@@ -63,7 +65,7 @@ def reconstruct_intent(
     ambiguity_candidates: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Reconstruct intent and a bounded recall query without inventing questions."""
-    del available_facts  # reserved for callers that pre-resolve ambiguity upstream
+    facts = dict(available_facts or {})
     lines = [line for line in str(request or "").splitlines() if line.strip()]
     section: str | None = None
     intent_lines: list[str] = []
@@ -112,7 +114,11 @@ def reconstruct_intent(
         text = str(ambiguity.get("text") or "").strip()
         if not text:
             continue
+        fact_key = str(ambiguity.get("fact_key") or "").strip()
+        fact_value = facts.get(fact_key) if fact_key else facts.get(text)
         resolution = ambiguity.get("resolved_by") or ambiguity.get("safe_default")
+        if fact_value is not None:
+            resolution = fact_value
         if resolution:
             resolved.append({"text": text, "resolution": str(resolution)})
         elif ambiguity.get("material"):
@@ -147,7 +153,7 @@ def reconstruct_intent(
 
 def select_load_bearing_objection(
     objections: list[dict[str, Any]], *, test_result: str | None = None,
-    change_kinds: list[str] | None = None,
+    change_kinds: list[str] | None = None, test_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return one high-impact objection and its cheapest falsification test."""
     if change_kinds is not None and not _HIGH_RISK_CHANGES.intersection(change_kinds):
@@ -169,13 +175,21 @@ def select_load_bearing_objection(
         ranked.append((-(impact * likelihood), -impact, index, item, tests))
     ranked.sort(key=lambda row: row[:3])
     _score, _impact, _index, chosen, tests = ranked[0]
+    test_name = str(tests[0]["test"]) if tests else None
     observed = (test_result or "").strip().lower()
-    status = {"pass": "FALSIFIED", "fail": "BLOCKER_CONFIRMED"}.get(observed, "TEST_REQUIRED")
+    proof = dict(test_evidence or {})
+    digest = str(proof.get("digest") or "")
+    proof_bound = bool(
+        test_name and proof.get("test") == test_name and re.fullmatch(r"[0-9a-fA-F]{64}", digest)
+    )
+    status = ({"pass": "FALSIFIED", "fail": "BLOCKER_CONFIRMED"}.get(observed, "TEST_REQUIRED")
+              if proof_bound else "TEST_REQUIRED")
     return {
         "status": status,
         "objection": str(chosen.get("text") or "").strip() or None,
-        "falsification_test": str(tests[0]["test"]) if tests else None,
+        "falsification_test": test_name,
         "test_cost": float(tests[0].get("cost", 1.0)) if tests else None,
+        "test_evidence": proof if proof_bound else None,
         "considered": [str(item.get("text") or "") for item in objections],
     }
 
@@ -205,7 +219,7 @@ def propose_sip_candidates(
         # MCP capture_preview: that surface stages a preview file.
         from binggupack.capture.preview import capture_preview
 
-        preview = capture_preview(text, explicit=True)
+        preview = capture_preview(text, explicit=True, semantic_off=True)
         preview_candidates = list(preview.get("candidates") or [])
         if not preview_candidates:
             rejected += 1
@@ -219,16 +233,16 @@ def propose_sip_candidates(
         seen.add(key)
         claims = [dict(c) for c in raw.get("external_claims") or []]
         candidates.append({
-            "proposal_id": "sip-" + key[:16],
             "kind": kind,
             "text": text,
             "source_refs": _unique(raw.get("source_refs") or []),
             "external_claims": claims,
             "needs_factchk": any(str(c.get("claim_type") or "") in _EXTERNAL_TYPES for c in claims),
             "canonical_preview": preview_candidates,
+            "canonical_preview_text": text,
             "status": "PROPOSED",
             "promotion_allowed": False,
-            "save_ready": not claims,
+            "canonical_gate_eligible": not claims,
         })
     return {
         "candidates": candidates,
@@ -241,6 +255,27 @@ def propose_sip_candidates(
         "requires_human_approval": True,
         "next_gate": "existing_binggupack_preview_dedupe_conflict_evidence_then_human_SAVE",
     }
+
+
+def attach_factcheck(candidate: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+    """Bind a fact-check result to an ephemeral SIP candidate without granting SAVE authority."""
+    out = dict(candidate)
+    bundle = {
+        "candidate_text": out.get("text"),
+        "kind": out.get("kind"),
+        "verification": result,
+    }
+    canonical = json.dumps(bundle, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    out["fact_status"] = result.get("status")
+    out["verification_bundle"] = bundle
+    out["verification_bundle_digest"] = hashlib.sha256(
+        canonical.encode("utf-8", "replace")
+    ).hexdigest()
+    if out.get("needs_factchk"):
+        out["canonical_gate_eligible"] = False
+        out["promotion_blocker"] = "external_evidence_not_exact_bound_by_current_SAVE_contract"
+        out["evidence_binding"] = "EPHEMERAL_ONLY"
+    return out
 
 
 def _parse_time(value: Any) -> datetime | None:
@@ -269,14 +304,33 @@ def fact_check_candidate(
         return {"status": "NOT_APPLICABLE", "claims": [], "provenance_preserved": True}
     now_dt = _parse_time(now) or datetime.now(timezone.utc)
     results: list[dict[str, Any]] = []
+    claim_ids = [str(claim.get("claim_id") or "").strip() for claim in claims]
+    duplicate_claim_ids = {cid for cid in claim_ids if cid and claim_ids.count(cid) > 1}
     for claim in claims:
-        cid = str(claim.get("claim_id") or "")
+        cid = str(claim.get("claim_id") or "").strip()
+        claim_text = str(claim.get("claim") or "").strip()
+        expected_claim_digest = hashlib.sha256(
+            claim_text.encode("utf-8", "replace")
+        ).hexdigest() if claim_text else ""
         refs = [dict(ref) for ref in evidence or [] if str(ref.get("claim_id") or "") == cid]
         fresh: list[dict[str, Any]] = []
         stale: list[dict[str, Any]] = []
+        rejected: list[dict[str, Any]] = []
         for ref in refs:
             checked = _parse_time(ref.get("checked_at"))
-            if checked is None or (now_dt - checked).total_seconds() > max_age_days * 86400:
+            parsed_uri = urlparse(str(ref.get("source_uri") or ""))
+            digest = str(ref.get("source_digest") or "")
+            claim_digest = str(ref.get("claim_digest") or "")
+            complete = bool(
+                cid and claim_text and cid not in duplicate_claim_ids
+                and parsed_uri.scheme in {"http", "https"} and parsed_uri.netloc
+                and re.fullmatch(r"[0-9a-fA-F]{64}", digest)
+                and claim_digest == expected_claim_digest
+                and ref.get("available", True) is not False
+            )
+            if not complete or checked is None or checked > now_dt:
+                rejected.append(ref)
+            elif (now_dt - checked).total_seconds() > max_age_days * 86400:
                 stale.append(ref)
             else:
                 fresh.append(ref)
@@ -291,7 +345,9 @@ def fact_check_candidate(
             status = "STALE"
         else:
             status = "UNVERIFIED"
-        results.append({**claim, "status": status, "evidence": fresh + stale})
+        results.append({**claim, "status": status, "evidence": fresh + stale,
+                        "rejected_evidence": rejected,
+                        "provenance_complete": bool(fresh or stale)})
     statuses = {item["status"] for item in results}
     if "CONTRADICTED" in statuses:
         overall = "CONTRADICTED"
@@ -302,6 +358,7 @@ def fact_check_candidate(
     else:
         overall = "VERIFIED"
     return {"status": overall, "claims": results, "provenance_preserved": True,
+            "provenance_complete": all(item["provenance_complete"] for item in results),
             "network_calls": 0, "writes": 0}
 
 
@@ -317,7 +374,6 @@ def _base_action_score(action: dict[str, Any], blocker: bool) -> float:
 def _rank_actions(actions: list[dict[str, Any]], context: dict[str, Any], *, use_memory: bool) -> list[dict[str, Any]]:
     blocker = bool(context.get("blocker"))
     recalls = list(context.get("recall") or []) if use_memory else []
-    outcomes = list(context.get("outcomes") or []) if use_memory else []
     ranked: list[dict[str, Any]] = []
     for action in actions:
         aid = str(action.get("id") or "")
@@ -331,16 +387,6 @@ def _rank_actions(actions: list[dict[str, Any]], context: dict[str, Any], *, use
             delta = weight if effect in {"recommend", "prefer", "support"} else -2.0 * weight
             score += delta
             influence.append({"type": "recall", "node_id": memory.get("node_id"), "delta": delta})
-        memory_ids = set(action.get("memory_ids") or [])
-        for outcome in outcomes:
-            overlap = memory_ids.intersection(outcome.get("applied_node_ids") or [])
-            if not overlap or outcome.get("application") != "applied":
-                continue
-            result = outcome.get("result")
-            delta = {"success": 0.5, "failure": -0.75, "mixed": -0.15}.get(result, 0.0)
-            score += delta
-            influence.append({"type": "outcome", "node_ids": sorted(overlap), "result": result,
-                              "delta": delta, "evidence_digest": outcome.get("evidence_digest")})
         ranked.append({"action": action, "score": round(score, 6), "influence": influence})
     ranked.sort(key=lambda row: (-row["score"], str(row["action"].get("id") or "")))
     return ranked
@@ -351,22 +397,28 @@ def select_next_best_action(actions: list[dict[str, Any]], context: dict[str, An
     if not actions:
         return {"action_id": None, "next_best_action": None, "why": "no actionable input",
                 "evidence": [], "confidence": "low", "blocker": context.get("blocker"),
-                "counterfactual_without_recall": None, "recall_changed_decision": False}
+                "counterfactual_without_recall": None, "recall_changed_decision": False,
+                "outcome_signals": list(context.get("outcomes") or []),
+                "outcome_used_for_ranking": False}
     ranked = _rank_actions(actions, context, use_memory=True)
     baseline = _rank_actions(actions, context, use_memory=False)
     chosen = ranked[0]
     margin = chosen["score"] - (ranked[1]["score"] if len(ranked) > 1 else chosen["score"] - 1.0)
     confidence = "high" if margin >= 0.75 else "medium" if margin >= 0.25 else "low"
-    evidence = chosen["influence"]
+    evidence = [item for row in ranked for item in row["influence"]]
+    outcome_signals = [dict(item) for item in context.get("outcomes") or []]
     action = chosen["action"]
     return {
         "action_id": action.get("id"),
         "next_best_action": action.get("action"),
-        "why": "highest bounded value after blocker, risk, recall, and outcome signals",
+        "why": "highest bounded value after blocker, risk, and recall signals",
         "evidence": evidence,
         "confidence": confidence,
         "blocker": context.get("blocker"),
         "counterfactual_without_recall": baseline[0]["action"].get("id"),
         "recall_changed_decision": baseline[0]["action"].get("id") != action.get("id"),
+        "outcome_signals": outcome_signals,
+        "outcome_used_for_ranking": False,
+        "outcome_note": "signal_only; human or caller must convert evidence into current state/blocker",
         "ranked": [{"action_id": row["action"].get("id"), "score": row["score"]} for row in ranked],
     }

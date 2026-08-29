@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import sqlite3
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -14,12 +13,21 @@ _CONSTRAINT_SUBTYPES = {"제약", "원칙", "constraint", "policy"}
 _FAILURE_SUBTYPES = {"버그패턴", "교훈", "failure", "lesson"}
 
 
+def _sidecar_safe(path: str | os.PathLike[str] | None) -> bool:
+    """Fail closed when SQLite would have to create a missing WAL shared-memory file."""
+    if not path:
+        return False
+    value = os.path.abspath(str(path))
+    return not (os.path.exists(value + "-wal") and not os.path.exists(value + "-shm"))
+
+
 def _git(repo: Path, *args: str) -> tuple[int, str]:
     env = dict(os.environ)
     env["GIT_OPTIONAL_LOCKS"] = "0"
     try:
         proc = subprocess.run(
-            ["git", "--no-optional-locks", *args], cwd=str(repo), env=env,
+            ["git", "--no-optional-locks", "-c", "core.fsmonitor=false",
+             "-c", "core.untrackedCache=false", *args], cwd=str(repo), env=env,
             text=True, encoding="utf-8", errors="replace", capture_output=True,
             timeout=10, check=False,
         )
@@ -58,96 +66,6 @@ def snapshot_repository(repo_path: str | os.PathLike[str], *, test_state: str | 
     }
 
 
-def _tokens(text: str) -> set[str]:
-    return {token.casefold() for token in str(text or "").replace("\n", " ").split() if len(token) >= 2}
-
-
-def _read_superseded_ro(ledger_path: str | os.PathLike[str] | None, query: str, limit: int = 5) -> list[dict[str, Any]]:
-    """Read only relevant historical decisions; never applies schema or creates files."""
-    if not ledger_path or not os.path.exists(ledger_path):
-        return []
-    con = None
-    try:
-        con = sqlite3.connect("file:%s?mode=ro" % os.path.abspath(str(ledger_path)), uri=True)
-        cols = {row[1] for row in con.execute("PRAGMA table_info(nodes)")}
-        if not {"node_id", "sentence", "state"} <= cols:
-            return []
-        subtype = "semantic_subtype" if "semantic_subtype" in cols else "NULL"
-        supersedes = "supersedes" if "supersedes" in cols else "NULL"
-        rows = con.execute(
-            "SELECT node_id,sentence,state,%s,%s FROM nodes ORDER BY node_id" % (subtype, supersedes)
-        ).fetchall()
-    except sqlite3.Error:
-        return []
-    finally:
-        if con is not None:
-            con.close()
-    replaced_by = {row[4]: row[0] for row in rows if row[4]}
-    qtokens = _tokens(query)
-    found = []
-    for node_id, sentence, state, semantic_subtype, _supersedes in rows:
-        if state in (None, "active", "confirmed") or semantic_subtype not in _DECISION_SUBTYPES:
-            continue
-        stokens = _tokens(sentence)
-        if qtokens and not qtokens.intersection(stokens):
-            continue
-        found.append({
-            "node_id": node_id,
-            "claim": str(sentence or "")[:240],
-            "semantic_subtype": semantic_subtype,
-            "superseded": True,
-            "superseded_by": replaced_by.get(node_id),
-            "source_ref": "memory:%s" % str(node_id)[-8:],
-        })
-    return found[:limit]
-
-
-def _read_outcomes_ro(home: str | os.PathLike[str] | None, limit: int = 10) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Read outcome rows and aggregate without calling schema-applying helpers."""
-    if not home:
-        return [], {"overall": {"traces": 0, "outcomes": 0, "pending_traces": 0}, "signal_only": True}
-    path = os.path.join(str(home), "recall_trace.sqlite")
-    if not os.path.exists(path):
-        return [], {"overall": {"traces": 0, "outcomes": 0, "pending_traces": 0}, "signal_only": True}
-    con = None
-    try:
-        con = sqlite3.connect("file:%s?mode=ro" % os.path.abspath(path), uri=True)
-        tables = {row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        trace_count = (con.execute("SELECT COUNT(*) FROM recall_traces").fetchone()[0]
-                       if "recall_traces" in tables else 0)
-        if "recall_run_outcomes" not in tables:
-            return [], {"overall": {"traces": trace_count, "outcomes": 0,
-                                      "pending_traces": trace_count}, "signal_only": True}
-        rows = con.execute(
-            "SELECT outcome_id,trace_id,applied_node_ids_json,application,result,"
-            "evidence_digest,evidence_kind,trust_tier,supersedes,ts "
-            "FROM recall_run_outcomes ORDER BY ts,outcome_id"
-        ).fetchall()
-    except sqlite3.Error:
-        return [], {"overall": {"traces": 0, "outcomes": 0, "pending_traces": 0}, "signal_only": True}
-    finally:
-        if con is not None:
-            con.close()
-    superseded_ids = {row[8] for row in rows if row[8]}
-    results = []
-    linked = set()
-    for row in rows:
-        if row[8] or row[0] in superseded_ids:
-            continue
-        try:
-            nodes = json.loads(row[2]) if row[2] else []
-        except (TypeError, json.JSONDecodeError):
-            nodes = []
-        linked.add(row[1])
-        results.append({"outcome_id": row[0], "trace_id": row[1], "applied_node_ids": nodes,
-                        "application": row[3], "result": row[4], "evidence_digest": row[5],
-                        "evidence_kind": row[6], "trust_tier": row[7], "ts": row[9]})
-    summary = {"overall": {"traces": trace_count, "outcomes": len(results),
-                            "pending_traces": max(0, trace_count - len(linked))},
-               "signal_only": True}
-    return results[-limit:] if limit else results, summary
-
-
 def _item_size(item: Any) -> int:
     return len(json.dumps(item, ensure_ascii=False, sort_keys=True))
 
@@ -161,6 +79,8 @@ def _source_item(raw: dict[str, Any], *, superseded: bool = False) -> dict[str, 
         "relevance": raw.get("relevance"),
         "superseded": bool(raw.get("superseded", superseded)),
         "superseded_by": raw.get("superseded_by"),
+        "evidence_refs": list(raw.get("evidence_refs") or []),
+        "evidence_count": int(raw.get("evidence_count") or 0),
         "source_ref": raw.get("source_ref") or (
             "memory:%s" % (raw.get("display_id") or str(node_id)[-8:]) if node_id else "memory:unknown"
         ),
@@ -199,6 +119,7 @@ def build_catchup(
     decisions = [item for item in unique if item.get("semantic_subtype") in _DECISION_SUBTYPES]
     constraints = [item for item in unique if item.get("semantic_subtype") in _CONSTRAINT_SUBTYPES]
     failures = [item for item in unique if item.get("semantic_subtype") in _FAILURE_SUBTYPES]
+    failures = failures[:5]
     classified = {id(item) for item in decisions + constraints + failures}
     general = [item for item in unique if id(item) not in classified]
 
@@ -215,7 +136,7 @@ def build_catchup(
                 unresolved.append("LIVE_MEMORY_CONFLICT: live repository is dirty; memory says clean")
                 break
     for outcome in outcomes:
-        if outcome.get("result") == "failure":
+        if outcome.get("result") == "failure" and not outcome.get("overturned"):
             failures.append({"claim": "linked outcome failure", "semantic_subtype": "failure",
                              "source_ref": "outcome:%s" % outcome.get("outcome_id", outcome.get("trace_id")),
                              "evidence_digest": outcome.get("evidence_digest"), "superseded": False})
@@ -237,11 +158,21 @@ def build_catchup(
     else:
         nba = dict(next_action)
 
-    current_state = dict(repo_state)
-    what_changed = list(repo_state.get("changed") or [])
+    current_state = {key: value for key, value in repo_state.items() if key != "changed"}
+    raw_changed = list(repo_state.get("changed") or [])
+    what_changed: list[str] = []
+    changed_omitted = 0
+    changed_used = 0
+    for item in raw_changed:
+        size = _item_size(item)
+        if changed_used + size <= max(0, max_chars // 4):
+            what_changed.append(str(item))
+            changed_used += size
+        else:
+            changed_omitted += 1
     base_used = _item_size(current_state) + _item_size(what_changed) + _item_size(unresolved) + _item_size(nba)
     used = base_used
-    omitted = 0
+    omitted = changed_omitted
     kept: dict[str, list[Any]] = {
         "decisions": [], "constraints": [], "history": [], "failures": [], "general": []
     }
@@ -263,7 +194,7 @@ def build_catchup(
             used += size
         else:
             omitted += 1
-    return {
+    result: dict[str, Any] = {
         "query": query,
         "current_state": current_state,
         "what_changed": what_changed,
@@ -273,11 +204,50 @@ def build_catchup(
         "known_failures": kept["failures"],
         "unresolved": unresolved,
         "next_best_action": nba,
-        "budget": {"max_chars": max_chars, "used_chars": min(used, max_chars),
-                   "omitted_count": omitted},
+        "budget": {"max_chars": max_chars, "used_chars": used,
+                   "omitted_count": omitted, "hard_cap_applied": bool(omitted)},
         "safety": {"writes": 0, "ledger_mutation": False, "candidate_write": False,
                    "approval_write": False, "outcome_write": False, "git_write": False},
     }
+    context_keys = (
+        "current_state", "what_changed", "relevant_memory", "decisions",
+        "known_constraints", "known_failures", "unresolved", "next_best_action",
+    )
+
+    def context_size() -> int:
+        return _item_size({key: result[key] for key in context_keys})
+
+    if context_size() > max_chars:
+        result["what_changed"] = []
+        omitted += len(what_changed)
+    if context_size() > max_chars:
+        result["current_state"] = {
+            "available": current_state.get("available"),
+            "repo": str(current_state.get("repo") or "")[-100:],
+            "branch": current_state.get("branch"),
+            "head": str(current_state.get("head") or "")[:12],
+            "clean": current_state.get("clean"),
+            "test_state": str(current_state.get("test_state") or "")[:80],
+        }
+    for key in ("known_failures", "relevant_memory", "known_constraints", "decisions"):
+        while result[key] and context_size() > max_chars:
+            result[key].pop()
+            omitted += 1
+    if context_size() > max_chars:
+        result["unresolved"] = [str(item)[:100] for item in result["unresolved"][:1]]
+        result["next_best_action"] = {
+            "next_best_action": str(nba.get("next_best_action") or "")[:100],
+            "confidence": nba.get("confidence", "low"),
+        }
+    actual = context_size()
+    result["budget"] = {
+        "max_chars": max_chars,
+        "used_chars": actual,
+        "omitted_count": omitted,
+        "hard_cap_applied": bool(omitted),
+        "cap_satisfied": actual <= max_chars,
+    }
+    return result
 
 
 def collect_catchup(
@@ -294,11 +264,16 @@ def collect_catchup(
     del now  # deterministic caller clock reserved for future display; no implicit current time
     repo_state = snapshot_repository(repo_path, test_state=test_state)
     recall_result: dict[str, Any] = {"relevant_nodes": []}
-    if ledger_path and os.path.exists(ledger_path):
+    superseded: list[dict[str, Any]] = []
+    ledger_readable = bool(
+        ledger_path and os.path.exists(ledger_path) and _sidecar_safe(ledger_path)
+    )
+    if ledger_readable:
         from binggupack.studio.read_model import (
             collect_memory_detail_snapshot,
             collect_memory_list_snapshot,
             collect_recall_snapshot,
+            collect_superseded_decision_snapshot,
         )
 
         snapshot = collect_recall_snapshot(str(ledger_path), query, limit=20)
@@ -319,9 +294,20 @@ def collect_catchup(
             if any(word in claim for word in ("repository", "repo ", "저장소", "branch", "브랜치")):
                 enriched.append(dict(item))
         recall_result = {"relevant_nodes": enriched, "confidence": snapshot.get("confidence", 0.0)}
-    superseded = _read_superseded_ro(ledger_path, query)
+        superseded = collect_superseded_decision_snapshot(str(ledger_path), query, limit=5)
     home = os.path.dirname(os.path.abspath(str(ledger_path))) if ledger_path else None
-    outcomes, read_summary = _read_outcomes_ro(home)
+    trace_path = os.path.join(home, "recall_trace.sqlite") if home else None
+    if trace_path and os.path.exists(trace_path) and _sidecar_safe(trace_path):
+        from binggupack.pack.outcome_attribution import aggregate_run_outcomes, list_run_outcomes_ro
+
+        outcomes = list_run_outcomes_ro(home=home, limit=10)
+        read_summary = aggregate_run_outcomes(home=home)
+    else:
+        outcomes = []
+        read_summary = {
+            "overall": {"traces": 0, "outcomes": 0, "pending_traces": 0},
+            "signal_only": True,
+        }
     return build_catchup(
         repo_state=repo_state,
         recall_result=recall_result,
@@ -378,4 +364,20 @@ def render_catchup(result: dict[str, Any]) -> str:
     lines.extend(["", "context: %s/%s chars; omitted=%s" % (
         budget.get("used_chars", 0), budget.get("max_chars", 0), budget.get("omitted_count", 0)
     )])
-    return "\n".join(lines) + "\n"
+    rendered = "\n".join(lines) + "\n"
+    max_chars = int(budget.get("max_chars") or 0)
+    if max_chars and len(rendered) > max_chars:
+        fixed = ["# BingguPack catchup (read-only)"]
+        first_lines = []
+        for heading, content in sections:
+            fixed.extend(["", "## " + heading])
+            first_lines.append(content[0] if content else "- none")
+        fixed.extend(["", "context: capped; omitted=%s" % budget.get("omitted_count", 0)])
+        fixed_size = len("\n".join(fixed)) + len(first_lines) + 1
+        per_section = max(4, (max_chars - fixed_size) // max(1, len(first_lines)))
+        compact = ["# BingguPack catchup (read-only)"]
+        for (heading, _content), first in zip(sections, first_lines):
+            compact.extend(["", "## " + heading, first[:per_section]])
+        compact.extend(["", "context: capped; omitted=%s" % budget.get("omitted_count", 0)])
+        rendered = "\n".join(compact) + "\n"
+    return rendered
