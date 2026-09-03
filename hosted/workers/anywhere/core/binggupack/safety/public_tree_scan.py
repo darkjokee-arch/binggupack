@@ -316,6 +316,10 @@ PUBLIC_IGNORE = ["*.sqlite", "*.db", "*_graph.yaml", "reports/", "reviews/", "ca
                  # 자기 코드의 컴파일 사본이라 원본을 이미 scan 했고, `exports.hasSecret = ...` 같은
                  # 심볼 재export 가 secret_kv 로 오탐된다(dist/ 와 동일 처분).
                  "dist-parity/", "*/dist-parity/*",
+                 # 코드그래프 산출물(graphify · .git/info/exclude 대상·미커밋). graph.json 이 8MB+ 라
+                 # 512KB 를 넘겨 content_size_skip → fail-closed BLOCK 을 만든다(2026-08-29 도입 후
+                 # 게이트가 계속 빨갛던 원인). 자기 코드의 파생 색인이라 원본은 이미 scan 됐다(dist/ 와 동일 처분).
+                 "graphify-out/", "*/graphify-out/*",
                  # gitignore 대상 비공개·미커밋 라이브 데이터 (path_private_pack_data 자기탐지 회피)
                  "hosted/workers/data/", "data/packs.json",
                  # 서드파티 의존성(gitignore·미커밋) — CI/로컬에서 npm install 로 생성됨. 자기 코드 아님 → scan 제외.
