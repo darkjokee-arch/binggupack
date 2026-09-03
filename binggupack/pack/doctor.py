@@ -220,6 +220,9 @@ def _real_tree_scan(tree_root):
               "tmp/", "__pycache__/", "*.bak_*",
               # Python 빌드 산출물(pip install/-m build). run_all 의 PUBLIC_IGNORE 와 정합.
               "dist/", "*/dist/*", "build/", "*/build/*", "*.egg-info/*", "*/*.egg-info/*",
+              # 코드그래프 산출물(graphify · 미커밋). graph.json 8MB+ 가 512KB 를 넘겨
+              # content_size_skip → fail-closed BLOCK. run_all 의 PUBLIC_IGNORE 와 정합.
+              "graphify-out/", "*/graphify-out/*",
               # gitignore 대상 비공개·미커밋 라이브 데이터 (path_private_pack_data 자기탐지 회피)
               "hosted/workers/data/", "data/packs.json"]
     return scan_public_tree(tree_root, ignore_globs=ignore)
