@@ -271,7 +271,8 @@ def _selftest():
     build_pack("쓰기", docs, out_dir=out)  # 반환 미사용·파일 write side-effect만 검증
     chk("F9 5파일 write", os.path.exists(os.path.join(out, "manifest.json"))
         and os.path.exists(os.path.join(out, "nodes.jsonl")))
-    mani = json.load(open(os.path.join(out, "manifest.json"), encoding="utf-8"))
+    with open(os.path.join(out, "manifest.json"), encoding="utf-8") as handle:
+        mani = json.load(handle)
     chk("F9b 기록 manifest 재검증 PASS", PV.validate_pack(mani)["verdict"] in ("PASS", "REVIEW_ONLY"))
 
     # ── export_cloud_text (역할분담 A — 클라우드 ingest 입력 번들) ──

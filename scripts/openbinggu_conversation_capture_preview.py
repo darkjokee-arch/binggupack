@@ -8,6 +8,7 @@
 
 CLI: python openbinggu_conversation_capture_preview.py --selftest
 """
+from contextlib import suppress
 import hashlib
 import os
 import re
@@ -331,10 +332,8 @@ def _fs_snapshot(roots):
         for dp, _, fns in os.walk(r):
             for fn in fns:
                 p = os.path.join(dp, fn)
-                try:
+                with suppress(OSError):
                     snap[p] = os.path.getmtime(p)
-                except OSError:
-                    pass
     return snap
 
 
@@ -540,9 +539,9 @@ GOLDEN_EXPLICIT = True
 # 골든이 생성 환경에 따라 달라지면 골든 자격이 없으므로 생성 시 강제 OFF 로 고정한다(결정성).
 GOLDEN_SEMANTIC_OFF = True
 KNOWN_DIVERGENCE = [
-    "ts 에 SSOT 판단-veto(capclf.classify → not_judgment:*) 미구현 — hosted 경로가 로컬보다 느슨하다. "
+    "ts 에 SSOT 판단-veto(capclf.classify → not_judgment:*) 미구현 — hosted 경로가 로컬보다 느슨하다. " +
     "분류기 전체 포팅이 필요해 본 골든의 대조 범위 밖(골든은 explicit=True 로 이 축을 고정).",
-    "ts 에 semantic 도장 층(binggu_canonical_semantic.suggest_label_kind) 미구현 — py 는 종결어 규칙 위에 "
+    "ts 에 semantic 도장 층(binggu_canonical_semantic.suggest_label_kind) 미구현 — py 는 종결어 규칙 위에 " +
     "의미 기반 label_kind 를 덮어쓴다. 골든은 BINGGU_SEMANTIC_OFF=1 로 규칙 층만 대조한다.",
 ]
 GOLDEN_NOTES = ("합성 전용 · 운영 원문 0 · PII/secret 입력 제외(구조 backstop 담당) · "

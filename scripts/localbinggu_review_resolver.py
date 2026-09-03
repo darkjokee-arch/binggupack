@@ -20,13 +20,20 @@ ROOT = os.path.dirname(HERE)                         # <repo>
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)   # binggupack 패키지 import 경로
 
-from binggupack.review.resolver import *  # noqa: E402,F401,F403
 from binggupack.review.resolver import (  # noqa: E402,F401  (전체 명시 re-export — _ 심볼 포함)
     APPROVE,
     HOLD_DECISIONS,
     resolve,
     items_from_plan,
     _selftest,
+)
+
+__all__ = (
+    'APPROVE',
+    'HOLD_DECISIONS',
+    'resolve',
+    'items_from_plan',
+    '_selftest',
 )
 
 BASE = Path(__file__).resolve().parent.parent

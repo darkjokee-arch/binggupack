@@ -11,6 +11,7 @@ TS index.ts 20000(S6 축소)는 설계상 다름. 현재 의도값 고정 검사
 
 CLI: python binggupack_constants_parity_selftest.py [--selftest]
 """
+from pathlib import Path
 import os
 import re
 import sys
@@ -86,7 +87,7 @@ def run_selftest():
         harness = os.path.join(BASE, "hosted", "workers", "parity", "capture_preview_parity.ts")
         if not os.path.exists(harness):
             return False, "parity 하네스 없음"
-        src = open(harness, "r", encoding="utf-8").read()
+        src = Path(harness).read_text(encoding='utf-8')
         ts_points = "capture_preview_golden.json" in src and '"parity"' in src
         py_points = "capture_preview_golden.json" in srcs["py_preview"]
         return (ts_points and py_points and os.path.exists(gp),

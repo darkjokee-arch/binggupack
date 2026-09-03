@@ -23,11 +23,11 @@ for _p in (ROOT, HERE):
     if _p not in sys.path:
         sys.path.insert(0, _p)   # binggupack 패키지 + scripts/ 형제 import 경로
 
-from binggupack.review.session_close import *  # noqa: E402,F401,F403
 from binggupack.review.session_close import (  # noqa: E402,F401  (전체 명시 re-export — _ 심볼 포함)
     _home,
     _load_close_phrases,
     register_close_phrase,
+    register_close_suffix,
     detect_session_close,
     _build_preview,
     _build_outcome_candidates,
@@ -39,6 +39,24 @@ from binggupack.review.session_close import (  # noqa: E402,F401  (전체 명시
     _fmt_rate,
     process,
     _selftest,
+)
+
+__all__ = (
+    '_home',
+    '_load_close_phrases',
+    'register_close_phrase',
+    'register_close_suffix',
+    'detect_session_close',
+    '_build_preview',
+    '_build_outcome_candidates',
+    '_RoLedger',
+    '_ledger_path',
+    '_build_governance',
+    'build_close_summary',
+    'render_close_md',
+    '_fmt_rate',
+    'process',
+    '_selftest',
 )
 
 

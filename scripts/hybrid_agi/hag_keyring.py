@@ -28,7 +28,9 @@ CLI: python hag_keyring.py --selftest  ->  'GATE: GO' | 'GATE: STOP'
 """
 from __future__ import annotations
 
+from contextlib import suppress
 import hashlib
+import importlib
 import os
 import secrets
 import sys
@@ -88,11 +90,9 @@ def _write_secret_atomic(path: str, secret: str) -> None:
         os.replace(tmp, path)
     except BaseException:
         # 실패 시 temp 정리(부분 파일 잔존 방지).
-        try:
+        with suppress(OSError):
             if os.path.exists(tmp):
                 os.remove(tmp)
-        except OSError:
-            pass
         raise
     _harden_permissions(path)
 
@@ -219,7 +219,7 @@ def _selftest():
     _here = os.path.dirname(os.path.abspath(__file__))
     if _here not in sys.path:
         sys.path.insert(0, _here)
-    import hag_orchestrator as orch_mod
+    orch_mod = importlib.import_module("hag_orchestrator")
 
     orch_secret = get_or_create_secret(home_a)  # 사용자별 키
     led_path = os.path.join(root, "blind_orch.sqlite")

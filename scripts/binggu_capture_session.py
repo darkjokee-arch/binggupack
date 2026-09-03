@@ -15,11 +15,16 @@ ROOT = os.path.dirname(HERE)                         # <repo>
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)   # binggupack 패키지 import 경로
 
-from binggupack.capture.session import *  # noqa: E402,F401,F403
 from binggupack.capture.session import (  # noqa: E402,F401  (전체 명시 re-export)
     CaptureSession,
     CaptureBuffer,
     _selftest,
+)
+
+__all__ = (
+    'CaptureSession',
+    'CaptureBuffer',
+    '_selftest',
 )
 
 if __name__ == "__main__":

@@ -288,6 +288,7 @@ def _explain_summary(ledger, nid, state):
         if jt.get("found"):
             return jt.get("summary"), float(jt.get("confidence", 0.0))
     except Exception:
+        # Trace summaries are optional; callers receive the explicit zero-confidence fallback.
         pass
     return None, 0.0
 

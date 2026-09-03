@@ -23,10 +23,13 @@ for _p in (ROOT, HERE):
     if _p not in sys.path:
         sys.path.insert(0, _p)   # binggupack 패키지 + scripts/ 형제 import 경로
 
-from binggupack.pack.recall_trace import *  # noqa: E402,F401,F403
 from binggupack.pack.recall_trace import (  # noqa: E402,F401  (계약 심볼 명시 re-export — 문서 겸용)
     VALID_VERDICTS,
+    AI_STAMP_ACTOR,
     REASON_CODES,
+    NOT_APPLIED_CODE,
+    VALID_SITUATIONS,
+    classify_situation,
     _SIGNAL_NOTE,
     _DRIFT_N_MIN,
     _DRIFT_RATIO,
@@ -44,6 +47,14 @@ from binggupack.pack.recall_trace import (  # noqa: E402,F401  (계약 심볼 �
     trace_from_why_search,
     trace_from_preflight,
     record_outcome,
+    auto_observe_adoption,
+    list_miss_candidates,
+    auto_observe_enabled,
+    set_auto_observe_flag,
+    AUTOINJECT_JUDGE_TOP_N,
+    AUTOINJECT_JUDGE_REL_MIN,
+    AUTOINJECT_KINDS,
+    AUTOINJECT_PENDING_TTL_DAYS,
     list_pending,
     count_pending,
     pending_stats,
@@ -51,6 +62,7 @@ from binggupack.pack.recall_trace import (  # noqa: E402,F401  (계약 심볼 �
     _load_review_snapshot,
     mark_by_index,
     aggregate,
+    SNAPSHOT_SCHEMA,
     _selftest,
 )
 
@@ -62,6 +74,50 @@ from binggupack.pack.recall_trace import (  # noqa: E402,F401  (계약 심볼 �
 #   그마저 전부 사람 도장 · AI 도장 0건). 정본을 고치고 사본을 안 고친 전형이다.
 #   → 목록은 계약 문서로 남기되, 빠진 `_` 심볼은 여기서 자동 보강한다(setdefault 라 위 명시분 불변).
 from binggupack.pack import recall_trace as _rt_src  # noqa: E402
+
+__all__ = (
+    'VALID_VERDICTS',
+    'AI_STAMP_ACTOR',
+    'REASON_CODES',
+    'NOT_APPLIED_CODE',
+    'VALID_SITUATIONS',
+    'classify_situation',
+    '_SIGNAL_NOTE',
+    '_DRIFT_N_MIN',
+    '_DRIFT_RATIO',
+    'trace_store_path',
+    '_open_store',
+    'review_snapshot_path',
+    '_flag_path',
+    'trace_enabled',
+    'set_trace_flag',
+    '_sha16',
+    '_scrub_node',
+    '_trace_id',
+    'latest_session_id',
+    'record_trace',
+    'trace_from_why_search',
+    'trace_from_preflight',
+    'record_outcome',
+    'auto_observe_adoption',
+    'list_miss_candidates',
+    'auto_observe_enabled',
+    'set_auto_observe_flag',
+    'AUTOINJECT_JUDGE_TOP_N',
+    'AUTOINJECT_JUDGE_REL_MIN',
+    'AUTOINJECT_KINDS',
+    'AUTOINJECT_PENDING_TTL_DAYS',
+    'list_pending',
+    'count_pending',
+    'pending_stats',
+    'save_review_snapshot',
+    '_load_review_snapshot',
+    'mark_by_index',
+    'aggregate',
+    'SNAPSHOT_SCHEMA',
+    '_selftest',
+    '_rt_src',
+)
 for _name in dir(_rt_src):
     if _name.startswith("_") and not _name.startswith("__"):
         globals().setdefault(_name, getattr(_rt_src, _name))

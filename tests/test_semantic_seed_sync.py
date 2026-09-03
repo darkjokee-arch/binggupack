@@ -106,14 +106,17 @@ def test_check_fail_on_missing_source(tmp_path, monkeypatch):
 def test_write_mirrors_source_to_fixture_and_check_passes(tmp_path, monkeypatch):
     # source canonical, fixture drift → --write 후 fixture 가 source 와 동일해지고 --check PASS
     _setup(tmp_path, monkeypatch, {}, {"seed_canonical_5.jsonl": b'{"a": 999}\n'})
-    assert S.write(verbose=False) is True
-    assert S.check(verbose=False) is True
+    wrote = S.write(verbose=False)
+    checked = S.check(verbose=False)
+    assert wrote is True
+    assert checked is True
 
 
 def test_write_refuses_non_canonical_source(tmp_path, monkeypatch):
     # source 가 CRLF(canonical 위반)면 --write 중단(fixture 오염 방지)
     _setup(tmp_path, monkeypatch, {"seed_canonical_5.jsonl": b'{"a": 1}\r\n'}, {})
-    assert S.write(verbose=False) is False
+    wrote = S.write(verbose=False)
+    assert wrote is False
 
 
 def test_empty_file_detected():

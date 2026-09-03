@@ -220,7 +220,8 @@ def load_state():
     p = _state_path()
     if os.path.exists(p):
         try:
-            return json.load(open(p, encoding="utf-8"))
+            with open(p, encoding="utf-8") as handle:
+                return json.load(handle)
         except Exception:
             return {}
     return {}
@@ -396,6 +397,8 @@ def _selftest():
         con = sqlite3.connect(ledger)
         from binggupack.storage.schema import apply_schema  # 정본 스키마 위임(인라인 CREATE TABLE 제거)
         apply_schema(con)
+        check(isinstance(_PACK_HEADER, list) and bool(_PACK_HEADER),
+              "T0 legacy _PACK_HEADER import-time snapshot 보존")
 
         def add(nid, sent, speaker="owner", state="active"):
             con.execute("INSERT INTO nodes(node_id,node_type,sentence,state,semantic_subtype,speaker)"
@@ -430,7 +433,11 @@ def _selftest():
         # T7 write_text 파일 생성
         wt = os.path.join(tmp, "pack.txt")
         sync(write_text=wt)
-        check(os.path.exists(wt) and "새 판단" in open(wt, encoding="utf-8").read(),
+        written_pack = ""
+        if os.path.exists(wt):
+            with open(wt, encoding="utf-8") as handle:
+                written_pack = handle.read()
+        check(os.path.exists(wt) and "새 판단" in written_pack,
               "T7 write_text 팩 파일 생성")
         # T8 ledger read-only(mtime 불변)
         m0 = os.path.getmtime(ledger)
@@ -455,7 +462,8 @@ def _selftest():
               "Td4 델타 텍스트 = 신규만(기존 문장 미포함)")
         wd = os.path.join(tmp, "delta.txt")
         sync_delta(write_text=wd)
-        dtxt = open(wd, encoding="utf-8").read()
+        with open(wd, encoding="utf-8") as handle:
+            dtxt = handle.read()
         check("새 원칙" in dtxt and "결론부터" not in dtxt and "유연함" not in dtxt,
               "Td5 write_text 델타 파일 = 신규만")
         # confirm_delta → uploaded 병합 → NO_CHANGE
@@ -522,7 +530,8 @@ def _selftest():
         rr = record_pack_id("11111111-2222-3333-4444-555555555555", baseline=True)
         check(rr["status"] == "OK" and rr["absorbed"] == 6,
               "Tn4 record_pack_id → config 기록 + 현재 6문장 전량 흡수(생성 시 full ingest 가정)")
-        cfg = json.load(open(cfgp, encoding="utf-8"))
+        with open(cfgp, encoding="utf-8") as handle:
+            cfg = json.load(handle)
         check(cfg["pack_id"].startswith("11111111") and cfg["auto_create"] is False,
               "Tn5 config pack_id 기록·auto_create 해제")
         rn3 = sync_delta()

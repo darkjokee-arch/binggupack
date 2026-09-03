@@ -2,6 +2,7 @@
 """Studio Memory Explorer 회귀 — mode=ro 목록/detail/lexical recall · exact-ID · provenance redaction ·
 semantic cache/network 0 · read-only 불변. 전 테스트 임시 ledger 격리 · 운영 ~/.binggupack 미접촉.
 """
+from contextlib import suppress
 import hashlib
 import json
 import os
@@ -64,11 +65,9 @@ def _snapshot(home):
             if f.endswith(_SIDECAR):
                 continue
             p = os.path.join(root, f)
-            try:
+            with suppress(OSError):
                 with open(p, "rb") as fh:
                     snap[os.path.relpath(p, home)] = hashlib.sha256(fh.read()).hexdigest()
-            except OSError:
-                pass
     return snap
 
 

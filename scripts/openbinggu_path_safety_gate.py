@@ -16,7 +16,6 @@ ROOT = os.path.dirname(HERE)                         # <repo>
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)   # binggupack 패키지 import 경로
 
-from binggupack.safety.path_safety import *  # noqa: E402,F401,F403
 from binggupack.safety.path_safety import (  # noqa: E402,F401  (전체 명시 re-export)
     classify_path,
     main,
@@ -25,6 +24,16 @@ from binggupack.safety.path_safety import (  # noqa: E402,F401  (전체 명시 r
     _DENY,
     _RE_8_3,
     _RE_DRIVE,
+)
+
+__all__ = (
+    'classify_path',
+    'main',
+    '_path_id',
+    '_selftest',
+    '_DENY',
+    '_RE_8_3',
+    '_RE_DRIVE',
 )
 
 if __name__ == "__main__":

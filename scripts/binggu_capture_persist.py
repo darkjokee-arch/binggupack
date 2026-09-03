@@ -11,6 +11,7 @@
 
 hook은 등록하지 않음(미래 별도 GO). 본 모듈은 should_capture 게이트 + 영속 store만 제공.
 """
+from contextlib import suppress
 import hashlib
 import json
 import os
@@ -288,10 +289,8 @@ class PersistentCaptureBuffer:
         c = sqlite3.connect(str(self.db_path))
         # ① 동시 접근 대비 — 다른 프로세스(MCP recall 등)가 잠근 순간 즉시 실패하지 않게.
         #    journal_mode 는 건드리지 않는다(운영 buffer 파일 포맷을 바꾸는 영구 변경 회피).
-        try:
+        with suppress(sqlite3.Error):
             c.execute("PRAGMA busy_timeout=%d" % CAPTURE_BUSY_TIMEOUT_MS)
-        except sqlite3.Error:
-            pass
         c.execute(
             """CREATE TABLE IF NOT EXISTS capture_candidates(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1055,7 +1054,7 @@ def _selftest():
         scope2.sem_preview_flag.unlink()
 
         # T20 캐시 hit: preview ON 2회 → SemanticShadow 1회만 생성(centroid 재계산 병목 제거)
-        import binggu_semantic_shadow as bss
+        bss = sys.modules["binggu_semantic_shadow"]
         bss._SHADOW_CACHE.clear()
         build_count = {"n": 0}
         _orig_shadow = bss.SemanticShadow

@@ -19,6 +19,7 @@
   · debounce — 옵트인 상태라도 min_interval_sec(기본 300s) 안의 연속 save 는 스킵(throttle).
     상태는 <home>/.claude/state/person_nrt_last.json 하나에만 기록(운영 장부·벤더 미접촉).
 """
+from contextlib import suppress
 import json
 import sys
 import time
@@ -50,7 +51,6 @@ def _run_sync(daily=True):
 def main():
     LOG.parent.mkdir(parents=True, exist_ok=True)
     old = sys.stdout, sys.stderr
-    rc = 1
     with open(LOG, "a", encoding="utf-8") as f:
         sys.stdout = sys.stderr = f
         try:
@@ -90,20 +90,16 @@ def near_real_time_config():
 
 
 def _nrt_last_run():
-    try:
+    with suppress((OSError, ValueError, TypeError)):
         if _NRT_STATE.is_file():
             return float(json.loads(_NRT_STATE.read_text(encoding="utf-8")).get("last_run", 0))
-    except (OSError, ValueError, TypeError):
-        pass
     return 0.0
 
 
 def _nrt_mark_run(ts):
-    try:
+    with suppress(OSError):
         _NRT_STATE.parent.mkdir(parents=True, exist_ok=True)
         _NRT_STATE.write_text(json.dumps({"last_run": ts}), encoding="utf-8")
-    except OSError:
-        pass
 
 
 def run_on_save_trigger(now=None, force_config=None, do_sync=None):

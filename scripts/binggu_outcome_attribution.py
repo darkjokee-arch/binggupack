@@ -17,7 +17,6 @@ for _p in (ROOT, HERE):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from binggupack.pack.outcome_attribution import *  # noqa: E402,F401,F403
 from binggupack.pack.outcome_attribution import (  # noqa: E402,F401 (전체 명시 re-export)
     VALID_APPLICATION,
     VALID_RESULT,
@@ -28,12 +27,32 @@ from binggupack.pack.outcome_attribution import (  # noqa: E402,F401 (전체 명
     _outcome_id,
     record_run_outcome,
     list_run_outcomes,
+    list_run_outcomes_ro,
     overturn_run_outcome,
     aggregate_run_outcomes,
     last_trace_path,
     stage_last_trace,
     last_staged_trace,
     _selftest,
+)
+
+__all__ = (
+    'VALID_APPLICATION',
+    'VALID_RESULT',
+    'VALID_EVIDENCE_KIND',
+    'TRUST_AUTO',
+    'TRUST_OVERTURN',
+    '_SIGNAL_NOTE',
+    '_outcome_id',
+    'record_run_outcome',
+    'list_run_outcomes',
+    'list_run_outcomes_ro',
+    'overturn_run_outcome',
+    'aggregate_run_outcomes',
+    'last_trace_path',
+    'stage_last_trace',
+    'last_staged_trace',
+    '_selftest',
 )
 
 

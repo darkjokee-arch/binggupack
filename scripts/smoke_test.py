@@ -18,5 +18,9 @@ sys.path.insert(0, ROOT)   # binggupack 패키지 import 경로
 
 from binggupack.pack.smoke import run_smoke_cli
 
+__all__ = (
+    'run_smoke_cli',
+)
+
 if __name__ == "__main__":
     run_smoke_cli()

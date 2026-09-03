@@ -15,6 +15,7 @@ now 인자, CLI 통합 케이스는 seed ts=time.time() 로 age>=0 만 가정) �
 BINGGU_STRICT_HUMAN_GATE 명시 set/pop. 운영 ~/.binggupack 미접촉(OPERATING_PATHS sentinel).
 CLI: python scripts/binggu_save_ref_binding_selftest.py [--selftest]
 """
+from pathlib import Path
 import json
 import os
 import shutil
@@ -119,9 +120,9 @@ def run():
         lp = os.path.join(d_r2, "last_preview_candidates.json")
         gp = os.path.join(d_r2, "save_gate_log.jsonl")
         n_prev = sg.write_last_preview(c1, path=lp)
-        pv = json.load(open(lp, encoding="utf-8"))
+        pv = json.loads(Path(lp).read_text(encoding='utf-8'))
         n_rec = sg.gate_record_from_prompt("세이브 1,3", preview_path=lp, gate_path=gp, ts=BASE_TS)
-        rows = [json.loads(x) for x in open(gp, encoding="utf-8") if x.strip()]
+        rows = [json.loads(x) for x in Path(gp).read_text(encoding='utf-8').splitlines(keepends=True) if x.strip()]
         refs = [r for r in rows if r.get("pref")]
         shs = [r for r in rows if r.get("sh")]
         ck("R2 훅 이중기록(ref 1행+sh 2행 병기 · pref/idxs/explicit 일치)",

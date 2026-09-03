@@ -24,7 +24,6 @@ ROOT = os.path.dirname(HERE)                         # <repo>
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)   # binggupack 패키지 import 경로
 
-from binggupack.pack.branch_explorer import *  # noqa: E402,F401,F403
 from binggupack.pack.branch_explorer import (  # noqa: E402,F401  (전체 명시 re-export)
     _normalize_label,
     _tokens,
@@ -42,6 +41,25 @@ from binggupack.pack.branch_explorer import (  # noqa: E402,F401  (전체 명시
     _tree_transport,
     _rel_transport,
     _selftest,
+)
+
+__all__ = (
+    '_normalize_label',
+    '_tokens',
+    '_coerce_labels',
+    '_coerce_score',
+    '_is_broken_label',
+    '_context_chain',
+    'build_expand_prompt',
+    'build_relevance_prompt',
+    'path_consistency',
+    'expand_node',
+    'score_relevance',
+    'explore',
+    'default_ollama_transport',
+    '_tree_transport',
+    '_rel_transport',
+    '_selftest',
 )
 
 

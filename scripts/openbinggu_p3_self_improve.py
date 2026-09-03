@@ -26,6 +26,7 @@
 
 CLI: python openbinggu_p3_self_improve.py --selftest
 """
+from contextlib import suppress
 import json
 import os
 import shutil
@@ -608,10 +609,8 @@ def rollback_to_snapshot(db, snapshot_path):
     for ext in ("", "-wal", "-shm"):
         p = path + ext
         if os.path.exists(p):
-            try:
+            with suppress(OSError):
                 os.remove(p)
-            except OSError:
-                pass
     shutil.copy2(snapshot_path, path)
     import sqlite3
     db.con = sqlite3.connect(path)

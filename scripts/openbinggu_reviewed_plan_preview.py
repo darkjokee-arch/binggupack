@@ -17,7 +17,6 @@ ROOT = os.path.dirname(HERE)                         # <repo>
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)   # binggupack 패키지 import 경로
 
-from binggupack.review.reviewed_plan_preview import *  # noqa: E402,F401,F403
 from binggupack.review.reviewed_plan_preview import (  # noqa: E402,F401  (밑줄 내부 심볼 + 전체 명시 re-export)
     BASE,
     FIXTURE_DIR,
@@ -34,6 +33,24 @@ from binggupack.review.reviewed_plan_preview import (  # noqa: E402,F401  (밑�
     run_selftest,
     run_single,
     main,
+)
+
+__all__ = (
+    'BASE',
+    'FIXTURE_DIR',
+    'PLAN_REPORT',
+    'SELFTEST_REPORT',
+    'ACTION_MAP',
+    'NON_ACTION_MAP',
+    'new_counters',
+    'human_approval_gate_design',
+    'assess',
+    '_counts',
+    '_all_action_items',
+    '_refs_preserved',
+    'run_selftest',
+    'run_single',
+    'main',
 )
 
 if __name__ == "__main__":

@@ -189,6 +189,7 @@ def restore_ledger(backup_path, ledger_path, home=None, ts=None, confirm=None):
         try:
             os.remove(tmp_path)
         except OSError:
+            # A locked temporary file is retained for recovery after the failed replacement.
             pass
         info.update({"status": "BUSY", "error": str(e)})
         return info
@@ -196,6 +197,7 @@ def restore_ledger(backup_path, ledger_path, home=None, ts=None, confirm=None):
         try:
             os.remove(ledger_path + suf)
         except OSError:
+            # Absent or locked SQLite sidecars do not invalidate the replaced main database.
             pass
     after = read_all(ledger_path)
     info.update({"status": "OK", "pre_snapshot": pre,
@@ -324,7 +326,8 @@ def _selftest():
         # 4. export json (파일)
         jout = os.path.join(tmp, "out.json")
         ej = export_ledger(led, fmt="json", out=jout)
-        parsed = json.load(open(jout, encoding="utf-8"))
+        with open(jout, encoding="utf-8") as handle:
+            parsed = json.load(handle)
         ck(ej["status"] == "OK" and parsed["meta"]["nodes"] == 2 and len(parsed["edges"]) == 1,
            "export json — 구조/카운트 정합")
 

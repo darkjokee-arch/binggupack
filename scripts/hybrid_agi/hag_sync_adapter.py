@@ -27,6 +27,7 @@ CLI: python hag_sync_adapter.py --selftest
 """
 from __future__ import annotations
 
+from contextlib import suppress
 import hashlib
 import json
 import os
@@ -301,10 +302,8 @@ def import_confirmed_edges(sync_conn, ledger_path, now=0, *, home=None, approval
                                    ta.summary_for("import_edges", payload, lid), now,
                                    provider.ttl_seconds, provider.pending_cap)
             if up.get("ok") and home:
-                try:
+                with suppress(Exception):
                     ta.write_review(home, rid, "import_edges", payload, digest)
-                except Exception:
-                    pass
             err = SyncError("approval_required — owner 로컬 승인 필요: "
                             "binggu approval show %s → binggu approval approve %s" % (rid, rid))
             err.reason = "approval_required"
@@ -370,14 +369,10 @@ def import_confirmed_edges(sync_conn, ledger_path, now=0, *, home=None, approval
             op.commit()
             sync_conn.commit()
         except Exception as ex:
-            try:
+            with suppress(Exception):
                 op.rollback()
-            except Exception:
-                pass
-            try:
+            with suppress(Exception):
                 sync_conn.rollback()
-            except Exception:
-                pass
             ta.release(op, nonce)          # hag_failed_import_does_not_consume — 승인 소각 0
             err = SyncError("import_write_failed: %s" % ex)
             err.reason = "import_write_failed"
@@ -388,11 +383,9 @@ def import_confirmed_edges(sync_conn, ledger_path, now=0, *, home=None, approval
         receipt = {"request_id": rid, "operation": "import_edges",
                    "imported_edge_ids": imported_ids, "actor": actor}
         ta.finalize_consumed(op, nonce, rid, receipt, now)
-        try:
+        with suppress(Exception):
             op.execute("UPDATE approval_requests SET state='consumed' WHERE request_id=?", (rid,))
             op.commit()
-        except Exception:
-            pass
         if home:
             ta.purge_review(home, rid)
         return {"imported": len(imported_ids), "skipped": 0, "dangling": dangling,

@@ -11,6 +11,7 @@ canonicalization 산식이 바뀌면(= spec 과 구현의 drift) 즉시 FAIL 한
 
 사용: python docs/memory-pr/tools/check_vectors.py
 """
+from pathlib import Path
 import json
 import os
 import sys
@@ -42,10 +43,10 @@ def _compute(func, inp):
 
 
 def main():
-    manifest = json.load(open(os.path.join(VROOT, "manifest.json"), encoding="utf-8"))
+    manifest = json.loads(Path(os.path.join(VROOT, 'manifest.json')).read_text(encoding='utf-8'))
     fails, total = [], 0
     for kf in manifest.get("kat", []):
-        data = json.load(open(os.path.join(VROOT, kf), encoding="utf-8"))
+        data = json.loads(Path(os.path.join(VROOT, kf)).read_text(encoding='utf-8'))
         for v in data.get("vectors", []):
             total += 1
             try:

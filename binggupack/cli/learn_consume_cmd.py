@@ -123,5 +123,6 @@ def cmd_learn_consume(a):
                   '\n  확인(교환 축): 기본 = 발화대로(upheld). 나중에 뒤집힌 건이면 '
                   '--verdict overturned 추가.')
     except Exception:
+        # Optional recall guidance must not hide the primary learn-consume result.
         pass
     return 0

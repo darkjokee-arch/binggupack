@@ -482,6 +482,7 @@ if __name__ == "__main__":
             try:
                 max_n = int(sys.argv[i + 1])
             except ValueError:
+                # Invalid CLI limits retain the bounded default.
                 pass
     if topic:
         tr = default_ollama_transport() if live else None

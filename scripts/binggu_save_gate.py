@@ -23,6 +23,7 @@ save-n 참조 바인딩(스펙 ①·④): 승격 정본 = preview_ref(pref)+선�
 gate_human_for_ref·preview_ref_for_candidates/rows) — gate_log 정본을 re-export + 동일 정의 폴백.
 폴백 gate_human_for 에 정본의 미래-ts(age<0) 거부 재동기(ride-along 수리 — 폴백 drift 봉인).
 """
+from pathlib import Path
 import hashlib
 import json
 import os
@@ -469,7 +470,7 @@ def _selftest():
     pp = os.path.join(work, "lp.json")
     SA, SB = "선택된 후보 문장 가나다", "선택 안 된 후보 문장 라마바"
     write_last_preview([{"sentence": SA}, {"sentence": SB}], path=pp)
-    raw = open(pp, encoding="utf-8").read()
+    raw = Path(pp).read_text(encoding='utf-8')
     chk("T9 preview 파일 원문 미포함(hash만)", (SA not in raw) and (SB not in raw))
     chk("T10 'SAVE 1' → 1건 기록", gate_record_from_prompt("SAVE 1", preview_path=pp, gate_path=gp3) == 1)
     chk("T11 기록된 SA → True", gate_human_for([SA], path=gp3) is True)

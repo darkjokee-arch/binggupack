@@ -26,21 +26,21 @@ class Adapter(Protocol):
 
     def capabilities(self) -> set[str]:
         """이 adapter 가 공개 인터페이스로 지원하는 Cap 집합. 여기 없는 op → UNSUPPORTED."""
-        ...
+        raise NotImplementedError
 
     def new_home(self, root: str) -> HomeHandle:
         """root(허용 임시 디렉터리) 아래에 격리 홈을 만들고 핸들 반환. 운영 정본 미접촉."""
-        ...
+        raise NotImplementedError
 
     def cleanup(self, home: HomeHandle) -> None:
         """격리 홈 정리(합성 장부·임시 파일 제거)."""
-        ...
+        raise NotImplementedError
 
     def operating_fingerprint(self) -> dict | None:
         """운영 정본(예: 운영 ledger)의 사후 오염 감지 fingerprint.
         {path, exists, size, mtime_ns, digest} 형태. 운영 정본이 없는 adapter 는 None."""
-        ...
+        raise NotImplementedError
 
     def observe(self, home: HomeHandle, op: str, **kwargs) -> Observation:
         """op 을 공개 인터페이스로 실행하고 관찰 자료를 반환. verdict 는 계산하지 않는다."""
-        ...
+        raise NotImplementedError

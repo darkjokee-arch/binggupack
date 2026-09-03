@@ -7,7 +7,9 @@ OpenBinggu Step 3 — synthetic staging write 구현 + selftest.
 안전: staging = temp 파일 SQLite(운영과 물리 분리). 운영 localcrab_index.sqlite/user_graph/_graph_merge
       connect 0·write 0(mtime 전후 대조). C-2 guard 통과 후에만 insert. apply(운영) 0.
 """
-import os, sys, re, json, hashlib, sqlite3, tempfile, shutil  # noqa: E401,I001
+from contextlib import suppress
+from pathlib import Path
+import os, sys, re, json, hashlib, importlib, sqlite3, tempfile, shutil  # noqa: E401,I001
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
@@ -419,11 +421,9 @@ class StagingDB:
                 break
             except FileExistsError:
                 pid_raw = ""
-                try:
+                with suppress(OSError):
                     with open(lock, "r") as f:
                         pid_raw = f.read().strip()
-                except OSError:
-                    pass
                 if pid_raw == str(os.getpid()):
                     break  # 같은 pid 재진입 허용(해제는 바깥 holder 가 — 기존 semantics)
                 try:
@@ -948,7 +948,7 @@ def run():
                         loc_rows=_rows_for("p27"))
     loc27 = r27.get("locator") or {}
     mir27 = evloc_mirror_path(db.path)
-    recs27 = [json.loads(ln) for ln in open(mir27, encoding="utf-8").read().splitlines() if ln.strip()] \
+    recs27 = [json.loads(ln) for ln in Path(mir27).read_text(encoding='utf-8').splitlines() if ln.strip()] \
         if os.path.exists(mir27) else []
     rec(27, "롤백 저장 → ledger locator 0 + 미러는 보정 레코드(_persisted=False/txn_rolled_back)"
             " + 모든 return 에 locator 리포트(D4)",
@@ -967,7 +967,7 @@ def run():
         (not r28b["applied"]) and r28b["reason"] == "evidence_refs_missing"
         and (r28b.get("locator") or {}).get("reason") == "not_attempted"
         and (r28b.get("locator") or {}).get("attempted") == 1
-        and len([ln for ln in open(mir27, encoding="utf-8").read().splitlines() if ln.strip()]) == 1)
+        and len([ln for ln in Path(mir27).read_text(encoding='utf-8').splitlines() if ln.strip()]) == 1)
     db.close()
 
     # 29. ★D9 — 출하 coverage 함수: 1차 출처(primary)와 any 를 **분리**한다.
@@ -1016,7 +1016,8 @@ def run():
     # 30. 등급 정본 위임 확인(D9×D10) — 앞막이 축은 method 가 아니라 **confidence** 로 갈린다.
     #     같은 match_method='live_capture' 인데 T1 은 1차, T2 는 1차 아님이 실제로 갈리는지 본다.
     #     동시에 백필·등급표·coverage 세 소비자가 **같은 표 하나**를 보는지 확인(두 번째 진실 금지).
-    from binggu_backfill_evidence_locator import PRIMARY_METHODS as _BF_PRIMARY  # noqa: E402
+    _BF_PRIMARY = importlib.import_module(
+        "binggu_backfill_evidence_locator").PRIMARY_METHODS
 
     from binggupack.schema import evidence_grade as _grade  # noqa: E402
     with evloc_env(True):

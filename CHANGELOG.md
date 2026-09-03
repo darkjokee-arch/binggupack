@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [1.24.1] - 2026-08-29
+
+### Security and quality
+- GitHub CodeQL의 실제 보안 문제와 품질 경고를 수정하고, 검증된 오탐에는 원문 비노출·정제 게이트·고정 허용목록 근거를 기록했다.
+- hosted worker의 `undici`를 안전 버전으로 고정해 Dependabot 경고와 `npm audit` 취약점을 제거했다.
+- 공개 facade 호환성, 비밀값 비노출, publish action 고정, 교차 플랫폼 selftest 회귀를 추가했다.
+
 ## [1.24.0] - 2026-08-29
 
 ### Added — Paperthin 7개 선택 패턴의 BingguPack식 폐루프 통합

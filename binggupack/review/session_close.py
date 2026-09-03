@@ -539,6 +539,7 @@ class _RoLedger:
             if self.con is not None:
                 self.con.close()
         except Exception:
+            # Close is idempotent and cleanup failure cannot recover the finished session.
             pass
 
 

@@ -21,6 +21,12 @@ from binggupack.pack import incoming_loader as v07loader  # v0.7 7불변식 검�
 from binggupack.pack import incoming_to_staging as v011  # secret 패턴 재사용 (_has_secret)
 from binggupack.safety import a0_node as a0  # G0 — 노드 헌법 shadow 판정 (기록만, stop은 기존 가드)
 
+__all__ = [
+    "DOMAIN", "REDACT_RE", "GENERATED_BY", "NODE_KEYS", "PROP_KEYS", "EVIDX_KEYS",
+    "_sha8", "_has_secret", "_meaningful", "to_nodes", "mvp1", "v011", "v07loader",
+    "lkmap", "a0",
+]
+
 # 주의: localbinggu_match_policy(Step3) 는 import 하지 않는다.
 
 DOMAIN = "STAGING_UNASSIGNED"

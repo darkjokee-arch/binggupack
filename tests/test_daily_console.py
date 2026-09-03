@@ -5,7 +5,9 @@
 ledger 바이트/mtime·row count·비-사이드카 파일목록 불변을 직접 확인한다(§8). WAL 사이드카
 (-wal/-shm/-journal)는 mode=ro 조회의 SQLite 조정 파일이라 논리 상태가 아니며 예외로 둔다.
 """
+from contextlib import suppress
 import hashlib
+import importlib
 import json
 import os
 import sqlite3
@@ -122,12 +124,10 @@ def _snapshot(home):
             if _is_sidecar(f):
                 continue
             p = os.path.join(root, f)
-            try:
+            with suppress(OSError):
                 with open(p, "rb") as fh:
                     data = fh.read()
                 snap[os.path.relpath(p, home)] = (len(data), hashlib.sha256(data).hexdigest())
-            except OSError:
-                pass
     return snap
 
 
@@ -266,7 +266,7 @@ def test_inbox_hosted_uses_existing_indices(tmp_path):
 
 def test_inbox_does_not_fetch_network(tmp_path, monkeypatch):
     home, ledger = _full_home(tmp_path)
-    import binggu_hosted_inbox as hi
+    hi = importlib.import_module("binggu_hosted_inbox")
 
     def _boom(*a, **k):
         raise AssertionError("inbox 가 네트워크 fetch(fetch_to_staging)를 호출했다")

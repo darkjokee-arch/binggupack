@@ -20,7 +20,6 @@ ROOT = os.path.dirname(HERE)                         # <repo>
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)   # binggupack 패키지 import 경로
 
-from binggupack.classifier.label_kind_map import *  # noqa: E402,F401,F403
 from binggupack.classifier.label_kind_map import (  # noqa: E402,F401  (전체 명시 re-export)
     KIND_KO,
     KO2EN,
@@ -30,6 +29,17 @@ from binggupack.classifier.label_kind_map import (  # noqa: E402,F401  (전체 �
     FALLBACK,
     classify_label_kind,
     to_a0_node_type,
+)
+
+__all__ = (
+    'KIND_KO',
+    'KO2EN',
+    'EN2KO',
+    'KIND_TO_SPACE_NTYPE',
+    '_RULES',
+    'FALLBACK',
+    'classify_label_kind',
+    'to_a0_node_type',
 )
 
 

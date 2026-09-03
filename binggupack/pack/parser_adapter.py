@@ -56,7 +56,6 @@ _CT_FMT = [
     ("application/json", "text"), ("application/xml", "text"), ("text/", "text"),
 ]
 _TEXT_FMTS = {"text", "html"}           # plain 폴백 허용
-_BINARY_FMTS = {"pdf", "hwp", "hwpx", "xlsx", "docx", "pptx"}
 
 
 def detect_format(content_type=None, filename=None):

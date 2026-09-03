@@ -166,6 +166,7 @@ def _connect(home=None):
                 if name not in have:
                     con.execute("ALTER TABLE hot_items ADD COLUMN %s" % ddl)
         except sqlite3.Error:
+            # Older or partially upgraded cache schemas are rebuilt by the outer recovery path.
             pass
         con.execute("INSERT OR IGNORE INTO index_meta(key,value) VALUES('schema_version',?)",
                     (str(INDEX_SCHEMA_VERSION),))
@@ -177,6 +178,7 @@ def _connect(home=None):
                 for iid, title in con.execute("SELECT item_id, title FROM hot_items WHERE kind='node'"):
                     con.execute("INSERT INTO hot_fts(item_id, txt) VALUES(?,?)", (iid, title or ""))
         except sqlite3.Error:
+            # FTS backfill is an optimization; canonical ledger reads remain available.
             pass
         con.commit()
     except Exception:
@@ -264,6 +266,7 @@ def _load_weights(home):
                 try:
                     w[k] = float(raw[k])
                 except (KeyError, TypeError, ValueError):
+                    # Invalid individual weights retain their safe defaults.
                     pass
         return w
     except Exception:
@@ -295,7 +298,8 @@ def _write_allowed_paths(paths, home=None):
     data = {}
     if os.path.exists(p):
         try:
-            data = json.loads(open(p, encoding="utf-8").read())
+            with open(p, encoding="utf-8") as handle:
+                data = json.loads(handle.read())
         except Exception:
             data = {}
     if not isinstance(data, dict):
@@ -371,7 +375,8 @@ def _file_pointer_text(path):
     """
     base = os.path.basename(path)
     try:
-        raw = open(path, "rb").read()
+        with open(path, "rb") as handle:
+            raw = handle.read()
     except OSError:
         return base, "", ""
     chash = hashlib.sha256(raw).hexdigest()
@@ -610,7 +615,6 @@ def peek(home=None):
 def index_rebuild(ledger_path, home=None):
     """색인 전체 재생성(owner 명시). 손상 색인 복구 경로 — 열리지 않으면 파일 삭제 후 새로. 원본 불변."""
     p = index_path(home)
-    pins = set()
     # 정상 파일이면 핀 보존을 위해 먼저 읽어둔다(손상 시 실패 → 핀 없이 복구).
     try:
         con = _connect(home)
@@ -624,6 +628,7 @@ def index_rebuild(ledger_path, home=None):
             if os.path.exists(p + suffix):
                 os.remove(p + suffix)
         except OSError:
+            # Missing or locked sidecars do not prevent rebuilding the disposable index.
             pass
     con = _connect(home)  # fresh 스키마 재생성
     for nid in pins:

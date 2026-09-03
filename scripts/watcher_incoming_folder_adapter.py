@@ -26,7 +26,6 @@ if ROOT not in sys.path:
 if HERE not in sys.path:
     sys.path.insert(0, HERE)   # scripts 형제(importer 호환) 호환
 
-from binggupack.pack.incoming_folder import *  # noqa: E402,F401,F403
 from binggupack.pack.incoming_folder import (  # noqa: E402,F401  (전체 명시 re-export)
     SCOPE,
     ALLOWED_SUFFIXES,
@@ -43,6 +42,24 @@ from binggupack.pack.incoming_folder import (  # noqa: E402,F401  (전체 명시
     adapt_incoming_folder,
     batchm1,
     mvp2,
+)
+
+__all__ = (
+    'SCOPE',
+    'ALLOWED_SUFFIXES',
+    'OPERATING_STORE_FILES',
+    'make_evc_id',
+    '_text_hash',
+    '_is_excluded',
+    'scan_markdown_files',
+    '_classify_block_type',
+    'parse_markdown_preserve_blocks',
+    'make_evidence_chunks',
+    'redact_and_validate',
+    '_store_snapshot',
+    'adapt_incoming_folder',
+    'batchm1',
+    'mvp2',
 )
 
 BASE = Path(__file__).resolve().parent.parent

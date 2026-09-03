@@ -41,7 +41,6 @@ COLOR = {"cmd": TXT, "dim": DIM, "txt": TXT, "ok": MINT, "mint": MINT}
 def base_window():
     """창 배경 + 그림자 + 타이틀바(그라데이션)."""
     im = Image.new("RGB", (W, H), BG)
-    d = ImageDraw.Draw(im)
     # 그림자
     sh = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     ImageDraw.Draw(sh).rounded_rectangle([PAD + 4, PAD + 10, W - PAD + 4, H - PAD + 10], 22, fill=(0, 0, 0, 150))

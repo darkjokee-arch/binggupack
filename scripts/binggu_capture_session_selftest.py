@@ -66,7 +66,7 @@ def run():
     ck("verdict_path", v.get("state") == "captured_candidate" and "signals" in v, "session이 classify verdict 전달")
 
     # ---- session 이 쓰는 CaptureBuffer == binggupack.capture package CaptureBuffer (동일 객체) ----
-    import binggu_capture_session as ssmod
+    ssmod = sys.modules["binggu_capture_session"]
     from binggupack.capture import CaptureBuffer as pkgBuf
     same_buf = ssmod.CaptureBuffer is pkgBuf and isinstance(CaptureSession().buf, pkgBuf)
     ck("buffer_path_identity", same_buf, "session.CaptureBuffer is binggupack.capture.CaptureBuffer")

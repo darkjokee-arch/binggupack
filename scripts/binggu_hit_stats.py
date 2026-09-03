@@ -23,7 +23,6 @@ for _p in (ROOT, HERE):
     if _p not in sys.path:
         sys.path.insert(0, _p)   # binggupack 패키지 + scripts/ 형제 import 경로
 
-from binggupack.pack.hit_stats import *  # noqa: E402,F401,F403
 from binggupack.pack.hit_stats import (  # noqa: E402,F401  (전체 명시 re-export — _ 심볼 포함)
     N_MIN,
     HALFLIFE_DAYS,
@@ -37,6 +36,21 @@ from binggupack.pack.hit_stats import (  # noqa: E402,F401  (전체 명시 re-ex
     classify_outcome,
     assert_not_ranking_input,
     _selftest,
+)
+
+__all__ = (
+    'N_MIN',
+    'HALFLIFE_DAYS',
+    'PAIR_RELS',
+    'record_resolution',
+    'record_stage1_selection',
+    'get_hit_rate',
+    'both_sides',
+    'proposal_priority_signal',
+    'snapshot_context',
+    'classify_outcome',
+    'assert_not_ranking_input',
+    '_selftest',
 )
 
 

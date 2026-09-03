@@ -11,6 +11,7 @@ fixture 기준(owner 명시): 실 approved 데이터 0 → synthetic fixture(tes
 텍스트 전용: visual_processing.status=not_applicable · OCR/CLIP 신규 의존성 설치 0.
 release gate: fixture라 억지 true 금지 — 미달이면 release_ready=false / release_status=degraded 정직 기록.
 """
+from pathlib import Path
 import hashlib
 import json
 import os
@@ -477,10 +478,10 @@ def _selftest():
         ck(rep["quality"]["leak_count"] == 0, "evidence leak_count=0")
 
         # evidence 4중 연결: index row · Evidence node · doc edge · evidence_refs
-        nodes_j = [json.loads(l) for l in open(os.path.join(out, "graph/nodes.jsonl"), encoding="utf-8")]
+        nodes_j = [json.loads(l) for l in Path(os.path.join(out, 'graph/nodes.jsonl')).read_text(encoding='utf-8').splitlines(keepends=True)]
         ev_node_ids = {n["id"] for n in nodes_j if n.get("node_type") == "Evidence"}
-        idx = [json.loads(l) for l in open(os.path.join(out, "evidence/index.jsonl"), encoding="utf-8")]
-        edges_j = [json.loads(l) for l in open(os.path.join(out, "graph/edges.jsonl"), encoding="utf-8")]
+        idx = [json.loads(l) for l in Path(os.path.join(out, 'evidence/index.jsonl')).read_text(encoding='utf-8').splitlines(keepends=True)]
+        edges_j = [json.loads(l) for l in Path(os.path.join(out, 'graph/edges.jsonl')).read_text(encoding='utf-8').splitlines(keepends=True)]
         doc_edge_src = {e.get("from") for e in edges_j if e.get("edge_kind") == "grounding"}
         ck(all(r["evidence_id"] in ev_node_ids for r in idx) and ev_node_ids <= doc_edge_src,
            "Evidence chunk 4중 연결(index·Evidence node·doc edge·refs)")
@@ -490,24 +491,24 @@ def _selftest():
         ck(verb_rels <= {SUPPORTS}, "verb edge = supports_judgment만(신규 predicate 0)")
 
         # release gate 정직(fixture) — 억지 true 금지
-        rg = json.load(open(os.path.join(out, "reports/release_gate.json"), encoding="utf-8"))
+        rg = json.loads(Path(os.path.join(out, 'reports/release_gate.json')).read_text(encoding='utf-8'))
         ck(rg["release_ready"] in (True, False) and
            (rg["release_ready"] or rg["release_status"] == "degraded"),
            "release_gate 정직(미달이면 degraded · 사유 기록): ready=%s status=%s" % (rg["release_ready"], rg["release_status"]))
 
         # visual not_applicable
-        vp = json.load(open(os.path.join(out, "reports/visual_processing.json"), encoding="utf-8"))
+        vp = json.loads(Path(os.path.join(out, 'reports/visual_processing.json')).read_text(encoding='utf-8'))
         ck(vp["status"] == "not_applicable" and vp["clip_model"] is None and vp["ocr_processor"] is None
            and vp["visual_candidate_count"] == 0, "visual_processing not_applicable · 전부 0 · 모델 none")
 
         # cloud upload 0 · db insert 0
         ck(rep["manifest"]["cloud_upload"] is False and rep["manifest"]["db_insert"] is False,
            "manifest cloud_upload=false · db_insert=false")
-        ns = json.load(open(os.path.join(out, "neo4j/export_status.json"), encoding="utf-8"))
+        ns = json.loads(Path(os.path.join(out, 'neo4j/export_status.json')).read_text(encoding='utf-8'))
         ck(ns["ingested"] is False and ns["cloud_upload"] is False, "neo4j export_status: ingest/upload 0")
 
         # ---- S2-5 (§5 무손실): Claim label 80자 캡 뒤가 팩에서 회수 가능한가 ----
-        chunks_j = [json.loads(l) for l in open(os.path.join(out, "cloud/chunks.jsonl"), encoding="utf-8")]
+        chunks_j = [json.loads(l) for l in Path(os.path.join(out, 'cloud/chunks.jsonl')).read_text(encoding='utf-8').splitlines(keepends=True)]
         by_cid = {c["chunk_id"]: c for c in chunks_j}
         src_by_id = {n["id"]: n["properties"].get("sentence", "") for n in nodes}
         claim_nodes = [n for n in nodes_j if n.get("node_type") == "Claim"]
@@ -543,9 +544,9 @@ def _selftest():
         conf2 = build_graph_confirm(g2, approve=list(range(1, len(g2["edges"]) + 1)))
         out2 = os.path.join(tmp, "pack_long")
         build_cloud_pack(out2, nodes2, evidence, g2, conf2)
-        n2 = [json.loads(l) for l in open(os.path.join(out2, "graph/nodes.jsonl"), encoding="utf-8")]
+        n2 = [json.loads(l) for l in Path(os.path.join(out2, 'graph/nodes.jsonl')).read_text(encoding='utf-8').splitlines(keepends=True)]
         c2 = {c["chunk_id"]: c for c in
-              (json.loads(l) for l in open(os.path.join(out2, "cloud/chunks.jsonl"), encoding="utf-8"))}
+              (json.loads(l) for l in Path(os.path.join(out2, 'cloud/chunks.jsonl')).read_text(encoding='utf-8').splitlines(keepends=True))}
         tgt = next(n for n in n2 if n["id"] == nodes2[2]["id"])
         ck(tgt["label_truncated"] is True and len(tgt["text"]) == SHORT_LABEL_LEN
            and c2[tgt["full_ref"]]["text"] == long_sent,

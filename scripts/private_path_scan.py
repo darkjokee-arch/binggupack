@@ -33,6 +33,7 @@ fp = 정규화한 매칭 문자열의 sha256 앞 12 hex. 실제 사설 문자열
   --selftest      synthetic 픽스처로 탐지기 자가검증(GATE=GO/NO-GO)
 종료코드: 0 clean · 1 leak(fail-closed) · 2 usage.
 """
+from pathlib import Path
 import hashlib
 import os
 import re
@@ -211,9 +212,9 @@ def run_selftest():
                     'pub = "C:/Users/Public/shared"\n'
                     'pat = r"[A-Za-z]:[\\\\/]Users"  # privpath-allow\n')
         checks = []
-        h_leak = _scan_text(open(leak, encoding="utf-8").read(), [])
+        h_leak = _scan_text(Path(leak).read_text(encoding='utf-8'), [])
         checks.append(("userhome_literal_detected", len(h_leak) >= 2))
-        h_clean = _scan_text(open(clean, encoding="utf-8").read(), [])
+        h_clean = _scan_text(Path(clean).read_text(encoding='utf-8'), [])
         checks.append(("synthetic_public_allow_clean", len(h_clean) == 0))
         # 3) owner deny exact 토큰
         h_tok = _scan_text("cwd = repo/some-private-proj/app\n", ["some-private-proj"])

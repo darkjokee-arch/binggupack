@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """Studio Approval Center 회귀 — effective-state 해석·exact-ID·nonce/path 미노출·review 무결성·
 receipt sanitize·read-only 불변. 임시 ledger 격리 · 운영 ~/.binggupack 미접촉. 시각은 now 주입(결정적)."""
+from contextlib import suppress
+from pathlib import Path
 import hashlib
 import json
 import os
@@ -69,11 +71,9 @@ def _snap_files(home):
             if f.endswith(_SIDECAR):
                 continue
             p = os.path.join(root, f)
-            try:
+            with suppress(OSError):
                 with open(p, "rb") as fh:
                     snap[os.path.relpath(p, home)] = hashlib.sha256(fh.read()).hexdigest()
-            except OSError:
-                pass
     return snap
 
 
@@ -221,9 +221,9 @@ def test_approval_receipt_links_exact_memory_id(seeded):
 def test_approval_review_digest_mismatch_hides_items(seeded):
     home, ledger = seeded
     p = ta._review_path(home, "req_approved1")
-    data = json.load(open(p, encoding="utf-8"))
+    data = json.loads(Path(p).read_text(encoding='utf-8'))
     data["payload_digest"] = "TAMPERED"
-    json.dump(data, open(p, "w", encoding="utf-8"), ensure_ascii=False)
+    Path(p).write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
     d = av.collect_approval_detail_snapshot(ledger, "req_approved1", now=NOW)
     assert d["review"]["available"] is False and d["review"]["integrity"] == "mismatch"
     assert "items" not in d["review"]
@@ -232,9 +232,9 @@ def test_approval_review_digest_mismatch_hides_items(seeded):
 def test_approval_review_operation_mismatch_hides_items(seeded):
     home, ledger = seeded
     p = ta._review_path(home, "req_approved1")
-    data = json.load(open(p, encoding="utf-8"))
+    data = json.loads(Path(p).read_text(encoding='utf-8'))
     data["operation"] = "deprecate"
-    json.dump(data, open(p, "w", encoding="utf-8"), ensure_ascii=False)
+    Path(p).write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
     d = av.collect_approval_detail_snapshot(ledger, "req_approved1", now=NOW)
     assert d["review"]["available"] is False and d["review"]["integrity"] == "mismatch"
 
@@ -319,7 +319,7 @@ def test_approved_unconsumed_guidance_is_safe(seeded):
 
 # ════════════════════════ UI 정적 계약 ════════════════════════
 def test_studio_approval_actions_copy_commands_only():
-    js = open(os.path.join(_STATIC, "app.js"), encoding="utf-8").read()
+    js = Path(os.path.join(_STATIC, 'app.js')).read_text(encoding='utf-8')
     # approval UI 는 copyButton 으로 CLI 명령만. approve/reject/revoke 실행 fetch 없음.
     assert "j.commands.approve" in js and "j.commands.reject" in js
     # POST/PUT/DELETE mutation fetch 없음
@@ -328,7 +328,7 @@ def test_studio_approval_actions_copy_commands_only():
 
 
 def test_studio_approval_has_no_mutation_fetch():
-    js = open(os.path.join(_STATIC, "app.js"), encoding="utf-8").read()
+    js = Path(os.path.join(_STATIC, 'app.js')).read_text(encoding='utf-8')
     for banned in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write",
                    ".submit(", "XMLHttpRequest"):
         assert banned not in js, banned
@@ -367,7 +367,7 @@ def test_no_ledger_approval_center_creates_nothing(tmp_path):
 def test_wheel_approval_center_assets_present():
     import binggupack.studio.approval_view as m
     assert m.SCHEMA_VERSION == 1
-    html = open(os.path.join(_STATIC, "index.html"), encoding="utf-8").read()
+    html = Path(os.path.join(_STATIC, 'index.html')).read_text(encoding='utf-8')
     assert 'data-view="approvals"' in html
 
 

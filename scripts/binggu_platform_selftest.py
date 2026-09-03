@@ -135,8 +135,10 @@ def main():
         child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
         try:
             fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.write(fd, str(child.pid).encode())   # 자기 pid 아님 · 생존 중
-            os.close(fd)
+            try:
+                os.write(fd, str(child.pid).encode())   # 자기 pid 아님 · 생존 중
+            finally:
+                os.close(fd)
             blocked = False
             try:
                 with db.write_lock():

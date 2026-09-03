@@ -21,6 +21,7 @@ scripts/ 를 sys.path 에 임시 삽입해 bare-name 접근(canonical_semantic �
   - canonical 5종 계층 불변 · semantic_subtype 은 표시 보조.
 """
 import hashlib
+import importlib
 import os
 import sys
 
@@ -79,7 +80,7 @@ def suggest_rationale(candidates, semantic=None):
                 sys.path.insert(0, _scr)
             import binggu_canonical_semantic as _CS
             if _CS.enabled():
-                import binggu_recall as _R
+                _R = importlib.import_module("binggu_recall")
                 _scorer = _R._semantic_scorer()  # 노드 임베딩 캐시 재사용
         except Exception:
             _scorer = None
@@ -106,6 +107,7 @@ def suggest_rationale(candidates, semantic=None):
             try:
                 _pf([c.get("text", "") for _, c in items if c.get("text")])
             except Exception:
+                # Optional scorer prefill may fail without changing deterministic fallback scoring.
                 pass
     edges, dup_edges, seen = [], [], set()
     for nid, c in items:

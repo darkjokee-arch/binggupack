@@ -393,22 +393,26 @@ class McpHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path != MCP_PATH:
-            return self._deny(404, "not found")
-        return self._deny(405, "SSE not offered (JSON-only server)")
+            self._deny(404, "not found")
+            return
+        self._deny(405, "SSE not offered (JSON-only server)")
 
     def do_DELETE(self):
-        return self._deny(405, "stateless server (no session)")
+        self._deny(405, "stateless server (no session)")
 
     def do_POST(self):
         if self.path != MCP_PATH:
-            return self._deny(404, "not found")
+            self._deny(404, "not found")
+            return
         if not self._origin_ok():
-            return self._deny(403, "origin not allowed")
+            self._deny(403, "origin not allowed")
+            return
         try:
             length = int(self.headers.get("Content-Length", "0"))
             req = json.loads(self.rfile.read(length).decode("utf-8"))
         except (ValueError, json.JSONDecodeError):
-            return self._deny(400, "invalid json")
+            self._deny(400, "invalid json")
+            return
         resp = handle_rpc(self.store, req)
         if resp is None:
             self.send_response(202)
@@ -432,7 +436,7 @@ def serve(port, packs_root):
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        pass
+        return
     finally:
         httpd.server_close()
 

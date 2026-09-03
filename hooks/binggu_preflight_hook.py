@@ -38,6 +38,7 @@ mandates(옵션 <home>/preflight_mandates.json)가 있으면 detect_conflicts �
   node→node 강한관계 자동생성 0(읽기만) · 운영 ledger 무단 write 금지(mode=ro) ·
   cloud 무관(PC local ledger 원본만 읽음).
 """
+from contextlib import suppress
 import json
 import os
 import sys
@@ -315,9 +316,9 @@ def _render_stamp_footer(res, prompt, trace_id=None):
         # ★Claude 렌더 강제(2026-07-25 owner 지적): 이 블록은 컨텍스트 주입일 뿐 owner 화면에 안 뜬다.
         #   AI 가 옮기지 않으면 owner 는 무엇이 회상됐는지 못 보고 히트/미스 도장도 못 한다
         #   (실측: 한 세션 회상 17회 전부 미노출). PR#105 가 마무리 preview 만 고치고 남긴 절반.
-        lines = ['[Claude 필수 — 회상 노출] 아래 회상을 **답변 첫머리**에 '
-                 '`🧠 회상 N. <요지>` 한 줄씩 그대로 옮겨 owner 에게 보여라. '
-                 '이 블록은 owner 화면에 안 뜬다(요약·생략·"위 참조" 금지). '
+        lines = ['[Claude 필수 — 회상 노출] 아래 회상을 **답변 첫머리**에 ' +
+                 '`🧠 회상 N. <요지>` 한 줄씩 그대로 옮겨 owner 에게 보여라. ' +
+                 '이 블록은 owner 화면에 안 뜬다(요약·생략·"위 참조" 금지). ' +
                  '안 옮기면 owner 가 히트/미스 도장을 못 해 회상 효용 측정이 멈춘다.',
                  '## 회상 도장 번호 (유용했으면 채팅 정확형 1줄 "히트 N" · 아니면 "미스 N")']
         for i, (_nid, claim) in enumerate(ordered, 1):
@@ -450,7 +451,7 @@ def _maybe_record_trace(prompt, res, domain=None, session_id=None):
         import binggu_recall_trace as RT
         h = str(_home())
         if not RT.trace_enabled(home=h):
-            return
+            return None
         from datetime import datetime, timezone
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         situation = RT.classify_situation(prompt)  # 의도 상황(lookup/decision/change/ambiguous)
@@ -458,17 +459,16 @@ def _maybe_record_trace(prompt, res, domain=None, session_id=None):
         # MF2: 발급된 trace_id + 회상 node_ids 를 staging 보존(outcome record 자동 경로 — 종전엔 버려짐).
         #   원문 0(node_id 는 식별자) · 실패 흡수(hook 무방해) · trace 미기록이면 no-op.
         if isinstance(r, dict) and r.get("recorded") and r.get("trace_id"):
-            try:
+            with suppress(Exception):
                 import binggu_outcome_attribution as OA
                 OA.stage_last_trace(r["trace_id"], r.get("node_ids"), "preflight", ts, home=h)
-            except Exception:
-                pass
             # ★ 2026-08-08 — **도장 푸터가 쓸 trace_id 를 돌려준다.** 종전엔 여기서 버려서
             #   AI 가 자동주입 회상의 trace_id 를 알 방법이 없었고, 그래서 판정이 영영 안 남았다
             #   (실측: 자동주입 1,373건 중 판정 16건 = 1.2% · 그마저 전부 사람 도장 · AI 도장 0건).
             return r.get("trace_id")
+        return None
     except Exception:
-        return
+        return None
 
 
 def main():

@@ -14,6 +14,7 @@ PC-mediated read 공유: 로컬 ledger 의 active(SAVE 확정) 노드를 hosted 
 - counts 정합 + evidence_refs ⊆ evidence_index (load_packs fail-closed 통과).
 - cloud upload / 배포 / data/ write 0 — 이 모듈은 packs 구조 생성·반환만. 실제 배포는 별도 owner GO.
 """
+import json
 import os
 import re
 import sys
@@ -173,7 +174,6 @@ def write_packs(res, out_path=DATA_PATH):
     미스매치 #2 정식 해결: 수동 inline write 를 빌더 안으로. data/ write 만 — KV/Cloud/배포 0.
     반환: {"written": path, "violations": []} 또는 {"blocked": reason}.
     """
-    import json
     if res.get("status") != "OK":
         return {"blocked": res.get("reason", "BUILD_NOT_OK")}
     viol = validate_packs_obj(res)
@@ -316,7 +316,6 @@ def _selftest():
     chk("T11 evidence 미연결 active → 제외(BLOCK NO_LINKED)", build_packs(lp3)["reason"] == "NO_LINKED_ACTIVE_NODES")
 
     # --write 경로(temp 전용 — 라이브 data/packs.json 미접촉)
-    import json
     out = os.path.join(work, "packs.json")
     r_ok = build_packs(lp)
     w = write_packs(r_ok, out)
@@ -341,7 +340,6 @@ def _selftest():
 if __name__ == "__main__":
     if "--selftest" in sys.argv:
         sys.exit(0 if _selftest() else 1)
-    import json
     res = build_packs()
     if "--write" in sys.argv:
         # 명시 write 모드: build → validate GO → data/packs.json 실제 write (gitignore 경로).

@@ -175,7 +175,7 @@ def run_on_pack(pack_dir):
     view_b = consume(pack_dir)          # 2회
     view_c = consume(pack_dir)          # 2nd instance (독립 호출)
 
-    checks = safety_checks(view_a)
+    checks = _safety_checks(view_a)
     checks["two_read_identical"] = _basis_equal(view_a, view_b)
     checks["two_instance_identical"] = _basis_equal(view_a, view_c)
     return view_a, checks

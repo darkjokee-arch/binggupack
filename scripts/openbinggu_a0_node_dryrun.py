@@ -23,7 +23,6 @@ if ROOT not in sys.path:
 if HERE not in sys.path:
     sys.path.insert(0, HERE)   # binggu_p1_config(scripts/ 정본) 해소 경로
 
-from binggupack.safety.a0_node import *  # noqa: E402,F401,F403
 from binggupack.safety.a0_node import (  # noqa: E402,F401  (전체 명시 re-export)
     LABEL_KINDS,
     LAYER,
@@ -37,6 +36,21 @@ from binggupack.safety.a0_node import (  # noqa: E402,F401  (전체 명시 re-ex
     load_user_ontology,
     is_confirm_actor,
     auto_value_judgment_allowed,
+)
+
+__all__ = (
+    'LABEL_KINDS',
+    'LAYER',
+    'OPEN_VERDICTS',
+    '_is_word',
+    '_has_independent_meaning',
+    'classify_node',
+    'recommend_open_classification',
+    'confirm_open_classification',
+    'preserves_unsupported_notes',
+    'load_user_ontology',
+    'is_confirm_actor',
+    'auto_value_judgment_allowed',
 )
 
 

@@ -15,7 +15,6 @@ ROOT = os.path.dirname(HERE)                         # <repo>
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)   # binggupack 패키지 import 경로
 
-from binggupack.workspace.organize import *  # noqa: E402,F401,F403
 from binggupack.workspace.organize import (  # noqa: E402,F401  (전체 명시 re-export — 밑줄 심볼 포함)
     RESOURCES,
     _ID_KEYS,
@@ -47,6 +46,39 @@ from binggupack.workspace.organize import (  # noqa: E402,F401  (전체 명시 r
     _mk_transport,
     _selftest,
     main,
+)
+
+__all__ = (
+    'RESOURCES',
+    '_ID_KEYS',
+    '_TYPE_KEYS',
+    '_TITLE_KEYS',
+    '_TOPIC_KEYS',
+    '_SENTENCE_KEYS',
+    '_NODE_IDS_KEYS',
+    '_EDGE_SRC_KEYS',
+    '_EDGE_DST_KEYS',
+    '_first',
+    '_as_list',
+    '_norm_id',
+    '_norm_type',
+    '_norm_title',
+    '_norm_topic',
+    '_norm_node_ids',
+    '_norm_sentence',
+    '_tokens',
+    '_sha8',
+    'fetch_workspace',
+    'detect_duplicate_packs',
+    'detect_orphan_nodes',
+    'detect_structure_candidates',
+    '_build_recommendations',
+    'build_report',
+    'analyze',
+    '_mk_workspace',
+    '_mk_transport',
+    '_selftest',
+    'main',
 )
 
 if __name__ == "__main__":

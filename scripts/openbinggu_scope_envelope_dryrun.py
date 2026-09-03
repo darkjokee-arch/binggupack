@@ -37,7 +37,6 @@ import watcher_batch_m1 as m1       # scan_residual_pii (독립 scanner 재사�
 # 순수 판정부(source pointer classify + fail-closed publish guard) = 정본 이관 · re-export.
 if str(BASE) not in sys.path:
     sys.path.insert(0, str(BASE))   # binggupack 패키지 import 경로
-from binggupack.pack.scope_envelope import *  # noqa: E402,F401,F403
 from binggupack.pack.scope_envelope import (  # noqa: E402,F401  (전체 명시 re-export — _ 심볼 포함)
     PUBLISH_REGRESSION_STATE,
     regression_guard,
@@ -53,6 +52,23 @@ from binggupack.pack.scope_envelope import (  # noqa: E402,F401  (전체 명시 
     _INTERNAL_NAME,
     _INTERNAL_OCTET,
     _UNDECIDED_TOKENS,
+)
+
+__all__ = (
+    "PUBLISH_REGRESSION_STATE",
+    "regression_guard",
+    "publish_decision",
+    "classify_source_pointer",
+    "classify_source_pointers",
+    "_ip_is_internal",
+    "_host_is_internal",
+    "_WIN_ABSPATH",
+    "_FILE_URI",
+    "_UNC",
+    "_UNIX_PRIVATE",
+    "_INTERNAL_NAME",
+    "_INTERNAL_OCTET",
+    "_UNDECIDED_TOKENS",
 )
 
 NS_A = "user_a"

@@ -32,7 +32,9 @@ CLI
   python scripts/binggu_backfill_evidence_locator.py --ledger <copy> --rollback --batch-id bf20260727
   python scripts/binggu_backfill_evidence_locator.py --selftest
 """
+from pathlib import Path
 import argparse
+import functools
 import glob
 import hashlib
 import json
@@ -63,6 +65,8 @@ from openbinggu_staging_write_selftest import (  # noqa: E402
 from binggupack.schema.evidence_grade import (  # noqa: E402,F401
     GRADE, METHOD_RANK as _METHOD_RANK, PRIMARY_METHODS, is_primary_source,
 )
+
+__all__ = ("GRADE", "_METHOD_RANK", "PRIMARY_METHODS", "is_primary_source")
 
 PARSER_ID = "binggu_backfill_evidence_locator/v1"
 # 무손실 판정 축 — 백필은 audit_log/audit_meta 에는 **정당하게 1행씩 추가**하므로 전 테이블
@@ -124,9 +128,12 @@ def operating_ledger_paths():
     ③ `~/.binggupack/ledger.sqlite` — resolver 가 실패해도 남는 최후의 리터럴 축.
     """
     out = []
-    for fn in (lambda: _plat.default_ledger(),
-               lambda: _plat.default_ledger(env={}),
-               lambda: os.path.join(os.path.expanduser("~"), ".binggupack", "ledger.sqlite")):
+    resolvers = (
+        _plat.default_ledger,
+        functools.partial(_plat.default_ledger, env={}),
+        functools.partial(os.path.join, os.path.expanduser("~"), ".binggupack", "ledger.sqlite"),
+    )
+    for fn in resolvers:
         try:
             p = fn()
         except Exception:                   # noqa: BLE001 — 축 하나가 실패해도 나머지로 판정한다
@@ -406,7 +413,7 @@ def scan_docs(roots, targets, progress=None):
     for path in sorted(set(files)):
         meta["files"] += 1
         try:
-            text = open(path, "r", encoding="utf-8", errors="replace").read()
+            text = Path(path).read_text(encoding='utf-8', errors='replace')
         except OSError:
             continue
         for lineno, raw in enumerate(text.splitlines(), 1):
@@ -828,7 +835,7 @@ def rollback_batch(ledger_path, batch_id, backup_dir=None, confirm_operating=Non
                 f.write(json.dumps({"_t": LOC_TABLE, **r}, ensure_ascii=False) + "\n")
             for r in prov_rows:
                 f.write(json.dumps({"_t": PROV_TABLE, **r}, ensure_ascii=False) + "\n")
-        exported = sum(1 for _ in open(path, "r", encoding="utf-8"))
+        exported = sum(1 for _ in Path(path).read_text(encoding='utf-8').splitlines(keepends=True))
         res["export"] = path
         res["exported"] = exported
         if exported != len(loc_rows) + len(prov_rows):
@@ -1061,7 +1068,7 @@ def _selftest():
         chk("27 롤백 후에도 audit chain·tail·locator 앵커 정상",
             rb["audit_chain_intact"] and rb["audit_tail_state"] and rb["locator_tail_ok"])
         chk("28 롤백은 테이블 삭제문을 쓰지 않는다(소스에 해당 DDL 리터럴 0건)",
-            "DROP" + " TABLE" not in open(os.path.abspath(__file__), encoding="utf-8").read())
+            "DROP" + " TABLE" not in Path(os.path.abspath(__file__)).read_text(encoding='utf-8'))
 
         # 테이블 부재(플래그 OFF) ledger — apply 는 조용히 성공하지 않고 사유를 남긴다
         led2 = os.path.join(work, "ledger_off.sqlite")
@@ -1083,7 +1090,7 @@ def _selftest():
         chk("32 앵커 가드가 백업/DDL 보다 먼저 걸린다(운영 접촉 0)", "backup" not in res4)
 
         sheet = write_sheet(plan, os.path.join(work, "sheet.md"))
-        body = open(sheet, encoding="utf-8").read()
+        body = Path(sheet).read_text(encoding='utf-8')
         chk("33 검수 시트에 등급표·1차/2차 분리 명시",
             "1차 출처" in body and "match_method" in body)
 
@@ -1174,7 +1181,6 @@ def main(argv=None):
     if args.use_plan:
         with open(args.use_plan, encoding="utf-8") as f:
             plan = json.load(f)
-        batch_id = plan.get("batch_id") or batch_id
     else:
         docs = [] if args.no_docs else (args.docs if args.docs is not None else list(DEFAULT_DOC_ROOTS))
         plan = build_plan(ledger, batch_id,

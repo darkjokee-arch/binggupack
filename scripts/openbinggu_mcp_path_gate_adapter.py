@@ -16,12 +16,18 @@ ROOT = os.path.dirname(HERE)                         # <repo>
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)   # binggupack 패키지 import 경로
 
-from binggupack.mcp.path_gate_adapter import *  # noqa: E402,F401,F403
 from binggupack.mcp.path_gate_adapter import (  # noqa: E402,F401  (밑줄 + 전체 명시 re-export)
     guarded_tool_call,
     _scan,
     main,
     _selftest,
+)
+
+__all__ = (
+    'guarded_tool_call',
+    '_scan',
+    'main',
+    '_selftest',
 )
 
 if __name__ == "__main__":

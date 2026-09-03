@@ -518,12 +518,16 @@ def _selftest_body():
         from scripts import binggu_save_gate as _sgx
     _lp = os.path.join(il_home, "last_preview_candidates.json")
     _sgx.write_last_preview([{"sentence": "교차 오염 검증 문장이다"}], path=_lp)
-    _lp_bytes = open(_lp, "rb").read()
+    with open(_lp, "rb") as _lp_handle:
+        _lp_bytes = _lp_handle.read()
     _pref6 = _sgx.preview_ref_for_candidates([{"sentence": "교차 오염 검증 문장이다"}])
+    _gate_ref = _sgx.gate_human_for_ref(_pref6, [1], path=il_gate)
+    _gate_text = _sgx.gate_human_for(["교차 오염 검증 문장이다"], path=il_gate)
+    with open(_lp, "rb") as _lp_handle:
+        _lp_after = _lp_handle.read()
     ck("H6_SAVE교차오염0(ref값공간분리·last_preview불변)",
-       _sgx.gate_human_for_ref(_pref6, [1], path=il_gate) is False
-       and _sgx.gate_human_for(["교차 오염 검증 문장이다"], path=il_gate) is False
-       and open(_lp, "rb").read() == _lp_bytes
+       _gate_ref is False and _gate_text is False
+       and _lp_after == _lp_bytes
        and GL.recall_stamp_verdicts(_rows, path=il_gate).get(_idx_a) == "hit")
 
     # H7: 도장 후 ledger 변경(재확보 집합에서 노드 소실) → stale_recall BLOCK
@@ -553,10 +557,13 @@ def _selftest_body():
        and [r["idx"] for r in _pst] == [1, 2])
 
     # P2: dry-run — 사전점검+안내만 · ledger write 0(byte 불변)
-    _led_bytes = open(il_led, "rb").read()
+    with open(il_led, "rb") as _led_handle:
+        _led_bytes = _led_handle.read()
     _rc, _out = _il_run(cmd_promote, ledger=il_led, n=1, id8="ilaa1111", confirm=None, limit=0)
+    with open(il_led, "rb") as _led_handle:
+        _led_after = _led_handle.read()
     ck("P2_dry-run_ledger_write0", _rc == 0 and "dry-run" in _out
-       and open(il_led, "rb").read() == _led_bytes)
+       and _led_after == _led_bytes)
 
     # P3: 번호/id8/confirm 문구 대조 — 불일치 전부 BLOCK
     _rc3a, _o3a = _il_run(cmd_promote, ledger=il_led, n=1, id8="deadbeef",

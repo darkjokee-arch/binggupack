@@ -16,7 +16,6 @@ ROOT = os.path.dirname(HERE)                         # <repo>
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)   # binggupack 패키지 import 경로
 
-from binggupack.safety.physical_store_isolation import *  # noqa: E402,F401,F403
 from binggupack.safety.physical_store_isolation import (  # noqa: E402,F401  (밑줄 + 전체 명시 re-export)
     OPERATING_STORE,
     USERS_RE,
@@ -26,6 +25,17 @@ from binggupack.safety.physical_store_isolation import (  # noqa: E402,F401  (�
     build_allow_root,
     _selftest,
     main,
+)
+
+__all__ = (
+    'OPERATING_STORE',
+    'USERS_RE',
+    'SHARED_RE',
+    '_path_id',
+    'check_store_access',
+    'build_allow_root',
+    '_selftest',
+    'main',
 )
 
 if __name__ == "__main__":

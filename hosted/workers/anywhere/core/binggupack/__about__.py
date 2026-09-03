@@ -76,5 +76,8 @@ v1.24.0 — Paperthin 7개 선택 패턴을 별도 런타임 없이 BingguPack�
 recall→decision→action→outcome→next recall 폐루프 fixture가 핵심. SIP는 ephemeral 후보만
 제안하고 factual evidence exact binding이 없으면 fail-closed한다. G4_no_auto·human approval·
 immutable bundle·provenance·rollback은 불변이며 Paperthin runtime/hook/별도 SSOT는 도입하지 않았다.
+v1.24.1 — Security and quality hardening: CodeQL findings were fixed or evidence-dismissed,
+the hosted worker resolves undici 7.29.0, publish actions are immutable-SHA pinned, and facade
+compatibility is regression-tested. Approval, G4_no_auto, provenance, and rollback remain unchanged.
 """
-__version__ = "1.24.0"
+__version__ = "1.24.1"

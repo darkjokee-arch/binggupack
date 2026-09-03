@@ -20,6 +20,8 @@ CLI:
   python binggu_hosted_centroid_gen.py --selftest                 # 주입 embed 로직 검증(Workers AI 호출 0)
   python binggu_hosted_centroid_gen.py --workers-ai --out <path>  # owner 승인 후: 실 Workers AI 임베드 → 산출 JSON
 """
+from contextlib import suppress
+from pathlib import Path
 import argparse
 import datetime
 import hashlib
@@ -41,12 +43,10 @@ def _resolve_seed_path(name):
     try:
         from importlib.resources import files
         res = files("binggupack.data").joinpath("semantic", name)
-        try:
+        with suppress(Exception):
             if res.is_file():
                 return str(res)
-        except Exception:
-            pass
-        try:
+        with suppress(Exception):
             from importlib.resources import as_file
             import atexit
             import tempfile
@@ -54,15 +54,13 @@ def _resolve_seed_path(name):
             if cached and os.path.exists(cached):
                 return cached
             with as_file(res) as ap:
-                data = open(ap, "rb").read()
+                data = Path(ap).read_bytes()
             fd, tmp = tempfile.mkstemp(prefix="binggu_seed_", suffix="_" + name)
             with os.fdopen(fd, "wb") as f:
                 f.write(data)
             _SEED_TMP_CACHE[name] = tmp
             atexit.register(lambda p=tmp: os.path.exists(p) and os.remove(p))
             return tmp
-        except Exception:
-            pass
     except Exception:
         pass
     return os.path.join(HERE, "..", "tests", "fixtures", "semantic", name)
@@ -94,7 +92,7 @@ def _dot(a, b):
 
 
 def load_seed(seed_path=SEED_PATH):
-    return [json.loads(l) for l in open(seed_path, encoding="utf-8") if l.strip()]
+    return [json.loads(l) for l in Path(seed_path).read_text(encoding='utf-8').splitlines(keepends=True) if l.strip()]
 
 
 def build_centroids(embed_fn, rows):

@@ -12,6 +12,7 @@ sys.path 에 얹어 형제 import 경로만 보존한다.
 CLI: python scripts/binggu_collection_planner.py --selftest
      python scripts/binggu_collection_planner.py --topic '<주제>' [--max N] [--live]
 """
+from contextlib import suppress
 import os
 import sys
 
@@ -21,7 +22,6 @@ for _p in (ROOT, HERE):
     if _p not in sys.path:
         sys.path.insert(0, _p)   # binggupack 패키지 + scripts/ 형제 import 경로
 
-from binggupack.pack.collection_planner import *  # noqa: E402,F401,F403
 from binggupack.pack.collection_planner import (  # noqa: E402,F401  (전체 명시 re-export)
     plan,
     default_ollama_transport,
@@ -33,6 +33,19 @@ from binggupack.pack.collection_planner import (  # noqa: E402,F401  (전체 명
     _infer_lang,
     _selftest,
     _DEFAULT_MAX_ASPECTS,
+)
+
+__all__ = (
+    'plan',
+    'default_ollama_transport',
+    '_parse_aspects',
+    '_normalize_aspects',
+    '_fallback_aspects',
+    '_build_prompt',
+    '_extract_json_block',
+    '_infer_lang',
+    '_selftest',
+    '_DEFAULT_MAX_ASPECTS',
 )
 import json  # noqa: E402
 
@@ -51,10 +64,8 @@ if __name__ == "__main__":
     if "--max" in sys.argv:
         i = sys.argv.index("--max")
         if i + 1 < len(sys.argv):
-            try:
+            with suppress(ValueError):
                 max_n = int(sys.argv[i + 1])
-            except ValueError:
-                pass
     if topic:
         tr = default_ollama_transport() if live else None
         print(json.dumps(plan(topic, llm_transport=tr, max_aspects=max_n),

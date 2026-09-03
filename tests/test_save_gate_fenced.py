@@ -170,5 +170,6 @@ def test_parser_copies_agree_on_fenced():
     import scripts.binggu_save_gate as sg
     fenced = "예시:\n```\n세이브 1\n```\n끝"
     plain = "메모\n세이브 1\n끝"
-    assert sg.parse_save_indices(fenced) == parse_save_indices(fenced) is None
+    assert sg.parse_save_indices(fenced) is None
+    assert parse_save_indices(fenced) is None
     assert sg.parse_save_indices(plain) == parse_save_indices(plain) == [1]

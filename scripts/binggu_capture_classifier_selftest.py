@@ -85,7 +85,7 @@ def run():
     ck("idempotent_pure", idem, "동일 입력 2회 동일 결과(순수)")
 
     # ---- 내장 _selftest 28케이스 전수 (현행 동작 정본) ----
-    import binggu_capture_classifier as m
+    m = sys.modules["binggu_capture_classifier"]
     builtin_ok = m._selftest()
     ck("builtin_selftest_28", builtin_ok, "내장 _selftest 전수 PASS")
 
