@@ -88,8 +88,14 @@ def test_catchup_memory_priorities_superseded_conflict_outcome_and_context_cap(t
         (f"l{i}", "judgment", f"release supporting lesson {i} " + ("x" * 80), "active", "교훈", None)
         for i in range(20)
     ])
+    # 예산은 current_state 안의 **절대 경로 길이까지** 함께 센다. 종전에는 한 번의 호출에
+    # max_chars=1800 을 걸고 「무엇이 담기는가」까지 봤는데 남는 여유가 2자였다 —
+    # 실측(2026-09-03): repo 경로 101자면 known_failures 유지, 103자면 탈락.
+    # pytest 직렬 tmp_path 는 90자, `-n auto` 는 `popen-gwN\` 가 붙어 100자라
+    # **xdist 에서만** 빨갛게 났다(ci_local_preflight 15/16 FAIL 의 정체).
+    # 그래서 「무엇이 담기는가」와 「상한을 지키는가」를 갈라 본다 — 둘 다 경로 길이와 무관하다.
     out = collect_catchup(repo, query="release approval", ledger_path=ledger,
-                          now="2026-08-29T00:00:00Z", max_chars=1800,
+                          now="2026-08-29T00:00:00Z",
                           outcome_summary={"overall": {"pending_traces": 2}})
     assert out["decisions"]
     assert out["known_constraints"]
@@ -97,12 +103,18 @@ def test_catchup_memory_priorities_superseded_conflict_outcome_and_context_cap(t
     assert any(x.get("superseded") for x in out["relevant_memory"])
     assert any("LIVE_MEMORY_CONFLICT" in x for x in out["unresolved"])
     assert any("pending" in x.lower() for x in out["unresolved"])
-    assert out["budget"]["used_chars"] <= 1800
-    assert out["budget"]["omitted_count"] > 0
     text = render_catchup(out)
     for section in ("CURRENT STATE", "WHAT CHANGED", "RELEVANT MEMORY", "DECISIONS",
                     "KNOWN CONSTRAINTS", "KNOWN FAILURES", "UNRESOLVED", "NEXT BEST ACTION"):
         assert section in text
+
+    # 상한은 따로 건다. 교훈 20줄만 2,000자가 넘으므로 경로가 아무리 짧아도 반드시 잘린다.
+    capped = collect_catchup(repo, query="release approval", ledger_path=ledger,
+                             now="2026-08-29T00:00:00Z", max_chars=1800,
+                             outcome_summary={"overall": {"pending_traces": 2}})
+    assert capped["budget"]["used_chars"] <= 1800
+    assert capped["budget"]["cap_satisfied"] is True
+    assert capped["budget"]["omitted_count"] > 0
 
 
 def test_catchup_performs_zero_repository_and_database_writes(tmp_path):
