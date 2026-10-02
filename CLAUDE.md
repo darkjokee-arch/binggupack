@@ -57,4 +57,4 @@ python scripts/sync_anywhere_vendor.py --check   # 공유 모듈 수정 시 필�
 2. 운영홈 `~/.binggupack/ledger.sqlite` 본체 불변 실측
 3. 공유 모듈 수정 시 벤더 `--check` 통과
 4. PR CI 전 매트릭스 green (flaky는 무관 3중 확증 후 해당 job만 재실행 — 억지 green 위장 0)
-5. 전역 §10 DoD (자가평가·traj·memory sync 포함)
+5. 전역 §10 DoD (자가평가·traj·memory sync 는 세션 마무리에 한 번 — 전역 §7-0)
