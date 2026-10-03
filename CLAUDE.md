@@ -25,7 +25,7 @@ hooks/               # Claude Code 훅 (capture·preflight·save_gate·session_c
 tests/               # pytest + 하니스(개수 가변 · 정본 = ls tests/) | docs/ 설계 정본(START_HERE·ARCHITECTURE·CONSTITUTION 2026-06-17)
 ```
 
-## 검증 게이트 (커밋 전 이 순서로 — 목표: preflight 1회 통과)
+## 검증 게이트 (PR·릴리스 직전 이 순서로 — 목표: preflight 1회 통과 · 작은 변경은 바꾼 것에 걸리는 게이트만 — 전역 §7-0, 스킬 binggupack-verify-battery Step 0)
 
 > ⚠ **Windows 이 박스에서 pytest/preflight를 백그라운드로 띄우지 말 것** — python 서브프로세스 트리가 세션 kill로 exit 255 즉사(출력 0·2026-07-13 실측, 순수 sleep은 생존). 동기 실행 + 테스트 파일 2~3청크 분할(청크당 ≤5분). 정본: 전역 박제 `feedback_windows_background_kill_safety`.
 ```bash
