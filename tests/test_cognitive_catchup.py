@@ -115,6 +115,9 @@ def test_catchup_memory_priorities_superseded_conflict_outcome_and_context_cap(t
     assert capped["budget"]["used_chars"] <= 1800
     assert capped["budget"]["cap_satisfied"] is True
     assert capped["budget"]["omitted_count"] > 0
+    # B-16: 압박을 받아도 과거 실수는 실제 항목으로 남고, 줄인 내역은 본문 한 줄로 보고된다.
+    assert any("omitted_count" not in item for item in capped["known_failures"])
+    assert "[기억 압축]" in render_catchup(capped)
 
 
 def test_catchup_performs_zero_repository_and_database_writes(tmp_path):
@@ -201,3 +204,105 @@ def test_catchup_does_not_resurrect_human_overturned_failure():
     )
     assert out["known_failures"] == []
     assert "known failure" not in out["next_best_action"]["next_best_action"].lower()
+
+
+_SECTIONS = ("what_changed", "relevant_memory", "decisions", "known_constraints", "known_failures")
+
+
+def _pressure_input(max_chars: int, *, clean: bool = True) -> dict:
+    nodes = (
+        [{"node_id": f"n-d{i}", "claim": f"결정 {i}: " + "승인 회귀 뒤에만 릴리스한다 " * 4,
+          "semantic_subtype": "결정", "evidence_refs": [f"evidence:d{i}"], "evidence_count": 1,
+          "display_id": f"d{i}"} for i in range(6)]
+        + [{"node_id": f"n-c{i}", "claim": f"제약 {i}: " + "G4_no_auto 를 지킨다 " * 5,
+            "semantic_subtype": "제약", "display_id": f"c{i}"} for i in range(6)]
+        + [{"node_id": f"n-f{i}", "claim": f"실수 {i}: " + "승인 회귀를 건너뛰어 저장 게이트가 열렸다 " * 8,
+            "semantic_subtype": "버그패턴", "display_id": f"f{i}"} for i in range(5)]
+        + [{"node_id": f"n-g{i}", "claim": f"참고 {i}: " + "릴리스 노트 " * 30,
+            "semantic_subtype": "선호", "display_id": f"g{i}"} for i in range(20)]
+    )
+    return dict(
+        repo_state={"available": True, "repo": "/repo", "branch": "main", "head": "a" * 40,
+                    "clean": clean, "changed": [] if clean else [f" M src/module_{i}.py" for i in range(40)],
+                    "last_commit": "abc base", "test_state": "green"},
+        recall_result={"relevant_nodes": nodes},
+        outcomes=[{"outcome_id": f"o{i}", "result": "failure", "evidence_digest": "b" * 64}
+                  for i in range(3)],
+        outcome_summary={"overall": {"pending_traces": 0}},
+        superseded=[{"node_id": f"n-s{i}", "claim": f"옛 결정 {i}", "semantic_subtype": "결정"}
+                    for i in range(3)],
+        query="release", max_chars=max_chars,
+    )
+
+
+def test_catchup_pressure_shrinks_every_section_instead_of_dropping():
+    full = build_catchup(**_pressure_input(10**9, clean=False))
+    out = build_catchup(**_pressure_input(3000, clean=False))
+    rows = out["budget"]["compression"]["sections"]
+    for name in _SECTIONS:
+        assert out[name], name
+        assert rows[name]["original"] == len(full[name])
+        assert rows[name]["kept"] + rows[name]["folded"] == rows[name]["original"]
+    assert out["budget"]["omitted_count"] == sum(row["folded"] for row in rows.values()) > 0
+    assert out["budget"]["cap_satisfied"] is True
+    assert out["budget"]["used_chars"] <= 3000
+    flat = json.dumps({name: out[name] for name in _SECTIONS}, ensure_ascii=False)
+    assert "…외 " in flat and "자 줄임)" in flat
+    line = out["budget"]["compression"]["line"]
+    assert line.startswith("[기억 압축] 예산 3000자 중 갈래별 원래→남김:")
+    assert "과거실수 %d→" % len(full["known_failures"]) in line
+    text = render_catchup(out)
+    assert text.splitlines()[1] == line
+    assert len(text) <= 3000
+
+
+def test_catchup_known_failures_never_drop_to_zero_under_pressure():
+    full = build_catchup(**_pressure_input(10**9))
+    top_ref = full["known_failures"][0]["source_ref"]
+    for max_chars in range(1200, 8001, 400):
+        out = build_catchup(**_pressure_input(max_chars))
+        assert out["budget"]["cap_satisfied"] is True, max_chars
+        real = [item for item in out["known_failures"] if "omitted_count" not in item]
+        assert real and real[0]["source_ref"] == top_ref, max_chars
+        # 다음 행동이 근거로 드는 과거 실수가 본문에서 사라지지 않는다.
+        assert out["next_best_action"]["evidence"] == [top_ref]
+        for name in ("relevant_memory", "decisions", "known_constraints"):
+            assert out[name], (max_chars, name)
+
+
+def _golden_input(max_chars: int) -> dict:
+    nodes = [
+        {"node_id": "n-d1", "claim": "릴리스는 승인 회귀 시험 뒤에만 한다", "semantic_subtype": "결정",
+         "evidence_refs": ["evidence:e1"], "evidence_count": 1, "display_id": "d1"},
+        {"node_id": "n-c1", "claim": "G4_no_auto 를 지킨다", "semantic_subtype": "제약", "display_id": "c1"},
+        {"node_id": "n-f1", "claim": "승인 회귀를 건너뛰어 저장 게이트가 열렸다", "semantic_subtype": "버그패턴",
+         "display_id": "f1"},
+        {"node_id": "n-g1", "claim": "릴리스 노트는 한국어로 쓴다", "semantic_subtype": "선호", "display_id": "g1"},
+    ]
+    return dict(
+        repo_state={"available": True, "repo": "/repo", "branch": "main", "head": "a" * 40, "clean": False,
+                    "changed": [" M app.txt", "?? new.txt"], "last_commit": "abc base", "test_state": "green"},
+        recall_result={"relevant_nodes": nodes},
+        outcomes=[{"outcome_id": "o1", "result": "failure", "evidence_digest": "b" * 64}],
+        outcome_summary={"overall": {"pending_traces": 1}},
+        superseded=[{"node_id": "n-d0", "claim": "옛 흐름으로 릴리스", "semantic_subtype": "결정"}],
+        query="release", max_chars=max_chars,
+    )
+
+
+def test_catchup_within_budget_output_is_byte_identical_to_before_b16():
+    # 해시는 B-16 이전 코드(main 738af46)로 같은 입력을 돌려 얻은 값이다(JSON 키 순서 + 렌더 본문).
+    # 예산 안(1808 = 딱 맞는 경계 포함)에서는 한 바이트도 달라지면 안 된다.
+    for max_chars, digest in (
+        (8000, "1542cd29aa671176bd2521e6cd72a04726d5dec74812fec432249310d281080d"),
+        (1808, "508244eacc7d03ac8a60bce92322e2fdfecdcc5dd6247427d2c602265fb77053"),
+    ):
+        out = build_catchup(**_golden_input(max_chars))
+        blob = json.dumps(out, ensure_ascii=False) + "\n" + render_catchup(out)
+        assert hashlib.sha256(blob.encode("utf-8")).hexdigest() == digest, max_chars
+        assert "compression" not in out["budget"]
+    # 한 글자만 모자라도 갈래를 통째로 버리지 않는다(종전엔 변경파일 2건을 다 버렸다) — 줄이고 보고한다.
+    tight = build_catchup(**_golden_input(1807))
+    assert tight["what_changed"] == [" M app.txt", "…외 1건"]
+    assert tight["known_failures"] == build_catchup(**_golden_input(8000))["known_failures"]
+    assert render_catchup(tight).splitlines()[1].startswith("[기억 압축] 예산 1807자")

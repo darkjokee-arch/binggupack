@@ -5,7 +5,7 @@
 
 ## 🔴 절대 경계 (위반 = 작업 중단)
 1. **운영홈은 repo 밖:** `~/.binggupack/` (`BINGGU_HOME` env 우선), 본체 = `~/.binggupack/ledger.sqlite`. **모든 테스트·preflight는 임시 BINGGU_HOME 격리** — 작업 후 운영홈 ledger 본체 mtime 불변 실측이 관례. repo 안 `_binggu_*_home/`·`_fc_home/`은 샌드박스(운영 아님).
-2. **저장은 사장님 SAVE만:** owner 발화 저장은 preview 제시 → 사장님이 직접 SAVE/confirm. AI가 `binggu pair/save --confirm`을 Bash로 대행 = 승인 위조 (정본 [[feedback_binggupack_save_master]] §4). owner 발화는 `pair`로만(평면 save BLOCK)·원문 그대로. 상세 정본: 전역 §8-1 ⑥.
+2. **저장은 사장님 SAVE n 발화가 있어야 한다:** preview 제시 → 사장님 "SAVE n" 발화(앵커) → 그 앵커로 `binggu save-batch --confirm "SAVE n"` 집행. 앵커 없이 AI가 confirm을 채우는 것은 승인 위조다. owner 발화는 원문 그대로 `pair`로(평면 save는 BLOCK). 정본: 전역 §C-11 · [[feedback_binggupack_save_master]] §4 · §8-1 ⑥.
 3. **PyPI 승인 대행 금지:** publish.yml `environment: pypi` 승인은 **owner 직접** — AI 대신 승인 0.
 4. **거버넌스 자산 write 0:** 빙구팩이 박제/CLAUDE.md/정책파일 직접 수정 금지 (전역 §8-1). `policies/binggu_policy.json`은 sha256 무결성 쌍으로 관리.
 
@@ -19,13 +19,13 @@
 binggu.py            # 메인 CLI (binggu/binggupack 콘솔 진입점) — save·recall·pair·studio·preflight·index 등
 binggupack/          # pip 패키지: pack(빌드·검증) safety(경로·시크릿 게이트) mcp studio(read-only 웹UI)
                      #   app(v1.21 read core) review capture classifier policy schema storage workspace cli
-scripts/             # ~166개: *_selftest.py 게이트·publish 파이프라인·doctor·autopush·경로 SSOT(binggu_paths.py)
+scripts/             # *_selftest.py 게이트·publish 파이프라인·doctor·autopush·경로 SSOT(binggu_paths.py)
 hosted/workers/      # Cloudflare Workers (wrangler.*.toml 다수) + anywhere/core = 벤더 사본(아래 함정 ①)
 hooks/               # Claude Code 훅 (capture·preflight·save_gate·session_close·enforce-recall)
 tests/               # pytest + 하니스(개수 가변 · 정본 = ls tests/) | docs/ 설계 정본(START_HERE·ARCHITECTURE·CONSTITUTION 2026-06-17)
 ```
 
-## 검증 게이트 (커밋 전 이 순서로 — 목표: preflight 1회 통과)
+## 검증 게이트 (PR·릴리스 직전 이 순서로 — 목표: preflight 1회 통과 · 작은 변경은 바꾼 것에 걸리는 게이트만 — 전역 §7-0, 스킬 binggupack-verify-battery Step 0)
 
 > ⚠ **Windows 이 박스에서 pytest/preflight를 백그라운드로 띄우지 말 것** — python 서브프로세스 트리가 세션 kill로 exit 255 즉사(출력 0·2026-07-13 실측, 순수 sleep은 생존). 동기 실행 + 테스트 파일 2~3청크 분할(청크당 ≤5분). 정본: 전역 박제 `feedback_windows_background_kill_safety`.
 ```bash
@@ -43,6 +43,9 @@ python scripts/sync_anywhere_vendor.py --check   # 공유 모듈 수정 시 필�
 3. **로컬 반복 통과 ≠ CI 결정성:** wall-clock 의존은 코드 읽기로 규명 (로컬 20회 GO여도 CI 전 OS fail 사례).
 4. **WIP 혼입:** 병렬 세션·이전 브랜치 잔여물이 워킹트리에 섞임 — 의심되면 **git worktree 격리** 후 대상 파일만 재적용 (`BingguPack_wt_*` 형제 폴더가 그 용도).
 
+## 회상 도장(ai_stamp) 구현 세부
+회상 효용 도장은 AI 가 사용 시점에 자동 기입한다(`actor=ai_stamp`). ① `ai_stamp` 는 `human` 과 분리 집계(`aggregate.by_actor`) ② owner 가 다르게 찍으면 사람 판정이 덮어씀(역방향 불가) ③ AI 도장분도 마무리 preview 에 표시. `ai_stamp` 의 `used` 는 `use_count`(랭킹)에도 반영하되, owner 가 `used` 아닌 것으로 판정하면 AI 몫만 회수(`p1_ranking.revoke_use` · use_key 를 actor 별로 분리). AI 몫 use_key 는 고정 키(day-bucket 금지 — 회수 가능·노드당 1회). 저장(SAVE)·승격·PyPI·PR 머지·파괴 작업은 사람 전용.
+
 ## Git·릴리스 컨베이어
 - 브랜치 → PR → **CI 전 매트릭스 green**(ubuntu 3.10/3.12/3.13/3.14·macos·windows + typecheck + MCP install) → `gh pr merge N --merge`
 - **merge commit만** — squash/rebase/force-push/history rewrite/기존 tag 이동 **0**. 충돌 시 origin/main 보존 머지
@@ -54,4 +57,4 @@ python scripts/sync_anywhere_vendor.py --check   # 공유 모듈 수정 시 필�
 2. 운영홈 `~/.binggupack/ledger.sqlite` 본체 불변 실측
 3. 공유 모듈 수정 시 벤더 `--check` 통과
 4. PR CI 전 매트릭스 green (flaky는 무관 3중 확증 후 해당 job만 재실행 — 억지 green 위장 0)
-5. 전역 §10 DoD (자가평가·traj·memory sync 포함)
+5. 전역 §10 DoD (자가평가·traj·memory sync 는 세션 마무리에 한 번 — 전역 §7-0)

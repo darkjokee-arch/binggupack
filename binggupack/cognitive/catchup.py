@@ -70,6 +70,191 @@ def _item_size(item: Any) -> int:
     return len(json.dumps(item, ensure_ascii=False, sort_keys=True))
 
 
+# 예산 압박 때 갈래를 통째로 버리지 않고 줄인다 (B-16 · 2026-10-17 사장님 결정:
+# «과거실수기록부터 버리는게 아니라 기억을 모두 정리해서 보고해야지 정상 아니냐?»).
+# 앞일수록 끝까지 지킨다 — 최소 몫조차 모자랄 때 뒤에서부터 «건수만» 으로 줄인다.
+_KEEP_PRIORITY = ("known_failures", "decisions", "known_constraints", "relevant_memory", "what_changed")
+_SECTION_LABELS = {
+    "known_failures": "과거실수",
+    "decisions": "결정",
+    "known_constraints": "제약",
+    "relevant_memory": "관련기억",
+    "what_changed": "변경파일",
+}
+_CLAIM_FLOOR = 80  # 여러 건을 담을 때 한 건에 남기는 최소 앞부분 글자 수
+_CLAIM_LAST = 20   # 한 건만 겨우 담을 때의 최소 앞부분 글자 수
+
+
+def _shorten(text: str, limit: int) -> tuple[str, bool]:
+    if len(text) <= limit:
+        return text, False
+    out = "%s…(%d자 줄임)" % (text[:limit], len(text) - limit)
+    if len(out) >= len(text):
+        return text, False
+    return out, True
+
+
+def _compact(entry: Any, limit: int) -> tuple[Any, bool]:
+    if not isinstance(entry, dict):
+        return _shorten(str(entry), limit)
+    claim, cut = _shorten(str(entry.get("claim") or ""), limit)
+    out: dict[str, Any] = {"claim": claim, "source_ref": entry.get("source_ref") or "memory:unknown"}
+    if entry.get("superseded"):
+        out["superseded"] = True
+    return out, cut
+
+
+def _stub(count: int, *, shown: bool, as_dict: bool) -> Any:
+    text = ("…외 %d건" % count) if shown else ("…%d건(본문 생략)" % count)
+    return {"claim": text, "omitted_count": count} if as_dict else text
+
+
+def _build(items: list[Any], keep: int, limit: int, as_dict: bool) -> tuple[list[Any], int]:
+    out: list[Any] = []
+    cut = 0
+    for entry in items[:keep]:
+        small, was_cut = _compact(entry, limit)
+        out.append(small)
+        cut += int(was_cut)
+    if keep < len(items):
+        out.append(_stub(len(items) - keep, shown=True, as_dict=as_dict))
+    return out, cut
+
+
+def _max_keep(items: list[Any], limit: int, cap: int, as_dict: bool, most: int) -> int:
+    """Largest top-K whose compact list (plus «외 M건») fits ``cap`` JSON chars."""
+    best = 0
+    used = 2
+    for k in range(1, min(len(items), most) + 1):
+        used += _item_size(_compact(items[k - 1], limit)[0]) + (2 if k > 1 else 0)
+        if used > cap:
+            break
+        total = used
+        if k < len(items):
+            total += 2 + _item_size(_stub(len(items) - k, shown=True, as_dict=as_dict))
+        if total <= cap:
+            best = k
+    return best
+
+
+def _max_limit(items: list[Any], keep: int, floor: int, cap: int, as_dict: bool) -> int:
+    def text_len(entry: Any) -> int:
+        return len(str(entry.get("claim") or "")) if isinstance(entry, dict) else len(str(entry))
+
+    lo, hi, best = floor, max(text_len(entry) for entry in items[:keep]), floor
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        if _item_size(_build(items, keep, mid, as_dict)[0]) <= cap:
+            best, lo = mid, mid + 1
+        else:
+            hi = mid - 1
+    return best
+
+
+def _fit_section(items: list[Any], cap: int, *, as_dict: bool) -> tuple[list[Any], dict[str, Any]]:
+    """Shrink one section into ``cap`` JSON chars without dropping it wholesale."""
+    n = len(items)
+    info: dict[str, Any] = {"original": n, "kept": n, "folded": 0, "truncated": 0, "compacted": False}
+    if not n or _item_size(items) <= cap:
+        return list(items), info
+    for floor, most in ((_CLAIM_FLOOR, n), (_CLAIM_LAST, 1)):
+        keep = _max_keep(items, floor, cap, as_dict, most)
+        if keep:
+            out, cut = _build(items, keep, _max_limit(items, keep, floor, cap, as_dict), as_dict)
+            info.update(kept=keep, folded=n - keep, truncated=cut, compacted=True)
+            return out, info
+    info.update(kept=0, folded=n, compacted=True)
+    tiny = [_stub(n, shown=False, as_dict=as_dict)]
+    if _item_size(tiny) <= cap:
+        return tiny, info
+    info["dropped"] = True
+    return [], info
+
+
+def _min_share(items: list[Any], as_dict: bool, limit: int = _CLAIM_FLOOR) -> int:
+    if not items:
+        return 0
+    return min(_item_size(items), _item_size(_build(items, 1, limit, as_dict)[0])) - 2
+
+
+def _tiny_share(items: list[Any], as_dict: bool) -> int:
+    return _item_size([_stub(len(items), shown=False, as_dict=as_dict)]) - 2 if items else 0
+
+
+def _fit_sections(
+    sections: dict[str, list[Any]], avail: int, max_chars: int
+) -> tuple[dict[str, list[Any]], dict[str, dict[str, Any]]]:
+    """Minimum share per section, then the rest split by need, then item-level shrink."""
+    as_dict = {name: name != "what_changed" for name in sections}
+    floor = {name: _min_share(items, as_dict[name]) for name, items in sections.items()}
+    top = {name: (_item_size(items) - 2 if items else 0) for name, items in sections.items()}
+    if sections["what_changed"]:  # 변경 파일 목록은 종전처럼 예산의 1/4 까지만
+        top["what_changed"] = max(floor["what_changed"], min(top["what_changed"], max_chars // 4))
+    if sum(floor.values()) <= avail:
+        rest = avail - sum(floor.values())
+        need = {name: top[name] - floor[name] for name in sections}
+        total_need = sum(need.values())
+        if total_need <= rest:
+            share = dict(top)
+        else:
+            share = {name: floor[name] + rest * need[name] // total_need for name in sections}
+    else:
+        # 모자라면 뒤 갈래부터: 먼저 모두 «한 건 앞부분+외 M건» 으로, 그래도 모자라면 «건수만» 으로.
+        share = dict(floor)
+        deficit = sum(floor.values()) - avail
+        for shrink in (lambda items, flag: _min_share(items, flag, _CLAIM_LAST), _tiny_share):
+            for name in reversed(_KEEP_PRIORITY):
+                if deficit <= 0:
+                    break
+                if sections[name]:
+                    smaller = min(share[name], shrink(sections[name], as_dict[name]))
+                    deficit -= share[name] - smaller
+                    share[name] = smaller
+    fitted: dict[str, list[Any]] = {}
+    info: dict[str, dict[str, Any]] = {}
+    for name in _KEEP_PRIORITY:
+        fitted[name], info[name] = _fit_section(sections[name], share[name] + 2, as_dict=as_dict[name])
+    slack = avail - sum(_item_size(value) - 2 for value in fitted.values())
+    for name in _KEEP_PRIORITY:  # 반올림·여유분은 앞 갈래부터 다시 나눠 준다
+        if slack <= 0:
+            break
+        if not info[name]["compacted"]:
+            continue
+        before = _item_size(fitted[name]) - 2
+        room = before + slack
+        if name == "what_changed":
+            room = min(room, top[name])
+        again, again_info = _fit_section(sections[name], room + 2, as_dict=as_dict[name])
+        after = _item_size(again) - 2
+        if before < after <= room:
+            fitted[name], info[name] = again, again_info
+            slack -= after - before
+    return fitted, info
+
+
+def _compression_line(max_chars: int, info: dict[str, dict[str, Any]], frame_notes: list[str]) -> str:
+    parts = []
+    for name in _KEEP_PRIORITY:
+        row = info[name]
+        if not row["original"]:
+            continue
+        text = "%s %d→%d건" % (_SECTION_LABELS[name], row["original"], row["kept"])
+        extra = []
+        if row["folded"]:
+            extra.append("외 %d건 묶음" % row["folded"])
+        if row["truncated"]:
+            extra.append("%d건 앞부분만" % row["truncated"])
+        if row.get("dropped"):
+            extra.append("상한 초과로 비움")
+        elif row["compacted"] and not extra:
+            extra.append("세부칸 뺌")
+        if extra:
+            text += "(" + "·".join(extra) + ")"
+        parts.append(text)
+    parts.extend(frame_notes)
+    return "[기억 압축] 예산 %d자 중 갈래별 원래→남김: %s" % (max_chars, " · ".join(parts) or "없음")
+
+
 def _source_item(raw: dict[str, Any], *, superseded: bool = False) -> dict[str, Any]:
     node_id = raw.get("node_id")
     return {
@@ -98,7 +283,15 @@ def build_catchup(
     max_chars: int = 8000,
     next_action: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Merge already-read sources under a deterministic context budget."""
+    """Merge already-read sources under a deterministic context budget.
+
+    Within budget the output is the full merge (byte-identical to the 2026-08-29
+    behaviour).  Under pressure no section is dropped wholesale: every non-empty
+    section keeps a minimum share, the rest is split by need, and overflowing
+    sections shrink item by item (head + «…(N자 줄임)», top K + «…외 M건»).
+    What shrank is reported in ``budget.compression`` and as one line at the top
+    of ``render_catchup``.
+    """
     nodes = recall_result.get("relevant_nodes") or recall_result.get("remember") or []
     unique: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -160,52 +353,24 @@ def build_catchup(
 
     current_state = {key: value for key, value in repo_state.items() if key != "changed"}
     raw_changed = list(repo_state.get("changed") or [])
-    what_changed: list[str] = []
-    changed_omitted = 0
-    changed_used = 0
-    for item in raw_changed:
-        size = _item_size(item)
-        if changed_used + size <= max(0, max_chars // 4):
-            what_changed.append(str(item))
-            changed_used += size
-        else:
-            changed_omitted += 1
-    base_used = _item_size(current_state) + _item_size(what_changed) + _item_size(unresolved) + _item_size(nba)
-    used = base_used
-    omitted = changed_omitted
-    kept: dict[str, list[Any]] = {
-        "decisions": [], "constraints": [], "history": [], "failures": [], "general": []
+    sections: dict[str, list[Any]] = {
+        "what_changed": [str(item) for item in raw_changed],
+        "relevant_memory": history + general,
+        "decisions": decisions,
+        "known_constraints": constraints,
+        "known_failures": failures,
     }
-    prioritized = [
-        ("decisions", item) for item in decisions
-    ] + [
-        ("constraints", item) for item in constraints
-    ] + [
-        ("history", item) for item in history
-    ] + [
-        ("failures", item) for item in failures
-    ] + [
-        ("general", item) for item in general
-    ]
-    for section, item in prioritized:
-        size = _item_size(item)
-        if used + size <= max_chars:
-            kept[section].append(item)
-            used += size
-        else:
-            omitted += 1
     result: dict[str, Any] = {
         "query": query,
         "current_state": current_state,
-        "what_changed": what_changed,
-        "relevant_memory": kept["history"] + kept["general"],
-        "decisions": kept["decisions"],
-        "known_constraints": kept["constraints"],
-        "known_failures": kept["failures"],
+        "what_changed": list(sections["what_changed"]),
+        "relevant_memory": list(sections["relevant_memory"]),
+        "decisions": list(decisions),
+        "known_constraints": list(constraints),
+        "known_failures": list(failures),
         "unresolved": unresolved,
         "next_best_action": nba,
-        "budget": {"max_chars": max_chars, "used_chars": used,
-                   "omitted_count": omitted, "hard_cap_applied": bool(omitted)},
+        "budget": {},
         "safety": {"writes": 0, "ledger_mutation": False, "candidate_write": False,
                    "approval_write": False, "outcome_write": False, "git_write": False},
     }
@@ -217,10 +382,20 @@ def build_catchup(
     def context_size() -> int:
         return _item_size({key: result[key] for key in context_keys})
 
-    if context_size() > max_chars:
-        result["what_changed"] = []
-        omitted += len(what_changed)
-    if context_size() > max_chars:
+    changed_fits = sum(_item_size(item) for item in raw_changed) <= max(0, max_chars // 4)
+    if changed_fits and context_size() <= max_chars:
+        result["budget"] = {"max_chars": max_chars, "used_chars": context_size(), "omitted_count": 0,
+                            "hard_cap_applied": False, "cap_satisfied": True}
+        return result
+
+    as_dict = {name: name != "what_changed" for name in sections}
+    frame_notes: list[str] = []
+
+    def avail() -> int:
+        frame = {key: ([] if key in sections else result[key]) for key in context_keys}
+        return max_chars - _item_size(frame)
+
+    if sum(_min_share(items, as_dict[name]) for name, items in sections.items()) > avail():
         result["current_state"] = {
             "available": current_state.get("available"),
             "repo": str(current_state.get("repo") or "")[-100:],
@@ -229,23 +404,35 @@ def build_catchup(
             "clean": current_state.get("clean"),
             "test_state": str(current_state.get("test_state") or "")[:80],
         }
-    for key in ("known_failures", "relevant_memory", "known_constraints", "decisions"):
-        while result[key] and context_size() > max_chars:
-            result[key].pop()
-            omitted += 1
-    if context_size() > max_chars:
-        result["unresolved"] = [str(item)[:100] for item in result["unresolved"][:1]]
+        frame_notes.append("상태칸 축약")
+    if sum(_tiny_share(items, as_dict[name]) for name, items in sections.items()) > avail():
+        result["unresolved"] = [str(item)[:100] for item in unresolved[:1]]
         result["next_best_action"] = {
             "next_best_action": str(nba.get("next_best_action") or "")[:100],
             "confidence": nba.get("confidence", "low"),
         }
+        frame_notes.append("미해결 %d→%d건·다음행동 축약" % (len(unresolved), len(result["unresolved"])))
+    fitted, info = _fit_sections(sections, avail(), max_chars)
+    result.update(fitted)
+    for name in reversed(_KEEP_PRIORITY):  # 건수 표시조차 못 담는 극단 상한에서만 — 그래도 상한은 지킨다
+        if context_size() <= max_chars:
+            break
+        if result[name]:
+            result[name] = []
+            info[name].update(kept=0, folded=info[name]["original"], truncated=0, dropped=True)
     actual = context_size()
+    line = _compression_line(max_chars, info, frame_notes)
     result["budget"] = {
         "max_chars": max_chars,
         "used_chars": actual,
-        "omitted_count": omitted,
-        "hard_cap_applied": bool(omitted),
+        "omitted_count": sum(row["folded"] for row in info.values()),
+        "hard_cap_applied": True,
         "cap_satisfied": actual <= max_chars,
+        "compression": {
+            "sections": {name: info[name] for name in _KEEP_PRIORITY},
+            "frame": frame_notes,
+            "line": line,
+        },
     }
     return result
 
@@ -357,17 +544,20 @@ def render_catchup(result: dict[str, Any]) -> str:
         ("UNRESOLVED", _render_items(result.get("unresolved") or [])),
         ("NEXT BEST ACTION", _render_items([result.get("next_best_action") or {}])),
     ]
-    lines = ["# BingguPack catchup (read-only)"]
+    budget = result.get("budget") or {}
+    note = str((budget.get("compression") or {}).get("line") or "")
+    lines = ["# BingguPack catchup (read-only)"] + ([note] if note else [])
     for heading, content in sections:
         lines.extend(["", "## " + heading, *content])
-    budget = result.get("budget") or {}
     lines.extend(["", "context: %s/%s chars; omitted=%s" % (
         budget.get("used_chars", 0), budget.get("max_chars", 0), budget.get("omitted_count", 0)
     )])
     rendered = "\n".join(lines) + "\n"
     max_chars = int(budget.get("max_chars") or 0)
     if max_chars and len(rendered) > max_chars:
-        fixed = ["# BingguPack catchup (read-only)"]
+        note = note[:max_chars // 4]
+        head = ["# BingguPack catchup (read-only)"] + ([note] if note else [])
+        fixed = list(head)
         first_lines = []
         for heading, content in sections:
             fixed.extend(["", "## " + heading])
@@ -375,7 +565,7 @@ def render_catchup(result: dict[str, Any]) -> str:
         fixed.extend(["", "context: capped; omitted=%s" % budget.get("omitted_count", 0)])
         fixed_size = len("\n".join(fixed)) + len(first_lines) + 1
         per_section = max(4, (max_chars - fixed_size) // max(1, len(first_lines)))
-        compact = ["# BingguPack catchup (read-only)"]
+        compact = list(head)
         for (heading, _content), first in zip(sections, first_lines):
             compact.extend(["", "## " + heading, first[:per_section]])
         compact.extend(["", "context: capped; omitted=%s" % budget.get("omitted_count", 0)])
