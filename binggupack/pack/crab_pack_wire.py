@@ -51,7 +51,85 @@ DEFAULT_MAX_TRIES = 8
 RETRYABLE_RX = re.compile(r"statement timeout|http_5\d\d|fetch_error", re.I)
 # 비동기 접수 응답 — 실패가 아니라 성공이다(2026-08-10). package_id 는 나중에 붙는다.
 ACCEPTED_RX = re.compile(r"upload accepted|processing the pack|asynchronous", re.I)
-TOKEN_IN_CMD_RX = re.compile(r"X-OpenCrab-Upload-Token: ([A-Za-z0-9_-]+)'")
+TOKEN_IN_CMD_RX = re.compile(r"X-OpenCrab-Upload-Token:\s*([A-Za-z0-9_-]+)")
+
+# ★ 2026-11-14 — 서버가 «공식 러너로 지은 edge 프로필 팩 + 사전 점검 결과»만 받는다
+#   (error_code CANONICAL_ARTIFACT_REQUIRED). 자체 빌더(build_crab_pack) ZIP 은 9/5 부터
+#   전부 거절됐는데 응답에 handoff 가 없어 SESSION_PARSE_FAIL 로만 찍혔다(5분마다 2만5천 번).
+RUNNER_ENV = "OPENCRAB_DESKTOP_BUILD_RUNNER"
+RUNNER_PY_ENV = "BINGGU_CRAB_RUNNER_PYTHON"
+RUNNER_CHUNK_CHARS = 350       # 문서당 조각 1.5개 미만이면 러너가 C 등급(출하 불가)을 준다
+
+
+def find_runner(env=None):
+    """공식 러너 경로 — env > ~/.opencrab/bin. 없으면 None(호출자가 legacy 빌더로 폴백)."""
+    e = os.environ if env is None else env
+    for cand in (e.get(RUNNER_ENV), str(Path.home() / ".opencrab" / "bin" / "opencrab_desktop_build_runner.py")):
+        if cand and Path(cand).is_file():
+            return str(cand)
+    return None
+
+
+def runner_python(env=None):
+    """러너를 돌릴 파이썬 — env > ~/.opencrab/venv-gpu > 현재 인터프리터."""
+    import sys
+    e = os.environ if env is None else env
+    venv = Path.home() / ".opencrab" / "venv-gpu" / ("Scripts" if os.name == "nt" else "bin") / (
+        "python.exe" if os.name == "nt" else "python")
+    for cand in (e.get(RUNNER_PY_ENV), str(venv)):
+        if cand and Path(cand).is_file():
+            return str(cand)
+    return sys.executable
+
+
+def _run_runner(argv, env, timeout):
+    import subprocess  # 지연 import — live 경로에서만
+    r = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                       timeout=timeout, env=env)
+    return r.returncode, r.stdout or "", r.stderr or ""
+
+
+def build_runner_pack(data_dir, out_zip, title, purpose, *, chunk_chars=RUNNER_CHUNK_CHARS,
+                      env=None, runner=None, python=None, run_fn=None, timeout=1500):
+    """공식 러너로 edge 프로필 팩을 짓고 사전 점검(--verify-upload-zip)까지 돈다.
+
+    반환(raise 0): {ok, reason, preflight, runner_version}. preflight 는 서버 create_upload_session
+    의 upload_preflight 로 그대로 넘긴다. NEO4J_* 환경변수는 지운다 — 켜져 있으면 러너가 그래프 DB
+    연결을 시도하다 실패해 D 등급(출하 불가)을 준다(팩 자체와 무관한 로컬 사정).
+    """
+    out = {"ok": False, "reason": None, "preflight": None, "runner_version": None}
+    rn = runner or find_runner(env)
+    if not rn:
+        out["reason"] = "RUNNER_MISSING"
+        return out
+    e = {k: v for k, v in (os.environ if env is None else env).items()
+         if not str(k).upper().startswith("NEO4J_")}
+    py = python or runner_python(env)
+    run = run_fn or _run_runner
+    try:
+        rc, so, se = run([py, rn, "--source", str(data_dir), "--output-zip", str(out_zip),
+                          "--title", str(title), "--purpose", str(purpose),
+                          "--embedding-profile", "edge", "--embedding-mode", "off",
+                          "--visual-mode", "off", "--ocr-mode", "off",
+                          "--max-files", "20000", "--chunk-chars", str(int(chunk_chars))], e, timeout)
+        if rc != 0 or not Path(out_zip).is_file():
+            out["reason"] = "RUNNER_BUILD_FAIL:rc=%s" % rc
+            return out
+        rc, so, se = run([py, rn, "--verify-upload-zip", str(out_zip)], e, 300)
+        try:
+            receipt = json.loads(so)
+        except (json.JSONDecodeError, TypeError):
+            m = re.search(r"upload preflight: ([^\"\\]{0,120})", so + se)
+            out["reason"] = "RUNNER_PREFLIGHT_FAIL:" + (m.group(1).strip() if m else "rc=%s" % rc)
+            return out
+        if rc != 0 or receipt.get("status") != "ok":
+            out["reason"] = "RUNNER_PREFLIGHT_FAIL:status=%s" % receipt.get("status")
+            return out
+        out.update({"ok": True, "preflight": receipt, "runner_version": receipt.get("runner_version")})
+        return out
+    except Exception as ex:  # noqa — 러너 예외도 typed 흡수
+        out["reason"] = "RUNNER_ERROR:" + type(ex).__name__
+        return out
 
 TEXT_EXTS = {".md", ".markdown", ".txt", ".csv", ".tsv", ".json", ".jsonl",
              ".yaml", ".yml", ".xml", ".html", ".htm"}
@@ -523,11 +601,24 @@ def _parse_session(tool_text):
     except (json.JSONDecodeError, TypeError):
         return None
     h = (j or {}).get("saas_ingest_handoff") or {}
-    m = TOKEN_IN_CMD_RX.search(h.get("upload_command") or "")
+    m = TOKEN_IN_CMD_RX.search("%s %s" % (h.get("upload_command") or "",
+                                          (j or {}).get("upload_command") or ""))
     if not (h.get("upload_url") and h.get("upload_finalize_url") and m):
         return None
     return {"upload_url": h["upload_url"], "finalize_url": h["upload_finalize_url"],
             "token": m.group(1), "session_id": h.get("upload_session_id")}
+
+
+def _session_reject_reason(tool_text):
+    """세션을 못 받았을 때 서버가 준 사유 — 'SERVER_<error_code|status>'. 못 읽으면 None."""
+    try:
+        j = json.loads(tool_text)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(j, dict):
+        return None
+    code = j.get("error_code") or j.get("status")
+    return ("SERVER_%s" % re.sub(r"[^A-Za-z0-9_]+", "_", str(code))[:60]) if code else None
 
 
 def _mcp_call(transport, tool, arguments):
@@ -575,7 +666,7 @@ def default_post_fn(url, headers, *, timeout=150):
 def upload_crab_pack(zip_path, pack_name, purpose, *, data_folder=None, project_id=None,
                      pack_category="travel", env=None, config_path=None, home=None,
                      transport=None, put_fn=None, post_fn=None, sleep_fn=None,
-                     dry_run=True, confirm=False, max_tries=DEFAULT_MAX_TRIES):
+                     dry_run=True, confirm=False, max_tries=DEFAULT_MAX_TRIES, preflight=None):
     """ZIP → crab-agent 업로드 세션 → PUT → finalize (statement timeout 은 세션 재발급 재시도).
 
     fail-closed 게이트(live): ENABLE_ENV=='1' + confirm=True + cloud config(url) +
@@ -593,14 +684,20 @@ def upload_crab_pack(zip_path, pack_name, purpose, *, data_folder=None, project_
     if not zp.is_file():
         out["reason"] = "ZIP_NOT_FOUND"
         return out
-    try:
-        gate = json.loads(zipfile.ZipFile(zp).read("reports/release_gate.json"))
-        if not gate.get("release_ready"):
-            out["reason"] = "ZIP_NOT_RELEASE_READY"
+    if preflight is not None:
+        # 러너 팩 — 출하 판정은 러너 사전 점검(--verify-upload-zip)이 이미 했다.
+        if not (isinstance(preflight, dict) and preflight.get("status") == "ok"):
+            out["reason"] = "PREFLIGHT_NOT_OK"
             return out
-    except Exception:  # noqa — 계약 위반 ZIP 도 typed 차단
-        out["reason"] = "ZIP_CONTRACT_INVALID"
-        return out
+    else:
+        try:
+            gate = json.loads(zipfile.ZipFile(zp).read("reports/release_gate.json"))
+            if not gate.get("release_ready"):
+                out["reason"] = "ZIP_NOT_RELEASE_READY"
+                return out
+        except Exception:  # noqa — 계약 위반 ZIP 도 typed 차단
+            out["reason"] = "ZIP_CONTRACT_INVALID"
+            return out
 
     if dry_run:
         out.update({"ok": True, "stage": "plan",
@@ -631,6 +728,9 @@ def upload_crab_pack(zip_path, pack_name, purpose, *, data_folder=None, project_
         args["data_folder"] = str(data_folder)
     if project_id:
         args["project_id"] = project_id
+    if preflight is not None:
+        args["upload_preflight"] = preflight
+        args["embedding_profile"] = "edge"
 
     last = None
     for attempt in range(1, int(max_tries) + 1):
@@ -645,7 +745,7 @@ def upload_crab_pack(zip_path, pack_name, purpose, *, data_folder=None, project_
             continue
         sess = _parse_session(text)
         if not sess:
-            last = "SESSION_PARSE_FAIL"
+            last = _session_reject_reason(text) or "SESSION_PARSE_FAIL"
             out["stage"] = "session"
             break
         out["session_id"] = sess["session_id"]
