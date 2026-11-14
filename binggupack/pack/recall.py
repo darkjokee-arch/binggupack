@@ -240,22 +240,20 @@ def _load_targets(home=None):
     return out
 
 
-def _target_hits(g, work_text, targets):
-    """대상 이름이 작업 텍스트에 나온 대상 기억 — (맞은 이름 길이, 순위 점수) 내림차순."""
+def _target_gate(work_text, targets):
+    """표지 붙은 기억의 통과 판정 함수 — 대상 기억(target/both)이고 그 대상 이름이 작업 텍스트에 나올 때만 True.
+
+    새로 뽑는 문이 아니라 **거르는 문**이다. 대상 이름만으로 장부 전체에서 새로 뽑으면(1차 구현) 같은 탭·프로젝트
+    이름만 겹친 기억이 묶음으로 따라붙었다 — 그렇게 새로 실린 171항목을 판정하니 쓸모 10개(5.8%).
+    뜻 비슷함으로 뽑힌 것 **가운데** 대상까지 맞는 것만 남기면 34%(50항목 중 17)였다."""
     q = _norm_name(work_text)
-    hits = []
-    for n in g["nodes"]:
-        t = targets.get(n["id"])
-        if not t or t["lane"] not in ("target", "both"):
-            continue
-        matched = [nm for nm in t["names"] if nm in q]
-        if matched:
-            hits.append((max(len(m) for m in matched), n["rank_score"], n))
-    hits.sort(key=lambda x: (-x[0], -x[1], x[2]["id"]))
-    return [{"node_id": n["id"], "claim": n["sentence"][:120], "node_type": n["node_type"],
-             "semantic_subtype": n["semantic_subtype"], "rank_score": n["rank_score"],
-             "relevance": 1.0, "via": "target", "candidate": True, "trust": "candidate_unverified"}
-            for _len, _rank, n in hits]
+
+    def passes(node_id):
+        t = targets.get(node_id)
+        if t is None:
+            return True                      # 표지 없는 기억 — 종전 방식 그대로
+        return t["lane"] in ("target", "both") and any(nm in q for nm in t["names"])
+    return passes
 
 
 def _preflight_node_ok(g):
@@ -790,13 +788,12 @@ def preflight_context(ledger_path, prompt=None, cwd=None, domain=None,
     remember = [n for n in ws["relevant_nodes"]
                 if n["relevance"] >= rel_min and n["node_id"] not in decayed
                 and ok(g["by_id"].get(n["node_id"]) or {"sentence": n["claim"]})]
-    # 대상 표지가 있으면: 표지 붙은 기억은 «대상 이름이 질문에 나올 때만» 싣고(대상 기억 먼저),
-    # 뜻 비슷함으로 뽑힌 것은 아직 표지 없는 기억만 남긴다. 표지 파일이 없으면 위 결과 그대로.
+    # 대상 표지가 있으면: 뜻 비슷함으로 뽑힌 것 가운데, 표지 붙은 기억은 그 대상 이름이 질문에 나올 때만 남긴다.
+    # 빈 자리는 채우지 않는다. 표지 파일이 없으면 위 결과 그대로.
     targets = _load_targets(home)
     if targets:
-        by_target = [n for n in _target_hits(g, work_text, targets)
-                     if n["node_id"] not in decayed and ok(g["by_id"][n["node_id"]])]
-        remember = (by_target + [n for n in remember if n["node_id"] not in targets])[:rc["preflight_max"]]
+        passes = _target_gate(work_text, targets)
+        remember = [n for n in remember if passes(n["node_id"])]
 
     # 반문 = 위험패턴 매칭(Phase6).
     risk = match_risk_patterns(g, work_text, qtok, home=home, scorer=scorer)

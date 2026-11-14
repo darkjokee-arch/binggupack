@@ -43,10 +43,17 @@ def test_no_label_file_keeps_previous_behaviour(tmp_path):
 def test_target_memory_comes_when_its_target_is_named(tmp_path):
     led, home = _ledger(tmp_path / "ledger.sqlite"), str(tmp_path)
     assert R.save_targets(LABELS, home) == 4
-    got = _ids(led, home, "견적계산기안에 들어가는 내용 얼마나 채웠는지 봐줘")    # 조사 붙은 꼴·문장 뜻은 안 겹침
-    assert got[:1] == ["calc"] and "find" not in got
-    assert _ids(led, home, "맞춤공고 화면 다시 봐줘")[:1] == ["find"]              # 별칭
-    assert _ids(led, home, "견적 계산기 빈칸")[:1] == ["calc"]                     # 띄어쓰기
+    got = _ids(led, home, "견적계산기안에 빈칸은 지붕이 없는 곳")        # 조사 붙은 꼴
+    assert "calc" in got and "find" not in got
+    assert "find" in _ids(led, home, "맞춤공고 검색이 아니라 면허로 자동으로")   # 별칭
+    assert "calc" in _ids(led, home, "견적 계산기 빈칸은 지붕이")               # 띄어쓰기
+
+
+def test_target_name_alone_does_not_pull_memory(tmp_path):
+    # 대상 이름만 겹치고 내용은 다른 일 — 새로 뽑지 않는다(이름만으로 뽑으면 쓸모 5.8% 였다)
+    led, home = _ledger(tmp_path / "ledger.sqlite"), str(tmp_path)
+    R.save_targets(LABELS, home)
+    assert "calc" not in _ids(led, home, "견적계산기 버튼 색을 파란색으로 바꿔줘")
 
 
 def test_labelled_memory_stays_quiet_without_its_target(tmp_path):
