@@ -180,6 +180,84 @@ def _decayed_node_ids(home=None):
                      and (d.get("used") or 0) / d["total"] <= PREFLIGHT_DECAY_MAX_RATE)
 
 
+# 대상 표지 — 기억마다 «갈래»(target/general/both/none)와 «무엇에 대한 말인가»(대상 이름·별칭)를 붙여 둔 파생 자료.
+# 2026-11-14 실측(자동 회상 826항목 판정): 쓸모 39개 중 32개가 대상 기억이었고, 문장 뜻 비슷함으로 고르면 4.7%,
+# 대상 이름이 질문에 나온 대상 기억만 실으면 34% 였다. 포괄 판단(general)은 비슷함으로 실으면 1/53.
+#   - 표지는 문장을 읽고 붙인다(낱말 맞추기로 만들지 않는다). 이 파일은 그 결과를 싣는 자리일 뿐이다.
+#   - 장부(ledger)와 별개 파일이다 — 지워도 장부는 그대로고, 없으면 종전 방식(뜻 비슷함)으로 돌아간다.
+#   - 표지가 없는 기억(새로 저장돼 아직 안 읽은 것)은 종전 방식 그대로.
+TARGET_STORE_NAME = "recall_targets.json"
+_TARGET_LANES = ("target", "general", "both", "none")
+
+
+def _norm_name(text):
+    """대상 이름 대조용 정규화 — 소문자 + 글자·숫자만(띄어쓰기·기호·조사 경계 무시)."""
+    return "".join(ch for ch in str(text or "").lower() if ch.isalnum())
+
+
+def target_store_path(home=None):
+    return os.path.join(str(home or _plat.binggu_home()), TARGET_STORE_NAME)
+
+
+def save_targets(labels, home=None):
+    """표지 목록 [{id, lane, targets, aliases}] 을 파생 파일로 저장(기존 표지에 덮어 합친다). 반환 = 저장된 총 개수."""
+    import json
+    path = target_store_path(home)
+    cur = {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            cur = json.load(fh).get("nodes") or {}
+    except (OSError, ValueError):
+        cur = {}
+    for x in labels or []:
+        nid, lane = x.get("id"), x.get("lane")
+        if not nid or lane not in _TARGET_LANES:
+            continue
+        names = []
+        for t in x.get("targets") or []:
+            names.append(t)
+            names.extend((x.get("aliases") or {}).get(t) or [])
+        cur[nid] = {"lane": lane, "names": sorted({str(n).strip() for n in names if len(_norm_name(n)) >= 2})}
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump({"version": 1, "nodes": cur}, fh, ensure_ascii=False, indent=1, sort_keys=True)
+    return len(cur)
+
+
+def _load_targets(home=None):
+    """{node_id: {"lane", "names": [정규화된 이름]}} — 파일이 없거나 깨졌으면 {}(종전 방식)."""
+    import json
+    try:
+        with open(target_store_path(home), encoding="utf-8") as fh:
+            raw = json.load(fh).get("nodes") or {}
+    except (OSError, ValueError, AttributeError):
+        return {}
+    out = {}
+    for nid, v in raw.items():
+        if isinstance(v, dict) and v.get("lane") in _TARGET_LANES:
+            out[nid] = {"lane": v["lane"],
+                        "names": [n for n in (_norm_name(x) for x in v.get("names") or []) if len(n) >= 2]}
+    return out
+
+
+def _target_hits(g, work_text, targets):
+    """대상 이름이 작업 텍스트에 나온 대상 기억 — (맞은 이름 길이, 순위 점수) 내림차순."""
+    q = _norm_name(work_text)
+    hits = []
+    for n in g["nodes"]:
+        t = targets.get(n["id"])
+        if not t or t["lane"] not in ("target", "both"):
+            continue
+        matched = [nm for nm in t["names"] if nm in q]
+        if matched:
+            hits.append((max(len(m) for m in matched), n["rank_score"], n))
+    hits.sort(key=lambda x: (-x[0], -x[1], x[2]["id"]))
+    return [{"node_id": n["id"], "claim": n["sentence"][:120], "node_type": n["node_type"],
+             "semantic_subtype": n["semantic_subtype"], "rank_score": n["rank_score"],
+             "relevance": 1.0, "via": "target", "candidate": True, "trust": "candidate_unverified"}
+            for _len, _rank, n in hits]
+
+
 def _preflight_node_ok(g):
     """자동 주입 대상 노드 판정 함수 — 길이 하한 + (화자 자료가 있으면) owner 발화만."""
     has_speaker = PREFLIGHT_OWNER_ONLY and any(n.get("speaker") == "owner" for n in g["nodes"])
@@ -712,6 +790,13 @@ def preflight_context(ledger_path, prompt=None, cwd=None, domain=None,
     remember = [n for n in ws["relevant_nodes"]
                 if n["relevance"] >= rel_min and n["node_id"] not in decayed
                 and ok(g["by_id"].get(n["node_id"]) or {"sentence": n["claim"]})]
+    # 대상 표지가 있으면: 표지 붙은 기억은 «대상 이름이 질문에 나올 때만» 싣고(대상 기억 먼저),
+    # 뜻 비슷함으로 뽑힌 것은 아직 표지 없는 기억만 남긴다. 표지 파일이 없으면 위 결과 그대로.
+    targets = _load_targets(home)
+    if targets:
+        by_target = [n for n in _target_hits(g, work_text, targets)
+                     if n["node_id"] not in decayed and ok(g["by_id"][n["node_id"]])]
+        remember = (by_target + [n for n in remember if n["node_id"] not in targets])[:rc["preflight_max"]]
 
     # 반문 = 위험패턴 매칭(Phase6).
     risk = match_risk_patterns(g, work_text, qtok, home=home, scorer=scorer)
