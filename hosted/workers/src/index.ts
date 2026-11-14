@@ -599,7 +599,8 @@ function toolPreflightContext(store: PackStore, args: Record<string, any>): any 
   const scored = allNodes.map(({ pid, n }) => ({ pid, n, rel: relScore(terms, n.claim ?? ""),
     relq: Math.round(relqScore(pfTbl, (n.claim ?? "").toLowerCase())
       * (typeof n.rank_score === "number" ? n.rank_score : 0) * 1e6) / 1e6 }))
-    .filter((x) => x.rel >= relMin && x.rel > 0);
+    // 조각 제외(py PREFLIGHT_MIN_CHARS=16 미러 · 2026-11-14) — 16자 미만 노드는 자동 주입에서 뺀다.
+    .filter((x) => x.rel >= relMin && x.rel > 0 && String(x.n.claim ?? "").trim().length >= 16);
   scored.sort((a, b) => b.rel - a.rel || b.relq - a.relq ||
     (a.n.id < b.n.id ? -1 : a.n.id > b.n.id ? 1 : 0));
   const remember = scored.slice(0, maxN).map(({ pid, n, rel }) => ({

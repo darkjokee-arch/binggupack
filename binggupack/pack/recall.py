@@ -143,6 +143,12 @@ def _load_graph(ledger_path):
 #  false-positive 반문이 나는 것을 방지). 관련 의미 문장쌍은 통상 0.55+.
 _SEMANTIC_FLOOR = 0.55
 
+# 자동 주입(preflight)에 싣지 않는 조각 길이 — 이 글자 수 미만 노드는 «기억할 것»에서 뺀다.
+# 2026-11-14 실측: 15자 이하 노드 77개(«검수 끝났습니다.» · «정본화 완료.» · «들어갈거 같은데»)가
+# 자동 주입 자리의 19%(3,794/19,619)를 차지하는데 쓰임은 1/8 이었다 — 짧은 문장은 아무 질문에나
+# 코사인 0.55~0.62 로 걸린다. 직접 인출(why_search·MCP recall)과 위험반문에는 적용하지 않는다.
+PREFLIGHT_MIN_CHARS = 16
+
 
 # ---- 노드 임베딩 영속 캐시 (회상 N+1 embed → query 1회) ----
 # 별도 sqlite(recall_embed_cache) — 운영 ledger 불변(순수 파생 데이터). 키 = sentence sha256 + model_digest
@@ -415,7 +421,7 @@ def why_search(ledger_path, query, limit=None, home=None, scorer=None):
         _release()
 
 
-def _why_search_on_graph(g, query, limit, home, scorer):
+def _why_search_on_graph(g, query, limit, home, scorer, node_ok=None):
     """why_search 본체 — 이미 로드된 그래프 g 위에서 회상 수행(재로드 0).
 
     scorer 소유권은 호출자(why_search 래퍼 · preflight_context)에게 있다 — 여기서 닫지 않는다.
@@ -449,6 +455,8 @@ def _why_search_on_graph(g, query, limit, home, scorer):
 
     scored = []
     for n, low in lower_sents:
+        if node_ok is not None and not node_ok(n):
+            continue  # 호출자 거름(preflight 조각 제외) — IDF 표는 전체 노드 기준 그대로
         rel = _relevance(qtok, n["sentence"])
         if scorer is not None and qtok:
             cs = scorer(query, n["sentence"])
@@ -456,7 +464,7 @@ def _why_search_on_graph(g, query, limit, home, scorer):
                 rel = max(rel, cs)  # cos 보강(의미 매칭, floor 이상만 — 무관 cos 잡음 차단)
         if rel <= 0.0:
             continue
-        relq = round(sum(idf[t] for t in uniq if t in low) / idf_sum, 6)
+        relq =round(sum(idf[t] for t in uniq if t in low) / idf_sum, 6)
         # 동점 2차 키 = relq × rank_score 곱 블렌드 (2026-07-29 백테스트 3-arm).
         # relq 단독은 owner 히트도장(used) 노드 top5 노출을 30→19 로 강등시켰다(희소토큰
         # 일회성 노드가 검증된 교훈을 밀어냄). 곱 블렌드는 used 27 회복 + 잡음 최소(10).
@@ -656,7 +664,9 @@ def preflight_context(ledger_path, prompt=None, cwd=None, domain=None,
     # 으로 하한 미만은 주입하지 않는다 — "무관 작업 → 출력 0(소음 0)" 설계 의도 복원.
     # 위험반문(risk)은 하한 미적용(안전 축 불변) — 직접 인출(why_search/MCP recall)도 미적용.
     rel_min = rc.get("preflight_rel_min", 0.25)
-    ws = _why_search_on_graph(g, work_text, rc["preflight_max"], home, scorer)
+    ws = _why_search_on_graph(
+        g, work_text, rc["preflight_max"], home, scorer,
+        node_ok=lambda n: len((n["sentence"] or "").strip()) >= PREFLIGHT_MIN_CHARS)
     remember = [n for n in ws["relevant_nodes"] if n["relevance"] >= rel_min]
 
     # 반문 = 위험패턴 매칭(Phase6).
