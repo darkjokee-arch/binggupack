@@ -29,7 +29,13 @@ import tempfile
 from pathlib import Path
 
 from binggupack.pack import person_pack_sync as PPS
-from binggupack.pack.crab_pack_wire import ENABLE_ENV, build_crab_pack, upload_crab_pack
+from binggupack.pack.crab_pack_wire import (
+    ENABLE_ENV,
+    build_crab_pack,
+    build_runner_pack,
+    find_runner,
+    upload_crab_pack,
+)
 from binggupack import paths as binggu_paths
 
 STATE_FILE = "person_crab_last.json"
@@ -231,9 +237,62 @@ def _chunk_cap(home=None):
         return 2400
 
 
+BUNDLE_PER_DOC = 4            # 러너 팩: 판단 N개를 한 문서로(문서당 조각 1.5개 이상이어야 출하 등급)
+FAIL_FILE = "person_crab_fail.json"
+FAIL_BACKOFF_SEC = 6 * 3600   # 같은 내용의 실패는 이 시간 동안 다시 올리지 않는다
+
+
+def bundle_docs(data_dir, out_dir, owner_label=DEFAULT_OWNER_LABEL, per_doc=BUNDLE_PER_DOC):
+    """문장당 1문서(export_docs 산출)를 per_doc 개씩 한 문서로 묶는다. 판단 하나가 문단 하나.
+
+    문장당 1문서는 러너 기준 «문서당 조각 1.0» 이라 C 등급(출하 불가)이 된다(2026-11-14 실측).
+    묶되 판단마다 자기 머리(##)를 줘 조각이 판단 경계에서 잘리게 한다. 반환 = 묶음 문서 수."""
+    out = Path(out_dir)
+    if out.exists():
+        shutil.rmtree(out)
+    out.mkdir(parents=True)
+    files = sorted(p for p in Path(data_dir).rglob("*") if p.is_file())
+    n = 0
+    for i in range(0, len(files), int(per_doc)):
+        n += 1
+        parts = [f.read_text(encoding="utf-8").strip().replace("# ", "## ", 1)
+                 for f in files[i:i + int(per_doc)]]
+        (out / ("owner_judgments_%03d.md" % n)).write_text(
+            "# %s 판단 원칙 묶음 %d\n\n" % (owner_label, n) + "\n\n".join(parts) + "\n", encoding="utf-8")
+    return n
+
+
+def _fail_path(home=None):
+    return os.path.join(_home(home), FAIL_FILE)
+
+
+def _in_backoff(ch, home=None, now=None):
+    import time
+    try:
+        with open(_fail_path(home), encoding="utf-8") as handle:
+            f = json.load(handle)
+    except Exception:  # 부재/손상 → 백오프 없음
+        return None
+    if f.get("content_hash") == ch and (now or time.time()) - float(f.get("at") or 0) < FAIL_BACKOFF_SEC:
+        return f.get("reason")
+    return None
+
+
+def _note_fail(ch, reason, home=None, now=None):
+    """서버 거절·러너 실패만 적는다 — 로컬 관문(설정 없음·미승인)은 고치면 바로 다시 돌아야 한다."""
+    import time
+    if not re.match(r"SERVER_|RUNNER_|SESSION_PARSE_FAIL", str(reason or "")):
+        return
+    try:
+        with open(_fail_path(home), "w", encoding="utf-8") as handle:
+            json.dump({"content_hash": ch, "reason": reason, "at": now or time.time()}, handle)
+    except OSError:
+        pass
+
+
 def sync(*, dry_run=True, confirm=False, force=False, env=None, ledger=None, home=None,
          config_path=None, work_dir=None, transport=None, put_fn=None, post_fn=None,
-         sleep_fn=None, max_tries=8, max_docs=90):
+         sleep_fn=None, max_tries=8, max_docs=90, runner_build=None, use_runner=False):
     """owner 문장 → 스키마 팩 빌드 → 업로드(제자리 교체). 반환(raise 0): typed dict.
 
     {status: NO_CHANGE|PLAN|DONE|BUILD_FAIL|UPLOAD_FAIL, count, blocked, content_hash,
@@ -264,10 +323,17 @@ def sync(*, dry_run=True, confirm=False, force=False, env=None, ledger=None, hom
     ch = _content_hash(sentences + ([xsig] if xsig else []) + [meta_sig])
     out["content_hash"] = ch
     st = load_state(home)
-    if not force and st.get("content_hash") == ch and st.get("package_id"):
+    # ★ 2026-11-14 — 비동기 접수(package_id 없음)도 «올렸다»로 본다. 종전에는 package_id 가 있어야만
+    #   NO_CHANGE 라, 접수된 뒤에도 5분마다 같은 팩을 다시 지어 올렸다.
+    if not force and st.get("content_hash") == ch and (st.get("package_id") or st.get("accepted")):
         out.update({"status": "NO_CHANGE", "package_id": st.get("package_id"),
                     "pack_name": st.get("pack_name")})
         return out
+    if not force and not dry_run:
+        held = _in_backoff(ch, home)
+        if held:
+            out.update({"status": "BACKOFF", "reason": held})
+            return out
 
     work = Path(work_dir) if work_dir else Path(tempfile.mkdtemp(prefix="person_crab_"))
     data_dir = work / "data"
@@ -275,11 +341,26 @@ def sync(*, dry_run=True, confirm=False, force=False, env=None, ledger=None, hom
     export_docs(graded, data_dir, owner_label=meta["owner_label"])
     budget = max(10, int(max_docs) - len(sentences))  # 총 문서 수 ≤ max_docs (finalize 한도)
     out["extra"] = merge_extra_sources(data_dir, home, max_bundle_docs=budget)
-    b = build_crab_pack(data_dir, zip_path, meta["title"], meta["purpose"], min_queries=4,
-                        chunk_cap=_chunk_cap(home))
-    out["grade"] = b.get("grade")
+    # 러너가 있으면 러너로 짓는다(서버가 자체 빌더 ZIP 을 받지 않는다). 없으면 종전 빌더.
+    #   use_runner: False(기본 · 종전 빌더) / True / "auto"(러너가 있으면 러너 — sync_auto·CLI 가 쓴다)
+    runner_on = (find_runner(env) is not None) if use_runner == "auto" else bool(use_runner)
+    preflight = None
+    if runner_on:
+        bundled = work / "bundled"
+        out["bundles"] = bundle_docs(data_dir, bundled, owner_label=meta["owner_label"])
+        b = (runner_build or build_runner_pack)(bundled, zip_path, meta["title"], meta["purpose"], env=env)
+        out["grade"] = "runner"
+        out["builder"] = "runner:%s" % (b.get("runner_version") or "?")
+        preflight = b.get("preflight")
+    else:
+        b = build_crab_pack(data_dir, zip_path, meta["title"], meta["purpose"], min_queries=4,
+                            chunk_cap=_chunk_cap(home))
+        out["grade"] = b.get("grade")
+        out["builder"] = "legacy"
     if not b.get("ok"):
         out.update({"status": "BUILD_FAIL", "reason": b.get("reason") or str(b.get("failed_gates"))})
+        if not dry_run:
+            _note_fail(ch, out["reason"], home)
         return out
     if dry_run:
         out.update({"status": "PLAN", "reason": "dry_run — live 는 --live --confirm"})
@@ -289,14 +370,16 @@ def sync(*, dry_run=True, confirm=False, force=False, env=None, ledger=None, hom
     u = upload_crab_pack(zip_path, pack_name, meta["purpose"], pack_category="personal-ontology",
                          env=env, config_path=config_path, home=home, transport=transport,
                          put_fn=put_fn, post_fn=post_fn, sleep_fn=sleep_fn,
-                         dry_run=False, confirm=confirm, max_tries=max_tries)
+                         dry_run=False, confirm=confirm, max_tries=max_tries, preflight=preflight)
     out.update({"tries": u.get("tries"), "pack_name": u.get("pack_name_used")})
     if not u.get("ok"):
         out.update({"status": "UPLOAD_FAIL", "reason": u.get("reason")})
+        _note_fail(ch, u.get("reason"), home)
         return out
     out.update({"status": "DONE", "package_id": u.get("package_id")})
     save_state({"package_id": u.get("package_id"), "pack_name": u.get("pack_name_used"),
-                "content_hash": ch, "count": len(sentences)}, home)
+                "content_hash": ch, "count": len(sentences),
+                "accepted": True, "builder": out.get("builder")}, home)
     return out
 
 
@@ -318,6 +401,8 @@ def sync_auto(env=None, ledger=None, home=None, config_path=None, **inject):
         return {"status": "DISABLED_AUTO", "reason": "%s 에 crab_auto_sync:true 없음" % PACK_CONFIG_FILE}
     e = dict(os.environ if env is None else env)
     e[ENABLE_ENV] = "1"
+    # 실제 무인 실행은 러너가 있으면 러너로 짓는다. 시험(transport 주입)은 종전 빌더로 결정적.
+    inject.setdefault("use_runner", False if "transport" in inject else "auto")
     return sync(dry_run=False, confirm=True, env=e, ledger=ledger, home=home,
                 config_path=config_path, **inject)
 
@@ -534,7 +619,7 @@ def main(argv=None):
     if a.auto:
         r = sync_auto()
     else:
-        r = sync(dry_run=not a.live, confirm=a.confirm, force=a.force)
+        r = sync(dry_run=not a.live, confirm=a.confirm, force=a.force, use_runner="auto")
     print(json.dumps(r, ensure_ascii=False))
     return 0 if r.get("status") in ("DONE", "PLAN", "NO_CHANGE") else 1
 
