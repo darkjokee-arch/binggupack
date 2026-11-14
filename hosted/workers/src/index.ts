@@ -599,11 +599,15 @@ function toolPreflightContext(store: PackStore, args: Record<string, any>): any 
   const scored = allNodes.map(({ pid, n }) => ({ pid, n, rel: relScore(terms, n.claim ?? ""),
     relq: Math.round(relqScore(pfTbl, (n.claim ?? "").toLowerCase())
       * (typeof n.rank_score === "number" ? n.rank_score : 0) * 1e6) / 1e6 }))
-    // 조각 제외(py PREFLIGHT_MIN_CHARS=16 미러 · 2026-11-14) — 16자 미만 노드는 자동 주입에서 뺀다.
-    .filter((x) => x.rel >= relMin && x.rel > 0 && String(x.n.claim ?? "").trim().length >= 16);
+    .filter((x) => x.rel >= relMin && x.rel > 0);
   scored.sort((a, b) => b.rel - a.rel || b.relq - a.relq ||
     (a.n.id < b.n.id ? -1 : a.n.id > b.n.id ? 1 : 0));
-  const remember = scored.slice(0, maxN).map(({ pid, n, rel }) => ({
+  // 조각 제외(py PREFLIGHT_MIN_CHARS=16 미러 · 2026-11-14) — 상위 maxN 을 뽑은 뒤 16자 미만을 뺀다(빈 자리는 채우지 않는다).
+  //   화자 조건(py PREFLIGHT_OWNER_ONLY)은 팩 노드에 speaker 가 실려 있을 때만 건다.
+  const pfHasOwner = allNodes.some(({ n }) => n.speaker === "owner");
+  const remember = scored.slice(0, maxN)
+    .filter(({ n }) => String(n.claim ?? "").trim().length >= 16 && (!pfHasOwner || n.speaker === "owner"))
+    .map(({ pid, n, rel }) => ({
     pack_id: pid, node_id: n.id, claim: (n.claim ?? "").slice(0, 100),
     semantic_subtype: n.semantic_subtype ?? null,
     rank_score: typeof n.rank_score === "number" ? n.rank_score : 0,
