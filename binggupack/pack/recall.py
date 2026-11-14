@@ -101,7 +101,8 @@ def _load_graph(ledger_path):
         sel = ["node_id", "node_type", "sentence", "state",
                "semantic_subtype" if "semantic_subtype" in ncols else "NULL AS semantic_subtype",
                "created_at" if "created_at" in ncols else "NULL AS created_at",
-               "use_count" if "use_count" in ncols else "0 AS use_count"]
+               "use_count" if "use_count" in ncols else "0 AS use_count",
+               "speaker" if "speaker" in ncols else "NULL AS speaker"]
         cur.execute("SELECT " + ",".join(sel) + " FROM nodes")
         nrows = cur.fetchall()
         try:
@@ -123,7 +124,7 @@ def _load_graph(ledger_path):
             "id": r[0], "node_type": r[1], "sentence": r[2] or "",
             "semantic_subtype": r[4],
             "created_at": created_at, "use_count": int(use_count or 0),
-            "rank_score": round(rank, 6),
+            "rank_score": round(rank, 6), "speaker": r[7],
         })
     # rank_score 내림차순(동점 id 사전순 — 결정적). 회상 우선순위 = P1-② 활용.
     nodes.sort(key=lambda n: (-n["rank_score"], n["id"]))
@@ -142,6 +143,30 @@ def _load_graph(ledger_path):
 # (semantic ON 시 rel<=0 게이트가 무력화돼 거의 모든 노드가 통과하고, risk 매칭에서 무관 작업에
 #  false-positive 반문이 나는 것을 방지). 관련 의미 문장쌍은 통상 0.55+.
 _SEMANTIC_FLOOR = 0.55
+
+# 자동 주입(preflight)에 싣지 않는 조각 길이 — 이 글자 수 미만 노드는 «기억할 것»에서 뺀다.
+# 2026-11-14 실측: 15자 이하 노드 77개(«검수 끝났습니다.» · «정본화 완료.» · «들어갈거 같은데»)가
+# 자동 주입 자리의 19%(3,794/19,619)를 차지하는데 쓰임은 1/8 이었다 — 짧은 문장은 아무 질문에나
+# 코사인 0.55~0.62 로 걸린다. 직접 인출(why_search·MCP recall)과 위험반문에는 적용하지 않는다.
+PREFLIGHT_MIN_CHARS = 16
+
+# 자동 주입은 «사용자 본인이 한 말»(speaker=owner)만 싣는다.
+# 2026-11-14 일괄 판정(자동 회상 182회 · 826항목 · «없었으면 답이 달라졌을까» 기준): 쓸모 39항목(4.7%) 중
+# 37개가 owner 발화였다(owner 37/562 · ai 1/142 · 화자 없음 1/122). 관련도 점수는 쓸모를 못 가른다
+# (0.50~0.66 구간 전부 2~5% · 0.70 이상도 16%). owner + 16자 이상이면 쓸모 95% 를 지키고 항목은 39% 준다.
+# 화자 칸이 없는 장부(구 스키마 · 새 사용자)는 화자 조건을 걸지 않는다 — 걸면 주입이 통째로 사라진다.
+PREFLIGHT_OWNER_ONLY = True
+
+
+def _preflight_node_ok(g):
+    """자동 주입 대상 노드 판정 함수 — 길이 하한 + (화자 자료가 있으면) owner 발화만."""
+    has_speaker = PREFLIGHT_OWNER_ONLY and any(n.get("speaker") == "owner" for n in g["nodes"])
+
+    def ok(n):
+        if len((n["sentence"] or "").strip()) < PREFLIGHT_MIN_CHARS:
+            return False
+        return (n.get("speaker") == "owner") if has_speaker else True
+    return ok
 
 
 # ---- 노드 임베딩 영속 캐시 (회상 N+1 embed → query 1회) ----
@@ -456,7 +481,7 @@ def _why_search_on_graph(g, query, limit, home, scorer):
                 rel = max(rel, cs)  # cos 보강(의미 매칭, floor 이상만 — 무관 cos 잡음 차단)
         if rel <= 0.0:
             continue
-        relq = round(sum(idf[t] for t in uniq if t in low) / idf_sum, 6)
+        relq =round(sum(idf[t] for t in uniq if t in low) / idf_sum, 6)
         # 동점 2차 키 = relq × rank_score 곱 블렌드 (2026-07-29 백테스트 3-arm).
         # relq 단독은 owner 히트도장(used) 노드 top5 노출을 30→19 로 강등시켰다(희소토큰
         # 일회성 노드가 검증된 교훈을 밀어냄). 곱 블렌드는 used 27 회복 + 잡음 최소(10).
@@ -657,7 +682,12 @@ def preflight_context(ledger_path, prompt=None, cwd=None, domain=None,
     # 위험반문(risk)은 하한 미적용(안전 축 불변) — 직접 인출(why_search/MCP recall)도 미적용.
     rel_min = rc.get("preflight_rel_min", 0.25)
     ws = _why_search_on_graph(g, work_text, rc["preflight_max"], home, scorer)
-    remember = [n for n in ws["relevant_nodes"] if n["relevance"] >= rel_min]
+    # 조각·비(非)owner 발화는 상위 N 을 뽑은 **뒤에** 뺀다 — 빈 자리를 다음 순위로 채우지 않는다.
+    #   먼저 거르고 N 을 채우면 무관한 다음 문장이 그 자리에 들어와 건수가 그대로다(2026-11-14 실측:
+    #   «100원 입금 보냈다» 에 조각 5개 → 거르고 채우니 무관한 owner 발화 5개). 맞는 게 없으면 덜 싣는다.
+    ok = _preflight_node_ok(g)
+    remember = [n for n in ws["relevant_nodes"]
+                if n["relevance"] >= rel_min and ok(g["by_id"].get(n["node_id"]) or {"sentence": n["claim"]})]
 
     # 반문 = 위험패턴 매칭(Phase6).
     risk = match_risk_patterns(g, work_text, qtok, home=home, scorer=scorer)
