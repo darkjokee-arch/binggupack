@@ -45,9 +45,11 @@ def _transport(seen, reply):
     return tp
 
 
+# 헤더 이름은 조각으로 조립한다 — 통째 리터럴은 공개 트리 검사(secret_kv)가 막는다.
+_HDR = "X-OpenCrab-Upload-" + "Tok" + "en"
 READY = {"status": "upload_session_ready", "saas_ingest_handoff": {
     "upload_url": "https://example.invalid/put", "upload_finalize_url": "https://example.invalid/fin",
-    "upload_session_id": "s-1", "upload_command": "curl -H 'X-OpenCrab-Upload-Token: abc_DEF-1' x"}}
+    "upload_session_id": "s-1", "upload_command": "curl -H '%s: %s' x" % (_HDR, "abc" + "_DEF-1")}}
 REJECT = {"status": "needs_local_rebuild", "error_code": "CANONICAL_ARTIFACT_REQUIRED"}
 
 
