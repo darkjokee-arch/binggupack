@@ -158,6 +158,28 @@ PREFLIGHT_MIN_CHARS = 16
 PREFLIGHT_OWNER_ONLY = True
 
 
+# 사용률 퇴화 — 회상 도장(쓰임/안 쓰임/틀림)이 이만큼 쌓였는데 쓰인 비율이 이 이하인 기억은 자동 주입에서 쉰다.
+# owner 2026-11-14: «퍼센트를 이용하여 잘 안쓰이거나 틀린 부분은 퇴화되는쪽으로».
+#   - 지우지 않는다. 직접 인출(why_search·MCP recall)·위험반문에는 그대로 나온다 — 거기서 쓰이면 비율이 올라 돌아온다.
+#   - 순위를 올리는 쪽이 아니라 쉬게 하는 쪽만 한다(인기 편향과 반대 방향).
+#   - not_applied(회상은 맞았는데 AI 가 안 쓴 것)는 분모에서 뺀다(recall_trace.aggregate 와 같은 셈법).
+# 2026-11-14 실측(도장 3,797 · 도장 받은 기억 515): 5회 이상·10% 이하 = 35개.
+PREFLIGHT_DECAY_MIN_JUDGED = 5
+PREFLIGHT_DECAY_MAX_RATE = 0.10
+
+
+def _decayed_node_ids(home=None):
+    """자동 주입에서 쉬게 할 node_id 집합. 도장 store 가 없거나 못 읽으면 빈 집합(퇴화 없음 · 예외 0)."""
+    try:
+        from binggupack.pack import recall_trace as RT
+        per = RT.aggregate(home=home).get("per_node") or {}
+    except Exception:
+        return frozenset()
+    return frozenset(nid for nid, d in per.items()
+                     if (d.get("total") or 0) >= PREFLIGHT_DECAY_MIN_JUDGED
+                     and (d.get("used") or 0) / d["total"] <= PREFLIGHT_DECAY_MAX_RATE)
+
+
 def _preflight_node_ok(g):
     """자동 주입 대상 노드 판정 함수 — 길이 하한 + (화자 자료가 있으면) owner 발화만."""
     has_speaker = PREFLIGHT_OWNER_ONLY and any(n.get("speaker") == "owner" for n in g["nodes"])
@@ -686,8 +708,10 @@ def preflight_context(ledger_path, prompt=None, cwd=None, domain=None,
     #   먼저 거르고 N 을 채우면 무관한 다음 문장이 그 자리에 들어와 건수가 그대로다(2026-11-14 실측:
     #   «100원 입금 보냈다» 에 조각 5개 → 거르고 채우니 무관한 owner 발화 5개). 맞는 게 없으면 덜 싣는다.
     ok = _preflight_node_ok(g)
+    decayed = _decayed_node_ids(home)
     remember = [n for n in ws["relevant_nodes"]
-                if n["relevance"] >= rel_min and ok(g["by_id"].get(n["node_id"]) or {"sentence": n["claim"]})]
+                if n["relevance"] >= rel_min and n["node_id"] not in decayed
+                and ok(g["by_id"].get(n["node_id"]) or {"sentence": n["claim"]})]
 
     # 반문 = 위험패턴 매칭(Phase6).
     risk = match_risk_patterns(g, work_text, qtok, home=home, scorer=scorer)
