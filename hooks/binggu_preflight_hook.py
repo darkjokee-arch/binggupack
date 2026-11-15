@@ -418,7 +418,8 @@ def _run(data):
         level, _scope_dom, _reason = _resolve_scope(_home(), dom)
         if level == "off":
             return None  # 무관/비활성 세션 → block+person+trust 전부 억제
-        res = RC.preflight_context(str(ledger), prompt=prompt, cwd=cwd)
+        res = RC.preflight_context(str(ledger), prompt=prompt, cwd=cwd,
+                                   recent_prompts=_recent_prompts(data.get("transcript_path"), prompt))
         # 다리c: 이미 계산된 dom(회상 시점 프로젝트)과 situation(의도 상황)을 trace 에 함께 기록.
         #   dom 은 종전 scope 게이트용으로만 쓰고 record 경로로 안 넘겨 recall_traces.domain 이 전부 NULL 이었음.
         trace_id = _maybe_record_trace(prompt, res, domain=dom, session_id=data.get("session_id"))  # Phase 2: opt-in 일 때만 회상 메타 기록(원문 0·실패 흡수)
@@ -438,6 +439,37 @@ def _run(data):
         return "\n\n".join(parts) if parts else None
     except Exception:
         return None
+
+
+_NOT_HUMAN = ("<", "[", "Stop hook", "Another Claude", "This session is being continued")
+
+
+def _recent_prompts(transcript_path, current, limit=3, tail_bytes=8_000_000):
+    """세션 기록 끝부분에서 사람이 직접 친 직전 질문만 꺼낸다(읽기 전용 · 저장 0 · 실패는 빈 목록)."""
+    out = []
+    try:
+        with open(transcript_path, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            fh.seek(max(0, fh.tell() - tail_bytes))
+            lines = fh.read().decode("utf-8", "replace").splitlines()
+        for line in lines:
+            try:
+                o = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(o, dict) or o.get("type") != "user" or o.get("isMeta"):
+                continue
+            c = (o.get("message") or {}).get("content")
+            if not isinstance(c, str):
+                c = " ".join(x.get("text", "") for x in (c or []) if isinstance(x, dict) and x.get("type") == "text")
+            c = " ".join(c.split())
+            if c and not c.startswith(_NOT_HUMAN):
+                out.append(c[:600])
+    except Exception:
+        return []
+    if out and out[-1] == " ".join((current or "").split())[:600]:
+        out.pop()
+    return out[-limit:]
 
 
 def _maybe_record_trace(prompt, res, domain=None, session_id=None):
