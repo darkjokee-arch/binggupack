@@ -3,7 +3,8 @@
  * stop-enforce-recall.js — 강제 회상 "검증" (Stop · SYNC · exit 2 물리 차단)
  *
  * 이번 turn 이 결정요청(pending 마커 존재)인데 recall/cloud_recall/why/opencrab 조회를
- * 한 번도 안 불렀으면 exit 2 로 turn 종료를 거부하고 "회상 후 재답변"을 강제한다.
+ * 한 번도 안 불렀으면 exit 2 로 turn 종료를 거부하고 회상을 강제한다.
+ * 재답변은 회상으로 답이 달라질 때만(2026-11-15 사장님 지시 — 덧붙임 글이 원래 보고를 덮던 문제).
  * exit 2 = 텍스트 잔소리가 아니라 물리 차단(Fable5 강제 실현성 실증 · 공식 문서:
  * Stop exit 2 = "Prevents Claude from stopping, continues the conversation").
  *
@@ -101,7 +102,8 @@ function pass(reason) {
     process.stderr.write(
       '[강제 회상 미이행] 결정/검토 답변인데 개인 판단 회상을 안 했습니다. ' +
       'recall(로컬 장부) 또는 cloud_recall(오픈크랩 개인 팩)로 사장님 판단·최근 실수·프로젝트 ' +
-      '최신 상태를 먼저 회상한 뒤 답변을 보완하세요. ' +
+      '최신 상태를 회상하고 도장을 찍으세요. 회상 때문에 답이 달라질 때만 고친 점을 넣은 완성된 답을 ' +
+      '처음부터 다시 쓰고, 달라지지 않으면 아무 글도 덧붙이지 말고 끝내세요(원래 답이 마지막 답으로 남습니다). ' +
       '(1회 한정 강제 · 끄기: ~/.claude/state/recall_enforce_disabled 파일 생성)\n'
     );
     process.exit(2);
