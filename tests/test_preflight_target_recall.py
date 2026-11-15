@@ -80,3 +80,39 @@ def test_save_merges_and_ignores_bad_rows(tmp_path):
     assert n == 2 and t["calc"]["lane"] == "both" and t["calc"]["names"] == ["견적계산기"]
     (tmp_path / R.TARGET_STORE_NAME).write_text("{깨진", encoding="utf-8")
     assert R._load_targets(home) == {}
+
+
+def test_target_named_in_recent_prompt_counts(tmp_path):
+    # «확인해» 류 — 대상 이름은 앞 질문에 있다. 뽑는 쪽은 지금 질문만 보고, 거르는 문만 앞 질문을 본다.
+    led, home = _ledger(tmp_path / "ledger.sqlite"), str(tmp_path)
+    R.save_targets(LABELS, home)
+    q = "빈칸은 지붕이 없는 곳이라 당연히 비어 있는 거 맞는지"
+    assert "calc" not in _ids(led, home, q)
+    got = [n["node_id"] for n in R.preflight_context(
+        led, prompt=q, home=home, recent_prompts=["견적계산기 화면 열어 봐"])["remember"]]
+    assert "calc" in got and "find" not in got
+    old = ["견적계산기 얘기"] + ["다른 얘기"] * R.TARGET_CARRY_PROMPTS          # 3개보다 오래된 질문은 안 본다
+    assert "calc" not in [n["node_id"] for n in R.preflight_context(
+        led, prompt=q, home=home, recent_prompts=old)["remember"]]
+
+
+def test_hook_reads_recent_human_prompts_only(tmp_path):
+    import importlib.util
+    import json
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location(
+        "pf_hook", Path(__file__).resolve().parents[1] / "hooks" / "binggu_preflight_hook.py")
+    hook = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hook)
+    tp = tmp_path / "t.jsonl"
+    rows = [{"type": "user", "message": {"content": "첫 질문"}},
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": "견적계산기 답변"}]}},
+            {"type": "user", "message": {"content": [{"type": "tool_result", "content": "도구 결과"}]}},
+            {"type": "user", "message": {"content": "<system-reminder>기계 글</system-reminder>"}},
+            {"type": "user", "isMeta": True, "message": {"content": "메타"}},
+            {"type": "user", "message": {"content": [{"type": "text", "text": "둘째  질문"}]}},
+            {"type": "user", "message": {"content": "지금 질문"}}]
+    tp.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n깨진줄", encoding="utf-8")
+    assert hook._recent_prompts(str(tp), "지금 질문") == ["첫 질문", "둘째 질문"]
+    assert hook._recent_prompts(str(tp), "아직 안 적힌 질문", limit=1) == ["지금 질문"]
+    assert hook._recent_prompts(None, "x") == [] and hook._recent_prompts(str(tmp_path / "없음"), "x") == []

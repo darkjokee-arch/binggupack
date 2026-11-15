@@ -187,6 +187,7 @@ def _decayed_node_ids(home=None):
 #   - 장부(ledger)와 별개 파일이다 — 지워도 장부는 그대로고, 없으면 종전 방식(뜻 비슷함)으로 돌아간다.
 #   - 표지가 없는 기억(새로 저장돼 아직 안 읽은 것)은 종전 방식 그대로.
 TARGET_STORE_NAME = "recall_targets.json"
+TARGET_CARRY_PROMPTS = 3
 _TARGET_LANES = ("target", "general", "both", "none")
 
 
@@ -735,7 +736,7 @@ def _domain_from_cwd(cwd, domain=None):
 
 
 def preflight_context(ledger_path, prompt=None, cwd=None, domain=None,
-                      files_changed=None, home=None, scorer=None):
+                      files_changed=None, home=None, scorer=None, recent_prompts=None):
     """작업 시작 전 자동 회상 + 반문(L5+L6). 입력=prompt/cwd/domain/files. read-only · write 0.
 
     반환(설계 Phase5 출력): {remember, ask(반문), avoid_patterns, preferences,
@@ -792,7 +793,10 @@ def preflight_context(ledger_path, prompt=None, cwd=None, domain=None,
     # 빈 자리는 채우지 않는다. 표지 파일이 없으면 위 결과 그대로.
     targets = _load_targets(home)
     if targets:
-        passes = _target_gate(work_text, targets)
+        # 직전 질문(최대 3개)에 나온 대상도 인정한다 — «확인해» 같은 질문은 대상 이름이 앞 질문에 있다.
+        # 뽑는 쪽(뜻 비슷함)은 지금 질문만 본다. 직전 답변 글은 쓰지 않는다(실측: 대상이 섞여 정확도 하락).
+        carry = " ".join(str(x) for x in (recent_prompts or [])[-TARGET_CARRY_PROMPTS:] if x)
+        passes = _target_gate(f"{work_text} {carry}", targets)
         remember = [n for n in remember if passes(n["node_id"])]
 
     # 반문 = 위험패턴 매칭(Phase6).
